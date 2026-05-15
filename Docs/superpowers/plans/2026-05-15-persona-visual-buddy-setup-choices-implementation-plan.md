@@ -102,7 +102,7 @@ Do not modify backend starter routes in this slice unless frontend selection is 
 - Modify: `apps/packages/ui/src/services/persona-visuals.ts`
 - Modify: `apps/packages/ui/src/services/__tests__/persona-visuals.test.ts`
 
-- [ ] **Step 1: Add failing starter catalog service tests**
+- [x] **Step 1: Add failing starter catalog service tests**
 
 Add tests to `apps/packages/ui/src/services/__tests__/persona-visuals.test.ts`.
 
@@ -218,7 +218,7 @@ it("copies a starter pack to a target persona without activation fields", async 
 })
 ```
 
-- [ ] **Step 2: Run the failing service tests**
+- [x] **Step 2: Run the failing service tests**
 
 Run:
 
@@ -229,7 +229,7 @@ bunx vitest run src/services/__tests__/persona-visuals.test.ts
 
 Expected: FAIL because the starter functions do not exist.
 
-- [ ] **Step 3: Add starter types**
+- [x] **Step 3: Add starter types**
 
 Add to `apps/packages/ui/src/types/persona-visuals.ts` near the existing visual pack types:
 
@@ -271,7 +271,7 @@ export interface PersonaVisualStarterPackCopyRequest {
 }
 ```
 
-- [ ] **Step 4: Add service helpers**
+- [x] **Step 4: Add service helpers**
 
 Update imports in `apps/packages/ui/src/services/persona-visuals.ts`, then add:
 
@@ -326,7 +326,7 @@ export async function copyPersonaVisualStarterPack(
 }
 ```
 
-- [ ] **Step 5: Run the service tests**
+- [x] **Step 5: Run the service tests**
 
 Run:
 
@@ -337,7 +337,7 @@ bunx vitest run src/services/__tests__/persona-visuals.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/packages/ui/src/types/persona-visuals.ts apps/packages/ui/src/services/persona-visuals.ts apps/packages/ui/src/services/__tests__/persona-visuals.test.ts
@@ -352,7 +352,7 @@ git commit -m "feat: add persona visual starter catalog client"
 - Create: `apps/packages/ui/src/components/PersonaGarden/VisualBuddySetupChoiceCard.tsx`
 - Create: `apps/packages/ui/src/components/PersonaGarden/__tests__/VisualBuddySetupChoiceCard.test.tsx`
 
-- [ ] **Step 1: Write failing component tests**
+- [x] **Step 1: Write failing component tests**
 
 Create `apps/packages/ui/src/components/PersonaGarden/__tests__/VisualBuddySetupChoiceCard.test.tsx`.
 
@@ -456,7 +456,7 @@ describe("VisualBuddySetupChoiceCard", () => {
 })
 ```
 
-- [ ] **Step 2: Run the failing component test**
+- [x] **Step 2: Run the failing component test**
 
 Run:
 
@@ -467,7 +467,7 @@ bunx vitest run src/components/PersonaGarden/__tests__/VisualBuddySetupChoiceCar
 
 Expected: FAIL because the component does not exist.
 
-- [ ] **Step 3: Implement the presentational component**
+- [x] **Step 3: Implement the presentational component**
 
 Create `apps/packages/ui/src/components/PersonaGarden/VisualBuddySetupChoiceCard.tsx`.
 
@@ -482,7 +482,7 @@ Implementation requirements:
 - Use `data-testid="visual-buddy-setup-choice-card"`.
 - Avoid rendering a card inside another card during integration. The component may be a bordered panel, but `VisualPackEditor` should mount it as a sibling before the main editor panel.
 
-- [ ] **Step 4: Run the component test**
+- [x] **Step 4: Run the component test**
 
 Run:
 
@@ -493,7 +493,7 @@ bunx vitest run src/components/PersonaGarden/__tests__/VisualBuddySetupChoiceCar
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/PersonaGarden/VisualBuddySetupChoiceCard.tsx apps/packages/ui/src/components/PersonaGarden/__tests__/VisualBuddySetupChoiceCard.test.tsx
@@ -508,7 +508,7 @@ git commit -m "feat: add visual buddy setup choice card"
 - Modify: `apps/packages/ui/src/components/PersonaGarden/VisualPackEditor.tsx`
 - Modify: `apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx`
 
-- [ ] **Step 1: Add failing editor tests**
+- [x] **Step 1: Add failing editor tests**
 
 Add focused tests to `apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx`.
 
@@ -566,7 +566,7 @@ expect(
 ).toBe(false)
 ```
 
-- [ ] **Step 2: Run the failing editor tests**
+- [x] **Step 2: Run the failing editor tests**
 
 Run:
 
@@ -577,7 +577,7 @@ bunx vitest run src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx
 
 Expected: FAIL because the setup card and starter service wiring are missing.
 
-- [ ] **Step 3: Track active visual state and starter catalog state**
+- [x] **Step 3: Track active visual state and starter catalog state**
 
 In `VisualPackEditor.tsx`:
 - Import `VisualBuddySetupChoiceCard`.
@@ -626,7 +626,7 @@ const loadPacks = React.useCallback(
 
 If adding `selectedPackId` to the dependency causes extra reloads, keep a `selectedPackIdRef` instead. Do not keep stale selection behavior.
 
-- [ ] **Step 4: Load starter catalog defensively**
+- [x] **Step 4: Load starter catalog defensively**
 
 Add a `loadStarterCatalog` callback and effect:
 
@@ -656,7 +656,7 @@ React.useEffect(() => {
 }, [isActive, loadStarterCatalog])
 ```
 
-- [ ] **Step 5: Add default-copy handler**
+- [x] **Step 5: Add default-copy handler**
 
 Add:
 
@@ -688,7 +688,7 @@ const handleCopyStarterPack = React.useCallback(
 
 Do not call `activatePersonaVisualPack` from this handler.
 
-- [ ] **Step 6: Make first-run import reachable without an existing pack**
+- [x] **Step 6: Make first-run import reachable without an existing pack**
 
 Keep upload, asset editing, manifest editing, export, and activation under `selectedPack`.
 
@@ -704,7 +704,7 @@ Keep the existing import functions:
 
 Do not broaden #1696 upload/import polish in this task.
 
-- [ ] **Step 7: Render setup choices**
+- [x] **Step 7: Render setup choices**
 
 Compute:
 
@@ -753,7 +753,7 @@ draftTitleInputRef.current?.scrollIntoView?.({ block: "center" })
 draftTitleInputRef.current?.focus()
 ```
 
-- [ ] **Step 8: Run editor tests**
+- [x] **Step 8: Run editor tests**
 
 Run:
 
@@ -764,7 +764,7 @@ bunx vitest run src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/PersonaGarden/VisualPackEditor.tsx apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx

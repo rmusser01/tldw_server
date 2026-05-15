@@ -4,6 +4,7 @@ title: Implement first-run Persona Visual Buddy setup choices
 status: In Progress
 assignee: []
 created_date: '2026-05-15 03:44'
+updated_date: '2026-05-15 07:19'
 labels:
   - persona
   - buddy
@@ -38,16 +39,6 @@ Implement the approved first-run Visual Buddy setup choices for Persona Garden. 
 - [ ] #6 Focused UI/service tests cover card rendering, no-active-pack behavior, starter copy selection, import/blank routing, compact wizard detour, and route-gating behavior.
 <!-- AC:END -->
 
-## Definition of Done
-<!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
-<!-- DOD:END -->
-
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
@@ -60,4 +51,20 @@ Implement the approved first-run Visual Buddy setup choices for Persona Garden. 
 <!-- SECTION:NOTES:BEGIN -->
 - Implementation plan created after user approval of the patched design spec.
 - Plan explicitly calls out an implementation trap discovered during planning: current import/portability controls are guarded by `selectedPack`, but first-run Import pack must be reachable with zero packs, so the import preview/commit UI needs to be split from selected-pack-only upload/export/editing controls.
+
+Task 3 VisualPackEditor setup flow integration completed and approved by code-quality reviewer. The editor now scopes setup state to the selected persona, loads starter packs defensively, copies defaults as inactive drafts, exposes first-run import and blank paths without requiring an existing pack, filters visible packs and candidates to the current persona, and guards async pack import and candidate mutation paths against stale persona or pack responses.
+
+Task 3 verification passed: focused stale accepted candidate review test, focused stale-regression VisualPackEditor pattern run, service card editor Vitest suite with 60 tests, git diff --check, and bun run verify:design-system-state with existing baseline exceptions only.
+
+Bandit not run for Task 3 because the slice changed only frontend TypeScript and TSX files.
 <!-- SECTION:NOTES:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+<!-- DOD:END -->

@@ -1,5 +1,5 @@
 import React from "react"
-import { Button, Tag, Typography } from "antd"
+import { Button, Modal, Tag, Typography } from "antd"
 import {
   ArrowDown,
   ArrowUp,
@@ -37,6 +37,7 @@ import {
   listPersonaVisualCandidates,
   listPersonaVisualDuplicateTargets,
   listPersonaVisualPacks,
+  listPersonaVisualStarterPacks,
   PersonaVisualApiError,
   reviewPersonaVisualCandidate,
   savePersonaVisualPackToLibrary,
@@ -87,6 +88,7 @@ import {
   classifyPersonaVisualGenerationReadiness,
   type PersonaVisualGenerationReadinessView
 } from "./personaVisualGenerationReadiness"
+import { VisualBuddySetupChoiceCard } from "./VisualBuddySetupChoiceCard"
 import { VisualPackReusePanel } from "./VisualPackReusePanel"
 
 type VisualPackEditorProps = {
@@ -786,7 +788,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const unknownLabel = t("common:unknown", { defaultValue: "unknown" })
   const [packs, setPacks] = React.useState<PersonaVisualPack[]>([])
   const [selectedPackId, setSelectedPackId] = React.useState("")
-  const selectedPackIdRef = React.useRef("")
+  const [activePackId, setActivePackId] = React.useState("")
+  const [packsLoaded, setPacksLoaded] = React.useState(false)
+  const [packsLoadedPersonaId, setPacksLoadedPersonaId] = React.useState("")
   const [draftTitle, setDraftTitle] = React.useState("")
   const [draftManifest, setDraftManifest] =
     React.useState<PersonaVisualManifest>(DEFAULT_MANIFEST)
@@ -844,6 +848,14 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       notes: "",
       tags: ""
     })
+  const [starterPacks, setStarterPacks] = React.useState<
+    PersonaVisualStarterPackSummary[]
+  >([])
+  const [starterCatalogLoading, setStarterCatalogLoading] = React.useState(false)
+  const [starterCatalogError, setStarterCatalogError] =
+    React.useState<string | null>(null)
+  const [copyingStarterId, setCopyingStarterId] = React.useState("")
+  const [starterPickerOpen, setStarterPickerOpen] = React.useState(false)
   const [previewingImport, setPreviewingImport] = React.useState(false)
   const [refreshingImportPreview, setRefreshingImportPreview] = React.useState(false)
   const [committingImport, setCommittingImport] = React.useState(false)
@@ -880,10 +892,35 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const duplicateTargetsRequestIdRef = React.useRef(0)
   const starterPacksRequestIdRef = React.useRef(0)
   const libraryRequestIdRef = React.useRef(0)
+  const packListRequestIdRef = React.useRef(0)
+  const candidatesRequestIdRef = React.useRef(0)
+  const candidateReviewRequestIdRef = React.useRef(0)
+  const starterCatalogRequestIdRef = React.useRef(0)
+  const starterCopyRequestIdRef = React.useRef(0)
+  const importPreviewRequestIdRef = React.useRef(0)
+  const importCommitRequestIdRef = React.useRef(0)
   const importCommitInFlightRef = React.useRef(false)
+  const selectedPersonaIdRef = React.useRef(selectedPersonaId)
+  const selectedPackIdRef = React.useRef("")
 
+  selectedPersonaIdRef.current = selectedPersonaId
+
+  const selectPackId = React.useCallback((packId: string) => {
+    selectedPackIdRef.current = packId
+    setSelectedPackId(packId)
+  }, [])
+
+  React.useEffect(() => {
+    selectedPackIdRef.current = selectedPackId
+  }, [selectedPackId])
+
+  const packStateMatchesSelectedPersona =
+    Boolean(selectedPersonaId) && packsLoadedPersonaId === selectedPersonaId
+  const visiblePacks = packStateMatchesSelectedPersona
+    ? packs.filter((pack) => pack.persona_id === selectedPersonaId)
+    : []
   const selectedPack =
-    packs.find((pack) => pack.id === selectedPackId) ?? packs[0] ?? null
+    visiblePacks.find((pack) => pack.id === selectedPackId) ?? visiblePacks[0] ?? null
   const availableDuplicateTargets = React.useMemo(
     () => duplicateTargets.filter((target) => target.id !== selectedPersonaId),
     [duplicateTargets, selectedPersonaId]
@@ -972,77 +1009,145 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     [generationReadinessView, t]
   )
 
-  React.useEffect(() => {
-    selectedPackIdRef.current = selectedPackId
-  }, [selectedPackId])
-
-  const loadPacks = React.useCallback(async (
-    preferredPackId?: string | null
-  ): Promise<boolean> => {
-    if (!isActive || !selectedPersonaId) {
-      setPacks([])
-      setSelectedPackId("")
-      setDraftManifest(DEFAULT_MANIFEST)
-      setCandidates([])
-      return false
-    }
-    setLoading(true)
-    setError(null)
-    try {
-      const response = await listPersonaVisualPacks(selectedPersonaId)
-      const nextPacks = response.packs || []
-      setPacks(nextPacks)
-      const explicitPreferredPack = preferredPackId
-        ? nextPacks.find((pack) => pack.id === preferredPackId) ?? null
-        : null
-      const preferred =
-        explicitPreferredPack ??
-        response.active_pack ??
-        nextPacks.find((pack) => pack.id === selectedPackIdRef.current) ??
-        nextPacks[0] ??
-        null
-      setSelectedPackId(preferred?.id || "")
-      if (!preferred) {
+  const loadPacks = React.useCallback(
+    async (
+      options: {
+        preferredPackId?: string
+        fallbackPack?: PersonaVisualPack
+      } = {}
+    ): Promise<boolean> => {
+      if (!isActive || !selectedPersonaId) {
+        packListRequestIdRef.current += 1
+        setPacks([])
+        setActivePackId("")
+        setPacksLoaded(false)
+        setPacksLoadedPersonaId("")
+        selectPackId("")
         setDraftManifest(DEFAULT_MANIFEST)
-        setSelectedAnimationId("")
+        setCandidates([])
+        return false
       }
-      return true
-    } catch (loadError) {
-      setPacks([])
-      setSelectedPackId("")
-      setDraftManifest(DEFAULT_MANIFEST)
-      setError(
-        loadError instanceof Error
-          ? loadError.message
+      const targetPersonaId = selectedPersonaId
+      const requestId = packListRequestIdRef.current + 1
+      packListRequestIdRef.current = requestId
+      const isLatestRequest = () =>
+        packListRequestIdRef.current === requestId &&
+        selectedPersonaIdRef.current === targetPersonaId
+      setLoading(true)
+      setPacksLoaded(false)
+      setError(null)
+      try {
+        const response = await listPersonaVisualPacks(targetPersonaId)
+        if (!isLatestRequest()) return false
+        const nextPacks = options.fallbackPack
+          ? mergePack(response.packs || [], options.fallbackPack)
+          : response.packs || []
+        const activePack =
+          response.active_pack ??
+          nextPacks.find((pack) => pack.status === "active") ??
+          null
+        setActivePackId(activePack?.id || "")
+        setPacks(nextPacks)
+        const preferred =
+          (options.preferredPackId
+            ? nextPacks.find((pack) => pack.id === options.preferredPackId)
+            : null) ??
+          nextPacks.find((pack) => pack.id === selectedPackIdRef.current) ??
+          activePack ??
+          nextPacks[0] ??
+          null
+        selectPackId(preferred?.id || "")
+        if (!preferred) {
+          setDraftManifest(DEFAULT_MANIFEST)
+          setSelectedAnimationId("")
+        }
+        setPacksLoaded(true)
+        setPacksLoadedPersonaId(targetPersonaId)
+        return true
+      } catch (loadError) {
+        if (!isLatestRequest()) return false
+        setPacks([])
+        setActivePackId("")
+        setPacksLoaded(false)
+        setPacksLoadedPersonaId("")
+        selectPackId("")
+        setDraftManifest(DEFAULT_MANIFEST)
+        setError(
+          loadError instanceof Error
+            ? loadError.message
             : "Failed to load visual packs."
-      )
-      return false
+        )
+        return false
+      } finally {
+        if (isLatestRequest()) setLoading(false)
+      }
+    },
+    [isActive, selectedPersonaId, selectPackId]
+  )
+
+  const loadStarterCatalog = React.useCallback(async () => {
+    if (!isActive || !selectedPersonaId) {
+      starterCatalogRequestIdRef.current += 1
+      setStarterPacks([])
+      setStarterCatalogError(null)
+      setStarterCatalogLoading(false)
+      return
+    }
+    const requestId = starterCatalogRequestIdRef.current + 1
+    starterCatalogRequestIdRef.current = requestId
+    const isLatestRequest = () => starterCatalogRequestIdRef.current === requestId
+    setStarterCatalogLoading(true)
+    setStarterCatalogError(null)
+    try {
+      const response = await listPersonaVisualStarterPacks()
+      if (isLatestRequest()) setStarterPacks(response.starter_packs || [])
+    } catch (starterError) {
+      if (isLatestRequest()) {
+        setStarterPacks([])
+        setStarterCatalogError(
+          starterError instanceof Error
+            ? starterError.message
+            : "Failed to load starter packs."
+        )
+      }
     } finally {
-      setLoading(false)
+      if (isLatestRequest()) setStarterCatalogLoading(false)
     }
   }, [isActive, selectedPersonaId])
 
   const loadCandidates = React.useCallback(async () => {
     const packId = selectedPack?.id || ""
     if (!isActive || !selectedPersonaId || !packId) {
+      candidatesRequestIdRef.current += 1
       setCandidates([])
+      setCandidatesLoading(false)
       return
     }
+    const targetPersonaId = selectedPersonaId
+    const targetPackId = packId
+    const requestId = candidatesRequestIdRef.current + 1
+    candidatesRequestIdRef.current = requestId
+    const isCurrentCandidatesRequest = () =>
+      candidatesRequestIdRef.current === requestId &&
+      selectedPersonaIdRef.current === targetPersonaId &&
+      selectedPackIdRef.current === targetPackId
     setCandidatesLoading(true)
     try {
-      const response = await listPersonaVisualCandidates(selectedPersonaId, packId)
-      setCandidates(response.candidates || [])
+      const response = await listPersonaVisualCandidates(targetPersonaId, targetPackId)
+      if (isCurrentCandidatesRequest()) setCandidates(response.candidates || [])
     } catch (loadError) {
-      setCandidates([])
-      if (!(loadError instanceof PersonaVisualApiError && loadError.status === 404)) {
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : "Failed to load generated candidates."
-        )
+      if (isCurrentCandidatesRequest()) {
+        setCandidates([])
+        if (!(loadError instanceof PersonaVisualApiError && loadError.status === 404)) {
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Failed to load generated candidates."
+          )
+        }
       }
     } finally {
-      setCandidatesLoading(false)
+      if (isCurrentCandidatesRequest()) setCandidatesLoading(false)
     }
   }, [isActive, selectedPersonaId, selectedPack?.id])
 
@@ -1055,15 +1160,20 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       setGenerationReadinessLoading(false)
       return
     }
+    const targetPersonaId = selectedPersonaId
+    const targetPackId = packId
     const requestId = generationReadinessRequestIdRef.current + 1
     generationReadinessRequestIdRef.current = requestId
-    const isLatestRequest = () => generationReadinessRequestIdRef.current === requestId
+    const isLatestRequest = () =>
+      generationReadinessRequestIdRef.current === requestId &&
+      selectedPersonaIdRef.current === targetPersonaId &&
+      selectedPackIdRef.current === targetPackId
     setGenerationReadinessLoading(true)
     setGenerationReadinessError(null)
     try {
       const response = await getPersonaVisualGenerationReadiness(
-        selectedPersonaId,
-        packId
+        targetPersonaId,
+        targetPackId
       )
       if (isLatestRequest()) setGenerationReadiness(response)
     } catch (loadError) {
@@ -1090,14 +1200,17 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     }
     const requestId = duplicateTargetsRequestIdRef.current + 1
     duplicateTargetsRequestIdRef.current = requestId
-    const isLatestRequest = () => duplicateTargetsRequestIdRef.current === requestId
+    const targetPersonaId = selectedPersonaId
+    const isLatestRequest = () =>
+      duplicateTargetsRequestIdRef.current === requestId &&
+      selectedPersonaIdRef.current === targetPersonaId
     setDuplicateTargets([])
     setDuplicateTargetId("")
     setDuplicateTargetsLoading(true)
     try {
       const targets = await listPersonaVisualDuplicateTargets()
       if (!isLatestRequest()) return
-      const available = targets.filter((target) => target.id !== selectedPersonaId)
+      const available = targets.filter((target) => target.id !== targetPersonaId)
       setDuplicateTargets(targets)
       setDuplicateTargetId(available[0]?.id ?? "")
     } catch (loadError) {
@@ -1192,6 +1305,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   }, [loadPacks])
 
   React.useEffect(() => {
+    void loadStarterCatalog()
+  }, [loadStarterCatalog])
+
+  React.useEffect(() => {
     void loadCandidates()
   }, [loadCandidates])
 
@@ -1258,19 +1375,51 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
 
   React.useEffect(() => {
     setExportJob(null)
-    setImportPreview(null)
-    setImportCommitJob(null)
-    setSelectedImportPreviewFile(null)
     setLastDuplicatedPersonaId("")
     setLibraryEditingItemId("")
     setLibraryEditDraft({ title: "", notes: "", tags: "" })
-    if (importPreviewInputRef.current) importPreviewInputRef.current.value = ""
+    setSaving(false)
+    setUploading(false)
+    setExportingPack(false)
+    setRefreshingExport(false)
+    setDownloadingExport(false)
+    setDuplicatingPack(false)
+    setSavingToLibrary(false)
+    setLibraryMutatingItemId("")
+    setReviewingCandidateId("")
+    setEnqueueingGeneration(false)
+    setActivating(false)
+    setDeactivating(false)
   }, [selectedPersonaId, selectedPack?.id])
+
+  React.useEffect(() => {
+    importPreviewRequestIdRef.current += 1
+    importCommitRequestIdRef.current += 1
+    importCommitInFlightRef.current = false
+    setImportPreview(null)
+    setImportCommitJob(null)
+    setSelectedImportPreviewFile(null)
+    setPreviewingImport(false)
+    setRefreshingImportPreview(false)
+    setCommittingImport(false)
+    setRefreshingImportCommit(false)
+    if (importPreviewInputRef.current) importPreviewInputRef.current.value = ""
+  }, [selectedPersonaId])
+
+  React.useEffect(() => {
+    starterCopyRequestIdRef.current += 1
+    setCopyingStarterId("")
+    setStarterPickerOpen(false)
+  }, [selectedPersonaId])
 
   React.useEffect(() => {
     setDuplicateTitle(selectedPack ? `Copy of ${selectedPack.title}` : "")
     setLastDuplicatedPersonaId("")
   }, [selectedPack?.id])
+
+  React.useEffect(() => {
+    candidateReviewRequestIdRef.current += 1
+  }, [selectedPersonaId, selectedPack?.id])
 
   const updateManifest = React.useCallback(
     (updater: (manifest: PersonaVisualManifest) => PersonaVisualManifest) => {
@@ -1281,6 +1430,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   )
 
   const focusDraftTitleInput = React.useCallback(() => {
+    draftTitleInputRef.current?.scrollIntoView?.({ block: "center" })
     draftTitleInputRef.current?.focus()
   }, [])
 
@@ -1303,15 +1453,17 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const handleCreateDraft = async () => {
     const title = draftTitle.trim()
     if (!selectedPersonaId || !title) return
+    const targetPersonaId = selectedPersonaId
     setSaving(true)
     setError(null)
     try {
-      const created = await createPersonaVisualPack(selectedPersonaId, {
+      const created = await createPersonaVisualPack(targetPersonaId, {
         title,
         manifest: DEFAULT_MANIFEST
       })
+      if (selectedPersonaIdRef.current !== targetPersonaId) return
       setPacks((current) => mergePack(current, created))
-      setSelectedPackId(created.id)
+      selectPackId(created.id)
       setDraftTitle("")
       setStatusMessage(
         t("sidepanel:personaGarden.visuals.created", {
@@ -1319,29 +1471,84 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         })
       )
     } catch (createError) {
-      setError(
-        createError instanceof Error
-          ? createError.message
-          : t("sidepanel:personaGarden.visuals.createError", {
-              defaultValue: "Failed to create visual pack."
-            })
-      )
+      if (selectedPersonaIdRef.current === targetPersonaId) {
+        setError(
+          createError instanceof Error
+            ? createError.message
+            : t("sidepanel:personaGarden.visuals.createError", {
+                defaultValue: "Failed to create visual pack."
+              })
+        )
+      }
     } finally {
-      setSaving(false)
+      if (selectedPersonaIdRef.current === targetPersonaId) setSaving(false)
     }
   }
 
+  const handleCopyStarterPack = React.useCallback(
+    async (starterPackId: string) => {
+      const normalizedStarterId = String(starterPackId || "").trim()
+      const targetPersonaId = selectedPersonaId
+      if (!targetPersonaId || !normalizedStarterId) return
+      const requestId = starterCopyRequestIdRef.current + 1
+      starterCopyRequestIdRef.current = requestId
+      const isCurrentCopyRequest = () =>
+        starterCopyRequestIdRef.current === requestId &&
+        selectedPersonaIdRef.current === targetPersonaId
+      setCopyingStarterId(normalizedStarterId)
+      setError(null)
+      try {
+        const copied = await copyPersonaVisualStarterPack(normalizedStarterId, {
+          target_persona_id: targetPersonaId
+        })
+        if (!isCurrentCopyRequest()) return
+        setPacks((current) => mergePack(current, copied))
+        selectPackId(copied.id)
+        await loadPacks({
+          preferredPackId: copied.id,
+          fallbackPack: copied
+        })
+        if (!isCurrentCopyRequest()) return
+        setStatusMessage(
+          "Default visual copied as an inactive draft. Review it, then activate when ready."
+        )
+        setStarterPickerOpen(false)
+      } catch (copyError) {
+        if (isCurrentCopyRequest()) {
+          setError(
+            copyError instanceof Error
+              ? copyError.message
+              : "Failed to copy starter pack."
+          )
+        }
+      } finally {
+        if (starterCopyRequestIdRef.current === requestId) {
+          setCopyingStarterId("")
+        }
+      }
+    },
+    [loadPacks, selectedPersonaId, selectPackId]
+  )
+
   const handleUploadAsset = async () => {
     if (!selectedPersonaId || !selectedPack || !selectedUploadFile) return
+    const targetPersonaId = selectedPersonaId
+    const targetPackId = selectedPack.id
     setUploading(true)
     setError(null)
     try {
       const asset = await uploadPersonaVisualAsset(
-        selectedPersonaId,
-        selectedPack.id,
+        targetPersonaId,
+        targetPackId,
         selectedUploadFile,
         uploadRole
       )
+      if (
+        selectedPersonaIdRef.current !== targetPersonaId ||
+        selectedPackIdRef.current !== targetPackId
+      ) {
+        return
+      }
       const nextPack = {
         ...selectedPack,
         assets: [...getPackAssets(selectedPack), asset]
@@ -1355,15 +1562,25 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         })
       )
     } catch (uploadError) {
-      setError(
-        uploadError instanceof Error
-          ? uploadError.message
-          : t("sidepanel:personaGarden.visuals.uploadError", {
-              defaultValue: "Failed to upload asset."
-            })
-      )
+      if (
+        selectedPersonaIdRef.current === targetPersonaId &&
+        selectedPackIdRef.current === targetPackId
+      ) {
+        setError(
+          uploadError instanceof Error
+            ? uploadError.message
+            : t("sidepanel:personaGarden.visuals.uploadError", {
+                defaultValue: "Failed to upload asset."
+              })
+        )
+      }
     } finally {
-      setUploading(false)
+      if (
+        selectedPersonaIdRef.current === targetPersonaId &&
+        selectedPackIdRef.current === targetPackId
+      ) {
+        setUploading(false)
+      }
     }
   }
 
@@ -1596,7 +1813,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       })
       if (duplicated.persona_id === selectedPersonaId) {
         setPacks((current) => mergePack(current, duplicated))
-        setSelectedPackId(duplicated.id)
+        selectPackId(duplicated.id)
       }
       setLastDuplicatedPersonaId(duplicated.persona_id)
       const target =
@@ -1624,13 +1841,20 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       setError(fileError)
       return
     }
+    const targetPersonaId = selectedPersonaId
+    const requestId = importPreviewRequestIdRef.current + 1
+    importPreviewRequestIdRef.current = requestId
+    const isCurrentImportPreviewRequest = () =>
+      importPreviewRequestIdRef.current === requestId &&
+      selectedPersonaIdRef.current === targetPersonaId
     setPreviewingImport(true)
     setError(null)
     try {
       const preview = await createPersonaVisualImportPreview(
-        selectedPersonaId,
+        targetPersonaId,
         selectedImportPreviewFile
       )
+      if (!isCurrentImportPreviewRequest()) return
       setImportPreview(preview)
       setImportCommitJob(null)
       setImportTargetMode("create_new")
@@ -1645,34 +1869,46 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         })
       )
     } catch (previewError) {
-      setError(
-        previewError instanceof Error
-          ? previewError.message
-          : "Failed to queue visual pack import preview."
-      )
+      if (isCurrentImportPreviewRequest()) {
+        setError(
+          previewError instanceof Error
+            ? previewError.message
+            : "Failed to queue visual pack import preview."
+        )
+      }
     } finally {
-      setPreviewingImport(false)
+      if (isCurrentImportPreviewRequest()) setPreviewingImport(false)
     }
   }
 
   const handleRefreshImportPreview = async () => {
     if (!selectedPersonaId || !importPreview?.preview_id) return
+    const targetPersonaId = selectedPersonaId
+    const previewId = importPreview.preview_id
+    const requestId = importPreviewRequestIdRef.current + 1
+    importPreviewRequestIdRef.current = requestId
+    const isCurrentImportPreviewRequest = () =>
+      importPreviewRequestIdRef.current === requestId &&
+      selectedPersonaIdRef.current === targetPersonaId
     setRefreshingImportPreview(true)
     setError(null)
     try {
       const preview = await getPersonaVisualImportPreview(
-        selectedPersonaId,
-        importPreview.preview_id
+        targetPersonaId,
+        previewId
       )
+      if (!isCurrentImportPreviewRequest()) return
       setImportPreview(preview)
     } catch (refreshError) {
-      setError(
-        refreshError instanceof Error
-          ? refreshError.message
-          : "Failed to refresh visual pack import preview."
-      )
+      if (isCurrentImportPreviewRequest()) {
+        setError(
+          refreshError instanceof Error
+            ? refreshError.message
+            : "Failed to refresh visual pack import preview."
+        )
+      }
     } finally {
-      setRefreshingImportPreview(false)
+      if (isCurrentImportPreviewRequest()) setRefreshingImportPreview(false)
     }
   }
 
@@ -1682,6 +1918,13 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     if (fullImportPreview.status !== "completed") return
     if (!importPreviewCommitEligible) return
     if (importConflictChoiceRequired && !importConflictChoiceValid) return
+    const targetPersonaId = selectedPersonaId
+    const previewId = fullImportPreview.preview_id
+    const requestId = importCommitRequestIdRef.current + 1
+    importCommitRequestIdRef.current = requestId
+    const isCurrentImportCommitRequest = () =>
+      importCommitRequestIdRef.current === requestId &&
+      selectedPersonaIdRef.current === targetPersonaId
     importCommitInFlightRef.current = true
     setCommittingImport(true)
     setError(null)
@@ -1689,8 +1932,8 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       const targetMode = importTargetMode || "create_new"
       const title = importDraftTitle.trim()
       const job = await startPersonaVisualImportCommit(
-        selectedPersonaId,
-        fullImportPreview.preview_id,
+        targetPersonaId,
+        previewId,
         {
           trust_mode: "untrusted_import",
           target_mode: targetMode,
@@ -1699,6 +1942,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           title: title || null
         }
       )
+      if (!isCurrentImportCommitRequest()) return
       setImportCommitJob(job)
       setStatusMessage(
         t("sidepanel:personaGarden.visuals.importCommitQueuedStatus", {
@@ -1707,29 +1951,43 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         })
       )
     } catch (commitError) {
-      setError(
-        commitError instanceof Error
-          ? commitError.message
-          : "Failed to queue visual pack import commit."
-      )
+      if (isCurrentImportCommitRequest()) {
+        setError(
+          commitError instanceof Error
+            ? commitError.message
+            : "Failed to queue visual pack import commit."
+        )
+      }
     } finally {
-      importCommitInFlightRef.current = false
-      setCommittingImport(false)
+      if (isCurrentImportCommitRequest()) {
+        importCommitInFlightRef.current = false
+        setCommittingImport(false)
+      }
     }
   }
 
   const handleRefreshImportCommit = async () => {
     if (!selectedPersonaId || !importCommitJob?.job_id) return
+    if (importCommitInFlightRef.current) return
+    const targetPersonaId = selectedPersonaId
+    const jobId = importCommitJob.job_id
+    const requestId = importCommitRequestIdRef.current + 1
+    importCommitRequestIdRef.current = requestId
+    const isCurrentImportCommitRequest = () =>
+      importCommitRequestIdRef.current === requestId &&
+      selectedPersonaIdRef.current === targetPersonaId
     setRefreshingImportCommit(true)
     setError(null)
     try {
       const job = await getPersonaVisualImportCommitStatus(
-        selectedPersonaId,
-        importCommitJob.job_id
+        targetPersonaId,
+        jobId
       )
+      if (!isCurrentImportCommitRequest()) return
       setImportCommitJob(job)
       if (job.status === "completed" && job.pack_id) {
-        const refreshed = await loadPacks(job.pack_id)
+        const refreshed = await loadPacks({ preferredPackId: job.pack_id })
+        if (!isCurrentImportCommitRequest()) return
         if (refreshed) {
           setStatusMessage(
             t("sidepanel:personaGarden.visuals.importCommitCompleted", {
@@ -1742,60 +2000,88 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         }
       }
     } catch (refreshError) {
-      setError(
-        refreshError instanceof Error
-          ? refreshError.message
-          : "Failed to refresh visual pack import commit."
-      )
+      if (isCurrentImportCommitRequest()) {
+        setError(
+          refreshError instanceof Error
+            ? refreshError.message
+            : "Failed to refresh visual pack import commit."
+        )
+      }
     } finally {
-      setRefreshingImportCommit(false)
+      if (isCurrentImportCommitRequest()) setRefreshingImportCommit(false)
     }
   }
 
   const handleSaveManifest = async () => {
     if (!selectedPersonaId || !selectedPack) return
+    const targetPersonaId = selectedPersonaId
+    const targetPackId = selectedPack.id
     setSaving(true)
     setError(null)
     try {
       const saved = await updatePersonaVisualManifest(
-        selectedPersonaId,
-        selectedPack.id,
+        targetPersonaId,
+        targetPackId,
         {
           manifest: draftManifest,
           expected_version: selectedPack.version ?? null
         }
       )
+      if (
+        selectedPersonaIdRef.current !== targetPersonaId ||
+        selectedPackIdRef.current !== targetPackId
+      ) {
+        return
+      }
       setPacks((current) =>
         mergePack(current, {
           ...saved,
           assets: getPackAssets(saved).length ? getPackAssets(saved) : assets
         })
       )
-      setSelectedPackId(saved.id)
+      selectPackId(saved.id)
       setStatusMessage(
         t("sidepanel:personaGarden.visuals.saved", {
           defaultValue: "Manifest saved."
         })
       )
     } catch (saveError) {
-      setError(
-        saveError instanceof Error
-          ? saveError.message
-          : t("sidepanel:personaGarden.visuals.saveError", {
-              defaultValue: "Failed to save visual manifest."
-            })
-      )
+      if (
+        selectedPersonaIdRef.current === targetPersonaId &&
+        selectedPackIdRef.current === targetPackId
+      ) {
+        setError(
+          saveError instanceof Error
+            ? saveError.message
+            : t("sidepanel:personaGarden.visuals.saveError", {
+                defaultValue: "Failed to save visual manifest."
+              })
+        )
+      }
     } finally {
-      setSaving(false)
+      if (
+        selectedPersonaIdRef.current === targetPersonaId &&
+        selectedPackIdRef.current === targetPackId
+      ) {
+        setSaving(false)
+      }
     }
   }
 
   const handleActivate = async () => {
     if (!selectedPersonaId || !selectedPack || validationErrors.length) return
+    const targetPersonaId = selectedPersonaId
+    const targetPackId = selectedPack.id
     setActivating(true)
     setError(null)
     try {
-      const active = await activatePersonaVisualPack(selectedPersonaId, selectedPack.id)
+      const active = await activatePersonaVisualPack(targetPersonaId, targetPackId)
+      if (
+        selectedPersonaIdRef.current !== targetPersonaId ||
+        selectedPackIdRef.current !== targetPackId
+      ) {
+        return
+      }
       setPacks((current) =>
         current.map((pack) =>
           pack.id === active.id
@@ -1805,7 +2091,8 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
               : pack
         )
       )
-      setSelectedPackId(active.id)
+      setActivePackId(active.id)
+      selectPackId(active.id)
       setStatusMessage(
         t("sidepanel:personaGarden.visuals.activated", {
           defaultValue: "Visual pack activated."
@@ -1822,44 +2109,59 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         )
       }
     } catch (activateError) {
-      setError(
-        activateError instanceof Error
-          ? activateError.message
-          : t("sidepanel:personaGarden.visuals.activateError", {
-              defaultValue: "Failed to activate visual pack."
-            })
-      )
+      if (
+        selectedPersonaIdRef.current === targetPersonaId &&
+        selectedPackIdRef.current === targetPackId
+      ) {
+        setError(
+          activateError instanceof Error
+            ? activateError.message
+            : t("sidepanel:personaGarden.visuals.activateError", {
+                defaultValue: "Failed to activate visual pack."
+              })
+        )
+      }
     } finally {
-      setActivating(false)
+      if (
+        selectedPersonaIdRef.current === targetPersonaId &&
+        selectedPackIdRef.current === targetPackId
+      ) {
+        setActivating(false)
+      }
     }
   }
 
   const handleDeactivate = async () => {
     if (!selectedPersonaId) return
+    const targetPersonaId = selectedPersonaId
     setDeactivating(true)
     setError(null)
     try {
-      await deactivatePersonaVisualPack(selectedPersonaId)
+      await deactivatePersonaVisualPack(targetPersonaId)
+      if (selectedPersonaIdRef.current !== targetPersonaId) return
       setPacks((current) =>
         current.map((pack) =>
           pack.status === "active" ? { ...pack, status: "archived" } : pack
         )
       )
+      setActivePackId("")
       setStatusMessage(
         t("sidepanel:personaGarden.visuals.deactivated", {
           defaultValue: "Active visual pack deactivated."
         })
       )
     } catch (deactivateError) {
-      setError(
-        deactivateError instanceof Error
-          ? deactivateError.message
-          : t("sidepanel:personaGarden.visuals.deactivateError", {
-              defaultValue: "Failed to deactivate visual pack."
-            })
-      )
+      if (selectedPersonaIdRef.current === targetPersonaId) {
+        setError(
+          deactivateError instanceof Error
+            ? deactivateError.message
+            : t("sidepanel:personaGarden.visuals.deactivateError", {
+                defaultValue: "Failed to deactivate visual pack."
+              })
+        )
+      }
     } finally {
-      setDeactivating(false)
+      if (selectedPersonaIdRef.current === targetPersonaId) setDeactivating(false)
     }
   }
 
@@ -1872,6 +2174,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     ) {
       return
     }
+    const targetPersonaId = selectedPersonaId
+    const targetPackId = selectedPack.id
+    const isCurrentGenerationRequest = () =>
+      selectedPersonaIdRef.current === targetPersonaId &&
+      selectedPackIdRef.current === targetPackId
     setEnqueueingGeneration(true)
     setError(null)
     try {
@@ -1883,14 +2190,15 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         setGenerationTargetState(targetState)
       }
       const job = await createPersonaVisualGenerationJob(
-        selectedPersonaId,
-        selectedPack.id,
+        targetPersonaId,
+        targetPackId,
         {
           prompt: generationPrompt.trim(),
           target_state: targetState || null,
           backend: generationBackend.trim() || null
         }
       )
+      if (!isCurrentGenerationRequest()) return
       setGenerationPrompt("")
       setStatusMessage(
         t("sidepanel:personaGarden.visuals.generationQueued", {
@@ -1898,15 +2206,17 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         })
       )
     } catch (generationError) {
-      setError(
-        generationError instanceof Error
-          ? generationError.message
-          : t("sidepanel:personaGarden.visuals.generationError", {
-              defaultValue: "Failed to queue generation job."
-            })
-      )
+      if (isCurrentGenerationRequest()) {
+        setError(
+          generationError instanceof Error
+            ? generationError.message
+            : t("sidepanel:personaGarden.visuals.generationError", {
+                defaultValue: "Failed to queue generation job."
+              })
+        )
+      }
     } finally {
-      setEnqueueingGeneration(false)
+      if (isCurrentGenerationRequest()) setEnqueueingGeneration(false)
     }
   }
 
@@ -1915,18 +2225,27 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     status: "accepted" | "rejected"
   ) => {
     if (!selectedPersonaId || !selectedPack) return
+    const targetPersonaId = selectedPersonaId
+    const targetPackId = selectedPack.id
+    const requestId = candidateReviewRequestIdRef.current + 1
+    candidateReviewRequestIdRef.current = requestId
+    const isCurrentCandidateReview = () =>
+      candidateReviewRequestIdRef.current === requestId &&
+      selectedPersonaIdRef.current === targetPersonaId &&
+      selectedPackIdRef.current === targetPackId
     setReviewingCandidateId(candidateId)
     setError(null)
     try {
       const updated = await reviewPersonaVisualCandidate(
-        selectedPersonaId,
-        selectedPack.id,
+        targetPersonaId,
+        targetPackId,
         candidateId,
         {
           status,
           failure_reason: status === "rejected" ? "Rejected in editor." : null
         }
       )
+      if (!isCurrentCandidateReview()) return
       setCandidates((current) =>
         current.map((candidate) =>
           candidate.id === candidateId ? { ...candidate, ...updated } : candidate
@@ -1945,15 +2264,17 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
             })
       )
     } catch (reviewError) {
-      setError(
-        reviewError instanceof Error
-          ? reviewError.message
-          : t("sidepanel:personaGarden.visuals.reviewError", {
-              defaultValue: "Failed to review candidate."
-            })
-      )
+      if (isCurrentCandidateReview()) {
+        setError(
+          reviewError instanceof Error
+            ? reviewError.message
+            : t("sidepanel:personaGarden.visuals.reviewError", {
+                defaultValue: "Failed to review candidate."
+              })
+        )
+      }
     } finally {
-      setReviewingCandidateId("")
+      if (isCurrentCandidateReview()) setReviewingCandidateId("")
     }
   }
 
@@ -2326,12 +2647,245 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const importCommitIsTerminal = importCommitStatus
     ? IMPORT_COMMIT_TERMINAL_STATUSES.has(importCommitStatus)
     : false
+  const visibleCandidates = selectedPack
+    ? candidates.filter(
+        (candidate) =>
+          candidate.persona_id === selectedPersonaId &&
+          candidate.pack_id === selectedPack.id
+      )
+    : []
+  const selectedActivePack = visiblePacks.find(
+    (pack) => pack.id === activePackId && pack.status === "active"
+  )
   const canStartImportCommit =
     importPreviewCommitEligible &&
     importConflictChoiceValid &&
     (!importCommitJob?.job_id || importCommitStatus === "failed")
   const canRefreshImportCommit =
     Boolean(importCommitJob?.job_id) && !importCommitIsTerminal
+  const hasActiveVisual =
+    packStateMatchesSelectedPersona &&
+    Boolean(
+      selectedActivePack || visiblePacks.some((pack) => pack.status === "active")
+    )
+  const showSetupChoices =
+    isActive &&
+    Boolean(selectedPersonaId) &&
+    packStateMatchesSelectedPersona &&
+    packsLoaded &&
+    !loading &&
+    !hasActiveVisual &&
+    !importPreview &&
+    !importCommitJob
+  const recommendedStarter = starterPacks[0] ?? null
+  const firstRunImportPanel = (
+    <div className="rounded-lg border border-border bg-surface p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+            Import visual pack
+          </div>
+          <div className="mt-1 text-xs text-text-muted">
+            Preview a portable archive, then commit it as an inactive draft.
+          </div>
+        </div>
+        <Tag>creates draft</Tag>
+      </div>
+      <div className="mt-3 rounded border border-border bg-bg p-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Typography.Text strong>Import preview</Typography.Text>
+          <Tag>review only</Tag>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input
+            ref={importPreviewInputRef}
+            data-testid="persona-visual-import-preview-input"
+            type="file"
+            accept={`${PORTABLE_VISUAL_PACK_EXTENSION},application/zip,application/octet-stream`}
+            className="text-xs text-text"
+            onChange={(event) =>
+              setSelectedImportPreviewFile(event.target.files?.[0] ?? null)
+            }
+          />
+          <Button
+            data-testid="persona-visual-import-preview-button"
+            size="small"
+            icon={<FileSearch className="h-3.5 w-3.5" />}
+            loading={previewingImport}
+            disabled={!selectedImportPreviewFile}
+            onClick={() => void handleStartImportPreview()}
+          >
+            Preview
+          </Button>
+          <Button
+            data-testid="persona-visual-import-preview-refresh-button"
+            size="small"
+            icon={<RefreshCw className="h-3.5 w-3.5" />}
+            loading={refreshingImportPreview}
+            disabled={!importPreview?.preview_id}
+            onClick={() => void handleRefreshImportPreview()}
+          >
+            Refresh
+          </Button>
+        </div>
+        {importPreview ? (
+          <div className="mt-2 space-y-1 text-xs text-text-muted">
+            <div className="flex flex-wrap items-center gap-2">
+              <Tag data-testid="persona-visual-import-preview-status">
+                {importPreview.status}
+              </Tag>
+              <span>{importPreview.stage}</span>
+              <span>{importPreview.preview_id}</span>
+            </div>
+            <div data-testid="persona-visual-import-preview-summary">
+              {formatImportPreviewSummary(importPreview)}
+            </div>
+            {importPreviewWarnings.length ? (
+              <div data-testid="persona-visual-import-preview-warnings">
+                {formatPreviewList(importPreviewWarnings)}
+              </div>
+            ) : null}
+            {importPreviewConflicts.length ? (
+              <div data-testid="persona-visual-import-preview-conflicts">
+                {formatPreviewList(importPreviewConflicts)}
+              </div>
+            ) : null}
+            {canCommitImportPreview ? (
+              <div className="mt-2 border-t border-border pt-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-medium text-text">Commit reviewed import</div>
+                  <Tag>creates draft</Tag>
+                </div>
+                <div className="mt-1 text-text-muted">
+                  Commit creates a new draft pack. Activation remains separate.
+                </div>
+                {!importPreviewCommitEligible ? (
+                  <div
+                    data-testid="persona-visual-import-commit-blocked"
+                    className="mt-2 rounded border border-border bg-bg p-2 text-text-muted"
+                  >
+                    {t("sidepanel:personaGarden.visuals.importCommitBlocked", {
+                      defaultValue:
+                        "Commit unavailable until preview blockers are resolved"
+                    })}
+                    {importCommitBlockers.length
+                      ? `: ${formatPreviewList(importCommitBlockers)}`
+                      : "."}
+                  </div>
+                ) : null}
+                {importConflictChoiceRequired ? (
+                  <div
+                    data-testid="persona-visual-import-conflict-choice"
+                    className="mt-2 grid gap-2 md:grid-cols-[minmax(140px,180px)_minmax(180px,1fr)_minmax(180px,1fr)]"
+                  >
+                    <label className="text-xs text-text-muted">
+                      <span className="mb-1 block">Target mode</span>
+                      <select
+                        data-testid="persona-visual-import-target-mode"
+                        className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                        value={importTargetMode}
+                        onChange={(event) => {
+                          const nextMode = event.target
+                            .value as PersonaVisualImportTargetMode | ""
+                          setImportTargetMode(nextMode)
+                          if (nextMode !== "replace_draft") {
+                            setImportReplacePackId("")
+                          } else if (!importReplacePackId) {
+                            setImportReplacePackId(
+                              replaceableImportConflicts[0]?.pack_id || ""
+                            )
+                          }
+                        }}
+                      >
+                        <option value="">Choose</option>
+                        {importAllowedTargetModes.map((mode) => (
+                          <option key={mode} value={mode}>
+                            {mode === "replace_draft"
+                              ? "Replace draft"
+                              : "Create new draft"}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {importTargetMode === "replace_draft" ? (
+                      <label className="text-xs text-text-muted">
+                        <span className="mb-1 block">Draft</span>
+                        <select
+                          data-testid="persona-visual-import-replace-pack"
+                          className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                          value={importReplacePackId}
+                          onChange={(event) =>
+                            setImportReplacePackId(event.target.value)
+                          }
+                        >
+                          <option value="">Select draft</option>
+                          {replaceableImportConflicts.map((conflict) => (
+                            <option key={conflict.pack_id} value={conflict.pack_id}>
+                              {getImportConflictLabel(conflict)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                    <label className="text-xs text-text-muted">
+                      <span className="mb-1 block">Draft title</span>
+                      <input
+                        data-testid="persona-visual-import-draft-title"
+                        className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                        value={importDraftTitle}
+                        onChange={(event) => setImportDraftTitle(event.target.value)}
+                      />
+                    </label>
+                  </div>
+                ) : null}
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Button
+                    key="first-run-import-commit"
+                    data-testid="persona-visual-import-commit-button"
+                    size="small"
+                    icon={<CheckCircle2 className="h-3.5 w-3.5" />}
+                    loading={committingImport}
+                    disabled={!canStartImportCommit}
+                    onClick={() => void handleStartImportCommit()}
+                  >
+                    Commit as draft
+                  </Button>
+                  <Button
+                    key="first-run-import-commit-refresh"
+                    data-testid="persona-visual-import-commit-refresh-button"
+                    size="small"
+                    icon={<RefreshCw className="h-3.5 w-3.5" />}
+                    loading={refreshingImportCommit}
+                    disabled={!canRefreshImportCommit}
+                    onClick={() => void handleRefreshImportCommit()}
+                  >
+                    Refresh commit
+                  </Button>
+                </div>
+                {importCommitJob ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-text-muted">
+                    <Tag data-testid="persona-visual-import-commit-status">
+                      {importCommitJob.status}
+                    </Tag>
+                    <span data-testid="persona-visual-import-commit-stage">
+                      {importCommitJob.stage}
+                    </span>
+                    <span data-testid="persona-visual-import-commit-job-id">
+                      {importCommitJob.job_id}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="mt-2 text-text-muted">No import commit job.</div>
+                )}
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="mt-2 text-xs text-text-muted">No import preview.</div>
+        )}
+      </div>
+    </div>
+  )
 
   React.useEffect(() => {
     if (!fullImportPreview) {
@@ -2350,6 +2904,76 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
 
   return (
     <div className="space-y-3" data-testid="persona-visual-pack-editor">
+      {showSetupChoices ? (
+        <VisualBuddySetupChoiceCard
+          selectedPersonaId={selectedPersonaId}
+          selectedPersonaName={selectedPersonaName || selectedPersonaId}
+          hasActiveVisual={hasActiveVisual}
+          packCount={visiblePacks.length}
+          recommendedStarter={recommendedStarter}
+          starterCount={starterPacks.length}
+          starterCatalogLoading={starterCatalogLoading}
+          starterCatalogError={starterCatalogError}
+          copyingDefault={Boolean(copyingStarterId)}
+          onUseDefault={
+            recommendedStarter
+              ? () => void handleCopyStarterPack(recommendedStarter.id)
+              : undefined
+          }
+          onChooseDefault={
+            starterPacks.length > 1 ? () => setStarterPickerOpen(true) : undefined
+          }
+          onImportPack={openImportArchivePicker}
+          onStartBlank={focusDraftTitleInput}
+        />
+      ) : null}
+
+      <Modal
+        title="Choose bundled default"
+        open={starterPickerOpen}
+        footer={null}
+        destroyOnHidden
+        onCancel={() => setStarterPickerOpen(false)}
+      >
+        <div
+          data-testid="persona-visual-starter-picker"
+          className="space-y-2"
+        >
+          {starterPacks.map((starter) => (
+            <div
+              key={starter.id}
+              className="rounded border border-border bg-bg p-2 text-xs"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <div className="font-medium text-text">{starter.title}</div>
+                  <div className="mt-1 text-text-muted">{starter.description}</div>
+                </div>
+                <Tag>{starter.renderer_type}</Tag>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1">
+                {starter.tags.map((tag) => (
+                  <Tag key={tag}>{tag}</Tag>
+                ))}
+                <Tag>{starter.license_label}</Tag>
+              </div>
+              <Button
+                data-testid={`persona-visual-copy-starter-${starter.id}`}
+                className="mt-2"
+                size="small"
+                type="primary"
+                icon={<Copy className="h-3.5 w-3.5" />}
+                loading={copyingStarterId === starter.id}
+                disabled={Boolean(copyingStarterId)}
+                onClick={() => void handleCopyStarterPack(starter.id)}
+              >
+                Copy as draft
+              </Button>
+            </div>
+          ))}
+        </div>
+      </Modal>
+
       <div className="rounded-lg border border-border bg-surface p-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -2378,10 +3002,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
               data-testid="persona-visual-pack-select"
               className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
               value={selectedPack?.id || ""}
-              onChange={(event) => setSelectedPackId(event.target.value)}
-              disabled={!packs.length}
+              onChange={(event) => selectPackId(event.target.value)}
+              disabled={!visiblePacks.length}
             >
-              {packs.map((pack) => (
+              {visiblePacks.map((pack) => (
                 <option key={pack.id} value={pack.id}>
                   {pack.title}
                 </option>
@@ -2410,7 +3034,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
             Create draft
           </Button>
         </div>
-        {!loading && !packs.length ? (
+        {!loading && !visiblePacks.length ? (
           <div
             data-testid="persona-visual-pack-empty"
             className="mt-3 rounded border border-dashed border-border bg-bg px-3 py-3 text-xs text-text-muted"
@@ -2754,6 +3378,8 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           {statusMessage}
         </div>
       ) : null}
+
+      {!selectedPack ? firstRunImportPanel : null}
 
       <div
         ref={libraryPanelRef}
@@ -3249,6 +3875,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                         ) : null}
                         <div className="mt-2 flex flex-wrap items-center gap-2">
                           <Button
+                            key="selected-import-commit"
                             data-testid="persona-visual-import-commit-button"
                             size="small"
                             icon={<CheckCircle2 className="h-3.5 w-3.5" />}
@@ -3259,6 +3886,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                             Commit as draft
                           </Button>
                           <Button
+                            key="selected-import-commit-refresh"
                             data-testid="persona-visual-import-commit-refresh-button"
                             size="small"
                             icon={<RefreshCw className="h-3.5 w-3.5" />}
@@ -3742,7 +4370,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                   size="small"
                   icon={<XCircle className="h-3.5 w-3.5" />}
                   loading={deactivating}
-                  disabled={!packs.some((pack) => pack.status === "active")}
+                  disabled={!visiblePacks.some((pack) => pack.status === "active")}
                   onClick={() => void handleDeactivate()}
                 >
                   Deactivate
@@ -3847,8 +4475,8 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
               ) : null}
             </div>
             <div className="mt-3 space-y-2">
-              {candidates.length ? (
-                candidates.map((candidate) => (
+              {visibleCandidates.length ? (
+                visibleCandidates.map((candidate) => (
                   <div
                     key={candidate.id}
                     className="rounded border border-border bg-bg p-2 text-xs"
