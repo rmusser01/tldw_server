@@ -257,7 +257,7 @@ def test_register_path_persists_and_returns_inventory_item(monkeypatch, tmp_path
     monkeypatch.setattr(
         llamacpp_inventory_service,
         "load_comprehensive_config",
-        lambda: _llamacpp_parser(models_dir, registered_model_paths=""),
+        lambda: _llamacpp_parser(models_dir, allowed_paths=str(external.parent), registered_model_paths=""),
     )
     monkeypatch.setattr(llamacpp_inventory_service.setup_manager, "update_config", updates.append)
     monkeypatch.setattr(llamacpp_inventory_service, "refresh_config_cache", lambda: refreshed.__setitem__("called", True))
@@ -272,6 +272,34 @@ def test_register_path_persists_and_returns_inventory_item(monkeypatch, tmp_path
     assert body["source"] == "registered_path"
     assert updates == [{"LlamaCpp": {"registered_model_paths": str(external.resolve())}}]
     assert refreshed["called"] is True
+
+
+@pytest.mark.unit
+def test_register_path_rejects_outside_allowed_paths_without_persisting(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    outside = tmp_path / "outside" / "registered.gguf"
+    outside.parent.mkdir()
+    outside.write_text("fake model")
+    updates: list[dict[str, dict[str, str]]] = []
+
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(models_dir, registered_model_paths=""),
+    )
+    monkeypatch.setattr(llamacpp_inventory_service.setup_manager, "update_config", updates.append)
+
+    app = _make_app_with_manager(_Manager())
+    with TestClient(app) as client:
+        response = client.post("/api/v1/llamacpp/models/register-path", json={"path": str(outside)})
+
+    assert response.status_code == 400, response.text
+    assert "outside allowed" in response.json()["detail"].lower()
+    assert str(outside) not in response.text
+    assert updates == []
 
 
 @pytest.mark.unit
@@ -298,7 +326,11 @@ def test_register_path_preserves_existing_paths_under_lock(monkeypatch, tmp_path
 
     def fake_load_config() -> ConfigParser:
         events.append("read_config")
-        return _llamacpp_parser(models_dir, registered_model_paths=str(existing))
+        return _llamacpp_parser(
+            models_dir,
+            allowed_paths=str(existing.parent),
+            registered_model_paths=str(existing),
+        )
 
     def fake_update_config(payload: dict[str, dict[str, str]]) -> None:
         events.append("write_config")

@@ -80,14 +80,19 @@ def scan_inventory(config_state: dict[str, Any] | None = None, limit: int = 500)
 def register_model_path(path: Path) -> LlamaCppInventoryItem:
     """Persist a local registered model path and return its inventory representation.
 
-    Registration is intentionally visibility-first: outside, missing, or non-GGUF
-    paths are saved and reported with warnings. Unresolvable paths are rejected
-    because they cannot get a deterministic safe ID and should not be persisted.
+    Registration only persists paths under the configured models_dir or
+    allowed_paths. Missing or non-GGUF paths within those roots are saved and
+    reported with warnings so operators can correct them from the WebUI.
+    Unresolvable paths are rejected because they cannot get a deterministic safe
+    ID and should not be persisted.
     """
     canonical = _canonical_path(path, "Registered model")
     try:
         with llamacpp_config_write_lock():
             saved_config = _read_saved_config()
+            allowed_bases = _allowed_bases_for_config(saved_config)
+            if not allowed_bases or not handler_utils.is_path_allowed(canonical, allowed_bases):
+                raise ServerError("Registered model path is outside allowed llama.cpp paths.")
             existing = _path_list(saved_config.get("registered_model_paths"))
             existing_by_id: dict[str, Path] = {}
             for item in existing:
