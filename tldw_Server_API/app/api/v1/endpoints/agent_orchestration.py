@@ -1827,12 +1827,11 @@ async def dispatch_run(
                     review_decision=review_decision_for_promotion,
                     review_run=review_run_for_promotion,
                 )
-            except Exception as exc:
+            except Exception:
                 logger.exception("ACP artifact promotion failed for task {}", task_id)
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="ACP artifact promotion failed",
-                ) from exc
+                artifact_promotion_result = ACPArtifactPromotionResult(
+                    errors=[{"artifact_id": "all", "reason": "promotion_failed"}]
+                )
             if any(
                 (
                     artifact_promotion_result.created_artifact_ids,

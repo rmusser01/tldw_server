@@ -36,6 +36,7 @@ _PROMOTABLE_ARTIFACT_TYPES = frozenset(
     }
 )
 _DEFAULT_REDACTION = {"support_safe": True, "redacted": False}
+_PREVIEW_TEXT_MAX_CHARS = 500
 
 
 @dataclass(frozen=True)
@@ -236,9 +237,9 @@ def _preview_text(artifact: Mapping[str, Any]) -> str | None:
         return preview
     summary = str(artifact.get("summary") or "").strip()
     if summary:
-        return summary[:500]
+        return summary[:_PREVIEW_TEXT_MAX_CHARS]
     content = str(artifact.get("content") or "").strip()
-    return content[:500] if content else None
+    return content[:_PREVIEW_TEXT_MAX_CHARS] if content else None
 
 
 def _workspace_artifact_payload(

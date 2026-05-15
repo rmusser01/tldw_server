@@ -4,7 +4,7 @@ title: Implement ACP deliverable promotion into traceable artifacts
 status: Done
 assignee: []
 created_date: '2026-05-15 03:51'
-updated_date: '2026-05-15 04:45'
+updated_date: '2026-05-15 21:58'
 labels:
   - acp
   - artifacts
@@ -45,24 +45,27 @@ Implement GitHub issue #1706: promote one golden-path ACP run deliverable, such 
 3. Implement the minimal backend promotion service/API seam that creates or updates traceable workspace artifacts while preserving ACP producer/session/run/review references. - Complete
 4. Wire the golden-path ACP completion caller only where the existing architecture already exposes deliverable metadata. - Complete
 5. Verify with focused pytest/Bandit and update #1706/TASK-369 evidence. - Complete
+6. Address PR #1718 review feedback: avoid converting post-commit artifact promotion failures into failed dispatch responses, preserve promotion failure metadata in the response/audit path, and replace repeated preview truncation literals with a named module constant. - Complete
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented ACP artifact promotion backend slice for issue #1706. Added a focused promotion service at tldw_Server_API/app/core/Agent_Orchestration/artifact_promotion.py and dispatch wiring in tldw_Server_API/app/api/v1/endpoints/agent_orchestration.py. Added regression coverage in tldw_Server_API/tests/Agent_Orchestration/test_artifact_promotion.py plus a dispatch-level golden path in test_orchestration_api.py. Verification: pytest tldw_Server_API/tests/Agent_Orchestration -q => 176 passed, 5 warnings. Ruff check on touched files => all checks passed. Bandit production touched files => exit 0; touched files with pytest B101/B105 excluded => exit 0.
+
+PR #1718 review follow-up reopened this task for Gemini feedback on post-commit promotion error handling and preview truncation maintainability.
+
+Review follow-up verification: `python -m pytest tldw_Server_API/tests/Agent_Orchestration/test_orchestration_api.py -k promotion_failure_without_rolling_back_task -q` failed before the endpoint fix and passed after it; `python -m pytest tldw_Server_API/tests/Agent_Orchestration/test_artifact_promotion.py tldw_Server_API/tests/Agent_Orchestration/test_orchestration_api.py -q` passed with 43 tests and 5 warnings; `python -m ruff check tldw_Server_API/app/api/v1/endpoints/agent_orchestration.py tldw_Server_API/app/core/Agent_Orchestration/artifact_promotion.py tldw_Server_API/tests/Agent_Orchestration/test_orchestration_api.py` passed; `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/agent_orchestration.py tldw_Server_API/app/core/Agent_Orchestration/artifact_promotion.py -f json -o /tmp/bandit_acp_artifact_promotion_1718.json` passed with 0 results/errors; `git diff --check` passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented issue #1706 in draft PR #1718: https://github.com/rmusser01/tldw_server/pull/1718
+Implemented issue #1706 in PR #1718: https://github.com/rmusser01/tldw_server/pull/1718
 
 Added ACP deliverable promotion into traceable workspace artifacts through a focused backend service and ACP dispatch wiring. The implementation promotes only structured work-product artifacts with source lineage, preserves ACP producer/session/run/review metadata, stores redaction/version/source-lineage contract fields, updates existing artifacts by version, and leaves retry/rejected/malformed payloads out of accepted artifact state.
 
-Verification recorded: Agent Orchestration pytest suite passed (176 passed, 5 warnings); Ruff passed on touched files; Bandit passed on production touched files and on the touched set with pytest-only B101/B105 excluded.
-
-Known merge gate: PR remains draft until the requester adds the required human-authored Change summary.
+Verification recorded: Agent Orchestration pytest suite passed (176 passed, 5 warnings); Ruff passed on touched files; Bandit passed on production touched files and on the touched set with pytest-only B101/B105 excluded. PR review follow-up also keeps dispatch responses successful when post-commit artifact promotion fails, includes a structured promotion failure result for audit/response metadata, and replaces repeated preview truncation literals with a named module constant.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
