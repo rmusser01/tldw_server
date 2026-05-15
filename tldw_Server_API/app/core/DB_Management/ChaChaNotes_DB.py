@@ -8379,30 +8379,30 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "CREATE INDEX IF NOT EXISTS idx_ws_artifacts_workspace ON workspace_artifacts(workspace_id)"
             )
             artifact_cols = {row[1] for row in conn.execute("PRAGMA table_info('workspace_artifacts')").fetchall()}
-            new_artifact_cols = {
-                "content_type": "TEXT NOT NULL DEFAULT 'text/markdown'",
-                "preview_text": "TEXT",
-                "summary": "TEXT",
-                "review_state": "TEXT NOT NULL DEFAULT 'draft'",
-                "owner_scope": "TEXT NOT NULL DEFAULT 'user'",
-                "owner_id": "TEXT",
-                "project_id": "TEXT",
-                "task_id": "TEXT",
-                "source_collection_id": "TEXT",
-                "root_artifact_id": "TEXT",
-                "artifact_version_id": "TEXT",
-                "previous_version_id": "TEXT",
-                "producer_metadata_json": "TEXT",
-                "source_lineage_json": "TEXT",
-                "review_metadata_json": "TEXT",
-                "version_metadata_json": "TEXT",
-                "export_refs_json": "TEXT",
-                "redaction_json": "TEXT",
-                "schema_version": "INTEGER NOT NULL DEFAULT 1",
+            new_artifact_col_ddls = {
+                "content_type": "ALTER TABLE workspace_artifacts ADD COLUMN content_type TEXT NOT NULL DEFAULT 'text/markdown'",
+                "preview_text": "ALTER TABLE workspace_artifacts ADD COLUMN preview_text TEXT",
+                "summary": "ALTER TABLE workspace_artifacts ADD COLUMN summary TEXT",
+                "review_state": "ALTER TABLE workspace_artifacts ADD COLUMN review_state TEXT NOT NULL DEFAULT 'draft'",
+                "owner_scope": "ALTER TABLE workspace_artifacts ADD COLUMN owner_scope TEXT NOT NULL DEFAULT 'user'",
+                "owner_id": "ALTER TABLE workspace_artifacts ADD COLUMN owner_id TEXT",
+                "project_id": "ALTER TABLE workspace_artifacts ADD COLUMN project_id TEXT",
+                "task_id": "ALTER TABLE workspace_artifacts ADD COLUMN task_id TEXT",
+                "source_collection_id": "ALTER TABLE workspace_artifacts ADD COLUMN source_collection_id TEXT",
+                "root_artifact_id": "ALTER TABLE workspace_artifacts ADD COLUMN root_artifact_id TEXT",
+                "artifact_version_id": "ALTER TABLE workspace_artifacts ADD COLUMN artifact_version_id TEXT",
+                "previous_version_id": "ALTER TABLE workspace_artifacts ADD COLUMN previous_version_id TEXT",
+                "producer_metadata_json": "ALTER TABLE workspace_artifacts ADD COLUMN producer_metadata_json TEXT",
+                "source_lineage_json": "ALTER TABLE workspace_artifacts ADD COLUMN source_lineage_json TEXT",
+                "review_metadata_json": "ALTER TABLE workspace_artifacts ADD COLUMN review_metadata_json TEXT",
+                "version_metadata_json": "ALTER TABLE workspace_artifacts ADD COLUMN version_metadata_json TEXT",
+                "export_refs_json": "ALTER TABLE workspace_artifacts ADD COLUMN export_refs_json TEXT",
+                "redaction_json": "ALTER TABLE workspace_artifacts ADD COLUMN redaction_json TEXT",
+                "schema_version": "ALTER TABLE workspace_artifacts ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1",
             }
-            for col_name, col_type in new_artifact_cols.items():
+            for col_name, ddl in new_artifact_col_ddls.items():
                 if col_name not in artifact_cols:
-                    conn.execute(f"ALTER TABLE workspace_artifacts ADD COLUMN {col_name} {col_type}")  # nosec B608
+                    conn.execute(ddl)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS workspace_artifact_versions (
                     workspace_id    TEXT NOT NULL,
@@ -15096,7 +15096,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return default
 
     @classmethod
-    def _load_workspace_artifact_json(cls, raw: Any, default: Any) -> Any:
+    def _load_workspace_artifact_json(
+        cls,
+        raw: Any,
+        default: Any,
+        *,
+        field_name: str = "workspace_artifact_json",
+    ) -> Any:
         if raw is None:
             return cls._copy_workspace_artifact_default(default)
         if isinstance(raw, (dict, list)):
@@ -15107,6 +15113,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             try:
                 return json.loads(raw)
             except json.JSONDecodeError:
+                preview = raw[:120].replace("\n", "\\n")
+                logger.warning(
+                    "Failed to decode workspace artifact JSON field {} ({} chars): {}",
+                    field_name,
+                    len(raw),
+                    preview,
+                )
                 return cls._copy_workspace_artifact_default(default)
         return cls._copy_workspace_artifact_default(default)
 
@@ -15140,7 +15153,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         item["previous_version_id"] = item.get("previous_version_id")
         item["schema_version"] = int(item.get("schema_version") or 1)
         for column_name, response_name, default in self._WORKSPACE_ARTIFACT_JSON_FIELDS:
-            item[response_name] = self._load_workspace_artifact_json(item.get(column_name), default)
+            item[response_name] = self._load_workspace_artifact_json(
+                item.get(column_name),
+                default,
+                field_name=column_name,
+            )
         return item
 
     def _insert_workspace_artifact_version(
@@ -15201,9 +15218,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         artifact_id = str(artifact_id)
         now = self._get_current_utc_timestamp_iso()
         review_state = self._normalize_workspace_artifact_review_state(data.get("review_state"))
-        root_artifact_id = str(data.get("root_artifact_id") or artifact_id)
-        artifact_version_id = str(data.get("artifact_version_id") or self._workspace_artifact_version_id(artifact_id, 1))
-        previous_version_id = data.get("previous_version_id")
+        root_artifact_id = artifact_id
+        artifact_version_id = self._workspace_artifact_version_id(artifact_id, 1)
+        previous_version_id = None
         content_type = str(data.get("content_type") or "text/markdown")
         producer_metadata_json = self._dump_workspace_artifact_json(data.get("producer_metadata"), {})
         source_lineage_json = self._dump_workspace_artifact_json(data.get("source_lineage"), {})
@@ -15304,7 +15321,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         for row in cursor.fetchall():
             item = dict(row)
             for column_name, response_name, default in self._WORKSPACE_ARTIFACT_JSON_FIELDS:
-                item[response_name] = self._load_workspace_artifact_json(item.get(column_name), default)
+                item[response_name] = self._load_workspace_artifact_json(
+                    item.get(column_name),
+                    default,
+                    field_name=column_name,
+                )
             versions.append(item)
         return versions
 
@@ -15331,11 +15352,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 entity_id=artifact_id,
             )
         next_version = expected_version + 1
-        next_root_artifact_id = str(updates.get("root_artifact_id") or existing.get("root_artifact_id") or artifact_id)
-        previous_version_id = str(existing.get("artifact_version_id") or self._workspace_artifact_version_id(artifact_id, expected_version))
-        next_artifact_version_id = str(
-            updates.get("artifact_version_id") or self._workspace_artifact_version_id(artifact_id, next_version)
-        )
+        next_root_artifact_id = str(existing.get("root_artifact_id") or artifact_id)
+        previous_version_id = self._workspace_artifact_version_id(artifact_id, expected_version)
+        next_artifact_version_id = self._workspace_artifact_version_id(artifact_id, next_version)
         review_state = self._normalize_workspace_artifact_review_state(
             updates.get("review_state") if "review_state" in updates else existing.get("review_state")
         )

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 
 class WorkspaceUpsertRequest(BaseModel):
@@ -109,6 +109,15 @@ WorkspaceArtifactReviewState = Literal[
 ]
 
 
+class WorkspaceArtifactRedaction(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    support_safe: StrictBool = True
+    redacted: StrictBool = False
+    retention_class: str | None = None
+    redacted_fields: list[str] = Field(default_factory=list)
+
+
 class WorkspaceArtifactCreateRequest(BaseModel):
     id: str
     artifact_type: str
@@ -124,15 +133,12 @@ class WorkspaceArtifactCreateRequest(BaseModel):
     project_id: str | None = None
     task_id: str | None = None
     source_collection_id: str | None = None
-    root_artifact_id: str | None = None
-    artifact_version_id: str | None = None
-    previous_version_id: str | None = None
     producer_metadata: dict[str, Any] = Field(default_factory=dict)
     source_lineage: dict[str, Any] = Field(default_factory=dict)
     review_metadata: dict[str, Any] = Field(default_factory=dict)
     version_metadata: dict[str, Any] = Field(default_factory=dict)
     export_refs: list[dict[str, Any]] = Field(default_factory=list)
-    redaction: dict[str, Any] = Field(default_factory=lambda: {"support_safe": True, "redacted": False})
+    redaction: WorkspaceArtifactRedaction = Field(default_factory=WorkspaceArtifactRedaction)
     schema_version: int = 1
 
 
@@ -149,15 +155,12 @@ class WorkspaceArtifactUpdateRequest(BaseModel):
     project_id: str | None = None
     task_id: str | None = None
     source_collection_id: str | None = None
-    root_artifact_id: str | None = None
-    artifact_version_id: str | None = None
-    previous_version_id: str | None = None
     producer_metadata: dict[str, Any] | None = None
     source_lineage: dict[str, Any] | None = None
     review_metadata: dict[str, Any] | None = None
     version_metadata: dict[str, Any] | None = None
     export_refs: list[dict[str, Any]] | None = None
-    redaction: dict[str, Any] | None = None
+    redaction: WorkspaceArtifactRedaction | None = None
     schema_version: int | None = None
     total_tokens: int | None = None
     total_cost_usd: float | None = None
@@ -189,7 +192,7 @@ class WorkspaceArtifactResponse(BaseModel):
     review_metadata: dict[str, Any] = Field(default_factory=dict)
     version_metadata: dict[str, Any] = Field(default_factory=dict)
     export_refs: list[dict[str, Any]] = Field(default_factory=list)
-    redaction: dict[str, Any] = Field(default_factory=lambda: {"support_safe": True, "redacted": False})
+    redaction: WorkspaceArtifactRedaction = Field(default_factory=WorkspaceArtifactRedaction)
     schema_version: int = 1
     total_tokens: int | None = None
     total_cost_usd: float | None = None

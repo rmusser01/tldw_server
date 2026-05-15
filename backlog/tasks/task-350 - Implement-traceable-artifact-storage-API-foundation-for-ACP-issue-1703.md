@@ -5,7 +5,7 @@ status: Done
 assignee:
   - codex
 created_date: '2026-05-15 01:15'
-updated_date: '2026-05-15 02:04'
+updated_date: '2026-05-15 02:10'
 labels:
   - acp
   - artifacts
@@ -69,6 +69,10 @@ PR review fix verification: added regression test_workspace_artifact_response_de
 PR review follow-up: CodeRabbit flagged test_workspace_artifact_api_exposes_traceable_contract_fields as missing @pytest.mark.integration. Reopening TASK-350 for the marker-only review fix before editing the test.
 
 PR #1711 review follow-up: added @pytest.mark.integration to test_workspace_artifact_api_exposes_traceable_contract_fields after CodeRabbit flagged the missing marker. Verified marker selection with python -m pytest tldw_Server_API/tests/Workspaces/test_workspaces_api.py::test_workspace_artifact_api_exposes_traceable_contract_fields -m integration -q (1 passed) and reran the focused workspace suites with python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py tldw_Server_API/tests/Workspaces/test_workspaces_api.py -q (61 passed, 5 warnings). git diff --check passed.
+
+PR #1711 Qodo follow-up: new unresolved review threads require typed redaction schema, backend-owned artifact/version IDs, fixed DDL migration SQL construction, and observable JSON decode failures. Reopening TASK-350 for focused review-fix work.
+
+PR #1711 Qodo follow-up verification: addressed four unresolved review threads by adding typed WorkspaceArtifactRedaction schema with strict support_safe/redacted booleans, removing client lineage/version IDs from create/update request schemas, enforcing backend-owned artifact_version_id/root/previous IDs in DB create/update, replacing interpolated artifact ALTER TABLE migration SQL with fixed DDL statements, and logging field-specific warnings for malformed workspace artifact JSON metadata. Red regressions failed before implementation and now pass. Verification: targeted Qodo regressions 4 passed; focused workspace DB/API suite 64 passed, 5 warnings; git diff --check passed; py_compile passed for ChaChaNotes_DB.py, workspace_schemas.py, and workspaces.py; Bandit passed with no errors/results in /tmp/bandit_acp_artifact_storage_api_1711_qodo_fixes.json.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -79,6 +83,8 @@ Implemented #1703 as the backend-owned storage/API foundation for traceable ACP-
 PR review follow-up: addressed Gemini review thread by normalizing nullable artifact response versions before generating fallback artifact_version_id values, with regression coverage for version=None.
 
 PR review follow-up: added the missing integration marker to the traceable artifact API contract test and verified the marker-selected test plus the focused workspace DB/API suites.
+
+PR review follow-up: addressed Qodo findings for typed redaction posture, backend-owned artifact lineage/version IDs, fixed migration DDL SQL construction, and observable malformed JSON metadata handling. Added regression coverage and reran focused workspace DB/API verification.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -560,6 +560,29 @@ def test_workspace_artifact_response_defaults_null_version_for_version_id():
     assert response.artifact_version_id == "art-null-version:v1"
 
 
+def test_workspace_artifact_redaction_schema_requires_typed_posture():
+    from pydantic import ValidationError
+
+    from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
+        WorkspaceArtifactCreateRequest,
+        WorkspaceArtifactResponse,
+    )
+
+    with pytest.raises(ValidationError):
+        WorkspaceArtifactCreateRequest(
+            id="brief-1",
+            artifact_type="workspace_brief",
+            title="Brief",
+            redaction={"support_safe": "yes", "redacted": False},
+        )
+
+    schema = WorkspaceArtifactResponse.model_json_schema()
+    redaction_ref = schema["properties"]["redaction"]["$ref"]
+    redaction_schema = schema["$defs"][redaction_ref.rsplit("/", 1)[-1]]
+    assert redaction_schema["properties"]["support_safe"]["type"] == "boolean"
+    assert redaction_schema["properties"]["redacted"]["type"] == "boolean"
+
+
 @pytest.mark.integration
 def test_workspace_artifact_api_exposes_traceable_contract_fields(workspace_fastapi_app, db):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
@@ -614,6 +637,9 @@ def test_workspace_artifact_api_exposes_traceable_contract_fields(workspace_fast
                             {"source_id": "src-1", "source_type": "media", "label": "Transcript"}
                         ]
                     },
+                    "root_artifact_id": "forged-root",
+                    "artifact_version_id": "forged:v99",
+                    "previous_version_id": "forged:v98",
                     "review_metadata": {"reviewer_id": "reviewer-1", "decision": "accepted"},
                     "version_metadata": {"revision_reason": "initial"},
                     "export_refs": [{"format": "md", "file_id": 101}],

@@ -158,6 +158,55 @@ class TestWorkspaceArtifacts:
         assert versions[0]["review_state"] == "accepted"
         assert versions[0]["source_lineage"]["sources"][0]["label"] == "Transcript"
 
+    def test_artifact_version_ids_are_server_owned_on_create_and_update(self, db):
+        created = db.add_workspace_artifact("ws-1", {
+            "id": "brief-1",
+            "artifact_type": "workspace_brief",
+            "title": "Draft Brief",
+            "root_artifact_id": "forged-root",
+            "artifact_version_id": "forged:v99",
+            "previous_version_id": "forged:v98",
+        })
+
+        assert created["root_artifact_id"] == "brief-1"
+        assert created["artifact_version_id"] == "brief-1:v1"
+        assert created["previous_version_id"] is None
+
+        updated = db.update_workspace_artifact(
+            "ws-1",
+            "brief-1",
+            {
+                "title": "Updated Brief",
+                "root_artifact_id": "rewired-root",
+                "artifact_version_id": "rewired:v100",
+                "previous_version_id": "rewired:v99",
+            },
+            expected_version=created["version"],
+        )
+
+        assert updated["root_artifact_id"] == "brief-1"
+        assert updated["artifact_version_id"] == "brief-1:v2"
+        assert updated["previous_version_id"] == "brief-1:v1"
+        versions = db.list_workspace_artifact_versions("ws-1", "brief-1")
+        assert [version["artifact_version_id"] for version in versions] == ["brief-1:v1", "brief-1:v2"]
+
+    def test_workspace_artifact_json_decode_failure_is_logged(self, monkeypatch):
+        warnings: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+        def _capture_warning(*args: object, **kwargs: object) -> None:
+            warnings.append((args, kwargs))
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.logger.warning",
+            _capture_warning,
+        )
+
+        loaded = CharactersRAGDB._load_workspace_artifact_json("{bad-json", {}, field_name="source_lineage_json")
+
+        assert loaded == {}
+        assert warnings
+        assert warnings[0][0][1] == "source_lineage_json"
+
     def test_list_artifacts(self, db):
         db.add_workspace_artifact("ws-1", {
             "id": "art-1", "artifact_type": "summary", "title": "S1",
