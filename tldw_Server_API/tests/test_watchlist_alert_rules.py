@@ -152,6 +152,34 @@ def test_evaluate_rules_for_run_skips_invalid_threshold_values(alert_rules_db_pa
     assert "Run failed" in triggered[0]["notification_kwargs"]["message"]
 
 
+def test_evaluate_rules_for_run_emits_health_issue_notification_payload(alert_rules_db_path: str) -> None:
+    create_alert_rule(
+        alert_rules_db_path,
+        user_id="user-1",
+        job_id=11,
+        name="Run failed",
+        condition_type="run_failed",
+    )
+
+    triggered = evaluate_rules_for_run(
+        alert_rules_db_path,
+        user_id="user-1",
+        job_id=11,
+        run_id=77,
+        stats={"items_found": 4, "items_ingested": 1, "error_msg": "boom"},
+        status="failed",
+    )
+
+    payload = triggered[0]["notification_kwargs"]
+    assert payload["kind"] == "watchlist_health_issue"
+    assert payload["type"] == "watchlist_health_issue"
+    assert payload["legacy_kind"] == "watchlist_alert"
+    assert payload["category"] == "health"
+    assert payload["link_type"] == "watchlist_run"
+    assert payload["link_id"] == "77"
+    assert "item_id" not in payload
+
+
 def test_update_rule_rejects_invalid_condition_type(alert_rules_client: TestClient) -> None:
     create_response = alert_rules_client.post(
         "/watchlists/alert-rules",

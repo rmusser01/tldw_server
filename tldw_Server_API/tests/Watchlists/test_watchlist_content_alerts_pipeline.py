@@ -8,6 +8,7 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.Watchlists import pipeline as wl_pipeline
 from tldw_Server_API.app.core.Watchlists.content_alerts import evaluate_content_alert_rules_for_item
 
 
@@ -187,3 +188,177 @@ def test_evaluate_content_alert_rules_ignores_notification_failures(tmp_path):
     assert len(created) == 1
     assert total == 1
     assert alerts[0].status == "unread"
+
+
+@pytest.mark.asyncio
+async def test_run_watchlist_job_triggers_content_alerts_for_recorded_items(monkeypatch, tmp_path):
+    user_id = 321
+    base_dir = tmp_path / "watchlist_pipeline_user_dbs"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
+    monkeypatch.delenv("TEST_MODE", raising=False)
+
+    db = WatchlistsDatabase.for_user(user_id)
+    watchlist = db.create_watchlist(
+        name="Healthcare CTI",
+        objective="Track active exploitation against hospitals",
+        domain="cti_osint",
+        priority="critical",
+        tags=["cti", "healthcare"],
+    )
+    source = db.create_source(
+        name="Advisory feed",
+        url="https://example.com/advisories.xml",
+        source_type="rss",
+        active=True,
+        settings_json=json.dumps({
+            "limit": 1,
+            "rss": {
+                "use_feed_content_if_available": True,
+                "feed_content_min_chars": 0,
+            },
+        }),
+        tags=["advisory", "cti"],
+        group_ids=[],
+        watchlist_id=int(watchlist.id),
+    )
+    job = db.create_job(
+        name="Daily advisory monitor",
+        description=None,
+        scope_json=json.dumps({"sources": [int(source.id)]}),
+        schedule_expr=None,
+        schedule_timezone="UTC",
+        active=True,
+        max_concurrency=1,
+        per_host_delay_ms=0,
+        retry_policy_json=json.dumps({}),
+        output_prefs_json=json.dumps({"persist_to_media_db": False}),
+        job_filters_json=None,
+        watchlist_id=int(watchlist.id),
+    )
+    rule = db.create_content_alert_rule(
+        watchlist_id=int(watchlist.id),
+        name="Active exploitation",
+        rule_kind="descriptor",
+        match_mode="contains",
+        pattern="active exploitation",
+        severity="critical",
+        source_constraints={"source_tags": ["advisory"]},
+    )
+
+    async def _stub_fetch(url, **kwargs):
+        return {
+            "status": 200,
+            "items": [
+                {
+                    "guid": "cve-2026-9999",
+                    "title": "CVE-2026-9999 active exploitation observed",
+                    "url": "https://example.com/advisory/cve-2026-9999",
+                    "summary": "Active exploitation is affecting healthcare providers.",
+                    "published": "2026-05-15T12:00:00+00:00",
+                }
+            ],
+        }
+
+    async def _noop_enqueue(**kwargs):
+        return None
+
+    monkeypatch.setattr(wl_pipeline, "fetch_rss_feed", _stub_fetch)
+    monkeypatch.setattr(wl_pipeline, "fetch_rss_feed_history", _stub_fetch)
+    monkeypatch.setattr(wl_pipeline, "enqueue_embeddings_job_for_item", _noop_enqueue)
+
+    result = await wl_pipeline.run_watchlist_job(user_id, int(job.id))
+    alerts, total = db.list_content_alerts(int(watchlist.id), limit=50, offset=0)
+
+    assert result["items_ingested"] == 1
+    assert total == 1
+    assert alerts[0].rule_id == rule.id
+    assert alerts[0].item_id is not None
+    assert alerts[0].run_id == result["run_id"]
+    assert alerts[0].job_id == job.id
+    assert alerts[0].source_id == source.id
+    assert "active exploitation" in alerts[0].snippet.lower()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_content_alert_failure_is_noncritical(monkeypatch, tmp_path):
+    user_id = 322
+    base_dir = tmp_path / "watchlist_pipeline_failure_user_dbs"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
+    monkeypatch.delenv("TEST_MODE", raising=False)
+
+    db = WatchlistsDatabase.for_user(user_id)
+    watchlist = db.create_watchlist(
+        name="News watchlist",
+        objective="Track developing events",
+        domain="news",
+        priority="medium",
+        tags=["news"],
+    )
+    source = db.create_source(
+        name="News feed",
+        url="https://example.com/news.xml",
+        source_type="rss",
+        active=True,
+        settings_json=json.dumps({
+            "limit": 1,
+            "rss": {
+                "use_feed_content_if_available": True,
+                "feed_content_min_chars": 0,
+            },
+        }),
+        tags=["news"],
+        group_ids=[],
+        watchlist_id=int(watchlist.id),
+    )
+    job = db.create_job(
+        name="News monitor",
+        description=None,
+        scope_json=json.dumps({"sources": [int(source.id)]}),
+        schedule_expr=None,
+        schedule_timezone="UTC",
+        active=True,
+        max_concurrency=1,
+        per_host_delay_ms=0,
+        retry_policy_json=json.dumps({}),
+        output_prefs_json=json.dumps({"persist_to_media_db": False}),
+        job_filters_json=None,
+        watchlist_id=int(watchlist.id),
+    )
+
+    async def _stub_fetch(url, **kwargs):
+        return {
+            "status": 200,
+            "items": [
+                {
+                    "guid": "news-1",
+                    "title": "Developing story",
+                    "url": "https://example.com/news/developing",
+                    "summary": "A developing story is being updated.",
+                    "published": "2026-05-15T12:00:00+00:00",
+                }
+            ],
+        }
+
+    async def _noop_enqueue(**kwargs):
+        return None
+
+    calls = {"count": 0}
+
+    def _raise_matcher(*args, **kwargs):
+        calls["count"] += 1
+        raise RuntimeError("matcher failed")
+
+    monkeypatch.setattr(wl_pipeline, "fetch_rss_feed", _stub_fetch)
+    monkeypatch.setattr(wl_pipeline, "fetch_rss_feed_history", _stub_fetch)
+    monkeypatch.setattr(wl_pipeline, "enqueue_embeddings_job_for_item", _noop_enqueue)
+    monkeypatch.setattr(wl_pipeline, "evaluate_content_alert_rules_for_item", _raise_matcher, raising=False)
+
+    result = await wl_pipeline.run_watchlist_job(user_id, int(job.id))
+    items, total = db.list_items(job_id=int(job.id), limit=50, offset=0)
+
+    assert calls["count"] == 1
+    assert result["items_ingested"] == 1
+    assert total == 1
+    assert items[0].status == "ingested"
