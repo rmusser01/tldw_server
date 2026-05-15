@@ -560,6 +560,7 @@ def test_workspace_artifact_response_defaults_null_version_for_version_id():
     assert response.artifact_version_id == "art-null-version:v1"
 
 
+@pytest.mark.integration
 def test_workspace_artifact_api_exposes_traceable_contract_fields(workspace_fastapi_app, db):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 

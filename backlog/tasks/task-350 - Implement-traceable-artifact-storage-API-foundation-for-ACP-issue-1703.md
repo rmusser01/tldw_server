@@ -5,7 +5,7 @@ status: Done
 assignee:
   - codex
 created_date: '2026-05-15 01:15'
-updated_date: '2026-05-15 02:00'
+updated_date: '2026-05-15 02:04'
 labels:
   - acp
   - artifacts
@@ -65,6 +65,10 @@ Post self-review update: added delete/recreate regression coverage for stable ar
 PR review follow-up: Gemini flagged _art_to_response fallback logic that can build artifact_version_id with vNone when a row dict carries version=None. Reopening TASK-350 for a focused review-fix commit with regression coverage before changing the mapper.
 
 PR review fix verification: added regression test_workspace_artifact_response_defaults_null_version_for_version_id, confirmed it failed before the mapper fix, normalized _art_to_response version fallback with art.get("version") or 1, then reran focused suite with 61 passed and 5 warnings. git diff --check passed. py_compile passed for tldw_Server_API/app/api/v1/endpoints/workspaces.py. Bandit passed with no errors/results in /tmp/bandit_acp_artifact_storage_api_1711_review_fix.json.
+
+PR review follow-up: CodeRabbit flagged test_workspace_artifact_api_exposes_traceable_contract_fields as missing @pytest.mark.integration. Reopening TASK-350 for the marker-only review fix before editing the test.
+
+PR #1711 review follow-up: added @pytest.mark.integration to test_workspace_artifact_api_exposes_traceable_contract_fields after CodeRabbit flagged the missing marker. Verified marker selection with python -m pytest tldw_Server_API/tests/Workspaces/test_workspaces_api.py::test_workspace_artifact_api_exposes_traceable_contract_fields -m integration -q (1 passed) and reran the focused workspace suites with python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py tldw_Server_API/tests/Workspaces/test_workspaces_api.py -q (61 passed, 5 warnings). git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -73,6 +77,8 @@ PR review fix verification: added regression test_workspace_artifact_response_de
 Implemented #1703 as the backend-owned storage/API foundation for traceable ACP-adjacent workspace artifacts. The existing workspace_artifacts surface now carries contract fields for ownership, review state, stable artifact/version IDs, source lineage, ACP producer metadata, review/version metadata, export references, redaction posture, and schema version. Artifact create/update writes version-history rows, and hard delete clears version rows so recreating an artifact ID remains compatible. Workspace artifact request/response schemas and endpoint mapping expose the new contract fields while preserving existing title/status/content behavior. Docs now mark #1703 as the storage/API foundation and keep UI detail, ACP promotion, export adapters, and broader signoff verification as follow-up slices. Verification recorded: 60 focused workspace DB/API tests passed, git diff --check passed, py_compile passed for touched backend modules, and Bandit reported no errors/results for the touched backend scope.
 
 PR review follow-up: addressed Gemini review thread by normalizing nullable artifact response versions before generating fallback artifact_version_id values, with regression coverage for version=None.
+
+PR review follow-up: added the missing integration marker to the traceable artifact API contract test and verified the marker-selected test plus the focused workspace DB/API suites.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
