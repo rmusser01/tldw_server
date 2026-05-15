@@ -4,7 +4,7 @@ title: Implement first-run Persona Visual Buddy setup choices
 status: Done
 assignee: []
 created_date: '2026-05-15 03:44'
-updated_date: '2026-05-15 15:18'
+updated_date: '2026-05-15 15:25'
 labels:
   - persona
   - buddy
@@ -61,12 +61,14 @@ Bandit not run for Task 3 because the slice changed only frontend TypeScript and
 Final wizard-detour closeout: AssistantSetupWizard now accepts optional compact visual setup content, the setup orchestrator tracks a route-level visual setup detour, sidepanel-persona can hide the wizard and show only the Visuals tab during the detour, and the detour return restores the setup overlay without marking setup complete. Focused validation passed: bunx vitest run ../packages/ui/src/components/PersonaGarden/__tests__/VisualBuddySetupChoiceCard.test.tsx ../packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx ../packages/ui/src/components/PersonaGarden/__tests__/AssistantSetupWizard.test.tsx ../packages/ui/src/routes/__tests__/sidepanel-persona.test.tsx ../packages/ui/src/services/__tests__/persona-visuals.test.ts --testTimeout=30000 -> 5 files passed, 152 tests passed. git diff --check passed. Bandit remains not applicable because this task touched frontend TypeScript/TSX and Backlog Markdown only.
 
 Quality review found that the first visual detour patch exposed all Persona Garden tabs while setup was still required. Resolved by filtering the detour view to the Visuals tab only and adding route regression assertions that Profiles, Commands, and Live Session are absent during the detour.
+
+Post-rebase verification on latest origin/dev passed: bunx vitest run src/components/PersonaGarden/__tests__/VisualBuddySetupChoiceCard.test.tsx src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx src/components/PersonaGarden/__tests__/AssistantSetupWizard.test.tsx src/routes/__tests__/sidepanel-persona.test.tsx src/services/__tests__/persona-visuals.test.ts --testTimeout=30000 -> 5 files passed, 153 tests passed. bun run verify:design-system-state passed with existing baseline exceptions only. git diff --check origin/dev...HEAD passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented first-run Persona Visual Buddy setup choices for issue #1695. The shared setup card supports full Visuals-tab actions and compact wizard routing. VisualPackEditor shows first-run setup choices only when no active visual exists, preserves advanced library/reuse affordances, copies bundled defaults into inactive drafts, focuses existing import controls, and routes blank setup to existing draft controls without auto-activation. Assistant setup now has an optional visual detour so users blocked by setup gating can open Visuals and return without changing setup completion state. Verification: focused UI/service Vitest suite passed with 152 tests, git diff --check passed, and Bandit is not applicable for the frontend-only touched scope.
+Implemented first-run Persona Visual Buddy setup choices for issue #1695. The shared setup card supports full Visuals-tab actions and compact wizard routing. VisualPackEditor shows first-run setup choices only when no active visual exists, preserves advanced library/reuse affordances, copies bundled defaults into inactive drafts, focuses existing import controls, and routes blank setup to existing draft controls without auto-activation. Assistant setup now has an optional visual detour so users blocked by setup gating can open only the Visuals tab and return without changing setup completion state. Verification after rebasing onto latest dev: focused UI/service Vitest suite passed with 153 tests, design-system state verification passed with existing baseline exceptions only, git diff --check passed, and Bandit is not applicable for the frontend-only touched scope.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
