@@ -9,6 +9,7 @@ import {
   expect,
   test,
   type APIRequestContext,
+  type APIResponse,
   type Locator,
   type Page,
   type Response,
@@ -35,6 +36,35 @@ const apiHeaders = () => ({
   'x-api-key': apiKey,
 });
 
+const truncateForDiagnostics = (value: string, maxLength = 800): string =>
+  value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
+
+const parseApiJsonResponse = async <T>(
+  response: APIResponse,
+  method: string,
+  path: string
+): Promise<T> => {
+  if (response.status() === 204) {
+    return null as T;
+  }
+  try {
+    return (await response.json()) as T;
+  } catch {
+    let responseText = '<response body unavailable>';
+    try {
+      const text = (await response.text()).trim();
+      responseText = text
+        ? truncateForDiagnostics(text)
+        : '<empty response body>';
+    } catch {
+      // Keep the fallback marker when the response body cannot be read.
+    }
+    throw new Error(
+      `${method} ${path} returned non-JSON response (${response.status()}): ${responseText}`
+    );
+  }
+};
+
 const apiGet = async <T>(
   request: APIRequestContext,
   path: string
@@ -60,7 +90,7 @@ const apiPost = async <T>(
     },
     timeout: 30_000,
   });
-  const payload = await response.json().catch(() => null);
+  const payload = await parseApiJsonResponse<T | null>(response, 'POST', path);
   return { status: response.status(), body: payload as T | null };
 };
 
@@ -314,6 +344,40 @@ const assertProviderQualifiedPayload = async (page: Page, response: Response) =>
 };
 
 test.describe('/chat cockpit real-server parity', () => {
+  test('reports non-JSON API POST responses with response context', async () => {
+    const fakeRequest = {
+      post: async () => ({
+        status: () => 502,
+        json: async () => {
+          throw new Error('invalid json');
+        },
+        text: async () => 'upstream gateway returned HTML',
+      }),
+    } as unknown as APIRequestContext;
+
+    await expect(
+      apiPost(fakeRequest, '/api/v1/example', { sample: true })
+    ).rejects.toThrow(
+      /POST \/api\/v1\/example returned non-JSON response \(502\): upstream gateway returned HTML/
+    );
+  });
+
+  test('keeps successful 204 API POST responses as null bodies', async () => {
+    const fakeRequest = {
+      post: async () => ({
+        status: () => 204,
+        json: async () => {
+          throw new Error('empty body');
+        },
+        text: async () => '',
+      }),
+    } as unknown as APIRequestContext;
+
+    await expect(
+      apiPost(fakeRequest, '/api/v1/example', { sample: true })
+    ).resolves.toEqual({ status: 204, body: null });
+  });
+
   test('does not intercept backend routes in this real-server spec', async ({}, testInfo) => {
     const fs = await import('node:fs');
     const { readFileSync } = fs;

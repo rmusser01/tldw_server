@@ -11,6 +11,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Playground } from "../Playground";
+import { getPromptById } from "@/db/dexie/helpers";
 import { useMcpToolsStore } from "@/store/mcp-tools";
 import {
   OPEN_ASSISTANT_SELECT_EVENT,
@@ -501,6 +502,39 @@ describe("Playground cockpit controls", () => {
       window.removeEventListener(OPEN_MCP_SETTINGS_EVENT, openMcpSettings);
       window.removeEventListener(TOGGLE_WEB_SEARCH_EVENT, toggleWebSearch);
       window.removeEventListener(SET_TEMPORARY_CHAT_EVENT, setTemporaryChat);
+    }
+  });
+
+  it("logs selected prompt lookup failures while keeping the prompt unavailable state visible", async () => {
+    const promptLookupWarning = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined);
+    vi.mocked(getPromptById).mockRejectedValueOnce(
+      new Error("prompt cache unavailable"),
+    );
+    messageOptionState.value.selectedSystemPrompt = "prompt-missing";
+
+    try {
+      render(<Playground />);
+
+      const contextRail = within(
+        await screen.findByTestId("playground-cockpit-left-rail"),
+      ).getByTestId("playground-context-rail");
+
+      await waitFor(() => {
+        expect(promptLookupWarning).toHaveBeenCalledWith(
+          "[Playground] Failed to resolve selected system prompt",
+          expect.objectContaining({
+            promptId: "prompt-missing",
+            error: expect.any(Error),
+          }),
+        );
+      });
+      expect(
+        within(contextRail).getAllByText("Prompt details unavailable").length,
+      ).toBeGreaterThan(0);
+    } finally {
+      promptLookupWarning.mockRestore();
     }
   });
 

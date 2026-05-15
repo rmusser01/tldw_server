@@ -26,16 +26,32 @@ const isHiddenBySelfOrAncestor = (element: HTMLElement): boolean => {
   return false;
 };
 
+export const normalizeFocusSelector = (
+  selector: unknown,
+): string | null => {
+  if (typeof selector !== "string") return null;
+  const trimmedSelector = selector.trim();
+  return trimmedSelector.length > 0 ? trimmedSelector : null;
+};
+
 export const getFirstVisibleFocusableElement = (
   selector: string,
   root?: ParentNode,
 ): HTMLElement | null => {
   if (typeof document === "undefined" && !root) return null;
 
+  const normalizedSelector = normalizeFocusSelector(selector);
+  if (!normalizedSelector) return null;
+
   const searchRoot = root ?? document;
-  const candidates = Array.from(
-    searchRoot.querySelectorAll<HTMLElement>(selector),
-  );
+  let candidates: HTMLElement[] = [];
+  try {
+    candidates = Array.from(
+      searchRoot.querySelectorAll<HTMLElement>(normalizedSelector),
+    );
+  } catch {
+    return null;
+  }
   return (
     candidates.find(
       (candidate) =>
