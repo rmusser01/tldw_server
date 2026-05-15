@@ -1,6 +1,10 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { getDesignSystemState } from "@/design-system";
+import {
+  DEGRADED_STATE_LABEL,
+  ERROR_STATE_LABEL,
+  READY_STATE_LABEL,
+} from "@/design-system";
 import {
   RotateCcw,
   Settings2,
@@ -71,10 +75,6 @@ export type PlaygroundRuntimeInspectorProps = {
   settingSummaries?: RuntimeSettingSummary[];
   toolSummary?: RuntimeToolSummary | null;
 };
-
-const DEGRADED_STATE_LABEL = getDesignSystemState("degraded").label;
-const ERROR_STATE_LABEL = getDesignSystemState("error").label;
-const READY_STATE_LABEL = getDesignSystemState("ready").label;
 
 const toolStateClass = (state: RuntimeToolSummary["state"]) => {
   if (state === "available") return "border-success/40 bg-success/10 text-success";
