@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 
 
@@ -220,6 +221,99 @@ def test_watchlist_scopes_sources_jobs_runs_items_and_default_create(client_with
     cti_counts = client.get("/api/v1/watchlists/items/smart-counts", params={"watchlist_id": cti_watchlist["id"]})
     assert cti_counts.status_code == 200, cti_counts.text
     assert cti_counts.json()["all"] == 1
+
+
+def test_watchlist_scopes_outputs_by_job_and_records_output_provenance(client_with_user):
+    client = client_with_user
+
+    cti_watchlist = _create_watchlist(client, name="CTI Outputs", domain="cti_osint")
+    news_watchlist = _create_watchlist(client, name="News Outputs", domain="news")
+
+    cti_source = _create_source(client, label="cti-outputs", watchlist_id=int(cti_watchlist["id"]))
+    news_source = _create_source(client, label="news-outputs", watchlist_id=int(news_watchlist["id"]))
+    cti_job = _create_job(
+        client,
+        label="cti-outputs",
+        source_id=int(cti_source["id"]),
+        watchlist_id=int(cti_watchlist["id"]),
+    )
+    news_job = _create_job(
+        client,
+        label="news-outputs",
+        source_id=int(news_source["id"]),
+        watchlist_id=int(news_watchlist["id"]),
+    )
+
+    db = WatchlistsDatabase.for_user(777)
+    cti_run = db.create_run(int(cti_job["id"]), status="finished")
+    news_run = db.create_run(int(news_job["id"]), status="finished")
+    db.record_scraped_item(
+        run_id=int(cti_run.id),
+        job_id=int(cti_job["id"]),
+        source_id=int(cti_source["id"]),
+        media_id=None,
+        media_uuid=None,
+        url="https://example.com/cti-output/story",
+        title="CTI output story",
+        summary="CTI output summary",
+        published_at=None,
+        tags=["cti"],
+        status="ingested",
+    )
+    db.record_scraped_item(
+        run_id=int(news_run.id),
+        job_id=int(news_job["id"]),
+        source_id=int(news_source["id"]),
+        media_id=None,
+        media_uuid=None,
+        url="https://example.com/news-output/story",
+        title="News output story",
+        summary="News output summary",
+        published_at=None,
+        tags=["news"],
+        status="ingested",
+    )
+
+    cti_output = client.post(
+        "/api/v1/watchlists/outputs",
+        json={"run_id": int(cti_run.id), "title": "CTI digest", "retention_seconds": 0},
+    )
+    assert cti_output.status_code == 200, cti_output.text
+    news_output = client.post(
+        "/api/v1/watchlists/outputs",
+        json={"run_id": int(news_run.id), "title": "News digest", "retention_seconds": 0},
+    )
+    assert news_output.status_code == 200, news_output.text
+
+    cti_payload = cti_output.json()
+    news_payload = news_output.json()
+    assert cti_payload["metadata"]["watchlist_id"] == int(cti_watchlist["id"])
+    assert cti_payload["metadata"]["job_id"] == int(cti_job["id"])
+    assert cti_payload["metadata"]["run_id"] == int(cti_run.id)
+
+    legacy_row = CollectionsDatabase.for_user(777).create_output_artifact(
+        type_="briefing_markdown",
+        title="Legacy CTI digest",
+        format_="md",
+        storage_path="legacy-cti-digest.md",
+        metadata_json=json.dumps({"origin": "watchlists", "version": 1}),
+        job_id=int(cti_job["id"]),
+        run_id=int(cti_run.id),
+    )
+
+    cti_outputs = client.get("/api/v1/watchlists/outputs", params={"watchlist_id": cti_watchlist["id"]})
+    assert cti_outputs.status_code == 200, cti_outputs.text
+    cti_ids = {item["id"] for item in cti_outputs.json()["items"]}
+    assert int(cti_payload["id"]) in cti_ids
+    assert int(legacy_row.id) in cti_ids
+    assert int(news_payload["id"]) not in cti_ids
+
+    news_outputs = client.get("/api/v1/watchlists/outputs", params={"watchlist_id": news_watchlist["id"]})
+    assert news_outputs.status_code == 200, news_outputs.text
+    news_ids = {item["id"] for item in news_outputs.json()["items"]}
+    assert int(news_payload["id"]) in news_ids
+    assert int(cti_payload["id"]) not in news_ids
+    assert int(legacy_row.id) not in news_ids
 
 
 def test_legacy_job_cluster_route_still_uses_job_id(client_with_user):

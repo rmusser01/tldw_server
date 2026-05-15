@@ -522,6 +522,21 @@ def _ensure_watchlist_exists(db: WatchlistsDatabase, watchlist_id: int | None) -
         raise HTTPException(status_code=404, detail="watchlist_not_found") from None
 
 
+def _list_watchlist_job_ids(db: WatchlistsDatabase, watchlist_id: int) -> list[int]:
+    job_ids: list[int] = []
+    page_size = 500
+    offset = 0
+    while True:
+        rows, total = db.list_jobs(q=None, limit=page_size, offset=offset, watchlist_id=watchlist_id)
+        if not rows:
+            break
+        job_ids.extend(int(row.id) for row in rows)
+        offset += len(rows)
+        if offset >= total:
+            break
+    return job_ids
+
+
 def _source_response_from_row(db: WatchlistsDatabase, row: Any) -> Source:
     settings = None
     try:
@@ -4835,6 +4850,16 @@ async def create_output(
         job = db.get_job(run.job_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="job_not_found") from None
+    job_id = int(run.job_id)
+    watchlist_id = getattr(job, "watchlist_id", None)
+    if watchlist_id is None:
+        default_watchlist = db.ensure_default_watchlist()
+        db.backfill_default_watchlist_scope(int(default_watchlist.id))
+        try:
+            job = db.get_job(job_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="job_not_found") from None
+        watchlist_id = getattr(job, "watchlist_id", None)
 
     job_prefs: dict[str, Any] = {}
     try:
@@ -4854,7 +4879,6 @@ async def create_output(
     elif isinstance(job_prefs.get("audio_brief"), dict):
         tts_brief_defaults = job_prefs.get("audio_brief") or {}
 
-    job_id = run.job_id
     items: list[Any]
     if payload.item_ids:
         items = db.get_items_by_ids(payload.item_ids)
@@ -5184,6 +5208,9 @@ async def create_output(
             "item_ids": [itm.id for itm in item_models],
             "format": output_format,
             "type": payload.type,
+            "job_id": job_id,
+            "run_id": int(payload.run_id),
+            "watchlist_id": int(watchlist_id) if watchlist_id is not None else None,
         }
     )
     if output_template:
@@ -5626,17 +5653,24 @@ async def create_output(
 async def list_outputs(
     run_id: int | None = Query(None),
     job_id: int | None = Query(None),
+    watchlist_id: int | None = Query(None, ge=1),
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_request_user),
+    db = Depends(get_watchlists_db_for_user),
     collections_db = Depends(get_collections_db_for_user),
 ):
     limit = size
     offset = (page - 1) * limit
     collections_db.purge_expired_outputs()
+    scoped_job_ids: list[int] | None = None
+    if watchlist_id is not None:
+        _ensure_watchlist_exists(db, watchlist_id)
+        scoped_job_ids = _list_watchlist_job_ids(db, watchlist_id)
     rows, total = collections_db.list_output_artifacts(
         run_id=run_id,
         job_id=job_id,
+        job_ids=scoped_job_ids,
         limit=limit,
         offset=offset,
         metadata_origin="watchlists",

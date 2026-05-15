@@ -1,6 +1,6 @@
 # Watchlists API Cheat Sheet
 
-Quick reference for recurring scraping (RSS or site lists) with runs, items, and outputs.
+Quick reference for first-class Watchlists, recurring scraping (RSS or site lists), runs, items, and outputs.
 
 Auth:
 - Single-user: `X-API-KEY: <key>`
@@ -10,6 +10,7 @@ Base path: `/api/v1/watchlists`
 
 ## Core concepts
 
+- Watchlist: project-like tracking container for intent, sources, monitors, runs, items, and outputs.
 - Source: a target to scrape (`rss` or `site`; `forum` is feature-flagged).
 - Job: schedule + scope + filters that produce runs.
 - Run: one execution of a job.
@@ -17,7 +18,25 @@ Base path: `/api/v1/watchlists`
 - Output: rendered report from run items.
 - Template: named output template (md/html).
 
+Watchlist fields:
+- `name`, `description`, and `objective`
+- `domain`: `general`, `cti_osint`, or `news`
+- `status`: `active`, `paused`, or `archived`
+- `priority`: `low`, `medium`, `high`, or `critical`
+- `tags`
+- lifecycle timestamps including `created_at`, `updated_at`, `archived_at`, `deleted_at`, and `restore_expires_at`
+
+Existing unscoped data is associated with a default `Imported Watchlist`. New source and job create calls that omit `watchlist_id` are attached to that default container for backward compatibility.
+
 ## Endpoints
+
+Watchlists:
+- `GET /`
+- `POST /`
+- `GET /{watchlist_id}`
+- `PATCH /{watchlist_id}`
+- `DELETE /{watchlist_id}` (soft delete with restore window)
+- `POST /{watchlist_id}/restore`
 
 Sources:
 - `POST /sources`
@@ -81,7 +100,39 @@ Templates:
 - `POST /templates/compose/flow-check` (manual final flow-check diff)
 - `DELETE /templates/{template_name}`
 
+Scoped list filters:
+- `GET /sources?watchlist_id=<id>`
+- `GET /jobs?watchlist_id=<id>`
+- `GET /runs?watchlist_id=<id>`
+- `GET /runs/export.csv?watchlist_id=<id>`
+- `GET /items?watchlist_id=<id>`
+- `GET /items/smart-counts?watchlist_id=<id>`
+- `GET /outputs?watchlist_id=<id>`
+
+`watchlist_id` filters return `404` when the Watchlist does not exist or has been deleted. The legacy `/{watchlist_id}/clusters` route currently uses a job id despite the path segment name; this route is preserved for compatibility.
+
 ## Minimal payloads
+
+Create a Watchlist:
+```json
+{
+  "name": "Healthcare ransomware",
+  "description": "Track hospital impact reports",
+  "objective": "Find new ransomware reports affecting hospitals in Germany",
+  "domain": "cti_osint",
+  "priority": "high",
+  "tags": ["ransomware", "healthcare"]
+}
+```
+
+Update a Watchlist lifecycle or metadata:
+```json
+{
+  "status": "archived",
+  "priority": "critical",
+  "tags": ["cti", "ransomware"]
+}
+```
 
 Create a source (RSS):
 ```json
@@ -89,7 +140,8 @@ Create a source (RSS):
   "name": "Example Feed",
   "url": "https://example.com/feed.xml",
   "source_type": "rss",
-  "tags": ["news"]
+  "tags": ["news"],
+  "watchlist_id": 42
 }
 ```
 
@@ -118,6 +170,7 @@ Create a job:
 ```json
 {
   "name": "Docs updates",
+  "watchlist_id": 42,
   "scope": {"sources": [123]},
   "schedule_expr": "0 */6 * * *",
   "timezone": "UTC",
@@ -302,6 +355,10 @@ Sharing policy is controlled by `WATCHLIST_SHARING_MODE`:
 - `admin_same_org`: admin cross-user reads require overlapping org membership
 - `private_only`: cross-user reads blocked
 
+## Alerts boundary
+
+Stage 1 Watchlists expose the container and scoping contract only. Content-match alerts for user descriptors, classifications, entities, keywords, and source constraints are future work. Existing run-stat alert rules should be treated as pipeline health issues, not user-facing content-match alerts.
+
 ## Ingestion and persistence
 
 - Watchlists always store run stats and scraped items in the Watchlists DB.
@@ -321,6 +378,12 @@ Create a base report from a run:
 ```
 
 Outputs can render templates (Markdown or HTML). Set `template_name` to use a named template.
+
+Output provenance:
+- Generated Watchlists outputs include `metadata.origin="watchlists"`.
+- New outputs include `metadata.watchlist_id`, `metadata.job_id`, `metadata.run_id`, `metadata.item_ids`, and `metadata.version`.
+- `GET /outputs?watchlist_id=<id>` filters by the Watchlist's jobs. Older outputs that do not yet carry `metadata.watchlist_id` are still returned when their stored `job_id` belongs to the requested Watchlist.
+- `GET /outputs?run_id=<id>` and `GET /outputs?job_id=<id>` remain supported and can be combined with `watchlist_id`.
 
 Create a report plus TTS variant output (`type=tts_audio`, `format=mp3`):
 ```json
