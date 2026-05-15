@@ -4,7 +4,7 @@ title: Complete main /chat cockpit functionality in PR 1582
 status: Done
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-15 02:10'
+updated_date: '2026-05-15 02:15'
 labels:
   - webui
   - chat
@@ -161,7 +161,7 @@ Verification: focused Vitest from apps/tldw-frontend passed 11 files / 90 tests 
 
 Task 9 plan/status synchronization: updated the implementation plan Task 9 checklist to match the already-committed P2 evidence. Refreshed live PR state at that checkpoint: PR 1582 remained open and draft on codex/chat-degraded-health; GraphQL review threads were resolved; CI checks from the latest push were still pending. Fresh local verification after plan sync: focused Vitest passed 11 files and 90 tests from apps/tldw-frontend; real-server Playwright passed 4 tests against http://localhost:8080 and http://127.0.0.1:8000 with no route interception; git diff --check passed. Bandit not applicable because this sync touched Markdown/task tracking only.
 
-Corrected P2 visual proof after the earlier screenshot was invalid. Root cause was the proof backend running from the worktree without Config_Files/.env so OpenAI credentials were not loaded. Re-ran with an env-backed real backend via TLDW_ENV_FILE real /chat WebUI no mocked payloads no route interception and no Computer Use. Screenshot path /private/tmp/chat-cockpit-openai-working-20260514.png. Observed POST /api/v1/chat/completions status 200 with api_provider openai model gpt-4o-mini and rendered assistant text cockpit proof ok. Temporary proof processes were shut down afterward.
+Corrected P2 visual proof after the earlier screenshot was invalid. Root cause was the proof backend running from the worktree without Config_Files/.env so OpenAI credentials were not loaded. Re-ran with an env-backed real backend using the path-valued assignment TLDW_ENV_FILE=tldw_Server_API/Config_Files/.env from repo root; "real" referred to the non-mocked /chat WebUI proof, not an env var value. The run used no mocked payloads, no route interception, and no Computer Use. Screenshot path /private/tmp/chat-cockpit-openai-working-20260514.png. Observed POST /api/v1/chat/completions status 200 with api_provider openai model gpt-4o-mini and rendered assistant text cockpit proof ok. Temporary proof processes were shut down afterward.
 
 Live PR state refresh after corrected proof: gh pr view 1582 reports state MERGED and isDraft false for codex/chat-degraded-health into dev. gh pr checks shows required frontend backend e2e security build lint gates passing. Broad Full Suite matrix jobs remain failed or cancelled due the previously noted one-hour broad-suite behavior while required aggregate gates are green.
 <!-- SECTION:NOTES:END -->
