@@ -1,10 +1,10 @@
 ---
 id: TASK-368.7
 title: Address PR 1727 llama.cpp register_model_path review feedback
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-15 19:15'
-updated_date: '2026-05-15 19:28'
+updated_date: '2026-05-15 20:35'
 labels:
   - llamacpp
   - pr-review
@@ -26,7 +26,7 @@ Fix the unresolved PR #1727 review findings on the llama.cpp management API, inc
 <!-- AC:BEGIN -->
 - [x] #1 register_model_path rejects paths outside configured models_dir/allowed_paths before persistence
 - [x] #2 Focused inventory tests cover allowed and rejected registration paths
-- [ ] #3 PR branch is pushed with review-fix commits and all unresolved review threads are addressed
+- [x] #3 PR branch is pushed with review-fix commits and all unresolved review threads are addressed
 - [x] #4 Blocking validation/log paths do not perform slow filesystem or subprocess work directly on the event loop
 - [x] #5 Config writes reject multiline or delimiter-corrupting values before persistence
 - [x] #6 New llama.cpp response surfaces have response models/return annotations and schema docstrings
@@ -56,11 +56,13 @@ Pushed review-fix commit 757c01fab to PR #1727, replied to the Gemini review thr
 After pushing, Qodo posted a second review pass with unresolved threads covering async blocking probes/log tail reads, missing endpoint return annotations, schema docstrings, start-by-model response modeling, config newline injection, empty-output probe validation, and delimiter-corrupted registered paths. Reopened this task to address those remaining PR issues.
 
 Second-pass fixes implemented: /llamacpp/validate now offloads validation through run_in_threadpool; managed log tail file reads run in a threadpool helper; setup_manager rejects multiline/NUL config values before comment-preserving writes; llama.cpp config updates reject multiline and delimiter-corrupting list values; register_model_path rejects config-control and delimiter characters; validate_binary treats empty successful probe output as valid; start-by-model has a response model; new admin schemas and endpoints have docstrings/return annotations. Verification: focused affected tests passed (48 passed, 5 warnings), broader llama.cpp backend slice passed (131 passed, 6 warnings), git diff --check passed, and Bandit on touched Python sources reported zero findings. Pytest still emits the pre-existing post-success Loguru closed-stream cleanup warnings.
+
+Rebased the PR branch onto current origin/dev while keeping the diff scoped to the llama.cpp management work. Fresh post-rebase verification passed: broader llama.cpp backend slice (131 passed, 6 warnings), package-local UI Vitest slice (16 passed), git diff --check, and Bandit on touched Python sources with zero findings. The initial repo-root Vitest invocation failed because it bypassed the package vitest config for jsdom and @ aliases; rerunning from apps/packages/ui with the package config passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
@@ -71,5 +73,5 @@ Second-pass fixes implemented: /llamacpp/validate now offloads validation throug
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Pending final update after the second Qodo review pass is addressed.
+Addressed the PR #1727 review findings by validating registered llama.cpp model paths before persistence, rejecting config-control and delimiter-corrupting values before config writes, offloading validation/log-tail blocking work from async request handlers, preserving successful empty-output binary probes, and adding response/docstring/type coverage for the new admin surfaces. All live review threads were replied to and resolved, and the branch was rebased onto current origin/dev to clear the dirty merge base while keeping the PR scoped to llama.cpp management changes.
 <!-- SECTION:FINAL_SUMMARY:END -->
