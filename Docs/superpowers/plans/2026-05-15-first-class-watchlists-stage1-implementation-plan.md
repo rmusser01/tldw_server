@@ -763,7 +763,7 @@ git commit -m "feat: add watchlist container shell"
   - `apps/packages/ui/src/components/Option/Watchlists/*`
 - Test files touched in previous tasks.
 
-- [x] **Step 1: Run backend focused suite**
+- [ ] **Step 1: Run backend focused suite**
 
 Run:
 
@@ -781,7 +781,7 @@ python -m pytest \
 
 Expected: focused backend Watchlists suite passes.
 
-- [x] **Step 2: Run frontend focused suite**
+- [ ] **Step 2: Run frontend focused suite**
 
 Run:
 
@@ -796,7 +796,7 @@ bunx vitest run \
 
 Expected: focused frontend Watchlists suite passes.
 
-- [x] **Step 3: Run Bandit on touched backend scope**
+- [ ] **Step 3: Run Bandit on touched backend scope**
 
 Run:
 
@@ -812,7 +812,7 @@ python -m bandit -r \
 
 Expected: no new findings in touched code. If existing baseline findings appear, document them with file/line and why they are pre-existing or out of scope.
 
-- [x] **Step 4: Run a browser/CDP smoke if UI was materially changed**
+- [ ] **Step 4: Run a browser/CDP smoke if UI was materially changed**
 
 Start WebUI in the project-approved way for the current branch. Then use CDP/Playwright, not Computer Use, to verify:
 
@@ -823,7 +823,7 @@ Start WebUI in the project-approved way for the current branch. Then use CDP/Pla
 
 Expected: page renders nonblank, controls are reachable, no obvious route errors.
 
-- [x] **Step 5: Commit verification fixes**
+- [ ] **Step 5: Commit verification fixes**
 
 If verification required fixes:
 
@@ -839,7 +839,7 @@ git commit -m "fix: harden watchlist container integration"
 - Modify if published docs are maintained in parallel: `Docs/Published/API-related/Watchlists_API.md`
 - Modify: relevant Backlog task files through MCP only.
 
-- [x] **Step 1: Update API docs**
+- [ ] **Step 1: Update API docs**
 
 Document:
 
@@ -849,7 +849,7 @@ Document:
 - Output provenance behavior.
 - Explicit note that content-match alerts are future Stage 3 work.
 
-- [x] **Step 2: Run docs hygiene**
+- [ ] **Step 2: Run docs hygiene**
 
 Run:
 
@@ -859,7 +859,7 @@ git diff --check -- Docs/API-related/Watchlists_API.md Docs/Published/API-relate
 
 Expected: no trailing whitespace or patch hygiene warnings.
 
-- [x] **Step 3: Final task updates**
+- [ ] **Step 3: Final task updates**
 
 Use Backlog MCP:
 
@@ -869,7 +869,7 @@ Use Backlog MCP:
 - Record browser/CDP evidence location if generated.
 - Add final summary.
 
-- [x] **Step 4: Final status check**
+- [ ] **Step 4: Final status check**
 
 Run:
 
