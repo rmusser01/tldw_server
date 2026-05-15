@@ -1,7 +1,7 @@
 # Persona Visual Buddy Setup Choices Design
 
 Date: 2026-05-15
-Status: Patched design pending user review for TASK-362 / issue #1695
+Status: Approved for implementation planning for TASK-362 / issue #1695
 Owner: Codex brainstorming pass
 Parent: #1510
 

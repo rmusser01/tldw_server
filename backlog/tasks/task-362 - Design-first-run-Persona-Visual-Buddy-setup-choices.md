@@ -1,9 +1,10 @@
 ---
 id: TASK-362
 title: Design first-run Persona Visual Buddy setup choices
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-15 03:22'
+updated_date: '2026-05-15 03:51'
 labels:
   - persona
   - buddy
@@ -56,6 +57,12 @@ Create the design/spec for GitHub issue #1695. The approved direction is a reusa
 - Second human-requested design critique found one blocking route-integration issue: while assistant setup is required, `sidepanel-persona.tsx` renders `AssistantSetupWizard` instead of `PersonaGardenTabs`, so a wizard action that only changes `tab=visuals` would not reveal `VisualPackEditor`. Patched the spec to require a route-level visual setup detour modeled on existing setup detours, plus tests for detour entry/return.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Created the design spec for first-run Persona Visual Buddy setup choices in `Docs/superpowers/specs/2026-05-15-persona-visual-buddy-setup-choices-design.md`. The spec defines a reusable setup-choice card for Visuals and Assistant Setup, keeps VisualPackEditor as the behavior owner, preserves inactive-draft and explicit-activation semantics, scopes Import pack to existing controls, defines starter catalog frontend service/type needs, and records focused test coverage. Independent spec review passed after one patch iteration. Later design critique patched implementation-risk notes around starter-copy selection, route focus scope, wizard unknown-state behavior, and the setup-required route gate that needs a visual setup detour before the wizard can open Visuals. Docs-only verification passed with `git diff --check`.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
@@ -65,9 +72,3 @@ Create the design/spec for GitHub issue #1695. The approved direction is a reusa
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created the design spec for first-run Persona Visual Buddy setup choices in `Docs/superpowers/specs/2026-05-15-persona-visual-buddy-setup-choices-design.md`. The spec defines a reusable setup-choice card for Visuals and Assistant Setup, keeps VisualPackEditor as the behavior owner, preserves inactive-draft and explicit-activation semantics, scopes Import pack to existing controls, defines starter catalog frontend service/type needs, and records focused test coverage. Independent spec review passed after one patch iteration. Later design critique patched implementation-risk notes around starter-copy selection, route focus scope, wizard unknown-state behavior, and the setup-required route gate that needs a visual setup detour before the wizard can open Visuals. Docs-only verification passed with `git diff --check`.
-<!-- SECTION:FINAL_SUMMARY:END -->
