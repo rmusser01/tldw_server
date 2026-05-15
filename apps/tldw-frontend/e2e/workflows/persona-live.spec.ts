@@ -747,12 +747,6 @@ test.describe("Persona Live Workflow", () => {
     })
     await openPersonaVisualsTab(authedPage)
 
-    await authedPage.getByTestId("persona-visual-starter-copy-button").click()
-    await expect(authedPage.getByTestId("persona-visual-pack-select")).toHaveValue(
-      "starter-copy-e2e",
-      { timeout: 15_000 }
-    )
-
     const portableUpload = await buildPortablePersonaVisualPackUpload()
     await authedPage
       .getByTestId("persona-visual-import-preview-input")

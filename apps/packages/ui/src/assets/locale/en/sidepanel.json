@@ -534,7 +534,12 @@
       "starterHeading": "Default starter pack",
       "starterDescription": "Copy a bundled sprite-frame pack as a draft, then review and activate it.",
       "starterCopiedDraft": "Starter pack copied as a draft. Review and activate it when ready.",
-      "starterCopyError": "Failed to copy bundled starter pack."
+      "starterCopyError": "Failed to copy bundled starter pack.",
+      "starterSelectLabel": "Starter",
+      "starterDraftTitleLabel": "Draft title",
+      "starterCopyAsDraft": "Copy as draft",
+      "starterAssetUnit": "assets",
+      "starterBytesUnit": "bytes"
     }
   },
   "persona": {

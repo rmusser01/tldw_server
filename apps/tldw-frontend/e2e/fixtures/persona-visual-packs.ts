@@ -148,12 +148,21 @@ export const buildPortablePersonaVisualPackUpload = async () => {
     PERSONA_VISUAL_E2E_FRAME_DATA_URI.split(",")[1] || "",
     "base64"
   )
-  const visualManifest = buildPersonaVisualPackFixture("portable-source", {
-    packId: "portable-upload-pack",
-    title: "Uploaded Visual Pack",
-    status: "draft",
-    provenance: "portable_fixture"
-  }).manifest
+  const uploadedAssetId = "portable-upload-pack-frame-idle"
+  const visualManifest = {
+    manifest_version: 1,
+    renderer_type: "sprite_frames",
+    states: {
+      idle: { animation_id: "idle-loop" }
+    },
+    animations: {
+      "idle-loop": {
+        frames: [{ asset_id: uploadedAssetId, duration_ms: 250 }],
+        loop: true
+      }
+    },
+    fallbacks: {}
+  }
   const manifestBytes = stableJson({
     archive_profile: "backup",
     counts: { assets: 1, assets_with_bytes: 1 },
@@ -178,7 +187,7 @@ export const buildPortablePersonaVisualPackUpload = async () => {
         asset_sha256: sha256(frameBytes),
         mime_type: "image/png",
         original_filename: "uploaded-idle.png",
-        source_asset_id: "portable-upload-pack-frame-idle"
+        source_asset_id: uploadedAssetId
       }
     ]
   })
