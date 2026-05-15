@@ -789,6 +789,41 @@ def test_launchd_drill_refuses_already_loaded_service_without_bootout(tmp_path: 
     CASE.assertEqual(calls, [["launchctl", "print", "gui/501/org.tldw.test"]])
 
 
+def test_launchd_drill_dry_run_skips_ping_checker_and_reports_dry_run_helper_status(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    helper, socket_path, log_dir, plist_path = _make_launchd_drill_inputs(tmp_path)
+    calls: list[list[str]] = []
+
+    def ping_checker(path: Path) -> helperctl.CheckResult:
+        raise AssertionError("dry-run drill must not ping the helper")
+
+    results = helperctl.run_launchd_drill(
+        helper_path=helper,
+        socket_path=socket_path,
+        log_dir=log_dir,
+        plist_path=plist_path,
+        label="org.tldw.test",
+        uid=501,
+        write_plist=True,
+        create_dirs=True,
+        dry_run=True,
+        launchd_runner=lambda argv, **kwargs: calls.append(argv) or 0,
+        ping_checker=ping_checker,
+    )
+
+    CASE.assertEqual(
+        results,
+        [
+            ("launchd_preflight", helperctl.CheckResult(ok=True, reason="dry_run")),
+            ("launchd_bootstrap", helperctl.CheckResult(ok=True, reason="dry_run")),
+            ("launchd_status", helperctl.CheckResult(ok=True, reason="dry_run")),
+            ("launchd_kickstart", helperctl.CheckResult(ok=True, reason="dry_run")),
+            ("helper_status", helperctl.CheckResult(ok=True, reason="dry_run")),
+        ],
+    )
+    CASE.assertNotIn(["launchctl", "bootout", "gui/501/org.tldw.test"], calls)
+
+
 def test_launchd_drill_bootouts_after_kickstart_success_and_ping_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -818,9 +853,15 @@ def test_launchd_drill_bootouts_after_kickstart_success_and_ping_failure(
         ping_checker=lambda path: helperctl.CheckResult(ok=False, reason="helper_ping_failed"),
     )
 
-    by_name = dict(results)
-    CASE.assertEqual(by_name["helper_status"], helperctl.CheckResult(ok=False, reason="helper_ping_failed"))
-    CASE.assertEqual(by_name["launchd_bootout"], helperctl.CheckResult(ok=True))
+    primary_failure = helperctl.CheckResult(ok=False, reason="helper_ping_failed")
+    CASE.assertEqual(
+        results[-3:],
+        [
+            ("helper_status", primary_failure),
+            ("launchd_bootout", helperctl.CheckResult(ok=True)),
+            ("launchd_drill", primary_failure),
+        ],
+    )
     CASE.assertIn(["launchctl", "bootout", "gui/501/org.tldw.test"], calls)
     CASE.assertFalse((socket_path.parent / "helper.pid").exists())
 
@@ -856,11 +897,15 @@ def test_launchd_drill_preserves_primary_failure_when_bootout_fails(
         ping_checker=lambda path: helperctl.CheckResult(ok=False, reason="helper_ping_failed"),
     )
 
-    by_name = dict(results)
-    CASE.assertEqual(by_name["helper_status"], helperctl.CheckResult(ok=False, reason="helper_ping_failed"))
+    primary_failure = helperctl.CheckResult(ok=False, reason="helper_ping_failed")
+    CASE.assertEqual(results[-1], ("launchd_drill", primary_failure))
+    CASE.assertIn(("helper_status", primary_failure), results)
     CASE.assertEqual(
-        by_name["launchd_bootout"],
-        helperctl.CheckResult(ok=False, reason="launchd_bootout_failed", message="5"),
+        results[-2],
+        (
+            "launchd_bootout",
+            helperctl.CheckResult(ok=False, reason="launchd_bootout_failed", message="5"),
+        ),
     )
     CASE.assertIn(["launchctl", "bootout", "gui/501/org.tldw.test"], calls)
     CASE.assertFalse((socket_path.parent / "helper.pid").exists())

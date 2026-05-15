@@ -748,6 +748,7 @@ def run_launchd_drill(
     """Run an isolated launchd helper lifecycle validation drill."""
     results: list[tuple[str, CheckResult]] = []
     bootstrapped = False
+    primary_failure: CheckResult | None = None
 
     preflight = launchd_service_loaded(label, uid=uid, dry_run=dry_run, command_runner=launchd_runner)
     if preflight.reason == "launchd_service_loaded":
@@ -794,6 +795,7 @@ def run_launchd_drill(
         )
         results.append(("launchd_status", status))
         if not status.ok:
+            primary_failure = status
             return results
 
         kickstart = run_launchd_action(
@@ -809,6 +811,11 @@ def run_launchd_drill(
         )
         results.append(("launchd_kickstart", kickstart))
         if not kickstart.ok:
+            primary_failure = kickstart
+            return results
+
+        if dry_run:
+            results.append(("helper_status", CheckResult(ok=True, reason="dry_run")))
             return results
 
         ping_state = wait_for_ping(socket_path, ping_checker=ping_checker)
@@ -818,10 +825,14 @@ def run_launchd_drill(
         if ping_state.helper_version:
             results.append(("helper_version", CheckResult(ok=True, message=ping_state.helper_version)))
         if not ping_state.result.ok:
+            primary_failure = ping_state.result
             return results
 
         if smoke_runner is not None:
-            results.append(("vz_linux_smoke", smoke_runner()))
+            smoke_result = smoke_runner()
+            results.append(("vz_linux_smoke", smoke_result))
+            if not smoke_result.ok:
+                primary_failure = smoke_result
 
         return results
     finally:
@@ -838,6 +849,8 @@ def run_launchd_drill(
                 command_runner=launchd_runner,
             )
             results.append(("launchd_bootout", bootout))
+            if primary_failure is not None:
+                results.append(("launchd_drill", primary_failure))
 
 
 def wait_for_socket(
