@@ -755,6 +755,58 @@ def test_launchd_drill_runs_bootstrap_status_kickstart_ping_bootout(tmp_path: Pa
     CASE.assertIn(["launchctl", "bootout", "gui/501/org.tldw.test"], calls)
 
 
+def test_launchd_drill_runs_smoke_after_ping_before_bootout(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    helper, socket_path, log_dir, plist_path = _make_launchd_drill_inputs(tmp_path)
+    calls: list[str] = []
+    status_command = "launchctl print gui/501/org.tldw.test"
+
+    def runner(argv: list[str], **kwargs: Any) -> int:
+        command = " ".join(argv)
+        calls.append(command)
+        if command == status_command and calls.count(status_command) == 1:
+            return 3
+        return 0
+
+    def ping_checker(path: Path) -> helperctl.CheckResult:
+        calls.append("ping")
+        return helperctl.CheckResult(ok=True)
+
+    def smoke_runner() -> helperctl.CheckResult:
+        calls.append("smoke")
+        return helperctl.CheckResult(ok=True)
+
+    results = helperctl.run_launchd_drill(
+        helper_path=helper,
+        socket_path=socket_path,
+        log_dir=log_dir,
+        plist_path=plist_path,
+        label="org.tldw.test",
+        uid=501,
+        write_plist=True,
+        create_dirs=True,
+        launchd_runner=runner,
+        ping_checker=ping_checker,
+        smoke_runner=smoke_runner,
+    )
+
+    result_names = [name for name, _ in results]
+    CASE.assertLess(result_names.index("helper_status"), result_names.index("vz_linux_smoke"))
+    CASE.assertLess(result_names.index("vz_linux_smoke"), result_names.index("launchd_bootout"))
+    CASE.assertEqual(
+        calls,
+        [
+            status_command,
+            f"launchctl bootstrap gui/501 {plist_path}",
+            status_command,
+            "launchctl kickstart -k gui/501/org.tldw.test",
+            "ping",
+            "smoke",
+            "launchctl bootout gui/501/org.tldw.test",
+        ],
+    )
+
+
 def test_launchd_drill_refuses_already_loaded_service_without_bootout(tmp_path: Path) -> None:
     helperctl = load_helperctl()
     helper, socket_path, log_dir, plist_path = _make_launchd_drill_inputs(tmp_path)
@@ -864,6 +916,50 @@ def test_launchd_drill_bootouts_after_kickstart_success_and_ping_failure(
     )
     CASE.assertIn(["launchctl", "bootout", "gui/501/org.tldw.test"], calls)
     CASE.assertFalse((socket_path.parent / "helper.pid").exists())
+
+
+def test_launchd_drill_preserves_smoke_failure_through_bootout(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    helper, socket_path, log_dir, plist_path = _make_launchd_drill_inputs(tmp_path)
+    calls: list[str] = []
+    status_command = "launchctl print gui/501/org.tldw.test"
+    smoke_failure = helperctl.CheckResult(ok=False, reason="vz_linux_smoke_failed", message="2")
+
+    def runner(argv: list[str], **kwargs: Any) -> int:
+        command = " ".join(argv)
+        calls.append(command)
+        if command == status_command and calls.count(status_command) == 1:
+            return 3
+        return 0
+
+    def smoke_runner() -> helperctl.CheckResult:
+        calls.append("smoke")
+        return smoke_failure
+
+    results = helperctl.run_launchd_drill(
+        helper_path=helper,
+        socket_path=socket_path,
+        log_dir=log_dir,
+        plist_path=plist_path,
+        label="org.tldw.test",
+        uid=501,
+        write_plist=True,
+        create_dirs=True,
+        launchd_runner=runner,
+        ping_checker=lambda path: helperctl.CheckResult(ok=True),
+        smoke_runner=smoke_runner,
+    )
+
+    CASE.assertIn(("vz_linux_smoke", smoke_failure), results)
+    CASE.assertEqual(
+        results[-3:],
+        [
+            ("vz_linux_smoke", smoke_failure),
+            ("launchd_bootout", helperctl.CheckResult(ok=True)),
+            ("launchd_drill", smoke_failure),
+        ],
+    )
+    CASE.assertIn("launchctl bootout gui/501/org.tldw.test", calls)
 
 
 def test_launchd_drill_preserves_primary_failure_when_bootout_fails(
