@@ -213,6 +213,7 @@ export function getDesignSystemStateLabel(
 
 export const READY_STATE_LABEL = getDesignSystemStateLabel("ready", "Ready")
 export const EMPTY_STATE_LABEL = getDesignSystemStateLabel("empty", "Empty")
+export const LOADING_STATE_LABEL = getDesignSystemStateLabel("loading", "Loading")
 export const DEGRADED_STATE_LABEL = getDesignSystemStateLabel("degraded", "Degraded")
 export const ERROR_STATE_LABEL = getDesignSystemStateLabel("error", "Error")
 export const BLOCKED_STATE_LABEL = getDesignSystemStateLabel("blocked", "Blocked")
