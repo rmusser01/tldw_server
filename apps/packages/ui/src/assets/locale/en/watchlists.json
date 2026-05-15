@@ -54,6 +54,44 @@
     "briefings": "Briefings",
     "briefingsHint": "Reports and templates"
   },
+  "setupWizard": {
+    "title": "Create Watchlist",
+    "presets": {
+      "cti_osint": {
+        "label": "CTI / OSINT",
+        "description": "Track vulnerabilities, malware, actors, advisories, and source changes."
+      },
+      "news": {
+        "label": "News",
+        "description": "Track developing events, people, organizations, and source diversity."
+      },
+      "general": {
+        "label": "General",
+        "description": "Track a topic and collect updates for review."
+      },
+      "blank": {
+        "label": "Blank",
+        "description": "Start with an empty Watchlist and configure details yourself."
+      }
+    },
+    "startModes": {
+      "sources": {
+        "label": "Start from sources",
+        "description": "Create a Watchlist with initial feeds and an optional monitor."
+      },
+      "topic": {
+        "label": "Start from topic",
+        "description": "Create the Watchlist objective first, then add sources before collection starts."
+      },
+      "report_goal": {
+        "label": "Start from report goal",
+        "description": "Define the briefing goal first, then connect sources and templates."
+      }
+    },
+    "boundaries": {
+      "alerts": "Content-match alerts come later. This setup defines the Watchlist and its initial collection scope."
+    }
+  },
   "orientation": {
     "showTabGuidance": "Show tab guidance",
     "actions": {

@@ -17,6 +17,54 @@
   "comingSoon": {
     "message": "Coming soon..."
   },
+  "setupWizard_title": {
+    "message": "Create Watchlist"
+  },
+  "setupWizard_presets_cti_osint_label": {
+    "message": "CTI / OSINT"
+  },
+  "setupWizard_presets_cti_osint_description": {
+    "message": "Track vulnerabilities, malware, actors, advisories, and source changes."
+  },
+  "setupWizard_presets_news_label": {
+    "message": "News"
+  },
+  "setupWizard_presets_news_description": {
+    "message": "Track developing events, people, organizations, and source diversity."
+  },
+  "setupWizard_presets_general_label": {
+    "message": "General"
+  },
+  "setupWizard_presets_general_description": {
+    "message": "Track a topic and collect updates for review."
+  },
+  "setupWizard_presets_blank_label": {
+    "message": "Blank"
+  },
+  "setupWizard_presets_blank_description": {
+    "message": "Start with an empty Watchlist and configure details yourself."
+  },
+  "setupWizard_startModes_sources_label": {
+    "message": "Start from sources"
+  },
+  "setupWizard_startModes_sources_description": {
+    "message": "Create a Watchlist with initial feeds and an optional monitor."
+  },
+  "setupWizard_startModes_topic_label": {
+    "message": "Start from topic"
+  },
+  "setupWizard_startModes_topic_description": {
+    "message": "Create the Watchlist objective first, then add sources before collection starts."
+  },
+  "setupWizard_startModes_report_goal_label": {
+    "message": "Start from report goal"
+  },
+  "setupWizard_startModes_report_goal_description": {
+    "message": "Define the briefing goal first, then connect sources and templates."
+  },
+  "setupWizard_boundaries_alerts": {
+    "message": "Content-match alerts come later. This setup defines the Watchlist and its initial collection scope."
+  },
   "tabs_overview": {
     "message": "Overview"
   },
