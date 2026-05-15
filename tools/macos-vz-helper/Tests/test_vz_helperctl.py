@@ -1250,6 +1250,30 @@ def test_launchd_drill_cli_json_outputs_deterministic_steps(
     CASE.assertEqual(output[0]["reason"], "launchd_service_absent")
 
 
+def test_launchd_drill_cli_json_dry_run_stdout_is_parseable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    helperctl = load_helperctl()
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    code = helperctl.main(["launchd-drill", "--dry-run", "--skip-smoke", "--json"])
+
+    output = json.loads(capsys.readouterr().out)
+    CASE.assertEqual(code, 0)
+    CASE.assertEqual(
+        [step["name"] for step in output],
+        [
+            "launchd_preflight",
+            "launchd_bootstrap",
+            "launchd_status",
+            "launchd_kickstart",
+            "helper_status",
+        ],
+    )
+
+
 def test_launchd_drill_cli_bundle_with_skip_smoke_passes_no_bundle(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

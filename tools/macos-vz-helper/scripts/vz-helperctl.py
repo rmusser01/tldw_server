@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import io
 import json
 import os
 import plistlib
@@ -1860,19 +1861,24 @@ def _launchd_drill_command(args: argparse.Namespace) -> int:
     bundle_path = None
     if not args.skip_smoke and args.bundle:
         bundle_path = Path(args.bundle)
-    results = run_launchd_drill(
-        helper_path=Path(args.helper_path) if args.helper_path else DEFAULT_HELPER,
-        socket_path=Path(args.socket_path) if args.socket_path else paths.socket_path,
-        log_dir=Path(args.log_dir) if args.log_dir else paths.log_dir,
-        plist_path=plist_path,
-        label=label,
-        uid=args.uid,
-        write_plist=args.write_plist,
-        create_dirs=args.create_dirs,
-        dry_run=args.dry_run,
-        bundle_path=bundle_path,
-        python_path=Path(args.python) if args.python else None,
-    )
+    drill_kwargs = {
+        "helper_path": Path(args.helper_path) if args.helper_path else DEFAULT_HELPER,
+        "socket_path": Path(args.socket_path) if args.socket_path else paths.socket_path,
+        "log_dir": Path(args.log_dir) if args.log_dir else paths.log_dir,
+        "plist_path": plist_path,
+        "label": label,
+        "uid": args.uid,
+        "write_plist": args.write_plist,
+        "create_dirs": args.create_dirs,
+        "dry_run": args.dry_run,
+        "bundle_path": bundle_path,
+        "python_path": Path(args.python) if args.python else None,
+    }
+    if args.json:
+        with contextlib.redirect_stdout(io.StringIO()):
+            results = run_launchd_drill(**drill_kwargs)
+    else:
+        results = run_launchd_drill(**drill_kwargs)
     _print_results(results, as_json=args.json)
     return 0 if all(result.ok for _, result in results) else 1
 
