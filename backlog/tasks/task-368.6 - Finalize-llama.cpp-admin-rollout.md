@@ -1,10 +1,10 @@
 ---
 id: TASK-368.6
 title: Finalize llama.cpp admin rollout
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-15 03:46'
-updated_date: '2026-05-15 03:46'
+updated_date: '2026-05-15 15:35'
 labels:
   - implementation
   - docs
@@ -33,6 +33,12 @@ Complete the docs E2E verification and final validation slice from the implement
 - [ ] #4 Bandit is run on touched backend scope and git diff --check passes.
 - [ ] #5 Parent implementation task is updated with final summary and known skips or blockers.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Started final llama.cpp admin rollout slice after TASK-368.5 was finalized. Scope: docs, tier-4 admin E2E smoke alignment, focused verification, Bandit/backend validation where applicable, and parent task closeout.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
