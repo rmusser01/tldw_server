@@ -111,7 +111,7 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
       : data?.fetchedAt
         ? formatRelativeTime(data.fetchedAt, t)
         : null
-  const unreadArticles = data?.items.unread ?? 0
+  const unreadUpdates = data?.items.unread ?? 0
   const attentionTotal = overviewHealth?.attention?.total ?? 0
   const hasAttention = attentionTotal > 0
 
@@ -135,10 +135,10 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
         : t("watchlists:healthBar.lastChecked", "Checked {{time}}", { time: lastCheckedAt })
     )
   }
-  if (unreadArticles > 0) {
+  if (unreadUpdates > 0) {
     summaryParts.push(
-      t("watchlists:healthBar.articlesPending", "{{count}} articles pending", {
-        count: unreadArticles
+      t("watchlists:healthBar.articlesPending", "{{count}} updates pending", {
+        count: unreadUpdates
       })
     )
   }
@@ -280,10 +280,10 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
               }
               onClick={() => goToTab("runs")}
             />
-            {/* Articles */}
+            {/* Updates */}
             <HealthCard
               icon={<Newspaper className="h-4 w-4" />}
-              label={t("watchlists:terminology.canonical.articles", "Articles")}
+              label={t("watchlists:terminology.canonical.articles", "Updates")}
               value={String(data.items.unread)}
               detail={t("watchlists:healthBar.articlesUnread", "unread")}
               onClick={() => goToTab("items")}

@@ -81,7 +81,7 @@
     "message": "No unread content alerts"
   },
   "overview_alertHealth_contentDescription": {
-    "message": "New articles matching your Watchlist alert rules."
+    "message": "New updates matching your Watchlist alert rules."
   },
   "overview_alertHealth_reviewAlerts": {
     "message": "Review alerts"
@@ -141,7 +141,7 @@
     "message": "Start from topic"
   },
   "setupWizard_startModes_topic_description": {
-    "message": "Create the Watchlist objective first, then add sources before collection starts."
+    "message": "Create the Watchlist objective first, then add feeds before collection starts."
   },
   "setupWizard_startModes_report_goal_label": {
     "message": "Start from report goal"
@@ -165,7 +165,7 @@
     "message": "Activity"
   },
   "tabs_items": {
-    "message": "Articles"
+    "message": "Updates"
   },
   "tabs_outputs": {
     "message": "Reports"
@@ -1905,34 +1905,34 @@
     "message": "Add initial collection"
   },
   "overview_onboarding_pipeline": {
-    "message": "Add sources -> Configure monitor -> Check Activity -> Review Articles -> Generate Reports"
+    "message": "Add feeds -> Configure monitor -> Check Activity -> Review Updates -> Generate Reports"
   },
   "overview_onboarding_steps_addFeed_title": {
-    "message": "Add sources to this Watchlist"
+    "message": "Add feeds to this Watchlist"
   },
   "overview_onboarding_steps_addFeed_description": {
-    "message": "Add RSS/site sources inside the selected Watchlist."
+    "message": "Add RSS/site feeds inside the selected Watchlist."
   },
   "overview_onboarding_steps_createMonitor_title": {
     "message": "Create a monitor"
   },
   "overview_onboarding_steps_createMonitor_description": {
-    "message": "Pick Watchlist sources, then set a schedule with presets."
+    "message": "Pick Watchlist feeds, then set a schedule with presets."
   },
   "overview_onboarding_steps_reviewResults_title": {
     "message": "Review results"
   },
   "overview_onboarding_steps_reviewResults_description": {
-    "message": "Open Activity for run health, Articles for captured content, and Reports for generated briefings."
+    "message": "Open Activity for run health, Updates for captured content, and Reports for generated briefings."
   },
   "overview_onboarding_cta_addFeed": {
-    "message": "Add source"
+    "message": "Add first feed"
   },
   "overview_onboarding_cta_createMonitor": {
-    "message": "Create monitor"
+    "message": "Create first monitor"
   },
   "overview_onboarding_cta_reviewArticles": {
-    "message": "Open Articles"
+    "message": "Open Updates"
   },
   "overview_onboarding_cta_guidedSetup": {
     "message": "Add initial collection"
@@ -2016,13 +2016,13 @@
     "message": "Run test now"
   },
   "overview_onboarding_quickSetup_reviewDescription": {
-    "message": "Preview sample candidates and expected briefing, then add sources and monitor to this Watchlist."
+    "message": "Preview sample candidates and expected briefing, then add feeds and monitor to this Watchlist."
   },
   "overview_onboarding_quickSetup_actions_finish": {
     "message": "Create collection"
   },
   "overview_onboarding_quickSetup_created": {
-    "message": "Initial collection added. Sources and monitor are ready."
+    "message": "Initial collection added. Feeds and monitor are ready."
   },
   "overview_onboarding_quickSetup_createdAndRunning": {
     "message": "Initial collection added. Your first run has started."
@@ -2034,10 +2034,10 @@
     "message": "Setup complete"
   },
   "overview_setupComplete_nextRunDescription": {
-    "message": "Your next monitor run is {{time}}. New content will appear in Articles and Activity."
+    "message": "Your next monitor run is {{time}}. New content will appear in Updates and Activity."
   },
   "overview_setupComplete_runNowDescription": {
-    "message": "Run a monitor from Monitors to generate your first Articles and Activity entries."
+    "message": "Run a monitor from Monitors to generate your first Updates and Activity entries."
   },
   "overview_setupComplete_openActivity": {
     "message": "Open Activity"
@@ -2070,7 +2070,7 @@
     "message": "No upcoming schedules"
   },
   "overview_cards_items_title": {
-    "message": "Articles"
+    "message": "Updates"
   },
   "overview_cards_items_unread": {
     "message": "Unread"
@@ -2127,13 +2127,13 @@
     "message": "Guided tour complete"
   },
   "guide_completedDescription": {
-    "message": "Next: monitor Activity for run health, review Articles for captured content, and open Reports for generated briefings."
+    "message": "Next: monitor Activity for run health, review Updates for captured content, and open Reports for generated briefings."
   },
   "guide_openActivity": {
     "message": "Open Activity"
   },
   "guide_openArticles": {
-    "message": "Open Articles"
+    "message": "Open Updates"
   },
   "guide_steps_sources_title": {
     "message": "1. Add feeds"
@@ -2154,10 +2154,10 @@
     "message": "Activity shows run status, logs, and failures for each monitor."
   },
   "guide_steps_items_title": {
-    "message": "4. Review articles"
+    "message": "4. Review updates"
   },
   "guide_steps_items_description": {
-    "message": "Articles are captured content from successful runs, ready for triage."
+    "message": "Updates are captured content from successful runs, ready for triage."
   },
   "guide_steps_outputs_title": {
     "message": "5. Deliver reports"
@@ -2265,7 +2265,7 @@
     "message": "Activity guidance"
   },
   "help_tabs_items": {
-    "message": "Article review"
+    "message": "Updates review"
   },
   "help_tabs_outputs": {
     "message": "Reports guidance"
@@ -2421,7 +2421,7 @@
     "message": "Check activity"
   },
   "quickActions_items": {
-    "message": "Review articles"
+    "message": "Review updates"
   },
   "quickActions_outputs": {
     "message": "View reports"
@@ -2439,7 +2439,7 @@
     "message": "Open Activity"
   },
   "orientation_actions_openItems": {
-    "message": "Open Articles"
+    "message": "Open Updates"
   },
   "orientation_actions_openOutputs": {
     "message": "Open Reports"
@@ -2457,7 +2457,7 @@
     "message": "Overview summarizes watchlist health, setup progress, and attention signals."
   },
   "orientation_tabs_overview_next": {
-    "message": "Next: open Feeds to add sources, then create Monitors."
+    "message": "Next: open Feeds to add feeds, then create Monitors."
   },
   "orientation_tabs_sources_what": {
     "message": "Feeds are your input sources for monitor runs."
@@ -2478,10 +2478,10 @@
     "message": "Next: open Reports to verify generated briefing outputs."
   },
   "orientation_tabs_items_what": {
-    "message": "Articles are captured content for daily triage and briefing input."
+    "message": "Updates are captured content for daily triage and briefing input."
   },
   "orientation_tabs_items_next": {
-    "message": "Next: adjust Monitors when article quality or volume needs tuning."
+    "message": "Next: adjust Monitors when update quality or volume needs tuning."
   },
   "orientation_tabs_outputs_what": {
     "message": "Reports contains generated briefings, including delivery outcomes."
@@ -2520,13 +2520,13 @@
     "message": "Monitors need schedule fixes ({{count}})"
   },
   "overview_onboarding_quickSetup_help_feed": {
-    "message": "Add one or more source URLs to this Watchlist. You can adjust feed settings later."
+    "message": "Add one or more feed URLs to this Watchlist. You can adjust feed settings later."
   },
   "overview_onboarding_quickSetup_help_monitor": {
     "message": "Choose how this Watchlist monitor runs; presets avoid cron setup first."
   },
   "overview_onboarding_quickSetup_help_review": {
-    "message": "Review the scoped sources and monitor before adding them to this Watchlist."
+    "message": "Review the scoped feeds and monitor before adding them to this Watchlist."
   },
   "overview_onboarding_quickSetup_fields_setupGoal": {
     "message": "Setup goal"
@@ -2583,7 +2583,7 @@
     "message": "Text + audio briefing"
   },
   "overview_onboarding_quickSetup_outcome_triage": {
-    "message": "Article triage only"
+    "message": "Update triage only"
   },
   "overview_onboarding_quickSetup_destinationHint_runNow": {
     "message": "Starts one test run immediately and opens Activity details."
@@ -2601,7 +2601,7 @@
     "message": "Retry preview"
   },
   "overview_onboarding_quickSetup_createdBriefing": {
-    "message": "Initial collection added. Sources and monitor are ready for briefing reports."
+    "message": "Initial collection added. Feeds and monitor are ready for briefing reports."
   },
   "overview_onboarding_quickSetup_testRunPending": {
     "message": "Initial collection added. Test run started. Open Activity for progress and Reports for generated briefings."

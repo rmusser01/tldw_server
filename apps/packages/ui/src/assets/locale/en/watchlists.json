@@ -12,8 +12,8 @@
       "monitor": "Monitor",
       "monitors": "Monitors",
       "activity": "Activity",
-      "article": "Article",
-      "articles": "Articles",
+      "article": "Update",
+      "articles": "Updates",
       "report": "Report",
       "reports": "Reports"
     },
@@ -21,7 +21,7 @@
       "sources": "Feeds",
       "jobs": "Monitors",
       "runs": "Activity",
-      "items": "Articles",
+      "items": "Updates",
       "alerts": "Alerts",
       "outputs": "Reports"
     }
@@ -31,7 +31,8 @@
     "sources": "Feeds",
     "jobs": "Monitors",
     "runs": "Activity",
-    "items": "Articles",
+    "items": "Updates",
+    "itemsTooltip": "Updates collected from your sources",
     "alerts": "Alerts",
     "alertsTooltip": "Content matches from your Watchlist alert rules",
     "outputs": "Reports",
@@ -45,7 +46,7 @@
     "sources": "Set up feeds",
     "jobs": "Configure monitors",
     "runs": "Check activity",
-    "items": "Review articles",
+    "items": "Review updates",
     "alerts": "Review alerts",
     "outputs": "View reports"
   },
@@ -54,7 +55,7 @@
     "collect": "Collect",
     "collectHint": "Feeds and monitors",
     "review": "Review",
-    "reviewHint": "Alerts, activity, and articles",
+    "reviewHint": "Alerts, activity, and updates",
     "briefings": "Briefings",
     "briefingsHint": "Reports and templates"
   },
@@ -85,7 +86,7 @@
       },
       "topic": {
         "label": "Start from topic",
-        "description": "Create the Watchlist objective first, then add sources before collection starts."
+        "description": "Create the Watchlist objective first, then add feeds before collection starts."
       },
       "report_goal": {
         "label": "Start from report goal",
@@ -103,7 +104,7 @@
       "openFeeds": "Open Feeds",
       "openMonitors": "Open Monitors",
       "openActivity": "Open Activity",
-      "openArticles": "Open Articles",
+      "openArticles": "Open Updates",
       "openReports": "Open Reports",
       "openTemplates": "Open Templates"
     },
@@ -124,8 +125,8 @@
       "description": "Inspect failures and logs here. Next, open Reports to view generated briefings."
     },
     "items": {
-      "title": "Articles: triage captured content",
-      "description": "Review and prioritize captured items. Next, tune monitor scope or open reports."
+      "title": "Updates: triage captured content",
+      "description": "Review and prioritize captured updates. Next, tune monitor scope or open reports."
     },
     "alerts": {
       "title": "Alerts: review matched content",
@@ -167,7 +168,7 @@
       "contentTitle": "Content alerts",
       "unreadAlerts": "Unread content alerts",
       "noUnreadAlerts": "No unread content alerts",
-      "contentDescription": "New articles matching your Watchlist alert rules.",
+      "contentDescription": "New updates matching your Watchlist alert rules.",
       "reviewAlerts": "Review alerts",
       "createRule": "Create content alert rule",
       "healthTitle": "Health issues",
@@ -186,32 +187,32 @@
     },
     "onboarding": {
       "title": "Add initial collection",
-      "pipeline": "Add sources -> Configure monitor -> Check Activity -> Review Articles -> Generate Reports",
+      "pipeline": "Add feeds -> Configure monitor -> Check Activity -> Review Updates -> Generate Reports",
       "path": {
         "label": "Onboarding mode",
         "beginner": "Beginner (guided)",
         "advanced": "Advanced (direct forms)",
         "beginnerHint": "Guided collection setup keeps this Watchlist scoped before advanced schedules and templates.",
-        "advancedHint": "Advanced mode opens direct source and monitor forms for this Watchlist."
+        "advancedHint": "Advanced mode opens direct feed and monitor forms for this Watchlist."
       },
       "steps": {
         "addFeed": {
-          "title": "Add sources to this Watchlist",
-          "description": "Add RSS/site sources inside the selected Watchlist."
+          "title": "Add feeds to this Watchlist",
+          "description": "Add RSS/site feeds inside the selected Watchlist."
         },
         "createMonitor": {
           "title": "Create a monitor",
-          "description": "Pick Watchlist sources, then set a schedule with presets."
+          "description": "Pick Watchlist feeds, then set a schedule with presets."
         },
         "reviewResults": {
           "title": "Review results",
-          "description": "Open Activity for monitor health, Articles for captured content, and Reports for generated briefings."
+          "description": "Open Activity for monitor health, Updates for captured content, and Reports for generated briefings."
         }
       },
       "cta": {
-        "addFeed": "Add source",
-        "createMonitor": "Create monitor",
-        "reviewArticles": "Open Articles",
+        "addFeed": "Add first feed",
+        "createMonitor": "Create first monitor",
+        "reviewArticles": "Open Updates",
         "guidedSetup": "Add initial collection"
       },
       "quickSetup": {
@@ -222,9 +223,9 @@
           "review": "Review"
         },
         "help": {
-          "feed": "Add one or more source URLs to this Watchlist. You can adjust feed settings later.",
+          "feed": "Add one or more feed URLs to this Watchlist. You can adjust feed settings later.",
           "monitor": "Choose how this Watchlist monitor runs; presets avoid cron setup first.",
-          "review": "Review the scoped sources and monitor before adding them to this Watchlist."
+          "review": "Review the scoped feeds and monitor before adding them to this Watchlist."
         },
         "fields": {
           "sourceName": "Feed name",
@@ -271,7 +272,7 @@
           "runNow": "Run test now",
           "destination": "After create"
         },
-        "reviewDescription": "Preview sample candidates and expected briefing, then add sources and monitor to this Watchlist.",
+        "reviewDescription": "Preview sample candidates and expected briefing, then add feeds and monitor to this Watchlist.",
         "candidatePreview": {
           "title": "Feed sample preview",
           "loading": "Loading sample candidates...",
@@ -286,7 +287,7 @@
         "outcome": {
           "textOnly": "Text briefing",
           "textAndAudio": "Text + audio briefing",
-          "triage": "Article triage only"
+          "triage": "Update triage only"
         },
         "destinationHint": {
           "runNow": "Starts one test run immediately and opens Activity details.",
@@ -298,8 +299,8 @@
           "finishWithTest": "Create collection + run test",
           "retryPreview": "Retry preview"
         },
-        "created": "Initial collection added. Sources and monitor are ready.",
-        "createdBriefing": "Initial collection added. Sources and monitor are ready for briefing reports.",
+        "created": "Initial collection added. Feeds and monitor are ready.",
+        "createdBriefing": "Initial collection added. Feeds and monitor are ready for briefing reports.",
         "createdAndRunning": "Initial collection added. Your first run has started.",
         "testRunPending": "Initial collection added. Test run started. Open Activity for progress and Reports for generated briefings.",
         "error": "Failed to add initial collection."
@@ -307,8 +308,8 @@
     },
     "setupComplete": {
       "title": "Setup complete",
-      "nextRunDescription": "Your next monitor run is {{time}}. New content will appear in Articles and Activity.",
-      "runNowDescription": "Run a monitor from Monitors to generate your first Articles and Activity entries.",
+      "nextRunDescription": "Your next monitor run is {{time}}. New content will appear in Updates and Activity.",
+      "runNowDescription": "Run a monitor from Monitors to generate your first Updates and Activity entries.",
       "openActivity": "Open Activity"
     },
     "cards": {
@@ -326,7 +327,7 @@
         "noNextRun": "No upcoming schedules"
       },
       "items": {
-        "title": "Articles",
+        "title": "Updates",
         "unread": "Unread"
       },
       "runs": {
@@ -353,9 +354,9 @@
     "finish": "Finish",
     "progress": "Step {{current}} of {{total}}",
     "completedTitle": "Guided tour complete",
-    "completedDescription": "Next: monitor Activity for monitor health, review Articles for captured content, and open Reports for generated briefings.",
+    "completedDescription": "Next: monitor Activity for monitor health, review Updates for captured content, and open Reports for generated briefings.",
     "openActivity": "Open Activity",
-    "openArticles": "Open Articles",
+    "openArticles": "Open Updates",
     "steps": {
       "sources": {
         "title": "1. Add feeds",
@@ -370,8 +371,8 @@
         "description": "Activity shows monitor status, logs, and failures."
       },
       "items": {
-        "title": "4. Review articles",
-        "description": "Articles are captured content from successful monitor checks, ready for triage."
+        "title": "4. Review updates",
+        "description": "Updates are captured content from successful monitor checks, ready for triage."
       },
       "outputs": {
         "title": "5. Deliver reports",
@@ -450,7 +451,7 @@
     "hint": "Tip: Use Cmd+K to open this palette anytime",
     "commands": {
       "openFeeds": "Open Feeds",
-      "openArticles": "Open Articles",
+      "openArticles": "Open Updates",
       "openReports": "Open Reports",
       "openMonitors": "Open Monitors",
       "openActivity": "Open Activity",
@@ -486,8 +487,9 @@
       "primaryCta": "Set up a monitor"
     },
     "articles": {
-      "description": "Articles are captured content from successful monitor runs, ready for review.",
-      "primaryCta": "Set up a monitor to start capturing articles"
+      "title": "No updates yet",
+      "description": "Updates are captured content from successful monitor runs, ready for review.",
+      "primaryCta": "Set up a monitor to start capturing updates"
     },
     "reports": {
       "description": "Reports are generated briefings from monitor runs using your templates.",
@@ -560,7 +562,7 @@
     "nextRun": "Next run {{time}}",
     "lastChecked": "Checked {{time}}",
     "runningNow": "running now",
-    "articlesPending": "{{count}} articles pending",
+    "articlesPending": "{{count}} updates pending",
     "attentionTooltip": "{{count}} items need attention",
     "feedsDegraded": "{{count}} need review",
     "monitorsAttention": "{{count}} need fixes",
@@ -583,7 +585,7 @@
       "sources": "Feeds setup",
       "jobs": "Monitor scheduling",
       "runs": "Activity guidance",
-      "items": "Article review",
+      "items": "Updates review",
       "alerts": "Alert guidance",
       "outputs": "Reports guidance",
       "templates": "Template authoring",

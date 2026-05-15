@@ -1863,7 +1863,7 @@ export const ItemsTab: React.FC = () => {
         title: t("watchlists:items.chatSizeWarningTitle", "Large content warning"),
         content: t(
           "watchlists:items.chatSizeWarningContent",
-          "Selected articles contain {{chars}} characters of content. This may use significant tokens. Continue with full content?",
+          "Selected updates contain {{chars}} characters of content. This may use significant tokens. Continue with full content?",
           { chars: totalChars.toLocaleString() }
         ),
         okText: t("watchlists:items.chatSizeWarningOk", "Use full content"),
@@ -2793,7 +2793,7 @@ export const ItemsTab: React.FC = () => {
 
           <section
             className="min-h-[720px] p-5"
-            aria-label={t("watchlists:items.readerRegionAria", "Article reader")}
+            aria-label={t("watchlists:items.readerRegionAria", "Update reader")}
             data-testid="watchlists-items-reader-pane"
           >
             {itemsLoading && !selectedItem ? (

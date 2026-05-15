@@ -201,7 +201,7 @@ describe("OverviewTab alert and health summary", () => {
 
     expect(contentAlerts).toHaveTextContent("Unread content alerts")
     expect(contentAlerts).toHaveTextContent("4")
-    expect(contentAlerts).toHaveTextContent("New articles matching your Watchlist alert rules.")
+    expect(contentAlerts).toHaveTextContent("New updates matching your Watchlist alert rules.")
     expect(healthIssues).toHaveTextContent("Health issues")
     expect(healthIssues).toHaveTextContent("2")
     expect(healthIssues).toHaveTextContent("Run failures and source problems are health issues, not content alerts.")

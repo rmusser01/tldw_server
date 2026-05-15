@@ -366,7 +366,7 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
       { tab: "sources", href: WATCHLISTS_TAB_HELP_DOCS.sources, label: "Feeds setup" },
       { tab: "jobs", href: WATCHLISTS_TAB_HELP_DOCS.jobs, label: "Monitor scheduling" },
       { tab: "runs", href: WATCHLISTS_TAB_HELP_DOCS.runs, label: "Activity guidance" },
-      { tab: "items", href: WATCHLISTS_TAB_HELP_DOCS.items, label: "Article review" },
+      { tab: "items", href: WATCHLISTS_TAB_HELP_DOCS.items, label: "Updates review" },
       { tab: "outputs", href: WATCHLISTS_TAB_HELP_DOCS.outputs, label: "Reports guidance" },
       { tab: "templates", href: WATCHLISTS_TAB_HELP_DOCS.templates, label: "Template authoring" },
       { tab: "settings", href: WATCHLISTS_TAB_HELP_DOCS.settings, label: "Workspace settings" }
@@ -390,13 +390,13 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
     expect(screen.getByTestId("watchlists-tab-sources")).toHaveTextContent("Feeds")
     expect(screen.getByTestId("watchlists-tab-jobs")).toHaveTextContent("Monitors")
     expect(screen.getByTestId("watchlists-tab-runs")).toHaveTextContent("Activity")
-    expect(screen.getByTestId("watchlists-tab-items")).toHaveTextContent("Articles")
+    expect(screen.getByTestId("watchlists-tab-items")).toHaveTextContent("Updates")
     expect(screen.getByTestId("watchlists-tab-outputs")).toHaveTextContent("Reports")
 
     expect(screen.getByTestId("watchlists-task-open-sources")).toHaveTextContent("Set up feeds")
     expect(screen.getByTestId("watchlists-task-open-jobs")).toHaveTextContent("Configure monitors")
     expect(screen.getByTestId("watchlists-task-open-runs")).toHaveTextContent("Check activity")
-    expect(screen.getByTestId("watchlists-task-open-items")).toHaveTextContent("Review articles")
+    expect(screen.getByTestId("watchlists-task-open-items")).toHaveTextContent("Review updates")
     expect(screen.getByTestId("watchlists-task-open-outputs")).toHaveTextContent("View reports")
   })
 

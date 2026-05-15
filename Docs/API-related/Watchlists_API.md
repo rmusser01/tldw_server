@@ -81,8 +81,16 @@ Runs:
 
 Items:
 - `GET /items`
+- `GET /items/smart-counts`
+- `POST /items/batch-update` (batch triage flags)
 - `GET /items/{item_id}`
 - `PATCH /items/{item_id}` (flagging)
+
+Item saved views:
+- `GET /{watchlist_id}/item-views`
+- `POST /{watchlist_id}/item-views`
+- `PATCH /{watchlist_id}/item-views/{view_id}`
+- `DELETE /{watchlist_id}/item-views/{view_id}`
 
 Outputs:
 - `POST /outputs`
@@ -222,6 +230,40 @@ Review a content alert:
 ```
 
 Alert review states are `unread`, `read`, and `dismissed`.
+
+List Watchlist Updates with server-backed triage filters:
+```bash
+curl "$BASE/api/v1/watchlists/items?watchlist_id=42&sort=alert_severity_desc&has_alert=true&include_alert_summary=true&size=50" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Batch mark all matching unread alert Updates as reviewed:
+```json
+{
+  "watchlist_id": 42,
+  "scope": {
+    "reviewed": false,
+    "has_alert": true,
+    "alert_status": "unread"
+  },
+  "reviewed": true,
+  "limit": 500
+}
+```
+
+Save an Updates review view for a Watchlist:
+```json
+{
+  "name": "Unread critical alerts",
+  "filters": {
+    "reviewed": false,
+    "has_alert": true,
+    "alert_severity": "critical"
+  },
+  "sort": "alert_severity_desc",
+  "is_default": false
+}
+```
 
 Trigger a run:
 ```json
@@ -397,6 +439,33 @@ Sharing policy is controlled by `WATCHLIST_SHARING_MODE`:
 Watchlist content alerts are user-facing notifications created when newly collected Watchlist items match user-defined descriptors, classifications, entities, keywords, CVEs, IOCs, or source constraints. Alert records preserve matched evidence, item/run/job/source IDs, snippets, and review state.
 
 Existing run-stat alert rules remain pipeline health behavior. Conditions such as no items, high error rate, item thresholds, or run failure should be shown as health issues, not unqualified content alerts. Topic Monitoring remains an internal dependency/reference for matching and notification patterns; product Watchlists do not store user-facing rules in the separate `monitoring_watchlists` model.
+
+## Updates triage
+
+The selected Watchlist review queue is user-facing "Updates" copy in the WebUI while the API keeps the existing `items` route names for compatibility.
+
+`GET /items` supports these Stage 4 triage query parameters:
+- `sort`: `created_desc`, `created_asc`, `published_desc`, `published_asc`, `unread_first`, `source_asc`, or `alert_severity_desc`. Default behavior remains `created_desc`.
+- `reviewed`, `queued_for_briefing`, `status`, `run_id`, `job_id`, `source_id`, `watchlist_id`, `q`, `since`, and `until`.
+- `has_alert`, `alert_status`, `alert_severity`, and `alert_rule_id` for content-alert-aware review queues.
+- `include_alert_summary=true` to attach compact alert context to each returned item.
+
+`GET /items/smart-counts` accepts the same Watchlist, source, search, date, status, and alert filters. It also supports `queue_run_id` for queued-count scoping.
+
+When `include_alert_summary=true`, each item may include:
+- `total`, `unread`, `read`, and `dismissed` alert counts.
+- `highest_severity`, `latest_alert_id`, `latest_alert_status`, and `latest_alert_created_at`.
+- `latest_matched_text`, `rule_ids`, and `severities`.
+
+Batch triage uses `POST /items/batch-update`. Provide exactly one of:
+- `item_ids`: explicit selected/page item IDs.
+- `scope`: all-filtered item criteria using `run_id`, `job_id`, `source_id`, `status`, `reviewed`, `queued_for_briefing`, `q`, `search`, `since`, `until`, `has_alert`, `alert_status`, `alert_severity`, or `alert_rule_id`.
+
+The batch payload may set `reviewed`, `status`, and/or `queued_for_briefing`. `limit` defaults to `500` and is capped at `5000`. Responses include `matched`, `changed`, `unchanged`, `failed`, ID lists, `capped`, `exhausted`, and the effective `limit` so clients can explain partial results.
+
+Saved item views are Watchlist-scoped and persist via `/{watchlist_id}/item-views`. Each view stores `name`, `filters`, `sort`, `is_default`, timestamps, and the owning `watchlist_id`. Filters are intentionally the same server-backed item filters used by the Updates queue.
+
+Report/briefing handoff remains the `queued_for_briefing` flag on items. Stage 4 supports selecting and queueing evidence; it does not create defensible report artifacts, immutable evidence snapshots, weak-evidence warnings, or a full report builder. Those are Stage 5 responsibilities.
 
 ## Ingestion and persistence
 

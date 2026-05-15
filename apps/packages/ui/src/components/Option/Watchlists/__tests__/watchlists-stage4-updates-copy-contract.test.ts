@@ -20,7 +20,30 @@ describe("Watchlists Stage 4 Updates copy contract", () => {
       "items.batch.scope.page",
       "items.batch.scope.allFiltered",
       "items.shortcuts.nextPrevious",
-      "items.live.selectionCleared"
+      "items.live.selectionCleared",
+      "tabs.items",
+      "tabs.itemsTooltip",
+      "quickActions.items",
+      "taskViews.reviewHint",
+      "orientation.actions.openArticles",
+      "orientation.items.title",
+      "orientation.items.description",
+      "overview.alertHealth.contentDescription",
+      "overview.onboarding.pipeline",
+      "overview.onboarding.steps.reviewResults.description",
+      "overview.onboarding.cta.reviewArticles",
+      "overview.setupComplete.nextRunDescription",
+      "overview.setupComplete.runNowDescription",
+      "overview.cards.items.title",
+      "guide.completedDescription",
+      "guide.openArticles",
+      "guide.steps.items.title",
+      "guide.steps.items.description",
+      "emptyState.articles.title",
+      "emptyState.articles.description",
+      "emptyState.articles.primaryCta",
+      "healthBar.articlesPending",
+      "help.tabs.items"
     ]
 
     for (const keyPath of copyPaths) {

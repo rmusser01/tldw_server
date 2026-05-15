@@ -257,7 +257,7 @@ describe("OverviewTab quick setup flow", () => {
     await waitFor(() => {
       expect(screen.getAllByText("Add initial collection").length).toBeGreaterThan(0)
     })
-    expect(screen.getByText("Add sources -> Configure monitor -> Check Activity -> Review Articles -> Generate Reports")).toBeInTheDocument()
+    expect(screen.getByText("Add feeds -> Configure monitor -> Check Activity -> Review Updates -> Generate Reports")).toBeInTheDocument()
     expect(screen.getByTestId("watchlists-overview-cta-guided-setup")).toHaveTextContent("Add initial collection")
 
     fireEvent.click(screen.getByTestId("watchlists-overview-cta-guided-setup"))
@@ -338,7 +338,7 @@ describe("OverviewTab quick setup flow", () => {
       type: "quick_setup_opened"
     })
     expect(
-      screen.getByText("Add one or more source URLs to this Watchlist. You can adjust feed settings later.")
+      screen.getByText("Add one or more feed URLs to this Watchlist. You can adjust feed settings later.")
     ).toBeInTheDocument()
 
     fireEvent.change(

@@ -122,7 +122,7 @@ const PROGRESSIVE_PRIMARY_TABS = ["sources", "alerts", "items", "outputs"] as co
 /** Which secondary section lives inside which primary tab */
 const SECONDARY_IN_PRIMARY: Record<string, string> = {
   jobs: "sources",    // Monitors section inside Feeds tab
-  runs: "items",      // Activity section inside Articles tab
+  runs: "items",      // Activity section inside Updates tab
   templates: "outputs" // Templates section inside Reports tab
 }
 
@@ -706,7 +706,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     sources: t("watchlists:help.tabs.sources", "Feeds setup"),
     jobs: t("watchlists:help.tabs.jobs", "Monitor scheduling"),
     runs: t("watchlists:help.tabs.runs", "Activity guidance"),
-    items: t("watchlists:help.tabs.items", "Article review"),
+    items: t("watchlists:help.tabs.items", "Updates review"),
     alerts: t("watchlists:help.tabs.alerts", "Alert guidance"),
     outputs: t("watchlists:help.tabs.outputs", "Reports guidance"),
     templates: t("watchlists:help.tabs.templates", "Template authoring"),
@@ -728,7 +728,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     },
     {
       key: "items" as const,
-      label: t("watchlists:quickActions.items", "Review articles")
+      label: t("watchlists:quickActions.items", "Review updates")
     },
     {
       key: "alerts" as const,
@@ -748,7 +748,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     {
       key: "review" as const,
       label: t("watchlists:taskViews.review", "Review"),
-      hint: t("watchlists:taskViews.reviewHint", "Activity and articles")
+      hint: t("watchlists:taskViews.reviewHint", "Activity and updates")
     },
     {
       key: "briefings" as const,
@@ -810,7 +810,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         },
         {
           key: "open-articles",
-          label: t("watchlists:orientation.actions.openArticles", "Open Articles"),
+          label: t("watchlists:orientation.actions.openArticles", "Open Updates"),
           target: "items"
         }
       ]
@@ -829,16 +829,16 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         },
         {
           key: "open-articles",
-          label: t("watchlists:orientation.actions.openArticles", "Open Articles"),
+          label: t("watchlists:orientation.actions.openArticles", "Open Updates"),
           target: "items"
         }
       ]
     },
     items: {
-      title: t("watchlists:orientation.items.title", "Articles: triage captured content"),
+      title: t("watchlists:orientation.items.title", "Updates: triage captured content"),
       description: t(
         "watchlists:orientation.items.description",
-        "Review and prioritize captured items. Next, tune monitor scope or open reports."
+        "Review and prioritize captured updates. Next, tune monitor scope or open reports."
       ),
       actions: [
         {
@@ -862,7 +862,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       actions: [
         {
           key: "open-articles",
-          label: t("watchlists:orientation.actions.openArticles", "Open Articles"),
+          label: t("watchlists:orientation.actions.openArticles", "Open Updates"),
           target: "items"
         },
         {
@@ -964,10 +964,10 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     },
     {
       tab: "items" as const,
-      title: t("watchlists:guide.steps.items.title", "4. Review articles"),
+      title: t("watchlists:guide.steps.items.title", "4. Review updates"),
       description: t(
         "watchlists:guide.steps.items.description",
-        "Articles are captured content from successful monitor checks, ready for triage."
+        "Updates are captured content from successful monitor checks, ready for triage."
       )
     },
     {
@@ -1624,10 +1624,10 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     {
       key: "items",
       label: (
-        <Tooltip title={t("watchlists:tabs.itemsTooltip", "Articles and posts collected from your sources")}>
+        <Tooltip title={t("watchlists:tabs.itemsTooltip", "Updates collected from your sources")}>
           <span className="flex items-center gap-2">
             <Newspaper className="h-4 w-4" />
-            {t("watchlists:tabs.items", "Articles")}
+            {t("watchlists:tabs.items", "Updates")}
           </span>
         </Tooltip>
       ),
@@ -1720,10 +1720,10 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     {
       key: "items",
       label: (
-        <Tooltip title={t("watchlists:tabs.itemsTooltip", "Articles and posts collected from your sources")}>
+        <Tooltip title={t("watchlists:tabs.itemsTooltip", "Updates collected from your sources")}>
           <span className="flex items-center gap-2">
             <Newspaper className="h-4 w-4" />
-            {t("watchlists:tabs.items", "Articles")}
+            {t("watchlists:tabs.items", "Updates")}
           </span>
         </Tooltip>
       ),
@@ -1859,7 +1859,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
               <div className="mt-1 text-sm text-text-muted">
                 {t(
                   "watchlists:containers.emptyDescription",
-                  "Use a Watchlist as the workspace for feeds, monitors, activity, articles, and reports."
+                  "Use a Watchlist as the workspace for feeds, monitors, activity, updates, and reports."
                 )}
               </div>
             </div>
@@ -2192,7 +2192,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
           title={t("watchlists:guide.completedTitle", "Guided tour complete")}
           description={t(
             "watchlists:guide.completedDescription",
-            "Next: monitor Activity for monitor health, review Articles for captured content, and open Reports for generated briefings."
+            "Next: monitor Activity for monitor health, review Updates for captured content, and open Reports for generated briefings."
           )}
           action={(
             <div className="flex flex-wrap gap-2">
@@ -2200,7 +2200,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
                 {t("watchlists:guide.openActivity", "Open Activity")}
               </Button>
               <Button size="small" onClick={() => navigateToTab("items")}>
-                {t("watchlists:guide.openArticles", "Open Articles")}
+                {t("watchlists:guide.openArticles", "Open Updates")}
               </Button>
             </div>
           )}
