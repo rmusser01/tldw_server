@@ -252,6 +252,95 @@ async def test_usage_tracker_persists_normalized_cache_fields(monkeypatch):
     reset_pricing_catalog()
 
 
+@pytest.mark.asyncio
+async def test_log_llm_usage_estimate_source_distinguishes_missing_usage_from_provider_usage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", "ut-key-" + uuid.uuid4().hex)
+    dburl = f"sqlite:///./Databases/users_test_ut_{uuid.uuid4().hex}.sqlite"
+    monkeypatch.setenv("DATABASE_URL", dburl)
+
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+
+    reset_settings()
+    await reset_db_pool()
+    await reset_session_manager()
+
+    pool = await get_db_pool()
+    await _ensure_llm_tables(pool)
+    await _ensure_llm_cache_columns(pool)
+
+    await log_llm_usage(
+        user_id=1,
+        key_id=None,
+        endpoint="POST:/api/v1/chat/completions",
+        operation="chat",
+        provider="openai",
+        model="gpt-4o-mini",
+        status=200,
+        latency_ms=10,
+        prompt_tokens=8,
+        completion_tokens=2,
+        usage_metadata=None,
+        estimated=None,
+        estimate_source=None,
+        request_id="req-missing-usage-source",
+    )
+    await log_llm_usage(
+        user_id=1,
+        key_id=None,
+        endpoint="POST:/api/v1/chat/completions",
+        operation="chat",
+        provider="openai",
+        model="gpt-4o-mini",
+        status=200,
+        latency_ms=10,
+        prompt_tokens=8,
+        completion_tokens=2,
+        usage_metadata={"prompt_tokens": 8, "completion_tokens": 2, "total_tokens": 10},
+        estimated=None,
+        estimate_source=None,
+        request_id="req-provider-usage-source",
+    )
+
+    if pool.pool:
+        rows = await pool.fetchall(
+            """
+            SELECT request_id, estimate_source, estimated
+            FROM llm_usage_log
+            WHERE request_id IN ($1, $2)
+            ORDER BY request_id
+            """,
+            "req-missing-usage-source",
+            "req-provider-usage-source",
+        )
+    else:
+        rows = await pool.fetchall(
+            """
+            SELECT request_id, estimate_source, estimated
+            FROM llm_usage_log
+            WHERE request_id IN (?, ?)
+            ORDER BY request_id
+            """,
+            "req-missing-usage-source",
+            "req-provider-usage-source",
+        )
+
+    sources = {row["request_id"]: row["estimate_source"] for row in rows}
+    assert sources == {
+        "req-missing-usage-source": "missing_usage",
+        "req-provider-usage-source": "provider_usage",
+    }
+    estimated_flags = {row["request_id"]: bool(row["estimated"]) for row in rows}
+    assert estimated_flags == {
+        "req-missing-usage-source": True,
+        "req-provider-usage-source": False,
+    }
+
+
 class _LoggerStub:
     def __init__(self) -> None:
         self.debugs: list[str] = []

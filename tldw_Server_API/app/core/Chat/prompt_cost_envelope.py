@@ -15,7 +15,7 @@ from typing import Any
 
 FINGERPRINT_VERSION = "prompt-v1"
 
-_DATA_URI_RE = re.compile(r"(data:image[^,]*,)[^\"\\s]+", re.IGNORECASE)
+_DATA_URI_RE = re.compile(r'(data:image[^,]*,)[^"\s]+', re.IGNORECASE)
 _KNOWN_PART_TYPES = frozenset(
     {
         "text",

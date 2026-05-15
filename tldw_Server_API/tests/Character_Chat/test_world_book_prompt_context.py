@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import Any
+
 from tldw_Server_API.app.core.Character_Chat.world_book_prompt_context import (
     apply_world_book_prompt_context,
     build_recent_world_book_scan_text,
@@ -6,16 +10,16 @@ from tldw_Server_API.app.core.Character_Chat.world_book_prompt_context import (
 
 
 class _FakeWorldBookService:
-    def __init__(self, result):
+    def __init__(self, result: dict[str, Any]) -> None:
         self.result = result
-        self.calls = []
+        self.calls: list[dict[str, Any]] = []
 
-    def process_context(self, **kwargs):
+    def process_context(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(kwargs)
         return self.result
 
 
-def test_build_recent_world_book_scan_text_uses_recent_user_and_assistant_turns():
+def test_build_recent_world_book_scan_text_uses_recent_user_and_assistant_turns() -> None:
     messages = [
         {"role": "system", "content": "rules"},
         {"role": "user", "content": "hello"},
@@ -27,7 +31,7 @@ def test_build_recent_world_book_scan_text_uses_recent_user_and_assistant_turns(
     assert build_recent_world_book_scan_text(messages) == "hello there latest"
 
 
-def test_world_book_prompt_context_returns_bounded_diagnostics_and_fingerprint():
+def test_world_book_prompt_context_returns_bounded_diagnostics_and_fingerprint() -> None:
     secret_keyword = "clock-secret"
     secret_content = "World prompt secret text"
     service = _FakeWorldBookService(
@@ -88,7 +92,20 @@ def test_world_book_prompt_context_returns_bounded_diagnostics_and_fingerprint()
     assert service.calls[0]["include_diagnostics"] is True
 
 
-def test_apply_world_book_prompt_context_preserves_system_message_insertion_order():
+def test_world_book_prompt_context_without_service_or_db_returns_empty_context() -> None:
+    context = build_world_book_prompt_context(
+        [{"role": "user", "content": "Tell me about the clock"}],
+        db=None,
+        world_book_service=None,
+        character_id=42,
+    )
+
+    assert context.text == ""
+    assert context.system_message is None
+    assert context.estimated_tokens == 0
+
+
+def test_apply_world_book_prompt_context_preserves_system_message_insertion_order() -> None:
     context = build_world_book_prompt_context(
         [{"role": "user", "content": "clock"}],
         world_book_service=_FakeWorldBookService(
@@ -117,7 +134,7 @@ def test_apply_world_book_prompt_context_preserves_system_message_insertion_orde
     assert messages[2] == context.system_message
 
 
-def test_world_book_prompt_context_fingerprint_is_stable_for_same_inputs():
+def test_world_book_prompt_context_fingerprint_is_stable_for_same_inputs() -> None:
     result = {
         "processed_context": "clock tower lore",
         "diagnostics": [{"entry_id": 1, "world_book_id": 2, "token_cost": 4}],

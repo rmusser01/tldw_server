@@ -14,7 +14,7 @@ labels:
 dependencies: []
 documentation:
   - Docs/superpowers/specs/2026-05-10-mcp-hub-walkthrough-remediation-design.md
-  - docs/superpowers/plans/2026-05-10-mcp-hub-live-discovery-chat-plan.md
+  - Docs/superpowers/plans/2026-05-10-mcp-hub-live-discovery-chat-plan.md
 parent_task_id: TASK-223
 priority: high
 ---
@@ -38,7 +38,7 @@ Implement the first PR-sized remediation slice from the MCP Hub walkthrough. Thi
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-PR 1 implementation plan drafted at docs/superpowers/plans/2026-05-10-mcp-hub-live-discovery-chat-plan.md.
+PR 1 implementation plan drafted at Docs/superpowers/plans/2026-05-10-mcp-hub-live-discovery-chat-plan.md.
 
 Stages:
 1. Backend runtime refresh/reconcile endpoint at POST /api/v1/mcp/hub/external-servers/refresh-discovery, live MCP singleton resolution, manager reconciliation, module registry remapping, external federation validator coverage.

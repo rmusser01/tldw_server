@@ -1,3 +1,10 @@
+"""Diagnostic helpers for local inference prefix and prompt caches.
+
+Local vLLM and llama.cpp cache signals are runtime and latency hints, not
+provider billing evidence. This module reports sanitized request and runtime
+metadata without exposing prompt text or local file paths.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -254,7 +261,13 @@ def _llamacpp_runtime_mode(flags: Mapping[str, Mapping[str, Any]]) -> str:
         return "read_only"
     if flags.get("prompt_cache") or prompt_cache_all.get("enabled"):
         return "writable"
-    if cache_prompt.get("enabled") or cache_reuse:
+    cache_reuse_enabled = bool(cache_reuse.get("enabled"))
+    cache_reuse_tokens = _int_or_none(cache_reuse.get("tokens"))
+    if (
+        cache_prompt.get("enabled")
+        or cache_reuse_enabled
+        or (cache_reuse_tokens is not None and cache_reuse_tokens > 0)
+    ):
         return "request_reuse"
     return "disabled_or_unknown"
 

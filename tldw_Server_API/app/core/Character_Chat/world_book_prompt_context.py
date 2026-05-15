@@ -80,6 +80,8 @@ def build_world_book_prompt_context(
         return _empty_context()
 
     if world_book_service is None:
+        if db is None:
+            return _empty_context()
         from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
 
         world_book_service = WorldBookService(db)

@@ -10,7 +10,9 @@ labels:
   - local-llm
   - cost-control
   - implementation
-dependencies: []
+dependencies:
+  - TASK-377
+  - TASK-378
 documentation:
   - >-
     Docs/superpowers/specs/2026-05-15-chat-worldbook-cache-cost-control-design.md

@@ -85,6 +85,18 @@ def test_llamacpp_prompt_cache_flags_are_reported_without_raw_paths() -> None:
     assert metadata["billing_cache_savings_reported"] is False
 
 
+def test_llamacpp_disabled_cache_reuse_does_not_report_request_reuse_mode() -> None:
+    diagnostic = build_local_cache_diagnostic(
+        provider="llama.cpp",
+        request={},
+        payload={"messages": [{"role": "user", "content": "hello"}]},
+        app_config={"llama_api": {"cache_reuse": 0}},
+    )
+
+    assert diagnostic.runtime_cache_mode == "disabled_or_unknown"
+    assert diagnostic.runtime_flags["cache_reuse"]["tokens"] == 0
+
+
 def test_inference_prefix_cache_intent_parser_is_separate_from_billing_cache_intent() -> None:
     intent = parse_inference_prefix_cache_intent(
         {

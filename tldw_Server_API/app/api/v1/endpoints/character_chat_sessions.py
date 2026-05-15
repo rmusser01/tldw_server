@@ -4944,8 +4944,10 @@ async def character_chat_completion(
         offline_sim = provider == "local-llm" and not (enable_local_llm or disable_offline_sim or legacy_allow_local)
         streams_unified = str(os.getenv("STREAMS_UNIFIED", "0")).strip().lower() in {"1", "true", "on", "yes"}
         turn_prompt_guardrail_diagnostics: Optional[dict[str, Any]] = None
+        prompt_guardrails_enabled = False
         try:
             prompt_guardrail_config = load_prompt_cost_guardrail_config()
+            prompt_guardrails_enabled = prompt_guardrail_config.enabled
             if prompt_guardrail_config.enabled:
                 prompt_guardrail_envelope = build_prompt_cost_envelope(
                     (
@@ -4989,9 +4991,17 @@ async def character_chat_completion(
             raise
         except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug(
-                "Character chat prompt cost guardrail evaluation skipped due to {}",
+                "Character chat prompt cost guardrail evaluation failed due to {}",
                 type(exc).__name__,
             )
+            if prompt_guardrails_enabled:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={
+                        "type": "prompt_cost_guardrail_error",
+                        "message": "Prompt cost guardrail evaluation failed before provider dispatch.",
+                    },
+                ) from exc
         llm_resp = None
         if not offline_sim:
             # Enforce per-minute completion rate only for real provider calls
@@ -5010,6 +5020,7 @@ async def character_chat_completion(
                     tools=body.tools,
                     tool_choice=body.tool_choice,
                     billing_prompt_cache_intent=body.billing_prompt_cache_intent,
+                    inference_prefix_cache_intent=body.inference_prefix_cache_intent,
                     streaming=bool(body.stream),
                     user_identifier=str(current_user.id),
                     app_config=byok_resolution.app_config,

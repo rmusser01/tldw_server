@@ -1,3 +1,10 @@
+"""Provider billing prompt-cache intent helpers.
+
+This module translates explicit caller cache intent into documented
+provider-specific request fields. It records only bounded diagnostics;
+authoritative cache reads and writes still come from provider usage metadata.
+"""
+
 from __future__ import annotations
 
 import copy

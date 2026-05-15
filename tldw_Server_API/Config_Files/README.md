@@ -100,6 +100,7 @@ How to apply changes
 - `prompt_guardrails_warn_static_segment_tokens` / `prompt_guardrails_warn_world_book_tokens` (int, optional): Segment-specific warning thresholds for cache-sensitive prompt sections.
 - `prompt_guardrails_warn_max_output_tokens` / `prompt_guardrails_warn_choice_count` (int, optional): Warn when output caps or `n` can multiply cost.
 - `prompt_guardrails_warn_reasoning_efforts` (csv): Reasoning-effort values that should warn about hidden/reasoning-token risk. Default: `high,xhigh`.
+- `prompt_guardrails_warn_on_fingerprint_churn` (bool): Warn when static prompt fingerprints churn between requests, indicating lower cache reuse potential. Default: `true`.
 - `history_messages_limit` (int): History window size for context (1-500).
 - `history_messages_order` (str): `asc|desc` ordering of loaded history.
 

@@ -2168,7 +2168,7 @@ def estimate_tokens_from_json(request_json: str) -> int:
         return 1
 
 
-_DATA_URI_RE = re.compile(r"(data:image[^,]*,)[^\"\\s]+", re.IGNORECASE)
+_DATA_URI_RE = re.compile(r'(data:image[^,]*,)[^"\s]+', re.IGNORECASE)
 
 
 def _sanitize_data_uris(text: str) -> str:
@@ -3381,7 +3381,16 @@ def _evaluate_chat_prompt_cost_guardrails(
         config = load_prompt_cost_guardrail_config()
         if not config.enabled:
             return None
-        envelope = build_prompt_cost_envelope(templated_llm_payload)
+        envelope_messages = list(templated_llm_payload)
+        system_message = cleaned_args.get("system_message")
+        if system_message is not None and (
+            not isinstance(system_message, str) or system_message.strip()
+        ):
+            envelope_messages = [
+                {"role": "system", "content": system_message},
+                *envelope_messages,
+            ]
+        envelope = build_prompt_cost_envelope(envelope_messages)
         decision = evaluate_prompt_cost_guardrails(
             envelope,
             request_options=cleaned_args,

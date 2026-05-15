@@ -605,20 +605,18 @@ def migration_085_remove_api_keys_scope_default(conn: sqlite3.Connection) -> Non
     # trigger when the live api_keys table is dropped.
     conn.execute("PRAGMA foreign_keys = OFF")
     try:
-        conn.execute(
-            f"""
+        create_api_keys_sql = f"""
             CREATE TABLE IF NOT EXISTS api_keys_new (
                 {', '.join(column_defs)}
             )
-            """
-        )
-        conn.execute(
-            f"""
+            """  # nosec B608
+        conn.execute(create_api_keys_sql)
+        copy_api_keys_sql = f"""
             INSERT INTO api_keys_new ({', '.join(current_columns)})
             SELECT {', '.join(current_columns)}
             FROM api_keys
-            """
-        )
+            """  # nosec B608
+        conn.execute(copy_api_keys_sql)
         conn.execute("DROP TABLE IF EXISTS api_keys")
         conn.execute("ALTER TABLE api_keys_new RENAME TO api_keys")
 
@@ -1869,22 +1867,31 @@ def migration_054_add_llm_usage_log_router_analytics_columns(conn: sqlite3.Conne
 
 def migration_088_add_llm_usage_cache_accounting_columns(conn: sqlite3.Connection) -> None:
     """Add cache-aware accounting columns to llm_usage_log (SQLite)."""
-    statements = (
-        "ALTER TABLE llm_usage_log ADD COLUMN cached_input_tokens INTEGER",
-        "ALTER TABLE llm_usage_log ADD COLUMN cache_write_input_tokens INTEGER",
-        "ALTER TABLE llm_usage_log ADD COLUMN cache_read_input_tokens INTEGER",
-        "ALTER TABLE llm_usage_log ADD COLUMN billable_input_tokens INTEGER",
-        "ALTER TABLE llm_usage_log ADD COLUMN reasoning_tokens INTEGER",
-        "ALTER TABLE llm_usage_log ADD COLUMN choice_count INTEGER",
-        "ALTER TABLE llm_usage_log ADD COLUMN estimate_source TEXT",
-        "ALTER TABLE llm_usage_log ADD COLUMN prompt_fingerprint TEXT",
-        "ALTER TABLE llm_usage_log ADD COLUMN prompt_fingerprint_version TEXT",
-        "ALTER TABLE llm_usage_log ADD COLUMN world_book_fingerprint TEXT",
-        "ALTER TABLE llm_usage_log ADD COLUMN raw_usage_metadata_json TEXT",
+    existing_columns = {
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(llm_usage_log)").fetchall()
+    }
+    if not existing_columns:
+        raise sqlite3.OperationalError("llm_usage_log table missing for migration 088")
+
+    columns = (
+        ("cached_input_tokens", "INTEGER"),
+        ("cache_write_input_tokens", "INTEGER"),
+        ("cache_read_input_tokens", "INTEGER"),
+        ("billable_input_tokens", "INTEGER"),
+        ("reasoning_tokens", "INTEGER"),
+        ("choice_count", "INTEGER"),
+        ("estimate_source", "TEXT"),
+        ("prompt_fingerprint", "TEXT"),
+        ("prompt_fingerprint_version", "TEXT"),
+        ("world_book_fingerprint", "TEXT"),
+        ("raw_usage_metadata_json", "TEXT"),
     )
-    for statement in statements:
-        with contextlib.suppress(_AUTHNZ_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-            conn.execute(statement)
+    for column_name, column_type in columns:
+        if column_name in existing_columns:
+            continue
+        conn.execute(f"ALTER TABLE llm_usage_log ADD COLUMN {column_name} {column_type}")  # nosec B608
+        existing_columns.add(column_name)
 
     conn.commit()
     logger.info("Migration 088: Added llm_usage_log cache accounting columns")

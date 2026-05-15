@@ -256,7 +256,8 @@ def compute_costs(
         if billable_input_tokens is None:
             normal_input = max(0, prompt_total - cache_read - cache_write)
         else:
-            normal_input = min(max(0, int(billable_input_tokens or 0)), prompt_total)
+            max_normal_input = max(0, prompt_total - cache_read - cache_write)
+            normal_input = min(max(0, int(billable_input_tokens or 0)), max_normal_input)
         cache_read_rate = rates.get("cache_read", in_per_1k)
         cache_write_rate = rates.get("cache_write", in_per_1k)
         prompt_cost = (
@@ -310,8 +311,8 @@ async def log_llm_usage(
         ct = int(completion_tokens or 0)
         tt = int(total_tokens) if total_tokens is not None else pt + ct
         resolved_estimate_source = estimate_source
-        if resolved_estimate_source is None and usage_metadata is None:
-            resolved_estimate_source = "missing_usage" if estimated else "provider_usage"
+        if resolved_estimate_source is None:
+            resolved_estimate_source = "provider_usage" if usage_metadata is not None else "missing_usage"
         # Normalize provider cache/cost metadata without changing the legacy
         # prompt/completion/total token columns used by existing callers.
         normalized_usage = normalize_llm_usage(
@@ -342,7 +343,7 @@ async def log_llm_usage(
             billable_input_tokens=normalized_usage.billable_input_tokens,
         )
         if estimated is None:
-            estimated = est_flag
+            estimated = est_flag or normalized_usage.estimate_source != "provider_usage"
 
         settings = get_settings()
         effective_remote_ip = remote_ip

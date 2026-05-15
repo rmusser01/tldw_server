@@ -648,6 +648,18 @@ async def fetch_llm_usage_summary(
             )
             rows = await db.fetch(sql, *params)
         out: list[dict[str, Any]] = []
+        cache_summary_defaults = {
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "billable_input_tokens": 0,
+            "provider_usage_count": 0,
+            "stream_estimate_count": 0,
+            "disconnect_estimate_count": 0,
+            "missing_usage_count": 0,
+            "local_diagnostic_count": 0,
+            "estimated_usage_count": 0,
+        }
         for r in rows:
             d = dict(r)
             try:
@@ -662,6 +674,8 @@ async def fetch_llm_usage_summary(
                     d["group_value_secondary"] = str(d.get(secondary_key))
             else:
                 d["group_value_secondary"] = None
+            for key, default_value in cache_summary_defaults.items():
+                d.setdefault(key, default_value)
             out.append(d)
         return out
     # SQLite

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections.abc import AsyncIterator, Iterator
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
@@ -21,34 +23,34 @@ from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
 
 
 class _DummyStreamTracker:
-    def add_heartbeat(self):
+    def add_heartbeat(self) -> None:
         return None
 
-    def add_chunk(self):
+    def add_chunk(self) -> None:
         return None
 
 
 class _DummyMetrics:
-    def track_llm_call(self, *_args, **_kwargs):
+    def track_llm_call(self, *_args: object, **_kwargs: object) -> None:
         return None
 
-    def track_provider_fallback_success(self, *_args, **_kwargs):
+    def track_provider_fallback_success(self, *_args: object, **_kwargs: object) -> None:
         return None
 
-    def track_rate_limit(self, *_args, **_kwargs):
+    def track_rate_limit(self, *_args: object, **_kwargs: object) -> None:
         return None
 
-    def track_tokens(self, **_kwargs):
+    def track_tokens(self, **_kwargs: object) -> None:
         return None
 
-    def track_moderation_output(self, *_args, **_kwargs):
+    def track_moderation_output(self, *_args: object, **_kwargs: object) -> None:
         return None
 
-    def track_moderation_stream_block(self, *_args, **_kwargs):
+    def track_moderation_stream_block(self, *_args: object, **_kwargs: object) -> None:
         return None
 
     @contextlib.asynccontextmanager
-    async def track_streaming(self, *_args, **_kwargs):
+    async def track_streaming(self, *_args: object, **_kwargs: object) -> AsyncIterator[_DummyStreamTracker]:
         yield _DummyStreamTracker()
 
 
@@ -57,20 +59,20 @@ class _NoModeration:
         enabled = False
         output_enabled = False
 
-    def get_effective_policy(self, *_args, **_kwargs):
+    def get_effective_policy(self, *_args: object, **_kwargs: object) -> _NoModeration._Policy:
         return self._Policy()
 
-    def evaluate_action(self, *_args, **_kwargs):
+    def evaluate_action(self, *_args: object, **_kwargs: object) -> None:
         return None
 
-    def check_text(self, *_args, **_kwargs):
+    def check_text(self, *_args: object, **_kwargs: object) -> tuple[bool, None]:
         return (False, None)
 
-    def redact_text(self, text, *_args, **_kwargs):
+    def redact_text(self, text: str, *_args: object, **_kwargs: object) -> str:
         return text
 
 
-def _warning_codes(decision) -> set[str]:
+def _warning_codes(decision: Any) -> set[str]:
     return {warning["code"] for warning in decision.to_response_metadata()["warnings"]}
 
 
@@ -83,7 +85,7 @@ def _chat_request() -> SimpleNamespace:
     )
 
 
-async def _save_message_fn(*_args, **_kwargs):
+async def _save_message_fn(*_args: object, **_kwargs: object) -> None:
     return None
 
 
@@ -102,7 +104,7 @@ async def _collect_sse_chunks(response: StreamingResponse) -> list[str]:
     return chunks
 
 
-def test_default_config_is_disabled_and_warn_only():
+def test_default_config_is_disabled_and_warn_only() -> None:
     envelope = build_prompt_cost_envelope(
         [{"role": "system", "content": "rules " * 1000}],
         world_book_text="world " * 1000,
@@ -116,7 +118,7 @@ def test_default_config_is_disabled_and_warn_only():
     assert decision.to_response_metadata()["warnings"] == []
 
 
-def test_warn_only_thresholds_return_bounded_metadata_without_prompt_text():
+def test_warn_only_thresholds_return_bounded_metadata_without_prompt_text() -> None:
     secret_text = "secret-" + ("x" * 600)
     envelope = build_prompt_cost_envelope(
         [{"role": "system", "content": secret_text}],
@@ -144,7 +146,7 @@ def test_warn_only_thresholds_return_bounded_metadata_without_prompt_text():
     assert "secret-" not in repr(metadata)
 
 
-def test_hard_block_threshold_overrides_warn_only_defaults():
+def test_hard_block_threshold_overrides_warn_only_defaults() -> None:
     envelope = build_prompt_cost_envelope([{"role": "user", "content": "hello world"}])
 
     decision = evaluate_prompt_cost_guardrails(
@@ -159,7 +161,7 @@ def test_hard_block_threshold_overrides_warn_only_defaults():
     assert "prompt_estimate_exceeds_hard_cap" in _warning_codes(decision)
 
 
-def test_fingerprint_churn_warns_for_adjacent_turn_cache_risk():
+def test_fingerprint_churn_warns_for_adjacent_turn_cache_risk() -> None:
     envelope = build_prompt_cost_envelope([{"role": "system", "content": "new stable rules"}])
 
     decision = evaluate_prompt_cost_guardrails(
@@ -177,7 +179,7 @@ def test_fingerprint_churn_warns_for_adjacent_turn_cache_risk():
     )
 
 
-def test_output_choice_and_reasoning_risks_warn_from_request_parameters():
+def test_output_choice_and_reasoning_risks_warn_from_request_parameters() -> None:
     envelope = build_prompt_cost_envelope([{"role": "user", "content": "hi"}])
 
     decision = evaluate_prompt_cost_guardrails(
@@ -203,8 +205,41 @@ def test_output_choice_and_reasoning_risks_warn_from_request_parameters():
     }.issubset(_warning_codes(decision))
 
 
+def test_chat_prompt_guardrail_envelope_includes_separate_system_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_messages: list[dict[str, Any]] = []
+
+    def fake_build_prompt_cost_envelope(messages: list[dict[str, Any]], **_kwargs: object) -> Any:
+        captured_messages[:] = [dict(message) for message in messages]
+        return build_prompt_cost_envelope(messages)
+
+    monkeypatch.setattr(
+        chat_service,
+        "load_prompt_cost_guardrail_config",
+        lambda: PromptCostGuardrailConfig(enabled=True),
+    )
+    monkeypatch.setattr(chat_service, "build_prompt_cost_envelope", fake_build_prompt_cost_envelope)
+
+    decision = chat_service._evaluate_chat_prompt_cost_guardrails(
+        cleaned_args={"system_message": "stable rules"},
+        templated_llm_payload=[{"role": "user", "content": "hello"}],
+        selected_provider="openai",
+        model="gpt-4o-mini",
+        streaming=False,
+    )
+
+    assert decision is None
+    assert captured_messages == [
+        {"role": "system", "content": "stable rules"},
+        {"role": "user", "content": "hello"},
+    ]
+
+
 @pytest.mark.asyncio
-async def test_execute_non_stream_call_attaches_prompt_guardrail_warnings(monkeypatch):
+async def test_execute_non_stream_call_attaches_prompt_guardrail_warnings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(chat_service, "get_topic_monitoring_service", lambda: None)
     monkeypatch.setattr(
         chat_service,
@@ -212,7 +247,7 @@ async def test_execute_non_stream_call_attaches_prompt_guardrail_warnings(monkey
         lambda: PromptCostGuardrailConfig(enabled=True, warn_total_estimated_tokens=1),
     )
 
-    async def fake_log_llm_usage(**_kwargs):
+    async def fake_log_llm_usage(**_kwargs: object) -> None:
         return None
 
     monkeypatch.setattr(chat_service, "log_llm_usage", fake_log_llm_usage)
@@ -259,7 +294,9 @@ async def test_execute_non_stream_call_attaches_prompt_guardrail_warnings(monkey
 
 
 @pytest.mark.asyncio
-async def test_execute_non_stream_call_blocks_before_provider_dispatch(monkeypatch):
+async def test_execute_non_stream_call_blocks_before_provider_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     called = False
     monkeypatch.setattr(
         chat_service,
@@ -267,7 +304,7 @@ async def test_execute_non_stream_call_blocks_before_provider_dispatch(monkeypat
         lambda: PromptCostGuardrailConfig(enabled=True, block_total_estimated_tokens=1),
     )
 
-    def llm_call_func():
+    def llm_call_func() -> dict[str, object]:
         nonlocal called
         called = True
         return {"choices": [{"message": {"role": "assistant", "content": "late"}}]}
@@ -311,7 +348,9 @@ async def test_execute_non_stream_call_blocks_before_provider_dispatch(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_execute_streaming_call_blocks_before_provider_dispatch(monkeypatch):
+async def test_execute_streaming_call_blocks_before_provider_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     called = False
     monkeypatch.setattr(
         chat_service,
@@ -319,7 +358,7 @@ async def test_execute_streaming_call_blocks_before_provider_dispatch(monkeypatc
         lambda: PromptCostGuardrailConfig(enabled=True, block_total_estimated_tokens=1),
     )
 
-    def llm_call_func():
+    def llm_call_func() -> Iterator[str]:
         nonlocal called
         called = True
         return iter(["late"])
