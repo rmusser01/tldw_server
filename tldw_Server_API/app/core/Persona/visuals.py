@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -21,14 +22,54 @@ VISUAL_STATE_IDS = {
     "offline",
 }
 REQUIRED_VISUAL_STATES = {"idle", "listening", "thinking", "speaking", "error"}
-SUPPORTED_TRIGGER_SOURCES = {"live_state", "tool_category", "mcp_runtime"}
+SUPPORTED_TRIGGER_SOURCES = {"live_state", "tool_category", "mcp_runtime", "tool_name"}
+SUPPORTED_STATE_CATALOG_KINDS = {
+    "tool_variant",
+    "reaction",
+    "live_variant",
+    "mcp_runtime",
+    "mood",
+    "pack_private",
+}
 
 MAX_FRAMES_PER_ANIMATION = 240
+MAX_CUSTOM_VISUAL_STATES = 256
+MAX_AUTHORED_TRIGGERS = 512
+MAX_FALLBACK_DEPTH = 8
 MIN_FRAME_DURATION_MS = 16
 MAX_FRAME_DURATION_MS = 30_000
 MIN_TRIGGER_DURATION_MS = 100
 MAX_TRIGGER_DURATION_MS = 30_000
 MAX_RENDERER_TYPE_ERROR_LENGTH = 100
+MAX_STATE_CATALOG_LABEL_LENGTH = 80
+MAX_STATE_CATALOG_DESCRIPTION_LENGTH = 280
+MAX_STATE_CATALOG_TAGS = 16
+MAX_STATE_CATALOG_TAG_LENGTH = 32
+CUSTOM_VISUAL_STATE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_.:-]{0,95}$")
+UNSAFE_CUSTOM_STATE_MARKERS = (
+    "access_token",
+    "api_key",
+    "apikey",
+    "auth_token",
+    "authorization",
+    "bearer_token",
+    "client_secret",
+    "password",
+    "passwd",
+    "private_key",
+    "refresh_token",
+    "secret",
+    "secret_key",
+)
+UNSAFE_CUSTOM_STATE_PREFIXES = (
+    "env:",
+    "file:",
+    "ftp:",
+    "http:",
+    "https:",
+    "proc:",
+    "ssh:",
+)
 
 
 class PersonaVisualManifestError(ValueError):
@@ -62,9 +103,13 @@ def validate_visual_manifest(
             available_asset_dimensions=dimensions,
         )
 
-    _validate_state_references(normalized)
-    _validate_fallbacks(normalized.get("fallbacks", {}))
-    _validate_authored_triggers(normalized.get("authored_triggers", []))
+    allowed_states = _allowed_visual_state_ids(normalized)
+    _validate_state_references(normalized, allowed_states=allowed_states)
+    _validate_fallbacks(normalized.get("fallbacks", {}), allowed_states=allowed_states)
+    _validate_authored_triggers(
+        normalized.get("authored_triggers", []),
+        allowed_states=allowed_states,
+    )
 
     resolved_required = {
         state: _resolve_state(state, normalized)
@@ -119,6 +164,7 @@ def _normalize_manifest_shape(
     animations = normalized.setdefault("animations", {})
     fallbacks = normalized.setdefault("fallbacks", {})
     authored_triggers = normalized.setdefault("authored_triggers", [])
+    state_catalog = normalized.setdefault("state_catalog", {})
 
     if not isinstance(states, dict):
         raise PersonaVisualManifestError("states must be an object")
@@ -128,6 +174,8 @@ def _normalize_manifest_shape(
         raise PersonaVisualManifestError("fallbacks must be an object")
     if not isinstance(authored_triggers, list):
         raise PersonaVisualManifestError("authored_triggers must be a list")
+    if not isinstance(state_catalog, dict):
+        raise PersonaVisualManifestError("state_catalog must be an object")
 
     for animation_id, animation in animations.items():
         if not isinstance(animation_id, str) or not animation_id:
@@ -135,6 +183,8 @@ def _normalize_manifest_shape(
         if not isinstance(animation, dict):
             raise PersonaVisualManifestError(f"Animation {animation_id} must be an object")
         animation["frames"] = _normalize_animation_frames(animation_id, animation)
+
+    _validate_state_catalog(state_catalog)
 
     return normalized
 
@@ -309,10 +359,117 @@ def _validate_frame_region(
         )
 
 
-def _validate_state_references(manifest: dict[str, Any]) -> None:
+def _validate_state_catalog(state_catalog: dict[str, Any]) -> None:
+    """Validate optional custom visual states declared by a sprite manifest."""
+    if len(state_catalog) > MAX_CUSTOM_VISUAL_STATES:
+        raise PersonaVisualManifestError(
+            f"state_catalog may define at most {MAX_CUSTOM_VISUAL_STATES} custom states"
+        )
+
+    for state_id, entry in state_catalog.items():
+        state_id_error = _custom_state_id_error(state_id)
+        if state_id_error:
+            raise PersonaVisualManifestError(state_id_error)
+        if state_id in VISUAL_STATE_IDS:
+            raise PersonaVisualManifestError(
+                f"state_catalog custom state {state_id} is reserved"
+            )
+        if not isinstance(entry, dict):
+            raise PersonaVisualManifestError(
+                f"state_catalog[{state_id}] must be an object"
+            )
+
+        label = entry.get("label")
+        if (
+            not isinstance(label, str)
+            or not label.strip()
+            or len(label) > MAX_STATE_CATALOG_LABEL_LENGTH
+            or _contains_control_character(label)
+        ):
+            raise PersonaVisualManifestError(
+                f"state_catalog[{state_id}].label must be a non-empty string up to "
+                f"{MAX_STATE_CATALOG_LABEL_LENGTH} characters"
+            )
+
+        kind = entry.get("kind")
+        if kind not in SUPPORTED_STATE_CATALOG_KINDS:
+            raise PersonaVisualManifestError(
+                f"state_catalog[{state_id}].kind must be one of "
+                f"{sorted(SUPPORTED_STATE_CATALOG_KINDS)}"
+            )
+
+        description = entry.get("description")
+        if description is not None and (
+            not isinstance(description, str)
+            or len(description) > MAX_STATE_CATALOG_DESCRIPTION_LENGTH
+            or _contains_control_character(description)
+        ):
+            raise PersonaVisualManifestError(
+                f"state_catalog[{state_id}].description must be a string up to "
+                f"{MAX_STATE_CATALOG_DESCRIPTION_LENGTH} characters"
+            )
+
+        tags = entry.get("tags")
+        if tags is not None:
+            _validate_state_catalog_tags(state_id, tags)
+
+
+def _validate_state_catalog_tags(state_id: str, tags: Any) -> None:
+    """Validate bounded user-facing tags for a custom visual state."""
+    if not isinstance(tags, list) or len(tags) > MAX_STATE_CATALOG_TAGS:
+        raise PersonaVisualManifestError(
+            f"state_catalog[{state_id}].tags must be a list of at most "
+            f"{MAX_STATE_CATALOG_TAGS} strings"
+        )
+    for index, tag in enumerate(tags):
+        if (
+            not isinstance(tag, str)
+            or not tag.strip()
+            or len(tag) > MAX_STATE_CATALOG_TAG_LENGTH
+            or _contains_control_character(tag)
+        ):
+            raise PersonaVisualManifestError(
+                f"state_catalog[{state_id}].tags[{index}] must be a non-empty string "
+                f"up to {MAX_STATE_CATALOG_TAG_LENGTH} characters"
+            )
+
+
+def _allowed_visual_state_ids(manifest: dict[str, Any]) -> set[str]:
+    """Return built-in states plus declared custom state_catalog keys."""
+    return VISUAL_STATE_IDS | manifest.get("state_catalog", {}).keys()
+
+
+def _custom_state_id_error(state_id: Any) -> str | None:
+    """Return a specific custom state ID validation error, or None if valid."""
+    if not isinstance(state_id, str):
+        return "state_catalog custom state ids must be strings"
+    if not CUSTOM_VISUAL_STATE_ID_PATTERN.fullmatch(state_id):
+        return (
+            "state_catalog custom state ids must match "
+            f"{CUSTOM_VISUAL_STATE_ID_PATTERN.pattern}"
+        )
+    lowered = state_id.lower()
+    if lowered.startswith(UNSAFE_CUSTOM_STATE_PREFIXES):
+        return "state_catalog custom state ids must not use unsafe prefixes"
+    compact = re.sub(r"[._:-]+", "_", lowered)
+    if any(marker in compact for marker in UNSAFE_CUSTOM_STATE_MARKERS):
+        return "state_catalog custom state ids must not contain unsafe markers"
+    return None
+
+
+def _contains_control_character(value: str) -> bool:
+    """Return whether user-facing manifest text contains ASCII control codes."""
+    return any(ord(character) < 32 or ord(character) == 127 for character in value)
+
+
+def _validate_state_references(
+    manifest: dict[str, Any],
+    *,
+    allowed_states: set[str],
+) -> None:
     animations = manifest["animations"]
     for state, mapping in manifest["states"].items():
-        if state not in VISUAL_STATE_IDS:
+        if state not in allowed_states:
             raise PersonaVisualManifestError(f"Unknown visual state {state}")
         if not isinstance(mapping, dict):
             raise PersonaVisualManifestError(f"State {state} mapping must be an object")
@@ -325,14 +482,18 @@ def _validate_state_references(manifest: dict[str, Any]) -> None:
             )
 
 
-def _validate_fallbacks(fallbacks: dict[str, Any]) -> None:
+def _validate_fallbacks(
+    fallbacks: dict[str, Any],
+    *,
+    allowed_states: set[str],
+) -> None:
     for state, fallback_chain in fallbacks.items():
-        if state not in VISUAL_STATE_IDS:
+        if state not in allowed_states:
             raise PersonaVisualManifestError(f"Unknown fallback state {state}")
         if not isinstance(fallback_chain, list):
             raise PersonaVisualManifestError(f"Fallback {state} must be a list")
         for fallback_state in fallback_chain:
-            if fallback_state not in VISUAL_STATE_IDS:
+            if fallback_state not in allowed_states:
                 raise PersonaVisualManifestError(
                     f"Fallback {state} references unknown state {fallback_state}"
                 )
@@ -341,6 +502,11 @@ def _validate_fallbacks(fallbacks: dict[str, Any]) -> None:
     visited: set[str] = set()
 
     def visit(state: str, path: tuple[str, ...]) -> None:
+        if len(path) >= MAX_FALLBACK_DEPTH:
+            raise PersonaVisualManifestError(
+                f"Fallback chain depth exceeds {MAX_FALLBACK_DEPTH}: "
+                + " -> ".join((*path, state))
+            )
         if state in visiting:
             raise PersonaVisualManifestError(
                 "Fallback cycle detected: " + " -> ".join((*path, state))
@@ -357,7 +523,15 @@ def _validate_fallbacks(fallbacks: dict[str, Any]) -> None:
         visit(state, ())
 
 
-def _validate_authored_triggers(triggers: list[Any]) -> None:
+def _validate_authored_triggers(
+    triggers: list[Any],
+    *,
+    allowed_states: set[str],
+) -> None:
+    if len(triggers) > MAX_AUTHORED_TRIGGERS:
+        raise PersonaVisualManifestError(
+            f"authored_triggers may define at most {MAX_AUTHORED_TRIGGERS} triggers"
+        )
     for index, trigger in enumerate(triggers):
         if not isinstance(trigger, dict):
             raise PersonaVisualManifestError(f"authored_triggers[{index}] must be an object")
@@ -374,7 +548,7 @@ def _validate_authored_triggers(triggers: list[Any]) -> None:
         if not isinstance(match, str) or not match:
             raise PersonaVisualManifestError(f"authored_triggers[{index}].match is required")
         state = trigger.get("state")
-        if state not in VISUAL_STATE_IDS:
+        if state not in allowed_states:
             raise PersonaVisualManifestError(
                 f"authored_triggers[{index}].state must be a known visual state"
             )
