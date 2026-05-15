@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from ....core.AuthNZ.User_DB_Handling import User, get_request_user
+from ....core.AuthNZ.repos.prototype_workspaces_repo import InactivePrototypeSharedActorError
 from ..schemas.prototype_workspace_schemas import (
     PrototypeCollaboratorSessionCreateRequest,
     PrototypePreviewGrantResponse,
@@ -167,7 +168,10 @@ def _is_inactive_prototype_record(record: dict[str, Any] | None) -> bool:
         return True
     if record.get("is_revoked") or record.get("revoked_at"):
         return True
-    expires_at = _parse_optional_datetime(record.get("expires_at"))
+    raw_expires_at = record.get("expires_at")
+    expires_at = _parse_optional_datetime(raw_expires_at)
+    if raw_expires_at not in (None, "") and expires_at is None:
+        return True
     return bool(expires_at and expires_at <= datetime.now(timezone.utc))
 
 
@@ -204,10 +208,12 @@ async def _assert_external_promotion_actor_active(
 
     token_workspace_id = str(token_payload.get("prototype_workspace_id") or "").strip()
     token_share_link_id = _coerce_optional_int(token_payload.get("share_link_id"))
+    session_share_link_id = _coerce_optional_int(session.get("share_link_id"))
     actor_share_link_id = _coerce_optional_int(actor.get("share_link_id"))
     if (
         str(actor.get("prototype_workspace_id") or "") != token_workspace_id
         or token_share_link_id is None
+        or session_share_link_id != token_share_link_id
         or actor_share_link_id != token_share_link_id
     ):
         raise _inactive_prototype_session_error()
@@ -486,10 +492,8 @@ async def create_promotion_request(
             candidate_snapshot_id=body.candidate_snapshot_id,
             requested_by_shared_actor_id=str(token_payload["shared_actor_id"]),
         )
-    except ValueError as exc:
-        if "requested_by_shared_actor_id" in str(exc):
-            raise _inactive_prototype_session_error() from exc
-        raise
+    except InactivePrototypeSharedActorError as exc:
+        raise _inactive_prototype_session_error() from exc
     return PrototypePromotionRequestResponse.model_validate(promotion_request)
 
 

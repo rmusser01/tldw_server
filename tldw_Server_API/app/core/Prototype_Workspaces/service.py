@@ -142,6 +142,7 @@ class PrototypeWorkspaceService:
             actor_type=actor_type,
             actor_user_id=actor_user_id,
             actor_shared_actor_id=actor_shared_actor_id,
+            share_link_id=share_link_id,
         )
         if existing:
             return {

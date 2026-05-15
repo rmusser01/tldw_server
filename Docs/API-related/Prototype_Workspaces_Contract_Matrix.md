@@ -52,6 +52,7 @@ Risk Gate 1 security model: ../Security/Prototype_Workspaces_Threat_Model.md
 
 - Fixture schema owner: Frontend/Product.
 - Mock state owner: Frontend/Product.
+- Risk Gate 1 seed fixture: `apps/tldw-frontend/e2e/fixtures/prototype-workspaces/contract-states.json`.
 - Contract feedback deadline: before Risk Gate 4 contract freeze.
 - Required fixture states: `invalid_link`, `expired_link`, `revoked_link`, `exhausted_link`, `password_required`, `bad_password`, `archived_workspace`, `inactive_session`, `preview_unavailable`, `stale_promotion`, `promotion_conflict`, `promotion_validation_failed`, and `bootstrap_failed`.
 - Route-state audit checklist:

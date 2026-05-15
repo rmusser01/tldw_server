@@ -17,6 +17,10 @@ _VALID_PREVIEW_SCOPES = {"canonical", "session"}
 _ROW_CONVERSION_EXCEPTIONS = (AttributeError, KeyError, TypeError, ValueError)
 
 
+class InactivePrototypeSharedActorError(ValueError):
+    """Raised when a shared actor is missing, revoked, or outside its allowed scope."""
+
+
 def _to_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -462,6 +466,42 @@ class PrototypeWorkspacesRepo:
         )
         return await self.get_shared_actor(shared_actor_id)
 
+    async def revoke_shared_actor(
+        self,
+        shared_actor_id: str,
+        *,
+        revoked_at: str | datetime | None = None,
+    ) -> dict[str, Any] | None:
+        """Revoke a shared actor without exposing raw table updates to callers."""
+        ts = self._ts()
+        await self.db_pool.execute(
+            """
+            UPDATE prototype_shared_actors
+            SET revoked_at = ?, updated_at = ?
+            WHERE id = ? AND revoked_at IS NULL
+            """,
+            (revoked_at if revoked_at is not None else ts, ts, shared_actor_id),
+        )
+        return await self.get_shared_actor(shared_actor_id)
+
+    async def update_shared_actor_expiry(
+        self,
+        shared_actor_id: str,
+        *,
+        expires_at: str | datetime | None,
+    ) -> dict[str, Any] | None:
+        """Set a shared actor expiry timestamp through the repository boundary."""
+        ts = self._ts()
+        await self.db_pool.execute(
+            """
+            UPDATE prototype_shared_actors
+            SET expires_at = ?, updated_at = ?
+            WHERE id = ? AND revoked_at IS NULL
+            """,
+            (expires_at, ts, shared_actor_id),
+        )
+        return await self.get_shared_actor(shared_actor_id)
+
     async def rotate_shared_actor_binding(
         self,
         shared_actor_id: str,
@@ -542,7 +582,7 @@ class PrototypeWorkspacesRepo:
         if actor_shared_actor_id is not None:
             shared_actor_row = await self.db_pool.fetchone(
                 """
-                SELECT id
+                SELECT id, share_link_id
                 FROM prototype_shared_actors
                 WHERE id = ? AND prototype_workspace_id = ? AND revoked_at IS NULL
                 """,
@@ -552,6 +592,13 @@ class PrototypeWorkspacesRepo:
                 raise ValueError(
                     "actor_shared_actor_id must reference an active shared actor in the same workspace"
                 )
+            if actor_type_value == "external_collaborator":
+                if share_link_id is None:
+                    raise ValueError("external_collaborator requires share_link_id")
+                shared_actor = self._row_to_dict(shared_actor_row)
+                actor_share_link_id = int(shared_actor["share_link_id"])
+                if actor_share_link_id != int(share_link_id):
+                    raise ValueError("share_link_id must match actor_shared_actor_id")
 
         if actor_type_value == "owner" and int(actor_user_id) != int(workspace["owner_user_id"]):
             raise ValueError("owner actor must match workspace owner")
@@ -600,6 +647,24 @@ class PrototypeWorkspacesRepo:
         )
         return self._normalize_session_row(self._row_to_dict(row) if row else None)
 
+    async def update_session_expiry(
+        self,
+        prototype_session_id: str,
+        *,
+        expires_at: str | datetime | None,
+    ) -> dict[str, Any] | None:
+        """Set a prototype session expiry timestamp through the repository boundary."""
+        ts = self._ts()
+        await self.db_pool.execute(
+            """
+            UPDATE prototype_sessions
+            SET expires_at = ?, updated_at = ?
+            WHERE id = ? AND revoked_at IS NULL
+            """,
+            (expires_at, ts, prototype_session_id),
+        )
+        return await self.get_session(prototype_session_id)
+
     async def list_sessions_for_workspace(
         self,
         prototype_workspace_id: str,
@@ -644,9 +709,11 @@ class PrototypeWorkspacesRepo:
         actor_type: str,
         actor_user_id: int | None = None,
         actor_shared_actor_id: str | None = None,
+        share_link_id: int | None = None,
     ) -> dict[str, Any] | None:
         actor_type_value = _normalize_actor_type(actor_type)
         actor_user_param = int(actor_user_id) if actor_user_id is not None else None
+        share_link_param = int(share_link_id) if share_link_id is not None else None
         row = await self.db_pool.fetchone(
             """
             SELECT id, prototype_workspace_id, base_snapshot_id, actor_user_id,
@@ -660,6 +727,7 @@ class PrototypeWorkspacesRepo:
               AND actor_type = ?
               AND (? IS NULL OR actor_user_id = ?)
               AND (? IS NULL OR actor_shared_actor_id = ?)
+              AND (? IS NULL OR share_link_id = ?)
               AND revoked_at IS NULL
               AND (runtime_status IS NULL OR LOWER(runtime_status) NOT IN ('failed', 'revoked', 'closed'))
               AND (expires_at IS NULL OR expires_at > ?)
@@ -674,6 +742,8 @@ class PrototypeWorkspacesRepo:
                 actor_user_param,
                 actor_shared_actor_id,
                 actor_shared_actor_id,
+                share_link_param,
+                share_link_param,
                 self._ts(),
             ),
         )
@@ -921,7 +991,7 @@ class PrototypeWorkspacesRepo:
                 (requested_by_shared_actor_id, prototype_workspace_id),
             )
             if not shared_actor_row:
-                raise ValueError(
+                raise InactivePrototypeSharedActorError(
                     "requested_by_shared_actor_id must reference an active shared actor in the same workspace"
                 )
 
