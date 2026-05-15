@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mockState = vi.hoisted(() => ({
@@ -206,6 +206,7 @@ describe("WritingPlayground topbar design-system state labels", () => {
   it("renders the ready diagnostics label from the design-system registry", () => {
     render(<WritingPlayground />)
 
-    expect(screen.getByText(mockState.registryReadyLabel)).toBeInTheDocument()
+    const topbar = screen.getByTestId("writing-playground-topbar")
+    expect(within(topbar).getByText(mockState.registryReadyLabel)).toBeInTheDocument()
   })
 })
