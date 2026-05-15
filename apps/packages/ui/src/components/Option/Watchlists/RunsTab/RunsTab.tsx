@@ -116,6 +116,7 @@ export const RunsTab: React.FC = () => {
   const pollingActive = useWatchlistsStore((s) => s.pollingActive)
   const runDetailOpen = useWatchlistsStore((s) => s.runDetailOpen)
   const selectedRunId = useWatchlistsStore((s) => s.selectedRunId)
+  const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
   const [jobs, setJobs] = useState<WatchlistJob[]>([])
   const [exportingRunsCsv, setExportingRunsCsv] = useState(false)
   const [runsCsvTalliesMode, setRunsCsvTalliesMode] = useState<RunsCsvTalliesMode>("none")
@@ -188,6 +189,7 @@ export const RunsTab: React.FC = () => {
         pagedItems = items
       } else {
         const result = await fetchWatchlistRuns({
+          watchlist_id: selectedWatchlistId ?? undefined,
           q: runsStatusFilter || undefined,
           page: runsPage,
           size: runsPageSize
@@ -218,6 +220,7 @@ export const RunsTab: React.FC = () => {
   }, [
     runsJobFilter,
     runsStatusFilter,
+    selectedWatchlistId,
     runsPage,
     runsPageSize,
     setRuns,
@@ -229,12 +232,16 @@ export const RunsTab: React.FC = () => {
   // Load jobs for filter dropdown
   const loadJobs = useCallback(async () => {
     try {
-      const result = await fetchWatchlistJobs({ page: 1, size: 200 })
+      const result = await fetchWatchlistJobs({
+        watchlist_id: selectedWatchlistId ?? undefined,
+        page: 1,
+        size: 200
+      })
       setJobs(result.items || [])
     } catch (err) {
       console.error("Failed to fetch jobs:", err)
     }
-  }, [])
+  }, [selectedWatchlistId])
 
   // Initial load
   useEffect(() => {
@@ -376,6 +383,7 @@ export const RunsTab: React.FC = () => {
       const result = runsJobFilter
         ? await fetchJobRuns(runsJobFilter, { page, size: RUNS_API_PAGE_SIZE })
         : await fetchWatchlistRuns({
+            watchlist_id: selectedWatchlistId ?? undefined,
             q: runsStatusFilter || undefined,
             page,
             size: RUNS_API_PAGE_SIZE
@@ -394,7 +402,7 @@ export const RunsTab: React.FC = () => {
       return collected.filter((run) => run.status === runsStatusFilter)
     }
     return collected
-  }, [runsJobFilter, runsStatusFilter])
+  }, [runsJobFilter, runsStatusFilter, selectedWatchlistId])
 
   const toRunsCsv = useCallback((items: WatchlistRun[]): string => {
     const rows = [
@@ -454,6 +462,7 @@ export const RunsTab: React.FC = () => {
     if (scope === "global" && talliesMode === "aggregate") {
       return exportRunsCsv({
         scope,
+        watchlist_id: selectedWatchlistId ?? undefined,
         q,
         include_tallies: true,
         tallies_mode: "aggregate"
@@ -468,6 +477,7 @@ export const RunsTab: React.FC = () => {
     while (true) {
       const csvChunk = await exportRunsCsv({
         scope,
+        watchlist_id: selectedWatchlistId ?? undefined,
         job_id: runsJobFilter || undefined,
         q,
         page,
@@ -495,7 +505,7 @@ export const RunsTab: React.FC = () => {
     }
     if (!header) return ""
     return `${[header, ...dataRows].join("\n")}\n`
-  }, [runsJobFilter, runsStatusFilter])
+  }, [runsJobFilter, runsStatusFilter, selectedWatchlistId])
 
   const handleExportRunsCsv = useCallback(async (modeOverride?: RunsCsvTalliesMode) => {
     try {

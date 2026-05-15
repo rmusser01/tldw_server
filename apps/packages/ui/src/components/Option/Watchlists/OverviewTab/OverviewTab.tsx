@@ -185,6 +185,7 @@ export const OverviewTab: React.FC = () => {
   const openOutputPreview = useWatchlistsStore((s) => s.openOutputPreview)
   const openSourceForm = useWatchlistsStore((s) => s.openSourceForm)
   const openJobForm = useWatchlistsStore((s) => s.openJobForm)
+  const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
 
   const loadOverview = useCallback(async (showLoading: boolean) => {
     if (showLoading) {
@@ -193,7 +194,9 @@ export const OverviewTab: React.FC = () => {
       setRefreshing(true)
     }
     try {
-      const result = await fetchWatchlistsOverviewData()
+      const result = await fetchWatchlistsOverviewData({
+        watchlist_id: selectedWatchlistId ?? undefined
+      })
       setData(result)
       if (typeof setOverviewHealth === "function") {
         setOverviewHealth(result.health, result.fetchedAt)
@@ -216,7 +219,7 @@ export const OverviewTab: React.FC = () => {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [setOverviewHealth, t])
+  }, [selectedWatchlistId, setOverviewHealth, t])
 
   useEffect(() => {
     void loadOverview(true)
@@ -493,9 +496,10 @@ export const OverviewTab: React.FC = () => {
       } as QuickSetupValues
       setQuickSetupSubmitting(true)
 
-      const source = await createWatchlistSource(
-        toQuickSetupSourcePayload(values)
-      )
+      const source = await createWatchlistSource({
+        ...toQuickSetupSourcePayload(values),
+        watchlist_id: selectedWatchlistId ?? undefined
+      })
       const sourceIds: number[] = [source.id]
       const rawExtraSourceUrls = String(values.extraSourceUrls || "").trim()
       const extraSourceUrls = parseQuickSetupExtraSourceUrls(rawExtraSourceUrls)
@@ -518,7 +522,8 @@ export const OverviewTab: React.FC = () => {
               name: host,
               url,
               source_type: values.sourceType,
-              active: true
+              active: true,
+              watchlist_id: selectedWatchlistId ?? undefined
             }
           })
         )
@@ -534,9 +539,10 @@ export const OverviewTab: React.FC = () => {
         sourceIds.push(...createdExtraSourceIds)
       }
 
-      const job = await createWatchlistJob(
-        toQuickSetupJobPayload(values, sourceIds)
-      )
+      const job = await createWatchlistJob({
+        ...toQuickSetupJobPayload(values, sourceIds),
+        watchlist_id: selectedWatchlistId ?? undefined
+      })
 
       let runId: number | null = null
       if (values.runNow) {
@@ -623,6 +629,7 @@ export const OverviewTab: React.FC = () => {
     openRunDetail,
     quickSetupForm,
     quickSetupStep,
+    selectedWatchlistId,
     setActiveTab,
     t
   ])
@@ -630,7 +637,11 @@ export const OverviewTab: React.FC = () => {
   const loadPipelineSources = useCallback(async () => {
     setPipelineSourcesLoading(true)
     try {
-      const result = await fetchWatchlistSources({ page: 1, size: 200 })
+      const result = await fetchWatchlistSources({
+        watchlist_id: selectedWatchlistId ?? undefined,
+        page: 1,
+        size: 200
+      })
       const items = Array.isArray(result.items) ? result.items : []
       setPipelineSources(items)
       const selectedIds = pipelineSetupForm.getFieldValue("sourceIds") as number[] | undefined
@@ -649,7 +660,7 @@ export const OverviewTab: React.FC = () => {
     } finally {
       setPipelineSourcesLoading(false)
     }
-  }, [pipelineSetupForm, t])
+  }, [pipelineSetupForm, selectedWatchlistId, t])
 
   const openPipelineSetup = useCallback(() => {
     pipelineSetupForm.setFieldsValue(PIPELINE_DEFAULT_VALUES)
@@ -742,7 +753,11 @@ export const OverviewTab: React.FC = () => {
         return
       }
 
-      const runResult = await fetchWatchlistRuns({ page: 1, size: 50 })
+      const runResult = await fetchWatchlistRuns({
+        watchlist_id: selectedWatchlistId ?? undefined,
+        page: 1,
+        size: 50
+      })
       const completedRun = (Array.isArray(runResult.items) ? runResult.items : []).find(
         (run) => String(run.status || "").trim().toLowerCase() === "completed"
       )
@@ -834,7 +849,7 @@ export const OverviewTab: React.FC = () => {
     } finally {
       setPipelinePreviewLoading(false)
     }
-  }, [pipelineSetupForm, t])
+  }, [pipelineSetupForm, selectedWatchlistId, t])
 
   const completePipelineSetup = useCallback(async (
     options?: { mode?: "create" | "test"; forceRunNow?: boolean }
@@ -899,7 +914,10 @@ export const OverviewTab: React.FC = () => {
       })
 
       pipelineFailureStage = "job_create"
-      const job = await createWatchlistJob(toPipelineJobCreatePayload(draft))
+      const job = await createWatchlistJob({
+        ...toPipelineJobCreatePayload(draft),
+        watchlist_id: selectedWatchlistId ?? undefined
+      })
       createdJobId = job.id
 
       if (!shouldRunNow) {
@@ -1006,6 +1024,7 @@ export const OverviewTab: React.FC = () => {
     openOutputPreview,
     openRunDetail,
     pipelineSetupForm,
+    selectedWatchlistId,
     setActiveTab,
     setOutputsRunFilter,
     t

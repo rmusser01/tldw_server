@@ -14,6 +14,7 @@ import {
   message
 } from "antd"
 import { useTranslation } from "react-i18next"
+import { useWatchlistsStore } from "@/store/watchlists"
 import {
   composeWatchlistTemplateSection,
   createWatchlistTemplate,
@@ -74,6 +75,7 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
   onClose
 }) => {
   const { t } = useTranslation(["watchlists", "common"])
+  const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
   const [form] = Form.useForm()
   const [saving, setSaving] = useState(false)
   const [loadingVersion, setLoadingVersion] = useState(false)
@@ -245,7 +247,11 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
       setAvailableRuns([])
       return
     }
-    fetchWatchlistRuns({ q: "completed", size: 20 })
+    fetchWatchlistRuns({
+      watchlist_id: selectedWatchlistId ?? undefined,
+      q: "completed",
+      size: 20
+    })
       .then((res) => {
         setAvailableRuns(
           (res.items || []).map((r) => ({
@@ -257,7 +263,7 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
       .catch(() => {
         setAvailableRuns([])
       })
-  }, [open])
+  }, [open, selectedWatchlistId])
 
   const handleLoadSelectedVersion = async () => {
     if (!template || !selectedVersion) return

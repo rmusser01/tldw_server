@@ -207,6 +207,7 @@ export const ItemsTab: React.FC = () => {
   const setStoreSmartFilter = useWatchlistsStore((s) => s.setItemsSmartFilter)
   const itemsSearch = useWatchlistsStore((s) => s.itemsSearchQuery)
   const setStoreItemsSearch = useWatchlistsStore((s) => s.setItemsSearchQuery)
+  const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
 
   const [sources, setSources] = useState<WatchlistSource[]>([])
   const [sourcesLoading, setSourcesLoading] = useState(false)
@@ -461,6 +462,7 @@ export const ItemsTab: React.FC = () => {
       queryOverride: string = effectiveSearchQuery
     ): FetchItemsParams => {
       const params: FetchItemsParams = {
+        watchlist_id: selectedWatchlistId ?? undefined,
         source_id: selectedSourceId ?? undefined,
         status: statusFilter === "all" ? undefined : statusFilter,
         q: queryOverride || undefined,
@@ -483,7 +485,7 @@ export const ItemsTab: React.FC = () => {
 
       return params
     },
-    [effectiveSearchQuery, queueRunFilter, selectedSourceId, smartFilter, statusFilter]
+    [effectiveSearchQuery, queueRunFilter, selectedSourceId, selectedWatchlistId, smartFilter, statusFilter]
   )
 
   const loadSources = useCallback(async () => {
@@ -497,6 +499,7 @@ export const ItemsTab: React.FC = () => {
 
       while (loaded.length < SOURCE_LOAD_MAX_ITEMS) {
         const response = await fetchWatchlistSources({
+          watchlist_id: selectedWatchlistId ?? undefined,
           page,
           size: SOURCE_LOAD_PAGE_SIZE
         })
@@ -529,12 +532,16 @@ export const ItemsTab: React.FC = () => {
       if (requestToken !== sourcesRequestTokenRef.current) return
       setSourcesLoading(false)
     }
-  }, [t])
+  }, [selectedWatchlistId, t])
 
   const loadRuns = useCallback(async () => {
     setRunsLoading(true)
     try {
-      const response = await fetchWatchlistRuns({ page: 1, size: 200 })
+      const response = await fetchWatchlistRuns({
+        watchlist_id: selectedWatchlistId ?? undefined,
+        page: 1,
+        size: 200
+      })
       setRuns(Array.isArray(response.items) ? response.items : [])
     } catch (error) {
       console.error("Failed to load watchlist runs:", error)
@@ -542,7 +549,7 @@ export const ItemsTab: React.FC = () => {
     } finally {
       setRunsLoading(false)
     }
-  }, [])
+  }, [selectedWatchlistId])
 
   const expandVisibleSourcesIfNeeded = useCallback(() => {
     const listElement = sourceListRef.current
@@ -598,6 +605,7 @@ export const ItemsTab: React.FC = () => {
     const requestToken = smartCountsRequestTokenRef.current + 1
     smartCountsRequestTokenRef.current = requestToken
     const cacheKey = [
+      selectedWatchlistId ?? "all-watchlists",
       selectedSourceId ?? "all",
       statusFilter,
       effectiveSearchQuery.trim().toLowerCase()
@@ -609,6 +617,7 @@ export const ItemsTab: React.FC = () => {
     }
     try {
       const base = {
+        watchlist_id: selectedWatchlistId ?? undefined,
         source_id: selectedSourceId ?? undefined,
         status: statusFilter === "all" ? undefined : statusFilter,
         q: effectiveSearchQuery || undefined,
@@ -634,7 +643,7 @@ export const ItemsTab: React.FC = () => {
       if (requestToken !== smartCountsRequestTokenRef.current) return
       console.error("Failed to load smart feed counts:", error)
     }
-  }, [effectiveSearchQuery, queueRunFilter, selectedSourceId, statusFilter])
+  }, [effectiveSearchQuery, queueRunFilter, selectedSourceId, selectedWatchlistId, statusFilter])
 
   const invalidateSmartCountsCache = useCallback(() => {
     smartCountsCacheRef.current = {}

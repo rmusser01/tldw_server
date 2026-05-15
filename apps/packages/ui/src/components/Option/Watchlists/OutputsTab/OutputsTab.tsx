@@ -111,6 +111,7 @@ export const OutputsTab: React.FC = () => {
   const outputsRunFilter = useWatchlistsStore((s) => s.outputsRunFilter)
   const outputPreviewOpen = useWatchlistsStore((s) => s.outputPreviewOpen)
   const selectedOutputId = useWatchlistsStore((s) => s.selectedOutputId)
+  const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
 
   // Store actions
   const setOutputs = useWatchlistsStore((s) => s.setOutputs)
@@ -170,6 +171,7 @@ export const OutputsTab: React.FC = () => {
     setOutputsLoading(true)
     try {
       const result = await fetchWatchlistOutputs({
+        watchlist_id: selectedWatchlistId ?? undefined,
         job_id: outputsJobFilter || undefined,
         run_id: outputsRunFilter || undefined,
         page: outputsPage,
@@ -196,6 +198,7 @@ export const OutputsTab: React.FC = () => {
   }, [
     outputsJobFilter,
     outputsRunFilter,
+    selectedWatchlistId,
     outputsPage,
     outputsPageSize,
     setOutputs,
@@ -206,12 +209,16 @@ export const OutputsTab: React.FC = () => {
   // Load jobs for filter dropdown
   const loadJobs = useCallback(async () => {
     try {
-      const result = await fetchWatchlistJobs({ page: 1, size: 200 })
+      const result = await fetchWatchlistJobs({
+        watchlist_id: selectedWatchlistId ?? undefined,
+        page: 1,
+        size: 200
+      })
       setJobs(result.items || [])
     } catch (err) {
       console.error("Failed to fetch jobs:", err)
     }
-  }, [])
+  }, [selectedWatchlistId])
 
   // Initial load
   useEffect(() => {

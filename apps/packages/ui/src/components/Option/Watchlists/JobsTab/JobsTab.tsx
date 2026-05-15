@@ -87,6 +87,7 @@ export const JobsTab: React.FC = () => {
   const jobsPageSize = useWatchlistsStore((s) => s.jobsPageSize)
   const jobFormOpen = useWatchlistsStore((s) => s.jobFormOpen)
   const jobFormEditId = useWatchlistsStore((s) => s.jobFormEditId)
+  const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
 
   // Store actions
   const setJobs = useWatchlistsStore((s) => s.setJobs)
@@ -117,6 +118,7 @@ export const JobsTab: React.FC = () => {
     setJobsLoading(true)
     try {
       const result = await fetchWatchlistJobs({
+        watchlist_id: selectedWatchlistId ?? undefined,
         page: jobsPage,
         size: jobsPageSize
       })
@@ -134,7 +136,7 @@ export const JobsTab: React.FC = () => {
     } finally {
       setJobsLoading(false)
     }
-  }, [jobsPage, jobsPageSize, setJobs, setJobsLoading, t])
+  }, [jobsPage, jobsPageSize, selectedWatchlistId, setJobs, setJobsLoading, t])
 
   // Initial load
   useEffect(() => {
@@ -144,7 +146,11 @@ export const JobsTab: React.FC = () => {
   const loadScopeCatalog = useCallback(async () => {
     try {
       const [sourcesResult, groupsResult] = await Promise.all([
-        fetchWatchlistSources({ page: 1, size: SCOPE_CATALOG_LIMIT }),
+        fetchWatchlistSources({
+          watchlist_id: selectedWatchlistId ?? undefined,
+          page: 1,
+          size: SCOPE_CATALOG_LIMIT
+        }),
         fetchWatchlistGroups({ page: 1, size: SCOPE_CATALOG_LIMIT })
       ])
 
@@ -163,7 +169,7 @@ export const JobsTab: React.FC = () => {
     } catch (err) {
       console.warn("Failed to fetch monitor scope catalog:", err)
     }
-  }, [])
+  }, [selectedWatchlistId])
 
   useEffect(() => {
     void loadScopeCatalog()
@@ -666,6 +672,7 @@ export const JobsTab: React.FC = () => {
         open={jobFormOpen}
         onClose={closeJobForm}
         initialValues={editingJob}
+        watchlistId={selectedWatchlistId}
         onSuccess={() => {
           closeJobForm()
           loadJobs()

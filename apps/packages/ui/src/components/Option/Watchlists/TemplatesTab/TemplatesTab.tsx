@@ -31,6 +31,7 @@ export const TemplatesTab: React.FC = () => {
   // Store state
   const templates = useWatchlistsStore((s) => s.templates)
   const templatesLoading = useWatchlistsStore((s) => s.templatesLoading)
+  const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
 
   // Store actions
   const setTemplates = useWatchlistsStore((s) => s.setTemplates)
@@ -94,6 +95,7 @@ export const TemplatesTab: React.FC = () => {
 
     while (page <= TEMPLATE_USAGE_CHECK_MAX_PAGES) {
       const response = await fetchWatchlistJobs({
+        watchlist_id: selectedWatchlistId ?? undefined,
         page,
         size: TEMPLATE_USAGE_CHECK_PAGE_SIZE
       })
@@ -109,7 +111,7 @@ export const TemplatesTab: React.FC = () => {
     }
 
     return allJobs
-  }, [])
+  }, [selectedWatchlistId])
 
   const requestDeleteConfirmation = useCallback(async (template: WatchlistTemplate) => {
     setCheckingTemplateDeleteName(template.name)

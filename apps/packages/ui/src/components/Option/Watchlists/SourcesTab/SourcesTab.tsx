@@ -149,6 +149,7 @@ export const SourcesTab: React.FC = () => {
   const selectedTagName = useWatchlistsStore((s) => s.selectedTagName)
   const sourceFormOpen = useWatchlistsStore((s) => s.sourceFormOpen)
   const sourceFormEditId = useWatchlistsStore((s) => s.sourceFormEditId)
+  const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
 
   // Store actions
   const setSources = useWatchlistsStore((s) => s.setSources)
@@ -245,6 +246,7 @@ export const SourcesTab: React.FC = () => {
     try {
       const useClientFilter = Boolean(selectedGroupId || selectedTypeFilter)
       const baseParams = {
+        watchlist_id: selectedWatchlistId ?? undefined,
         q: sourcesSearch || undefined,
         tags: selectedTagName ? [selectedTagName] : undefined
       }
@@ -334,6 +336,7 @@ export const SourcesTab: React.FC = () => {
     selectedTagName,
     selectedTypeFilter,
     selectedGroupId,
+    selectedWatchlistId,
     sourcesPage,
     sourcesPageSize,
     setSources,
@@ -407,6 +410,7 @@ export const SourcesTab: React.FC = () => {
 
     while (page <= SOURCE_USAGE_LOOKUP_MAX_PAGES) {
       const response = await fetchWatchlistJobs({
+        watchlist_id: selectedWatchlistId ?? undefined,
         page,
         size: SOURCE_USAGE_LOOKUP_PAGE_SIZE
       })
@@ -422,7 +426,7 @@ export const SourcesTab: React.FC = () => {
     }
 
     return allJobs
-  }, [])
+  }, [selectedWatchlistId])
 
   // Handle delete
   const handleDelete = async (sourceId: number) => {
@@ -1099,7 +1103,10 @@ export const SourcesTab: React.FC = () => {
         updateSourceInList(sourceFormEditId, updated)
         message.success(t("watchlists:sources.updated", "Source updated"))
       } else {
-        const created = await createWatchlistSource(values)
+        const created = await createWatchlistSource({
+          ...values,
+          watchlist_id: selectedWatchlistId ?? undefined
+        })
         addSource(created)
         message.success(t("watchlists:sources.created", "Source created"))
       }
@@ -1644,6 +1651,7 @@ export const SourcesTab: React.FC = () => {
         groups={groups}
         tags={tags}
         defaultGroupId={selectedGroupId}
+        watchlistId={selectedWatchlistId}
         onImported={() => {
           loadSources()
           loadTags()

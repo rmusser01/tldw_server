@@ -18,6 +18,7 @@ interface SourcesBulkImportProps {
   groups: WatchlistGroup[]
   tags: WatchlistTag[]
   defaultGroupId?: number | null
+  watchlistId?: number | null
   onImported: () => void
 }
 
@@ -120,6 +121,7 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
   groups,
   tags,
   defaultGroupId,
+  watchlistId,
   onImported
 }) => {
   const { t } = useTranslation(["watchlists", "common"])
@@ -156,6 +158,7 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
       let page = 1
       while (page <= EXISTING_URL_LOOKUP_MAX_PAGES) {
         const response = await fetchWatchlistSources({
+          watchlist_id: watchlistId ?? undefined,
           page,
           size: EXISTING_URL_LOOKUP_PAGE_SIZE
         })
@@ -185,7 +188,7 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
     } finally {
       setExistingUrlsLoading(false)
     }
-  }, [t])
+  }, [t, watchlistId])
 
   useEffect(() => {
     if (!open) {
@@ -245,7 +248,8 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
       const response = await importOpml(selectedFile, {
         active,
         tags: selectedTags,
-        group_id: selectedGroupId ?? undefined
+        group_id: selectedGroupId ?? undefined,
+        watchlist_id: watchlistId ?? undefined
       })
       setResult(response)
       onImported()
@@ -314,7 +318,8 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
       const retryResult = await importOpml(retryFile, {
         active,
         tags: selectedTags,
-        group_id: selectedGroupId ?? undefined
+        group_id: selectedGroupId ?? undefined,
+        watchlist_id: watchlistId ?? undefined
       })
       const retriedUrlSet = new Set(retryableFailedItems.map((item) => item.url))
       setResult((previous) => {

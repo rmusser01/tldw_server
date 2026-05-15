@@ -12,6 +12,7 @@ import type { JobScope, WatchlistGroup, WatchlistSource, WatchlistTag } from "@/
 interface ScopeSelectorProps {
   value: JobScope
   onChange: (scope: JobScope) => void
+  watchlistId?: number | null
 }
 
 type ScopeMode = "sources" | "groups" | "tags"
@@ -20,7 +21,8 @@ const SCOPE_SELECTOR_SOURCE_LIMIT = 500
 
 export const ScopeSelector: React.FC<ScopeSelectorProps> = ({
   value,
-  onChange
+  onChange,
+  watchlistId
 }) => {
   const { t } = useTranslation(["watchlists"])
 
@@ -47,6 +49,7 @@ export const ScopeSelector: React.FC<ScopeSelectorProps> = ({
 
       while (allSources.length < SCOPE_SELECTOR_SOURCE_LIMIT) {
         const result = await fetchWatchlistSources({
+          watchlist_id: watchlistId ?? undefined,
           page,
           size: SCOPE_SELECTOR_PAGE_SIZE
         })
@@ -80,7 +83,7 @@ export const ScopeSelector: React.FC<ScopeSelectorProps> = ({
       }
     }
     loadData()
-  }, [])
+  }, [watchlistId])
 
   // Sync active tab when value changes
   useEffect(() => {

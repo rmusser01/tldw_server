@@ -52,6 +52,7 @@ interface JobFormModalProps {
   onClose: () => void
   onSuccess: () => void
   initialValues?: WatchlistJob
+  watchlistId?: number | null
 }
 
 interface FormValues {
@@ -239,7 +240,8 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
   open,
   onClose,
   onSuccess,
-  initialValues
+  initialValues,
+  watchlistId
 }) => {
   const { t } = useTranslation(["watchlists", "common"])
   const [form] = Form.useForm<FormValues>()
@@ -759,7 +761,11 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
     let cancelled = false
 
     Promise.all([
-      fetchWatchlistSources({ page: 1, size: JOB_SCOPE_CATALOG_PAGE_SIZE }),
+      fetchWatchlistSources({
+        watchlist_id: watchlistId ?? undefined,
+        page: 1,
+        size: JOB_SCOPE_CATALOG_PAGE_SIZE
+      }),
       fetchWatchlistGroups({ page: 1, size: JOB_SCOPE_CATALOG_PAGE_SIZE })
     ])
       .then(([sourcesResult, groupsResult]) => {
@@ -782,7 +788,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
     return () => {
       cancelled = true
     }
-  }, [open])
+  }, [open, watchlistId])
 
   useEffect(() => {
     if (!open || !isEditing || !initialValues?.id) {
@@ -991,7 +997,8 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
         schedule_expr: schedule || undefined,
         timezone: timezone || undefined,
         output_prefs: isEditing ? (outputPrefs || {}) : outputPrefs,
-        job_filters: filters.length > 0 ? { filters } : undefined
+        job_filters: filters.length > 0 ? { filters } : undefined,
+        watchlist_id: watchlistId ?? undefined
       }
 
       const confirmationItems: string[] = []
@@ -1416,7 +1423,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
           <span className="text-danger ml-1">*</span>
         </span>
       ),
-      children: <ScopeSelector value={scope} onChange={setScope} />,
+      children: <ScopeSelector value={scope} onChange={setScope} watchlistId={watchlistId} />,
       forceRender: true
     },
     {
