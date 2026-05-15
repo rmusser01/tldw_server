@@ -128,3 +128,33 @@ class LlamaCppStartByModelRequest(BaseModel):
 
     model_id: str = Field(..., min_length=1)
     server_args: dict[str, object] = Field(default_factory=dict)
+
+
+class LlamaCppUseInChatResponse(BaseModel):
+    provider: str
+    endpoint: str
+    updated: bool
+    effective: bool
+    warnings: list[str] = Field(default_factory=list)
+
+
+class LlamaCppLogTailResponse(BaseModel):
+    lines: list[str] = Field(default_factory=list)
+    truncated: bool = False
+    warnings: list[str] = Field(default_factory=list)
+
+
+class LlamaCppGpuSnapshot(BaseModel):
+    index: int
+    name: str | None = None
+    memory_total_bytes: int | None = None
+    memory_free_bytes: int | None = None
+    memory_used_bytes: int | None = None
+
+
+class LlamaCppHardwareSnapshotResponse(BaseModel):
+    ram_total_bytes: int | None = None
+    ram_available_bytes: int | None = None
+    cpu_count: int | None = None
+    gpus: list[LlamaCppGpuSnapshot] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)

@@ -8,16 +8,19 @@ from typing import Any, Optional
 
 #
 # Thid-party Libraries
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, RequireRole, User
 from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
     LlamaCppConfigResponse,
     LlamaCppConfigUpdateRequest,
+    LlamaCppHardwareSnapshotResponse,
     LlamaCppInventoryItem,
     LlamaCppInventoryResponse,
+    LlamaCppLogTailResponse,
     LlamaCppRegisterModelPathRequest,
     LlamaCppStartByModelRequest,
+    LlamaCppUseInChatResponse,
     LlamaCppValidationRequest,
     LlamaCppValidationResponse,
 )
@@ -28,7 +31,12 @@ from tldw_Server_API.app.core.Local_LLM.LlamaCpp_Handler import LlamaCppHandler
 # Local Imports
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import InferenceError, ModelNotFoundError, ServerError
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Manager import LLMInferenceManager
-from tldw_Server_API.app.core.Local_LLM import llamacpp_config_service, llamacpp_inventory_service
+from tldw_Server_API.app.core.Local_LLM import (
+    llamacpp_config_service,
+    llamacpp_hardware_service,
+    llamacpp_inventory_service,
+    llamacpp_provider_service,
+)
 
 #
 ########################################################################################################################
@@ -221,6 +229,24 @@ async def start_llamacpp_by_model_endpoint(
 
 
 @router.post(
+    "/llamacpp/use-in-chat",
+    summary="Use Managed llama.cpp Server in Chat",
+    response_model=LlamaCppUseInChatResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def use_llamacpp_in_chat_endpoint(llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager)):
+    try:
+        return await llamacpp_provider_service.use_managed_server_in_chat(llm_manager)
+    except llamacpp_provider_service.ManagedServerNotRunningError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except llamacpp_provider_service.ProviderConfigWriteError as e:
+        raise HTTPException(status_code=500, detail="Failed to update llama.cpp chat provider endpoint.") from e
+    except Exception as e:
+        _log_sanitized_manager_error(llm_manager, "Unexpected error wiring Llama.cpp provider endpoint")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred.") from e
+
+
+@router.post(
     "/llamacpp/start_server",
     summary="Start or Swap Llama.cpp Server Model",
     dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
@@ -306,6 +332,36 @@ async def get_llamacpp_status_endpoint(llm_manager: LLMInferenceManager = Depend
     except Exception as e:
         _log_sanitized_manager_error(llm_manager, "Unexpected error getting Llama.cpp server status")
         raise HTTPException(status_code=500, detail="An unexpected error occurred.") from e
+
+
+@router.get(
+    "/llamacpp/logs/tail",
+    summary="Tail Managed llama.cpp Logs",
+    response_model=LlamaCppLogTailResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def tail_llamacpp_logs_endpoint(
+    lines: int = Query(default=200, ge=1, le=1000),
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+):
+    try:
+        return llamacpp_provider_service.tail_managed_log(llm_manager, requested_lines=lines)
+    except llamacpp_provider_service.ManagedServerNotRunningError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    except Exception as e:
+        _log_sanitized_manager_error(llm_manager, "Unexpected error tailing Llama.cpp logs")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred.") from e
+
+
+@router.get(
+    "/llamacpp/hardware",
+    summary="Get llama.cpp Hardware Snapshot",
+    response_model=LlamaCppHardwareSnapshotResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def get_llamacpp_hardware_endpoint(llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager)):
+    _ = llm_manager
+    return llamacpp_hardware_service.get_hardware_snapshot()
 
 
 @router.get(
