@@ -13,15 +13,17 @@ describe("Overview onboarding copy contract", () => {
   it("keeps quick setup and guided-tour onboarding copy stable", () => {
     const labels = watchlistsLocale as JsonObject
 
+    expect(pick(labels, "overview.onboarding.title")).toBe("Add initial collection")
     expect(pick(labels, "overview.onboarding.pipeline")).toBe(
-      "Add Feed -> Configure Monitor -> Check Activity -> Review Articles -> View Reports"
+      "Add sources -> Configure monitor -> Check Activity -> Review Articles -> Generate Reports"
     )
     expect(pick(labels, "overview.onboarding.cta")).toEqual({
-      addFeed: "Add first feed",
-      createMonitor: "Create first monitor",
-      guidedSetup: "Guided setup",
+      addFeed: "Add source",
+      createMonitor: "Create monitor",
+      guidedSetup: "Add initial collection",
       reviewArticles: "Open Articles"
     })
+    expect(pick(labels, "overview.onboarding.quickSetup.title")).toBe("Add initial collection")
     expect(pick(labels, "overview.onboarding.quickSetup.fields")).toEqual(
       expect.objectContaining({
         sourceUrl: "Feed URL",

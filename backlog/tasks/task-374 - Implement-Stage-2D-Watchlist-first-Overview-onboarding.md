@@ -1,9 +1,10 @@
 ---
 id: TASK-374
 title: Implement Stage 2D Watchlist-first Overview onboarding
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-15 04:56'
+updated_date: '2026-05-15 06:26'
 labels:
   - watchlists
   - stage2
@@ -28,18 +29,28 @@ Reposition the existing Overview Quick Setup after the Stage 2 shell setup wizar
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Overview no longer bypasses Watchlist-first creation with source-first auto-open behavior.
-- [ ] #2 Existing selected-Watchlist quick setup still creates scoped source/job payloads.
-- [ ] #3 User-facing Overview copy frames quick setup as initial collection inside the selected Watchlist.
+- [x] #1 Overview no longer bypasses Watchlist-first creation with source-first auto-open behavior.
+- [x] #2 Existing selected-Watchlist quick setup still creates scoped source/job payloads.
+- [x] #3 User-facing Overview copy frames quick setup as initial collection inside the selected Watchlist.
 - [ ] #4 Constrained viewport smoke evidence is recorded if the rendered flow changes.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Started Stage 2D in worktree codex/watchlists-stage1a. Inspecting Overview quick setup behavior, selected Watchlist scoping, and existing tests before edits.
+
+Implemented Stage 2D Overview repositioning. Verification passed: quick setup helper/copy contracts (7 tests), selected-scope static contract (8 tests), targeted Overview UI checks for no-Watchlist fallback and selected-Watchlist initial collection copy (2 tests). git diff --check passed. CDP/Playwright constrained viewport smoke was attempted against Next dev on ports 3027 (Turbopack) and 3028 (webpack) with mocked Watchlists API routes; both servers stayed at 'Compiling /watchlists' until page.goto timed out and were stopped cleanly. No screenshot was produced. This is recorded as a smoke blocker rather than a product-code failure.
+
+Bandit skipped: touched code is frontend TypeScript/JSON only.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

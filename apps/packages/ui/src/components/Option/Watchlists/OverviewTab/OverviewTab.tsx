@@ -186,8 +186,20 @@ export const OverviewTab: React.FC = () => {
   const openSourceForm = useWatchlistsStore((s) => s.openSourceForm)
   const openJobForm = useWatchlistsStore((s) => s.openJobForm)
   const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
+  const hasSelectedWatchlist = selectedWatchlistId != null
 
   const loadOverview = useCallback(async (showLoading: boolean) => {
+    if (selectedWatchlistId == null) {
+      setData(null)
+      setError(null)
+      if (typeof setOverviewHealth === "function") {
+        setOverviewHealth(null, null)
+      }
+      setLoading(false)
+      setRefreshing(false)
+      return
+    }
+
     if (showLoading) {
       setLoading(true)
     } else {
@@ -341,6 +353,7 @@ export const OverviewTab: React.FC = () => {
     if (
       !data ||
       data.sources.total !== 0 ||
+      selectedWatchlistId == null ||
       quickSetupAutoShownRef.current ||
       onboardingPath !== "beginner"
     ) {
@@ -359,7 +372,7 @@ export const OverviewTab: React.FC = () => {
       quickSetupAutoShownRef.current = true
       openQuickSetup()
     }
-  }, [data, quickSetupOpen, onboardingPath, openQuickSetup])
+  }, [data, quickSetupOpen, onboardingPath, openQuickSetup, selectedWatchlistId])
 
   const closeQuickSetup = useCallback(() => {
     quickSetupPreviewRequestRef.current += 1
@@ -415,7 +428,7 @@ export const OverviewTab: React.FC = () => {
       setQuickSetupCandidatePreviewError(
         t(
           "watchlists:overview.onboarding.quickSetup.candidatePreview.error",
-          "Could not load feed sample preview right now. You can still create setup and use a test run to verify results."
+          "Could not load feed sample preview right now. You can still add the collection and use a test run to verify results."
         )
       )
       void trackWatchlistsOnboardingTelemetry({
@@ -496,10 +509,9 @@ export const OverviewTab: React.FC = () => {
       } as QuickSetupValues
       setQuickSetupSubmitting(true)
 
-      const source = await createWatchlistSource({
-        ...toQuickSetupSourcePayload(values),
-        watchlist_id: selectedWatchlistId ?? undefined
-      })
+      const source = await createWatchlistSource(
+        toQuickSetupSourcePayload(values, selectedWatchlistId)
+      )
       const sourceIds: number[] = [source.id]
       const rawExtraSourceUrls = String(values.extraSourceUrls || "").trim()
       const extraSourceUrls = parseQuickSetupExtraSourceUrls(rawExtraSourceUrls)
@@ -539,10 +551,9 @@ export const OverviewTab: React.FC = () => {
         sourceIds.push(...createdExtraSourceIds)
       }
 
-      const job = await createWatchlistJob({
-        ...toQuickSetupJobPayload(values, sourceIds),
-        watchlist_id: selectedWatchlistId ?? undefined
-      })
+      const job = await createWatchlistJob(
+        toQuickSetupJobPayload(values, sourceIds, selectedWatchlistId)
+      )
 
       let runId: number | null = null
       if (values.runNow) {
@@ -565,16 +576,16 @@ export const OverviewTab: React.FC = () => {
         values.runNow
           ? t(
               "watchlists:overview.onboarding.quickSetup.testRunPending",
-              "Quick setup complete. Test run started. Open Activity for progress and Reports for generated briefings."
+              "Initial collection added. Test run started. Open Activity for progress and Reports for generated briefings."
             )
           : values.setupGoal === "briefing"
             ? t(
                 "watchlists:overview.onboarding.quickSetup.createdBriefing",
-                "Quick setup complete. Feed and monitor created for briefing reports."
+                "Initial collection added. Sources and monitor are ready for briefing reports."
               )
           : t(
               "watchlists:overview.onboarding.quickSetup.created",
-              "Quick setup complete. Feed and monitor created."
+              "Initial collection added. Sources and monitor are ready."
             )
       )
 
@@ -608,7 +619,7 @@ export const OverviewTab: React.FC = () => {
         })
       }
     } catch (err) {
-      console.error("Failed to complete quick setup:", err)
+      console.error("Failed to add initial Watchlist collection:", err)
       void trackWatchlistsOnboardingTelemetry({
         type: "quick_setup_failed",
         step: currentStep
@@ -616,7 +627,7 @@ export const OverviewTab: React.FC = () => {
       message.error(
         t(
           "watchlists:overview.onboarding.quickSetup.error",
-          "Failed to complete quick setup."
+          "Failed to add initial collection."
         )
       )
     } finally {
@@ -1063,7 +1074,7 @@ export const OverviewTab: React.FC = () => {
     if (!quickSetupCandidatePreview) {
       return t(
         "watchlists:overview.onboarding.quickSetup.candidatePreview.empty",
-        "No sample candidates returned yet. You can still create setup and validate with a test run."
+        "No sample candidates returned yet. You can still add the collection and validate with a test run."
       )
     }
     return t(
@@ -1121,23 +1132,23 @@ export const OverviewTab: React.FC = () => {
   const quickSetupFinishLabel = quickSetupSnapshot.runNow
     ? t(
         "watchlists:overview.onboarding.quickSetup.actions.finishWithTest",
-        "Create setup + run test"
+        "Create collection + run test"
       )
-    : t("watchlists:overview.onboarding.quickSetup.actions.finish", "Create setup")
+    : t("watchlists:overview.onboarding.quickSetup.actions.finish", "Create collection")
   const quickSetupStepHelp =
     quickSetupStep === 0
       ? t(
           "watchlists:overview.onboarding.quickSetup.help.feed",
-          "Tip: paste a feed URL now. You can adjust feed settings later."
+          "Add one or more source URLs to this Watchlist. You can adjust feed settings later."
         )
       : quickSetupStep === 1
         ? t(
             "watchlists:overview.onboarding.quickSetup.help.monitor",
-            "No cron needed: choose a preset schedule for now."
+            "Choose how this Watchlist monitor runs; presets avoid cron setup first."
           )
         : t(
             "watchlists:overview.onboarding.quickSetup.help.review",
-            "You can change any of these settings later from Feeds and Monitors."
+            "Review the scoped sources and monitor before adding them to this Watchlist."
           )
   const quickSetupExtraSourceUrls = parseQuickSetupExtraSourceUrls(
     String(quickSetupValues?.extraSourceUrls || "")
@@ -1196,6 +1207,31 @@ export const OverviewTab: React.FC = () => {
   const pipelineSetupIsLastStep = pipelineSetupStep >= PIPELINE_SETUP_MAX_STEP
   const overviewBadges = getOverviewTabBadges(data?.health)
 
+  if (!hasSelectedWatchlist) {
+    return (
+      <div
+        className="rounded-md border border-dashed border-border bg-surface p-6"
+        data-testid="watchlists-overview-no-watchlist"
+      >
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={(
+            <span>
+              {t("watchlists:overview.noWatchlist.title", "Create a Watchlist first")}
+            </span>
+          )}
+        >
+          <p className="mx-auto max-w-xl text-sm text-text-muted">
+            {t(
+              "watchlists:overview.noWatchlist.description",
+              "Use the Watchlist setup action above to create the project container before adding sources, monitors, or reports."
+            )}
+          </p>
+        </Empty>
+      </div>
+    )
+  }
+
   if (loading && !data) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -1252,7 +1288,7 @@ export const OverviewTab: React.FC = () => {
               size="small"
               title={
                 <span className="flex items-center gap-2">
-                  {t("watchlists:overview.onboarding.title", "Quick setup")}
+                  {t("watchlists:overview.onboarding.title", "Add initial collection")}
                   <Tag color="green">{t("watchlists:overview.onboarding.recommended", "Recommended")}</Tag>
                 </span>
               }
@@ -1260,7 +1296,7 @@ export const OverviewTab: React.FC = () => {
               <p className="mb-3 text-sm text-text-muted">
                 {t(
                   "watchlists:overview.onboarding.pipeline",
-                  "Add Feed -> Create Monitor -> Review Results"
+                  "Add sources -> Configure monitor -> Check Activity -> Review Articles -> Generate Reports"
                 )}
               </p>
               <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -1290,11 +1326,11 @@ export const OverviewTab: React.FC = () => {
                 {onboardingPath === "beginner"
                   ? t(
                       "watchlists:overview.onboarding.path.beginnerHint",
-                      "Guided setup keeps the flow simple and avoids cron/template setup first."
+                      "Guided collection setup keeps this Watchlist scoped before advanced schedules and templates."
                     )
                   : t(
                       "watchlists:overview.onboarding.path.advancedHint",
-                      "Advanced mode prioritizes direct Feed and Monitor forms."
+                      "Advanced mode opens direct source and monitor forms for this Watchlist."
                     )}
               </p>
               <Steps
@@ -1302,17 +1338,17 @@ export const OverviewTab: React.FC = () => {
                 current={data.sources.total === 0 ? 0 : data.jobs.total === 0 ? 1 : 2}
                 items={[
                   {
-                    title: t("watchlists:overview.onboarding.steps.addFeed.title", "Add your first feed"),
+                    title: t("watchlists:overview.onboarding.steps.addFeed.title", "Add sources to this Watchlist"),
                     content: t(
                       "watchlists:overview.onboarding.steps.addFeed.description",
-                      "Start by adding an RSS/site source in Feeds."
+                      "Add RSS/site sources inside the selected Watchlist."
                     )
                   },
                   {
-                    title: t("watchlists:overview.onboarding.steps.createMonitor.title", "Create your first monitor"),
+                    title: t("watchlists:overview.onboarding.steps.createMonitor.title", "Create a monitor"),
                     content: t(
                       "watchlists:overview.onboarding.steps.createMonitor.description",
-                      "Pick feeds, then set a schedule with presets."
+                      "Pick Watchlist sources, then set a schedule with presets."
                     )
                   },
                   {
@@ -1330,7 +1366,7 @@ export const OverviewTab: React.FC = () => {
                   onClick={openQuickSetup}
                   data-testid="watchlists-overview-cta-guided-setup"
                 >
-                  {t("watchlists:overview.onboarding.cta.guidedSetup", "Guided setup")}
+                  {t("watchlists:overview.onboarding.cta.guidedSetup", "Add initial collection")}
                 </Button>
                 {onboardingPath === "advanced" && (
                   <Button
@@ -1341,8 +1377,8 @@ export const OverviewTab: React.FC = () => {
                     data-testid="watchlists-overview-cta-advanced-direct"
                   >
                     {data.sources.total === 0
-                      ? t("watchlists:overview.onboarding.cta.addFeed", "Add first feed")
-                      : t("watchlists:overview.onboarding.cta.createMonitor", "Create first monitor")}
+                      ? t("watchlists:overview.onboarding.cta.addFeed", "Add source")
+                      : t("watchlists:overview.onboarding.cta.createMonitor", "Create monitor")}
                   </Button>
                 )}
                 {data.sources.total === 0 && (
@@ -1351,7 +1387,7 @@ export const OverviewTab: React.FC = () => {
                     onClick={handleStartSourceQuickCreate}
                     data-testid="watchlists-overview-cta-add-feed"
                   >
-                    {t("watchlists:overview.onboarding.cta.addFeed", "Add first feed")}
+                    {t("watchlists:overview.onboarding.cta.addFeed", "Add source")}
                   </Button>
                 )}
                 {data.sources.total > 0 && data.jobs.total === 0 && (
@@ -1360,7 +1396,7 @@ export const OverviewTab: React.FC = () => {
                     onClick={handleStartJobQuickCreate}
                     data-testid="watchlists-overview-cta-create-monitor"
                   >
-                    {t("watchlists:overview.onboarding.cta.createMonitor", "Create first monitor")}
+                    {t("watchlists:overview.onboarding.cta.createMonitor", "Create monitor")}
                   </Button>
                 )}
                 <Button onClick={handleOpenItems}>
@@ -1647,7 +1683,7 @@ export const OverviewTab: React.FC = () => {
 
       <Modal
         open={quickSetupOpen}
-        title={t("watchlists:overview.onboarding.quickSetup.title", "Guided quick setup")}
+        title={t("watchlists:overview.onboarding.quickSetup.title", "Add initial collection")}
         onCancel={quickSetupSubmitting ? undefined : cancelQuickSetup}
         destroyOnHidden
         maskClosable={!quickSetupSubmitting}
@@ -1953,7 +1989,7 @@ export const OverviewTab: React.FC = () => {
                 <p className="text-text-muted">
                   {t(
                     "watchlists:overview.onboarding.quickSetup.reviewDescription",
-                    "Preview sample candidates and expected briefing, then create your feed and monitor."
+                    "Preview sample candidates and expected briefing, then add sources and monitor to this Watchlist."
                   )}
                 </p>
                 <div className="rounded-md border border-border bg-surface p-3">

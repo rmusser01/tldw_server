@@ -144,6 +144,10 @@
     "openJobs": "Open",
     "openItems": "Open",
     "openRuns": "Open",
+    "noWatchlist": {
+      "title": "Create a Watchlist first",
+      "description": "Use the Watchlist setup action above to create the project container before adding sources, monitors, or reports."
+    },
     "health": {
       "healthyTitle": "System healthy",
       "healthyDescription": "No recent failed runs and source health is stable.",
@@ -159,23 +163,23 @@
       "jobs": "Monitors need schedule fixes ({{count}})"
     },
     "onboarding": {
-      "title": "Quick setup",
-      "pipeline": "Add Feed -> Configure Monitor -> Check Activity -> Review Articles -> View Reports",
+      "title": "Add initial collection",
+      "pipeline": "Add sources -> Configure monitor -> Check Activity -> Review Articles -> Generate Reports",
       "path": {
         "label": "Onboarding mode",
         "beginner": "Beginner (guided)",
         "advanced": "Advanced (direct forms)",
-        "beginnerHint": "Guided setup keeps the flow simple. You can customize exact timing and template formatting later.",
-        "advancedHint": "Advanced mode opens full Feed and Monitor forms, including custom schedules and template options."
+        "beginnerHint": "Guided collection setup keeps this Watchlist scoped before advanced schedules and templates.",
+        "advancedHint": "Advanced mode opens direct source and monitor forms for this Watchlist."
       },
       "steps": {
         "addFeed": {
-          "title": "Add your first feed",
-          "description": "Start by adding an RSS/site feed in Feeds."
+          "title": "Add sources to this Watchlist",
+          "description": "Add RSS/site sources inside the selected Watchlist."
         },
         "createMonitor": {
-          "title": "Create your first monitor",
-          "description": "Pick feeds, then set a schedule with presets."
+          "title": "Create a monitor",
+          "description": "Pick Watchlist sources, then set a schedule with presets."
         },
         "reviewResults": {
           "title": "Review results",
@@ -183,22 +187,22 @@
         }
       },
       "cta": {
-        "addFeed": "Add first feed",
-        "createMonitor": "Create first monitor",
+        "addFeed": "Add source",
+        "createMonitor": "Create monitor",
         "reviewArticles": "Open Articles",
-        "guidedSetup": "Guided setup"
+        "guidedSetup": "Add initial collection"
       },
       "quickSetup": {
-        "title": "Guided quick setup",
+        "title": "Add initial collection",
         "steps": {
           "feed": "Feed",
           "monitor": "Monitor",
           "review": "Review"
         },
         "help": {
-          "feed": "Tip: paste a feed URL now. You can adjust feed settings later.",
-          "monitor": "No cron needed: choose a preset schedule for now.",
-          "review": "You can change any of these settings later from Feeds and Monitors."
+          "feed": "Add one or more source URLs to this Watchlist. You can adjust feed settings later.",
+          "monitor": "Choose how this Watchlist monitor runs; presets avoid cron setup first.",
+          "review": "Review the scoped sources and monitor before adding them to this Watchlist."
         },
         "fields": {
           "sourceName": "Feed name",
@@ -245,13 +249,13 @@
           "runNow": "Run test now",
           "destination": "After create"
         },
-        "reviewDescription": "Preview sample candidates and expected briefing, then create your feed and monitor.",
+        "reviewDescription": "Preview sample candidates and expected briefing, then add sources and monitor to this Watchlist.",
         "candidatePreview": {
           "title": "Feed sample preview",
           "loading": "Loading sample candidates...",
           "summary": "{{ingestable}} ingestable, {{filtered}} filtered from {{total}} sample items.",
-          "empty": "No sample candidates returned yet. You can still create setup and validate with a test run.",
-          "error": "Could not load feed sample preview right now. You can still create setup and use a test run to verify results."
+          "empty": "No sample candidates returned yet. You can still add the collection and validate with a test run.",
+          "error": "Could not load feed sample preview right now. You can still add the collection and use a test run to verify results."
         },
         "templatePreview": {
           "title": "Briefing preview (template: {{template}})",
@@ -268,15 +272,15 @@
           "triage": "Opens Monitors after setup so you can run checks when ready."
         },
         "actions": {
-          "finish": "Create setup",
-          "finishWithTest": "Create setup + run test",
+          "finish": "Create collection",
+          "finishWithTest": "Create collection + run test",
           "retryPreview": "Retry preview"
         },
-        "created": "Quick setup complete. Feed and monitor created.",
-        "createdBriefing": "Quick setup complete. Feed and monitor created for briefing reports.",
-        "createdAndRunning": "Quick setup complete. Your first run has started.",
-        "testRunPending": "Quick setup complete. Test run started. Open Activity for progress and Reports for generated briefings.",
-        "error": "Failed to complete quick setup."
+        "created": "Initial collection added. Sources and monitor are ready.",
+        "createdBriefing": "Initial collection added. Sources and monitor are ready for briefing reports.",
+        "createdAndRunning": "Initial collection added. Your first run has started.",
+        "testRunPending": "Initial collection added. Test run started. Open Activity for progress and Reports for generated briefings.",
+        "error": "Failed to add initial collection."
       }
     },
     "setupComplete": {

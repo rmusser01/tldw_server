@@ -424,7 +424,7 @@ git commit -m "feat: integrate watchlist setup wizard"
 - Modify: `apps/packages/ui/src/assets/locale/en/watchlists.json`
 - Modify if mirrored: `apps/packages/ui/src/public/_locales/en/watchlists.json`
 
-- [ ] **Step 1: Write failing overview tests**
+- [x] **Step 1: Write failing overview tests**
 
 Assert:
 
@@ -434,7 +434,7 @@ Assert:
 
 Expected failure: current copy and auto-open behavior are source-first.
 
-- [ ] **Step 2: Update Overview entry points**
+- [x] **Step 2: Update Overview entry points**
 
 Reframe Quick Setup as "Add initial collection" when a Watchlist is selected.
 
@@ -444,7 +444,7 @@ Rules:
 - If exactly the default imported Watchlist is selected, still allow initial collection setup.
 - Keep pipeline builder scoped to the selected Watchlist.
 
-- [ ] **Step 3: Preserve existing helper contracts**
+- [x] **Step 3: Preserve existing helper contracts**
 
 Do not break:
 
@@ -463,6 +463,26 @@ Do not break:
 ```
 
 Expected: tests pass.
+
+Progress: targeted Stage 2D checks passed:
+
+```bash
+./node_modules/.bin/vitest run \
+  src/components/Option/Watchlists/OverviewTab/__tests__/quick-setup.test.ts \
+  src/components/Option/Watchlists/OverviewTab/__tests__/OverviewTab.onboarding-copy.snapshot.test.ts \
+  --maxWorkers=1 --no-file-parallelism --reporter=verbose
+
+./node_modules/.bin/vitest run \
+  src/components/Option/Watchlists/OverviewTab/__tests__/OverviewTab.quick-setup.test.tsx \
+  --maxWorkers=1 --no-file-parallelism --reporter=verbose \
+  -t "Watchlist creation|initial collection setup"
+
+./node_modules/.bin/vitest run \
+  src/components/Option/Watchlists/__tests__/watchlists-selected-scope-contract.test.ts \
+  --maxWorkers=1 --no-file-parallelism --reporter=verbose
+```
+
+The full `OverviewTab.quick-setup.test.tsx` file still carries the pre-existing slow/timeout behavior recorded during baseline, so Stage 2D verification uses focused tests for the new no-Watchlist fallback, selected-Watchlist copy, and payload helper contracts.
 
 - [ ] **Step 5: Commit**
 

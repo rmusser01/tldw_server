@@ -1784,6 +1784,12 @@
   "overview_fetchError": {
     "message": "Failed to load overview"
   },
+  "overview_noWatchlist_title": {
+    "message": "Create a Watchlist first"
+  },
+  "overview_noWatchlist_description": {
+    "message": "Use the Watchlist setup action above to create the project container before adding sources, monitors, or reports."
+  },
   "overview_openSources": {
     "message": "Open"
   },
@@ -1809,22 +1815,22 @@
     "message": "Some sources or recent runs show failures. Open failed runs to investigate."
   },
   "overview_onboarding_title": {
-    "message": "Quick setup"
+    "message": "Add initial collection"
   },
   "overview_onboarding_pipeline": {
-    "message": "Add Feed -> Configure Monitor -> Check Activity -> Review Articles -> View Reports"
+    "message": "Add sources -> Configure monitor -> Check Activity -> Review Articles -> Generate Reports"
   },
   "overview_onboarding_steps_addFeed_title": {
-    "message": "Add your first feed"
+    "message": "Add sources to this Watchlist"
   },
   "overview_onboarding_steps_addFeed_description": {
-    "message": "Start by adding an RSS/site feed in Feeds."
+    "message": "Add RSS/site sources inside the selected Watchlist."
   },
   "overview_onboarding_steps_createMonitor_title": {
-    "message": "Create your first monitor"
+    "message": "Create a monitor"
   },
   "overview_onboarding_steps_createMonitor_description": {
-    "message": "Pick feeds, then set a schedule with presets."
+    "message": "Pick Watchlist sources, then set a schedule with presets."
   },
   "overview_onboarding_steps_reviewResults_title": {
     "message": "Review results"
@@ -1833,19 +1839,19 @@
     "message": "Open Activity for run health, Articles for captured content, and Reports for generated briefings."
   },
   "overview_onboarding_cta_addFeed": {
-    "message": "Add first feed"
+    "message": "Add source"
   },
   "overview_onboarding_cta_createMonitor": {
-    "message": "Create first monitor"
+    "message": "Create monitor"
   },
   "overview_onboarding_cta_reviewArticles": {
     "message": "Open Articles"
   },
   "overview_onboarding_cta_guidedSetup": {
-    "message": "Guided setup"
+    "message": "Add initial collection"
   },
   "overview_onboarding_quickSetup_title": {
-    "message": "Guided quick setup"
+    "message": "Add initial collection"
   },
   "overview_onboarding_quickSetup_steps_feed": {
     "message": "Feed"
@@ -1923,19 +1929,19 @@
     "message": "Run test now"
   },
   "overview_onboarding_quickSetup_reviewDescription": {
-    "message": "Preview sample candidates and expected briefing, then create your feed and monitor."
+    "message": "Preview sample candidates and expected briefing, then add sources and monitor to this Watchlist."
   },
   "overview_onboarding_quickSetup_actions_finish": {
-    "message": "Create setup"
+    "message": "Create collection"
   },
   "overview_onboarding_quickSetup_created": {
-    "message": "Quick setup complete. Feed and monitor created."
+    "message": "Initial collection added. Sources and monitor are ready."
   },
   "overview_onboarding_quickSetup_createdAndRunning": {
-    "message": "Quick setup complete. Your first run has started."
+    "message": "Initial collection added. Your first run has started."
   },
   "overview_onboarding_quickSetup_error": {
-    "message": "Failed to complete quick setup."
+    "message": "Failed to add initial collection."
   },
   "overview_setupComplete_title": {
     "message": "Setup complete"
@@ -2427,13 +2433,13 @@
     "message": "Monitors need schedule fixes ({{count}})"
   },
   "overview_onboarding_quickSetup_help_feed": {
-    "message": "Tip: paste a feed URL now. You can adjust feed settings later."
+    "message": "Add one or more source URLs to this Watchlist. You can adjust feed settings later."
   },
   "overview_onboarding_quickSetup_help_monitor": {
-    "message": "No cron needed: choose a preset schedule for now."
+    "message": "Choose how this Watchlist monitor runs; presets avoid cron setup first."
   },
   "overview_onboarding_quickSetup_help_review": {
-    "message": "You can change any of these settings later from Feeds and Monitors."
+    "message": "Review the scoped sources and monitor before adding them to this Watchlist."
   },
   "overview_onboarding_quickSetup_fields_setupGoal": {
     "message": "Setup goal"
@@ -2472,10 +2478,10 @@
     "message": "{{ingestable}} ingestable, {{filtered}} filtered from {{total}} sample items."
   },
   "overview_onboarding_quickSetup_candidatePreview_empty": {
-    "message": "No sample candidates returned yet. You can still create setup and validate with a test run."
+    "message": "No sample candidates returned yet. You can still add the collection and validate with a test run."
   },
   "overview_onboarding_quickSetup_candidatePreview_error": {
-    "message": "Could not load feed sample preview right now. You can still create setup and use a test run to verify results."
+    "message": "Could not load feed sample preview right now. You can still add the collection and use a test run to verify results."
   },
   "overview_onboarding_quickSetup_templatePreview_title": {
     "message": "Briefing preview (template: {{template}})"
@@ -2502,16 +2508,16 @@
     "message": "Opens Monitors after setup so you can run checks when ready."
   },
   "overview_onboarding_quickSetup_actions_finishWithTest": {
-    "message": "Create setup + run test"
+    "message": "Create collection + run test"
   },
   "overview_onboarding_quickSetup_actions_retryPreview": {
     "message": "Retry preview"
   },
   "overview_onboarding_quickSetup_createdBriefing": {
-    "message": "Quick setup complete. Feed and monitor created for briefing reports."
+    "message": "Initial collection added. Sources and monitor are ready for briefing reports."
   },
   "overview_onboarding_quickSetup_testRunPending": {
-    "message": "Quick setup complete. Test run started. Open Activity for progress and Reports for generated briefings."
+    "message": "Initial collection added. Test run started. Open Activity for progress and Reports for generated briefings."
   },
   "teachPoints_label": {
     "message": "First-time tip"
