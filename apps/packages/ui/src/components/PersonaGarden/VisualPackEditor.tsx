@@ -894,6 +894,13 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     starterPacks.find((starter) => starter.id === selectedStarterPackId) ??
     starterPacks[0] ??
     null
+  const personaVisualLabel = selectedPersonaName || selectedPersonaId
+  const hasActiveVisualPack = React.useMemo(
+    () => packs.some((pack) => pack.status === "active"),
+    [packs]
+  )
+  const showFirstRunSetup =
+    isActive && Boolean(selectedPersonaId) && !loading && !hasActiveVisualPack
   const selectedPackLibraryItem = React.useMemo(
     () =>
       selectedPack
@@ -1300,9 +1307,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     duplicateTargetSelectRef.current?.focus()
   }, [])
 
-  const handleCreateDraft = async () => {
-    const title = draftTitle.trim()
-    if (!selectedPersonaId || !title) return
+  const createDraftPack = async (
+    title: string,
+    successMessage: string
+  ): Promise<PersonaVisualPack | null> => {
+    if (!selectedPersonaId || !title) return null
     setSaving(true)
     setError(null)
     try {
@@ -1313,11 +1322,8 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       setPacks((current) => mergePack(current, created))
       setSelectedPackId(created.id)
       setDraftTitle("")
-      setStatusMessage(
-        t("sidepanel:personaGarden.visuals.created", {
-          defaultValue: "Draft created."
-        })
-      )
+      setStatusMessage(successMessage)
+      return created
     } catch (createError) {
       setError(
         createError instanceof Error
@@ -1326,9 +1332,34 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
               defaultValue: "Failed to create visual pack."
             })
       )
+      return null
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleCreateDraft = async () => {
+    const title = draftTitle.trim()
+    await createDraftPack(
+      title,
+      t("sidepanel:personaGarden.visuals.created", {
+        defaultValue: "Draft created."
+      })
+    )
+  }
+
+  const handleStartBlankDraft = async () => {
+    const title = t("sidepanel:personaGarden.visuals.firstRunBlankDraftTitle", {
+      personaName: personaVisualLabel,
+      defaultValue: `${personaVisualLabel} blank visual draft`
+    })
+    await createDraftPack(
+      title,
+      t("sidepanel:personaGarden.visuals.firstRunBlankCreated", {
+        defaultValue:
+          "Blank visual draft created. Add assets and activate it when ready."
+      })
+    )
   }
 
   const handleUploadAsset = async () => {
@@ -2493,6 +2524,117 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           </div>
         ) : null}
       </div>
+
+      {showFirstRunSetup ? (
+        <div
+          data-testid="persona-visual-first-run-setup"
+          className="rounded-lg border border-border bg-surface p-3"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+                {t("sidepanel:personaGarden.visuals.firstRunHeading", {
+                  defaultValue: "Set up Persona Buddy visual"
+                })}
+              </div>
+              <div className="mt-1 text-sm font-medium text-text">
+                {t("sidepanel:personaGarden.visuals.firstRunDescription", {
+                  personaName: personaVisualLabel,
+                  defaultValue: `Choose how to set up ${personaVisualLabel}'s visual.`
+                })}
+              </div>
+              <div className="mt-1 max-w-3xl text-xs leading-5 text-text-muted">
+                {t("sidepanel:personaGarden.visuals.firstRunDraftFirstCopy", {
+                  defaultValue:
+                    "Each option creates or opens a draft first. Activate only after review."
+                })}
+              </div>
+            </div>
+            <Tag>
+              {t("sidepanel:personaGarden.visuals.firstRunDraftFirstBadge", {
+                defaultValue: "draft first"
+              })}
+            </Tag>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-3">
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-text">
+                {t("sidepanel:personaGarden.visuals.firstRunUseDefaultTitle", {
+                  defaultValue: "Use default"
+                })}
+              </div>
+              <div className="text-xs leading-5 text-text-muted">
+                {t("sidepanel:personaGarden.visuals.firstRunUseDefaultDescription", {
+                  defaultValue:
+                    "Copy the bundled sprite-frame starter as a draft for this persona."
+                })}
+              </div>
+              <Button
+                data-testid="persona-visual-first-run-default-button"
+                size="small"
+                icon={<Copy className="h-3.5 w-3.5" />}
+                loading={copyingStarterPack}
+                disabled={
+                  starterPacksLoading || !selectedStarterPack || copyingStarterPack
+                }
+                onClick={() => void handleCopyStarterPack()}
+              >
+                {t("sidepanel:personaGarden.visuals.firstRunUseDefaultButton", {
+                  defaultValue: "Use default"
+                })}
+              </Button>
+            </div>
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-text">
+                {t("sidepanel:personaGarden.visuals.firstRunImportTitle", {
+                  defaultValue: "Import pack"
+                })}
+              </div>
+              <div className="text-xs leading-5 text-text-muted">
+                {t("sidepanel:personaGarden.visuals.firstRunImportDescription", {
+                  defaultValue:
+                    "Validate a portable pack archive, then commit it as a draft."
+                })}
+              </div>
+              <Button
+                data-testid="persona-visual-first-run-import-button"
+                size="small"
+                icon={<Upload className="h-3.5 w-3.5" />}
+                onClick={openImportArchivePicker}
+              >
+                {t("sidepanel:personaGarden.visuals.firstRunImportButton", {
+                  defaultValue: "Import pack"
+                })}
+              </Button>
+            </div>
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-text">
+                {t("sidepanel:personaGarden.visuals.firstRunBlankTitle", {
+                  defaultValue: "Start blank"
+                })}
+              </div>
+              <div className="text-xs leading-5 text-text-muted">
+                {t("sidepanel:personaGarden.visuals.firstRunBlankDescription", {
+                  defaultValue:
+                    "Create an empty draft and add assets, states, and animations manually."
+                })}
+              </div>
+              <Button
+                data-testid="persona-visual-first-run-blank-button"
+                size="small"
+                icon={<Edit3 className="h-3.5 w-3.5" />}
+                loading={saving}
+                disabled={saving}
+                onClick={() => void handleStartBlankDraft()}
+              >
+                {t("sidepanel:personaGarden.visuals.firstRunBlankButton", {
+                  defaultValue: "Start blank"
+                })}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <VisualPackReusePanel
         selectedPersonaName={selectedPersonaName || selectedPersonaId}

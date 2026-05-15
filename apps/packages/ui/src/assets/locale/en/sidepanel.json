@@ -539,7 +539,22 @@
       "starterDraftTitleLabel": "Draft title",
       "starterCopyAsDraft": "Copy as draft",
       "starterAssetUnit": "assets",
-      "starterBytesUnit": "bytes"
+      "starterBytesUnit": "bytes",
+      "firstRunHeading": "Set up Persona Buddy visual",
+      "firstRunDescription": "Choose how to set up {{personaName}}'s visual.",
+      "firstRunDraftFirstCopy": "Each option creates or opens a draft first. Activate only after review.",
+      "firstRunDraftFirstBadge": "draft first",
+      "firstRunUseDefaultTitle": "Use default",
+      "firstRunUseDefaultDescription": "Copy the bundled sprite-frame starter as a draft for this persona.",
+      "firstRunUseDefaultButton": "Use default",
+      "firstRunImportTitle": "Import pack",
+      "firstRunImportDescription": "Validate a portable pack archive, then commit it as a draft.",
+      "firstRunImportButton": "Import pack",
+      "firstRunBlankTitle": "Start blank",
+      "firstRunBlankDescription": "Create an empty draft and add assets, states, and animations manually.",
+      "firstRunBlankButton": "Start blank",
+      "firstRunBlankDraftTitle": "{{personaName}} blank visual draft",
+      "firstRunBlankCreated": "Blank visual draft created. Add assets and activate it when ready."
     }
   },
   "persona": {
