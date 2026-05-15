@@ -94,10 +94,11 @@ tools/macos-vz-helper/scripts/vz-helperctl.py launchd-drill \
   --skip-smoke
 ```
 
-Add `--bundle /path/to/canonical/bundle` to run the real `vz_linux` host smoke
-through the launchd-managed helper. Keep drill labels isolated and plist paths
-private; the drill refuses to take over a service that is already loaded before
-bootstrap because cleanup ownership would be ambiguous.
+Omit `--skip-smoke` and add `--bundle /path/to/canonical/bundle` to run the
+real `vz_linux` host smoke through the launchd-managed helper. Keep drill labels
+isolated and plist paths private; the drill refuses to take over a service that
+is already loaded before bootstrap because cleanup ownership would be
+ambiguous.
 
 These commands never run automatically from `plist`, `status`, `smoke`, or
 server startup. They are operator-owned scaffolding and do not validate host

@@ -511,6 +511,7 @@ so the drill cannot take ownership of a user's existing service.
 runtime_dir="$(mktemp -d "${TMPDIR:-/tmp}/tldw-vz-launchd-drill.XXXXXX")"
 chmod 700 "$runtime_dir"
 label="org.tldw.macos-vz-helper.drill.$$"
+trap 'tools/macos-vz-helper/scripts/vz-helperctl.py launchd bootout --label "$label" --plist-output "$runtime_dir/${label}.plist" >/dev/null 2>&1 || true; rm -rf "$runtime_dir"' EXIT
 
 tools/macos-vz-helper/scripts/vz-helperctl.py launchd-drill \
   --socket "$runtime_dir/helper.sock" \

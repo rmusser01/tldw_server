@@ -124,7 +124,7 @@ disruptive reboot testing and preserve helper/stdout/serial logs reliably.
 
 `tools/macos-vz-helper/scripts/vz-helperctl.py launchd-drill` is the explicit
 LaunchAgent validation path. It may be run manually on a prepared runner, but
-this PR must not enable it in the scheduled workflow by default. A
+the scheduled workflow must not enable it by default. A
 `launchd-drill` skip is expected unless a maintainer deliberately requested
 LaunchAgent validation for that runner.
 
