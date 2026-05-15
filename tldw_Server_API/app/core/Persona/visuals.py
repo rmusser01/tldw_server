@@ -435,7 +435,7 @@ def _validate_state_catalog_tags(state_id: str, tags: Any) -> None:
 
 
 def _allowed_visual_state_ids(manifest: dict[str, Any]) -> set[str]:
-    return set(VISUAL_STATE_IDS) | set(manifest.get("state_catalog", {}))
+    return VISUAL_STATE_IDS | manifest.get("state_catalog", {}).keys()
 
 
 def _is_safe_custom_state_id(state_id: str) -> bool:
@@ -449,7 +449,7 @@ def _is_safe_custom_state_id(state_id: str) -> bool:
 
 
 def _contains_control_character(value: str) -> bool:
-    return any(character in value for character in ("\r", "\n", "\t"))
+    return any(ord(character) < 32 or ord(character) == 127 for character in value)
 
 
 def _validate_state_references(

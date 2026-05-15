@@ -233,6 +233,49 @@ def test_manifest_rejects_invalid_state_catalog_entries(
         )
 
 
+@pytest.mark.parametrize(
+    ("catalog_entry", "message"),
+    [
+        ({"label": "Bad\x7fLabel", "kind": "tool_variant"}, "label"),
+        (
+            {
+                "label": "Valid label",
+                "kind": "tool_variant",
+                "description": "Bad\x7fDescription",
+            },
+            "description",
+        ),
+        (
+            {
+                "label": "Valid label",
+                "kind": "tool_variant",
+                "tags": ["Bad\x7fTag"],
+            },
+            "tags",
+        ),
+    ],
+)
+def test_manifest_rejects_state_catalog_text_with_ascii_control_characters(
+    catalog_entry: dict[str, object],
+    message: str,
+) -> None:
+    manifest = _activatable_manifest()
+    manifest["state_catalog"] = {"tool.notes_search": catalog_entry}
+
+    with pytest.raises(PersonaVisualManifestError, match=message):
+        validate_visual_manifest(
+            manifest,
+            available_asset_ids={
+                "asset-idle",
+                "asset-listen",
+                "asset-think",
+                "asset-speak",
+                "asset-error",
+            },
+            require_activatable=True,
+        )
+
+
 def test_manifest_rejects_excessive_state_catalog_size() -> None:
     manifest = _activatable_manifest()
     manifest["state_catalog"] = {
