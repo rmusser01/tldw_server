@@ -526,6 +526,43 @@ def smoke_helper(
     return CheckResult(ok=True)
 
 
+def run_vz_linux_host_smoke(
+    *,
+    bundle_path: Path,
+    socket_path: Path,
+    python_path: Path | None = None,
+    dry_run: bool = False,
+    command_runner: Callable[..., int] | None = None,
+) -> CheckResult:
+    runner = command_runner or run_command
+    python_bin = python_path if python_path is not None else Path(sys.executable)
+    env = os.environ.copy()
+    env.update(
+        {
+            "TEST_MODE": "0",
+            "TLDW_SANDBOX_VZ_LINUX_E2E": "1",
+            "TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE": str(bundle_path),
+            "TLDW_SANDBOX_MACOS_HELPER_SOCKET": str(socket_path),
+            "SANDBOX_ENABLE_EXECUTION": "1",
+            "SANDBOX_BACKGROUND_EXECUTION": "0",
+        }
+    )
+    argv = [
+        str(python_bin),
+        "-m",
+        "pytest",
+        str(REPO_ROOT / "tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py"),
+        "-m",
+        "vz_linux_host_smoke",
+        "-q",
+        "-rs",
+    ]
+    code = runner(argv, dry_run=dry_run, env=env)
+    if code == 0:
+        return CheckResult(ok=True, reason="dry_run" if dry_run else "ok")
+    return CheckResult(ok=False, reason="vz_linux_smoke_failed", message=str(code))
+
+
 def read_codesign_entitlements(helper_path: Path) -> CheckResult:
     try:
         # macOS operator command, fixed executable name, no shell expansion.
@@ -743,6 +780,8 @@ def run_launchd_drill(
     dry_run: bool = False,
     ping_checker: Callable[[Path], CheckResult | PingState] = ping_helper_state,
     launchd_runner: Callable[..., int] | None = None,
+    bundle_path: Path | None = None,
+    python_path: Path | None = None,
     smoke_runner: Callable[[], CheckResult] | None = None,
 ) -> list[tuple[str, CheckResult]]:
     """Run an isolated launchd helper lifecycle validation drill."""
@@ -816,6 +855,16 @@ def run_launchd_drill(
 
         if dry_run:
             results.append(("helper_status", CheckResult(ok=True, reason="dry_run")))
+            if smoke_runner is None and bundle_path is not None:
+                smoke_result = run_vz_linux_host_smoke(
+                    bundle_path=bundle_path,
+                    socket_path=socket_path,
+                    python_path=python_path,
+                    dry_run=True,
+                )
+                results.append(("vz_linux_smoke", smoke_result))
+                if not smoke_result.ok:
+                    primary_failure = smoke_result
             return results
 
         ping_state = wait_for_ping(socket_path, ping_checker=ping_checker)
@@ -830,6 +879,16 @@ def run_launchd_drill(
 
         if smoke_runner is not None:
             smoke_result = smoke_runner()
+            results.append(("vz_linux_smoke", smoke_result))
+            if not smoke_result.ok:
+                primary_failure = smoke_result
+        elif bundle_path is not None:
+            smoke_result = run_vz_linux_host_smoke(
+                bundle_path=bundle_path,
+                socket_path=socket_path,
+                python_path=python_path,
+                dry_run=dry_run,
+            )
             results.append(("vz_linux_smoke", smoke_result))
             if not smoke_result.ok:
                 primary_failure = smoke_result

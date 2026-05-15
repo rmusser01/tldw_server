@@ -695,6 +695,81 @@ def test_launchd_service_loaded_dry_run_reports_absent_for_nonzero_runner() -> N
     CASE.assertEqual(result, helperctl.CheckResult(ok=True, reason="launchd_service_absent"))
 
 
+def test_run_vz_linux_host_smoke_constructs_pytest_command_and_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    bundle = tmp_path / "bundle"
+    socket_path = tmp_path / "helper.sock"
+    python_path = Path("/usr/bin/python3")
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+    monkeypatch.setenv("TLDW_TEST_EXISTING_ENV", "preserved")
+
+    result = helperctl.run_vz_linux_host_smoke(
+        bundle_path=bundle,
+        socket_path=socket_path,
+        python_path=python_path,
+        command_runner=lambda argv, **kwargs: calls.append((argv, kwargs)) or 0,
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=True))
+    CASE.assertEqual(len(calls), 1)
+    argv, kwargs = calls[0]
+    CASE.assertEqual(
+        argv,
+        [
+            str(python_path),
+            "-m",
+            "pytest",
+            str(helperctl.REPO_ROOT / "tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py"),
+            "-m",
+            "vz_linux_host_smoke",
+            "-q",
+            "-rs",
+        ],
+    )
+    CASE.assertFalse(kwargs["dry_run"])
+    env = kwargs["env"]
+    CASE.assertEqual(env["TEST_MODE"], "0")
+    CASE.assertEqual(env["TLDW_SANDBOX_VZ_LINUX_E2E"], "1")
+    CASE.assertEqual(env["TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE"], str(bundle))
+    CASE.assertEqual(env["TLDW_SANDBOX_MACOS_HELPER_SOCKET"], str(socket_path))
+    CASE.assertEqual(env["SANDBOX_ENABLE_EXECUTION"], "1")
+    CASE.assertEqual(env["SANDBOX_BACKGROUND_EXECUTION"], "0")
+    CASE.assertEqual(env["TLDW_TEST_EXISTING_ENV"], "preserved")
+
+
+def test_run_vz_linux_host_smoke_reports_failure(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+
+    result = helperctl.run_vz_linux_host_smoke(
+        bundle_path=tmp_path / "bundle",
+        socket_path=tmp_path / "helper.sock",
+        python_path=Path("/usr/bin/python3"),
+        command_runner=lambda argv, **kwargs: 2,
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="vz_linux_smoke_failed", message="2"))
+
+
+def test_run_vz_linux_host_smoke_dry_run_forwards_flag_and_reports_dry_run(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    calls: list[dict[str, Any]] = []
+
+    result = helperctl.run_vz_linux_host_smoke(
+        bundle_path=tmp_path / "bundle",
+        socket_path=tmp_path / "helper.sock",
+        python_path=Path("/usr/bin/python3"),
+        dry_run=True,
+        command_runner=lambda argv, **kwargs: calls.append(kwargs) or 0,
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=True, reason="dry_run"))
+    CASE.assertEqual(len(calls), 1)
+    CASE.assertTrue(calls[0]["dry_run"])
+
+
 def _make_launchd_drill_inputs(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     private_root = tmp_path / "private"
     private_root.mkdir(mode=0o700)
@@ -748,6 +823,7 @@ def test_launchd_drill_runs_bootstrap_status_kickstart_ping_bootout(tmp_path: Pa
     CASE.assertEqual(by_name["launchd_bootout"].reason, "ok")
     CASE.assertEqual(by_name["protocol_version"].message, "1")
     CASE.assertEqual(by_name["helper_version"].message, "test")
+    CASE.assertNotIn("vz_linux_smoke", by_name)
     CASE.assertFalse((socket_path.parent / "helper.pid").exists())
     CASE.assertIn(["launchctl", "bootstrap", "gui/501", str(plist_path)], calls)
     CASE.assertGreaterEqual(calls.count(["launchctl", "print", "gui/501/org.tldw.test"]), 2)
@@ -959,6 +1035,129 @@ def test_launchd_drill_preserves_smoke_failure_through_bootout(tmp_path: Path) -
             ("launchd_drill", smoke_failure),
         ],
     )
+    CASE.assertIn("launchctl bootout gui/501/org.tldw.test", calls)
+
+
+def test_launchd_drill_runs_bundle_smoke_after_ping_before_bootout(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    helper, socket_path, log_dir, plist_path = _make_launchd_drill_inputs(tmp_path)
+    bundle = tmp_path / "bundle"
+    python_path = Path("/usr/bin/python3")
+    calls: list[str] = []
+    smoke_kwargs: list[dict[str, Any]] = []
+    status_command = "launchctl print gui/501/org.tldw.test"
+
+    def runner(argv: list[str], **kwargs: Any) -> int:
+        command = " ".join(argv)
+        calls.append(command)
+        if command == status_command and calls.count(status_command) == 1:
+            return 3
+        return 0
+
+    def ping_checker(path: Path) -> helperctl.CheckResult:
+        calls.append("ping")
+        return helperctl.CheckResult(ok=True)
+
+    def smoke_runner(**kwargs: Any) -> helperctl.CheckResult:
+        smoke_kwargs.append(kwargs)
+        calls.append("bundle-smoke")
+        return helperctl.CheckResult(ok=True)
+
+    monkeypatch.setattr(helperctl, "run_vz_linux_host_smoke", smoke_runner)
+
+    results = helperctl.run_launchd_drill(
+        helper_path=helper,
+        socket_path=socket_path,
+        log_dir=log_dir,
+        plist_path=plist_path,
+        label="org.tldw.test",
+        uid=501,
+        write_plist=True,
+        create_dirs=True,
+        launchd_runner=runner,
+        ping_checker=ping_checker,
+        bundle_path=bundle,
+        python_path=python_path,
+    )
+
+    result_names = [name for name, _ in results]
+    CASE.assertLess(result_names.index("helper_status"), result_names.index("vz_linux_smoke"))
+    CASE.assertLess(result_names.index("vz_linux_smoke"), result_names.index("launchd_bootout"))
+    CASE.assertEqual(
+        smoke_kwargs,
+        [
+            {
+                "bundle_path": bundle,
+                "socket_path": socket_path,
+                "python_path": python_path,
+                "dry_run": False,
+            }
+        ],
+    )
+    CASE.assertEqual(
+        calls,
+        [
+            status_command,
+            f"launchctl bootstrap gui/501 {plist_path}",
+            status_command,
+            "launchctl kickstart -k gui/501/org.tldw.test",
+            "ping",
+            "bundle-smoke",
+            "launchctl bootout gui/501/org.tldw.test",
+        ],
+    )
+
+
+def test_launchd_drill_preserves_bundle_smoke_failure_through_bootout(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    helper, socket_path, log_dir, plist_path = _make_launchd_drill_inputs(tmp_path)
+    calls: list[str] = []
+    status_command = "launchctl print gui/501/org.tldw.test"
+    smoke_failure = helperctl.CheckResult(ok=False, reason="vz_linux_smoke_failed", message="2")
+
+    def runner(argv: list[str], **kwargs: Any) -> int:
+        command = " ".join(argv)
+        calls.append(command)
+        if command == status_command and calls.count(status_command) == 1:
+            return 3
+        return 0
+
+    def smoke_runner(**kwargs: Any) -> helperctl.CheckResult:
+        calls.append("bundle-smoke")
+        return smoke_failure
+
+    monkeypatch.setattr(helperctl, "run_vz_linux_host_smoke", smoke_runner)
+
+    results = helperctl.run_launchd_drill(
+        helper_path=helper,
+        socket_path=socket_path,
+        log_dir=log_dir,
+        plist_path=plist_path,
+        label="org.tldw.test",
+        uid=501,
+        write_plist=True,
+        create_dirs=True,
+        launchd_runner=runner,
+        ping_checker=lambda path: helperctl.CheckResult(ok=True),
+        bundle_path=tmp_path / "bundle",
+    )
+
+    CASE.assertIn(("vz_linux_smoke", smoke_failure), results)
+    CASE.assertEqual(
+        results[-3:],
+        [
+            ("vz_linux_smoke", smoke_failure),
+            ("launchd_bootout", helperctl.CheckResult(ok=True)),
+            ("launchd_drill", smoke_failure),
+        ],
+    )
+    CASE.assertIn("bundle-smoke", calls)
     CASE.assertIn("launchctl bootout gui/501/org.tldw.test", calls)
 
 
