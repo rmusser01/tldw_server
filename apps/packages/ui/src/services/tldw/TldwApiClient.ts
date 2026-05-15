@@ -2222,8 +2222,8 @@ export class TldwApiClientBase {
   async startLlamacppModel(
     modelId: string,
     serverArgs?: Record<string, unknown>
-  ): Promise<any> {
-    return await bgRequest<any>({
+  ): Promise<Record<string, unknown>> {
+    return await bgRequest<Record<string, unknown>>({
       path: "/api/v1/llamacpp/start-by-model",
       method: "POST",
       headers: { "Content-Type": "application/json" },
