@@ -16,6 +16,7 @@ export type ResolvePersonaVisualStateInput = {
   approvalNeeded?: boolean
   runtimeOverride?: PersonaVisualRuntimeOverride | null
   authoredTriggers?: PersonaVisualAuthoredTrigger[] | null
+  activeToolName?: string | null
   activeToolStatus?: string | null
   wakeArmed?: boolean
   isOffline?: boolean
@@ -23,7 +24,7 @@ export type ResolvePersonaVisualStateInput = {
   now?: number
 }
 
-const VISUAL_STATES = new Set<PersonaVisualStateId>([
+const BUILTIN_VISUAL_STATES = new Set<PersonaVisualStateId>([
   "idle",
   "wake_armed",
   "listening",
@@ -45,7 +46,7 @@ const normalizeLiveVoiceState = (
 ): PersonaVisualStateId | null => {
   const normalized = toNormalizedToken(value).replace(/[\s-]+/g, "_")
   if (!normalized) return null
-  if (VISUAL_STATES.has(normalized as PersonaVisualStateId)) {
+  if (BUILTIN_VISUAL_STATES.has(normalized as PersonaVisualStateId)) {
     return normalized as PersonaVisualStateId
   }
   if (
@@ -89,6 +90,9 @@ const triggerMatches = (
     const category = parseToolCategory(input.activeToolStatus)
     return match === category || toolStatus.startsWith(match)
   }
+  if (trigger.source === "tool_name") {
+    return match === toNormalizedToken(input.activeToolName)
+  }
   if (trigger.source === "mcp_runtime") {
     const runtimeReason =
       toNormalizedToken(input.mcpRuntimeReason) ||
@@ -119,7 +123,7 @@ export const resolvePersonaVisualState = (
   if (
     input.runtimeOverride &&
     input.runtimeOverride.expiresAt > now &&
-    VISUAL_STATES.has(input.runtimeOverride.state)
+    BUILTIN_VISUAL_STATES.has(input.runtimeOverride.state)
   ) {
     return input.runtimeOverride.state
   }

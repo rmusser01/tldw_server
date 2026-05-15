@@ -1,4 +1,4 @@
-export type PersonaVisualStateId =
+export type PersonaVisualBuiltinStateId =
   | "idle"
   | "wake_armed"
   | "listening"
@@ -8,6 +8,11 @@ export type PersonaVisualStateId =
   | "approval_needed"
   | "error"
   | "offline"
+
+export type PersonaVisualCustomStateId = string & {}
+export type PersonaVisualStateId =
+  | PersonaVisualBuiltinStateId
+  | PersonaVisualCustomStateId
 
 export type PersonaVisualRendererType =
   | "sprite_frames"
@@ -101,9 +106,30 @@ export interface PersonaVisualAnimation {
   preview_asset_id?: string
 }
 
+export type PersonaVisualStateCatalogKind =
+  | "tool_variant"
+  | "reaction"
+  | "live_variant"
+  | "mcp_runtime"
+  | "mood"
+  | "pack_private"
+
+export interface PersonaVisualStateCatalogEntry {
+  label: string
+  kind: PersonaVisualStateCatalogKind
+  description?: string | null
+  tags?: string[]
+}
+
+export type PersonaVisualAuthoredTriggerSource =
+  | "live_state"
+  | "tool_category"
+  | "mcp_runtime"
+  | "tool_name"
+
 export interface PersonaVisualAuthoredTrigger {
   id: string
-  source: "live_state" | "tool_category" | "mcp_runtime"
+  source: PersonaVisualAuthoredTriggerSource
   match: string
   state: PersonaVisualStateId
   duration_ms: number
@@ -116,6 +142,7 @@ export interface PersonaVisualManifest {
   states: Partial<Record<PersonaVisualStateId, { animation_id: string }>>
   animations: Record<string, PersonaVisualAnimation>
   fallbacks?: Partial<Record<PersonaVisualStateId, PersonaVisualStateId[]>>
+  state_catalog?: Record<PersonaVisualCustomStateId, PersonaVisualStateCatalogEntry>
   authored_triggers?: PersonaVisualAuthoredTrigger[]
 }
 

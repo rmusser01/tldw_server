@@ -2065,6 +2065,7 @@ describe("usePersonaLiveVoiceController", () => {
     })
 
     expect((result.current as any).activeToolStatus).toBeTruthy()
+    expect((result.current as any).activeToolName).toBe("search_notes")
 
     act(() => {
       result.current.handlePayload({
@@ -2136,6 +2137,7 @@ describe("usePersonaLiveVoiceController", () => {
     })
 
     expect((result.current as any).activeToolStatus).toBe("")
+    expect((result.current as any).activeToolName).toBe("")
     expect((result.current as any).recoveryMode).toBe("none")
   })
 

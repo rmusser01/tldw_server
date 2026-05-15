@@ -373,6 +373,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     renderContext.visual_state ??
     resolvePersonaVisualState({
       liveVoiceState: renderContext.live_voice_state,
+      activeToolName: renderContext.active_tool_name,
       activeToolStatus: renderContext.active_tool_status,
       wakeArmed: renderContext.wake_armed,
       recovering:

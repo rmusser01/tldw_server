@@ -247,6 +247,7 @@ const ASSET_ROLES: PersonaVisualAssetRole[] = [
 const TRIGGER_SOURCES: PersonaVisualAuthoredTrigger["source"][] = [
   "live_state",
   "tool_category",
+  "tool_name",
   "mcp_runtime"
 ]
 
@@ -415,6 +416,7 @@ const DEFAULT_MANIFEST: PersonaVisualManifest = {
   states: {},
   animations: {},
   fallbacks: {},
+  state_catalog: {},
   authored_triggers: []
 }
 
@@ -446,6 +448,9 @@ const normalizeManifest = (
     },
     fallbacks: {
       ...(source.fallbacks || {})
+    },
+    state_catalog: {
+      ...(source.state_catalog || {})
     },
     authored_triggers: Array.isArray(source.authored_triggers)
       ? source.authored_triggers
@@ -873,6 +878,21 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const animationIds = React.useMemo(
     () => getAnimationIds(draftManifest),
     [draftManifest]
+  )
+  const customVisualStates = React.useMemo(
+    () =>
+      Object.keys(draftManifest.state_catalog || {}).sort((a, b) =>
+        a.localeCompare(b)
+      ) as PersonaVisualStateId[],
+    [draftManifest.state_catalog]
+  )
+  const activeVisualStates = React.useMemo(
+    () => [...VISUAL_STATES, ...customVisualStates],
+    [customVisualStates]
+  )
+  const editableFallbackStates = React.useMemo(
+    () => [...OPTIONAL_VISUAL_STATES, ...customVisualStates],
+    [customVisualStates]
   )
   const selectedAnimation =
     selectedAnimationId && draftManifest.animations[selectedAnimationId]
@@ -1817,7 +1837,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       const nextValues = value
         .split(",")
         .map((item) => item.trim() as PersonaVisualStateId)
-        .filter((item) => VISUAL_STATES.includes(item))
+        .filter((item) => activeVisualStates.includes(item))
       if (nextValues.length) {
         fallbacks[state] = nextValues
       } else {
@@ -2919,8 +2939,37 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 </label>
               ))}
             </div>
+            {customVisualStates.length ? (
+              <>
+                <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+                  Custom States
+                </div>
+                <div className="mt-2 grid gap-2 md:grid-cols-2">
+                  {customVisualStates.map((state) => (
+                    <label key={state} className="text-xs text-text-muted">
+                      <span className="mb-1 flex items-center gap-1">
+                        <span>{formatStateLabel(state)}</span>
+                        <Tag color="blue">
+                          {draftManifest.state_catalog?.[state]?.kind || "custom"}
+                        </Tag>
+                      </span>
+                      <select
+                        data-testid={`persona-visual-state-${state}-select`}
+                        className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                        value={draftManifest.states?.[state]?.animation_id || ""}
+                        onChange={(event) =>
+                          handleStateMappingChange(state, event.target.value)
+                        }
+                      >
+                        {renderAnimationOptions()}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+              </>
+            ) : null}
             <div className="mt-3 grid gap-2 md:grid-cols-2">
-              {OPTIONAL_VISUAL_STATES.map((state) => (
+              {editableFallbackStates.map((state) => (
                 <label key={state} className="text-xs text-text-muted">
                   <span className="mb-1 block">{`${formatStateLabel(state)} fallbacks`}</span>
                   <input
@@ -3209,7 +3258,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                   }))
                 }
               >
-                {VISUAL_STATES.map((state) => (
+                {activeVisualStates.map((state) => (
                   <option key={state} value={state}>
                     {state}
                   </option>
@@ -3354,7 +3403,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                     setGenerationTargetState(event.target.value as PersonaVisualStateId)
                   }
                 >
-                  {VISUAL_STATES.map((state) => (
+                  {activeVisualStates.map((state) => (
                     <option key={state} value={state}>
                       {state}
                     </option>
