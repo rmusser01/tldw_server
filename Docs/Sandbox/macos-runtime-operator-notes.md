@@ -468,13 +468,13 @@ helper daemon for real `vz_linux` E2E, verifies ephemeral execution, verifies
 same-session VM reuse, verifies recovery diagnostics plus dry-run
 reconciliation repair planning, and stops the helper on exit.
 
-`restart-drill` is a narrower local helper lifecycle check. Use it after
-starting the helper through `vz-helperctl.py start` when you need to prove that
-the managed pid-file/socket workflow can stop the helper, start a replacement
-on the same paths, and reach healthy status again. It refuses absent or
-unmanaged helpers, preserves existing helper logs under the configured log
-directory, and does not run guest commands, mutate reconciliation state, manage
-launchd, or validate host reboot behavior.
+`restart-drill` validates the direct `vz-helperctl.py`-managed lifecycle. Use it
+after starting the helper through `vz-helperctl.py start` when you need to prove
+that the managed pid-file/socket workflow can stop the helper, start a
+replacement on the same paths, and reach healthy status again. It refuses
+absent or unmanaged helpers, preserves existing helper logs under the
+configured log directory, and does not run guest commands, mutate
+reconciliation state, manage launchd, or validate host reboot behavior.
 
 ```bash
 tools/macos-vz-helper/scripts/vz-helperctl.py start
@@ -499,16 +499,39 @@ tools/macos-vz-helper/scripts/vz-helperctl.py launchd bootstrap \
 tools/macos-vz-helper/scripts/vz-helperctl.py launchd kickstart
 tools/macos-vz-helper/scripts/vz-helperctl.py launchd status
 tools/macos-vz-helper/scripts/vz-helperctl.py status
-tools/macos-vz-helper/scripts/vz-helperctl.py smoke \
-  --bundle /path/to/canonical/bundle \
-  --entitlements /path/to/helper.entitlements
 tools/macos-vz-helper/scripts/vz-helperctl.py launchd bootout
 ```
 
+`launchd-drill` is the opt-in validation path for LaunchAgent bootstrap,
+kickstart, helper readiness, bootout, and optional real `vz_linux` smoke through
+the launchd-managed helper. Use isolated labels and private plist/runtime paths
+so the drill cannot take ownership of a user's existing service.
+
+```bash
+runtime_dir="$(mktemp -d "${TMPDIR:-/tmp}/tldw-vz-launchd-drill.XXXXXX")"
+chmod 700 "$runtime_dir"
+label="org.tldw.macos-vz-helper.drill.$$"
+trap 'tools/macos-vz-helper/scripts/vz-helperctl.py launchd bootout --label "$label" --plist-output "$runtime_dir/${label}.plist" >/dev/null 2>&1 || true; rm -rf "$runtime_dir"' EXIT
+
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd-drill \
+  --socket "$runtime_dir/helper.sock" \
+  --log-dir "$runtime_dir/logs" \
+  --plist-output "$runtime_dir/${label}.plist" \
+  --label "$label" \
+  --write-plist \
+  --create-dirs \
+  --skip-smoke
+```
+
+Omit `--skip-smoke` and add `--bundle /path/to/canonical/bundle` when the
+prepared host should also run the real `vz_linux` smoke against the
+launchd-managed helper. The default direct-helper smoke path remains unchanged.
+
 The launchd path does not run from diagnostics, server startup, `status`,
 `plist`, or `smoke`. It also does not validate host reboot behavior; reboot
-testing remains a manual operator drill until a prepared runner can preserve
-logs and tolerate disruptive host lifecycle changes.
+testing remains a manual operator drill and must stay out of scheduled CI until
+a prepared runner can tolerate disruptive host lifecycle changes and preserve
+logs.
 
 Manual failure drills are opt-in and remain disabled for default smoke and
 scheduled host-gated runs. To include them, pass:

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import io
 import json
 import os
 import plistlib
@@ -270,6 +271,17 @@ def launchd_service_target(label: str, *, uid: int | None = None) -> str:
     return f"{launchd_domain(uid)}/{label}"
 
 
+def default_launchd_drill_label(*, pid: int | None = None) -> str:
+    """Return the isolated launchd label used by the validation drill."""
+    suffix = os.getpid() if pid is None else pid
+    return f"{DEFAULT_LAUNCHD_LABEL}.drill.{suffix}"
+
+
+def default_launchd_drill_plist_path(paths: HelperPaths, label: str) -> Path:
+    """Return the private runtime plist path used by the validation drill."""
+    return paths.socket_path.parent / "launchd-drill" / f"{label}.plist"
+
+
 def launchd_argv(
     action: str,
     *,
@@ -289,6 +301,35 @@ def launchd_argv(
     if action == "kickstart":
         return ["launchctl", "kickstart", "-k", launchd_service_target(label, uid=uid)]
     return ["launchctl", "bootout", launchd_service_target(label, uid=uid)]
+
+
+def launchd_service_loaded(
+    label: str,
+    *,
+    uid: int | None = None,
+    dry_run: bool = False,
+    command_runner: Callable[..., int] | None = None,
+) -> CheckResult:
+    """Check whether launchd currently has the helper service loaded."""
+    runner = command_runner or run_command
+    target = launchd_service_target(label, uid=uid)
+    argv = launchd_argv("status", label=label, uid=uid)
+
+    if dry_run:
+        code = runner(argv, dry_run=True)
+        if code == 0:
+            return CheckResult(ok=True, reason="dry_run")
+        return CheckResult(ok=True, reason="launchd_service_absent")
+
+    if _is_default_run_command(runner) and shutil.which("launchctl") is None:
+        return CheckResult(ok=False, reason="launchd_launchctl_unavailable")
+
+    code = runner(argv, dry_run=False)
+    if code == 0:
+        return CheckResult(ok=True, reason="launchd_service_loaded", message=target)
+    if code == 127:
+        return CheckResult(ok=False, reason="launchd_launchctl_unavailable")
+    return CheckResult(ok=True, reason="launchd_service_absent", message=target)
 
 
 def _prepare_launchd_plist(
@@ -404,6 +445,24 @@ def run_command(argv: list[str], *, dry_run: bool = False, env: dict[str, str] |
     return int(completed.returncode)
 
 
+def run_command_captured(argv: list[str], *, dry_run: bool = False, env: dict[str, str] | None = None) -> int:
+    """Run a command without letting child stdout/stderr reach the CLI stream."""
+    if dry_run:
+        return 0
+    # argv is executed directly without a shell.
+    try:
+        completed = subprocess.run(  # nosec B603
+            argv,
+            env=env,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        return 127
+    return int(completed.returncode)
+
+
 def _is_default_run_command(runner: Callable[..., int]) -> bool:
     return getattr(runner, "__module__", None) == __name__ and getattr(runner, "__name__", None) == "run_command"
 
@@ -484,6 +543,48 @@ def smoke_helper(
     if code != 0:
         return CheckResult(ok=False, reason="helper_smoke_failed")
     return CheckResult(ok=True)
+
+
+def run_vz_linux_host_smoke(
+    *,
+    bundle_path: Path,
+    socket_path: Path,
+    python_path: Path | None = None,
+    dry_run: bool = False,
+    command_runner: Callable[..., int] | None = None,
+) -> CheckResult:
+    """Run host-gated `vz_linux` smoke against an already-managed helper.
+
+    The smoke uses the existing pytest contract, points it at the provided
+    helper socket, and reports nonzero exits as `vz_linux_smoke_failed`.
+    """
+    runner = command_runner or run_command
+    python_bin = python_path if python_path is not None else Path(sys.executable)
+    env = os.environ.copy()
+    env.update(
+        {
+            "TEST_MODE": "0",
+            "TLDW_SANDBOX_VZ_LINUX_E2E": "1",
+            "TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE": str(bundle_path),
+            "TLDW_SANDBOX_MACOS_HELPER_SOCKET": str(socket_path),
+            "SANDBOX_ENABLE_EXECUTION": "1",
+            "SANDBOX_BACKGROUND_EXECUTION": "0",
+        }
+    )
+    argv = [
+        str(python_bin),
+        "-m",
+        "pytest",
+        str(REPO_ROOT / "tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py"),
+        "-m",
+        "vz_linux_host_smoke",
+        "-q",
+        "-rs",
+    ]
+    code = runner(argv, dry_run=dry_run, env=env)
+    if code == 0:
+        return CheckResult(ok=True, reason="dry_run" if dry_run else "ok")
+    return CheckResult(ok=False, reason="vz_linux_smoke_failed", message=str(code))
 
 
 def read_codesign_entitlements(helper_path: Path) -> CheckResult:
@@ -688,6 +789,158 @@ def wait_for_ping(
         if time.monotonic() >= deadline:
             return last_state
         time.sleep(interval_sec)
+
+
+def run_launchd_drill(
+    *,
+    helper_path: Path,
+    socket_path: Path,
+    log_dir: Path,
+    plist_path: Path,
+    label: str,
+    uid: int | None = None,
+    write_plist: bool = False,
+    create_dirs: bool = False,
+    dry_run: bool = False,
+    ping_checker: Callable[[Path], CheckResult | PingState] = ping_helper_state,
+    launchd_runner: Callable[..., int] | None = None,
+    bundle_path: Path | None = None,
+    python_path: Path | None = None,
+    smoke_command_runner: Callable[..., int] | None = None,
+    smoke_runner: Callable[[], CheckResult] | None = None,
+) -> list[tuple[str, CheckResult]]:
+    """Run an isolated launchd helper lifecycle validation drill."""
+    results: list[tuple[str, CheckResult]] = []
+    bootstrapped = False
+    primary_failure: CheckResult | None = None
+
+    preflight = launchd_service_loaded(label, uid=uid, dry_run=dry_run, command_runner=launchd_runner)
+    if preflight.reason == "launchd_service_loaded":
+        results.append(
+            (
+                "launchd_preflight",
+                CheckResult(False, "launchd_service_already_loaded", preflight.message),
+            )
+        )
+        return results
+    results.append(("launchd_preflight", preflight))
+    if not preflight.ok:
+        return results
+
+    bootstrap = run_launchd_action(
+        "bootstrap",
+        label=label,
+        plist_path=plist_path,
+        helper_path=helper_path,
+        socket_path=socket_path,
+        log_dir=log_dir,
+        uid=uid,
+        dry_run=dry_run,
+        write_plist=write_plist,
+        create_dirs=create_dirs,
+        command_runner=launchd_runner,
+    )
+    results.append(("launchd_bootstrap", bootstrap))
+    if not bootstrap.ok:
+        return results
+    bootstrapped = not dry_run
+
+    try:
+        status = run_launchd_action(
+            "status",
+            label=label,
+            plist_path=plist_path,
+            helper_path=helper_path,
+            socket_path=socket_path,
+            log_dir=log_dir,
+            uid=uid,
+            dry_run=dry_run,
+            command_runner=launchd_runner,
+        )
+        results.append(("launchd_status", status))
+        if not status.ok:
+            primary_failure = status
+            return results
+
+        kickstart = run_launchd_action(
+            "kickstart",
+            label=label,
+            plist_path=plist_path,
+            helper_path=helper_path,
+            socket_path=socket_path,
+            log_dir=log_dir,
+            uid=uid,
+            dry_run=dry_run,
+            command_runner=launchd_runner,
+        )
+        results.append(("launchd_kickstart", kickstart))
+        if not kickstart.ok:
+            primary_failure = kickstart
+            return results
+
+        if dry_run:
+            results.append(("helper_status", CheckResult(ok=True, reason="dry_run")))
+            if smoke_runner is None and bundle_path is not None:
+                smoke_kwargs = {
+                    "bundle_path": bundle_path,
+                    "socket_path": socket_path,
+                    "python_path": python_path,
+                    "dry_run": True,
+                }
+                if smoke_command_runner is not None:
+                    smoke_kwargs["command_runner"] = smoke_command_runner
+                smoke_result = run_vz_linux_host_smoke(**smoke_kwargs)
+                results.append(("vz_linux_smoke", smoke_result))
+                if not smoke_result.ok:
+                    primary_failure = smoke_result
+            return results
+
+        ping_state = wait_for_ping(socket_path, ping_checker=ping_checker)
+        results.append(("helper_status", ping_state.result))
+        if ping_state.protocol_version:
+            results.append(("protocol_version", CheckResult(ok=True, message=ping_state.protocol_version)))
+        if ping_state.helper_version:
+            results.append(("helper_version", CheckResult(ok=True, message=ping_state.helper_version)))
+        if not ping_state.result.ok:
+            primary_failure = ping_state.result
+            return results
+
+        if smoke_runner is not None:
+            smoke_result = smoke_runner()
+            results.append(("vz_linux_smoke", smoke_result))
+            if not smoke_result.ok:
+                primary_failure = smoke_result
+        elif bundle_path is not None:
+            smoke_kwargs = {
+                "bundle_path": bundle_path,
+                "socket_path": socket_path,
+                "python_path": python_path,
+                "dry_run": dry_run,
+            }
+            if smoke_command_runner is not None:
+                smoke_kwargs["command_runner"] = smoke_command_runner
+            smoke_result = run_vz_linux_host_smoke(**smoke_kwargs)
+            results.append(("vz_linux_smoke", smoke_result))
+            if not smoke_result.ok:
+                primary_failure = smoke_result
+
+        return results
+    finally:
+        if bootstrapped:
+            bootout = run_launchd_action(
+                "bootout",
+                label=label,
+                plist_path=plist_path,
+                helper_path=helper_path,
+                socket_path=socket_path,
+                log_dir=log_dir,
+                uid=uid,
+                dry_run=dry_run,
+                command_runner=launchd_runner,
+            )
+            results.append(("launchd_bootout", bootout))
+            if primary_failure is not None:
+                results.append(("launchd_drill", primary_failure))
 
 
 def wait_for_socket(
@@ -1627,6 +1880,41 @@ def _launchd_command(args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
+def _launchd_drill_command(args: argparse.Namespace) -> int:
+    paths = default_paths()
+    label = args.label or default_launchd_drill_label()
+    plist_path = (
+        Path(args.plist_output)
+        if args.plist_output
+        else default_launchd_drill_plist_path(paths, label)
+    )
+    bundle_path = None
+    if not args.skip_smoke and args.bundle:
+        bundle_path = Path(args.bundle)
+    drill_kwargs = {
+        "helper_path": Path(args.helper_path) if args.helper_path else DEFAULT_HELPER,
+        "socket_path": Path(args.socket_path) if args.socket_path else paths.socket_path,
+        "log_dir": Path(args.log_dir) if args.log_dir else paths.log_dir,
+        "plist_path": plist_path,
+        "label": label,
+        "uid": args.uid,
+        "write_plist": args.write_plist,
+        "create_dirs": args.create_dirs,
+        "dry_run": args.dry_run,
+        "bundle_path": bundle_path,
+        "python_path": Path(args.python) if args.python else None,
+    }
+    if args.json:
+        drill_kwargs["launchd_runner"] = run_command_captured
+        drill_kwargs["smoke_command_runner"] = run_command_captured
+        with contextlib.redirect_stdout(io.StringIO()):
+            results = run_launchd_drill(**drill_kwargs)
+    else:
+        results = run_launchd_drill(**drill_kwargs)
+    _print_results(results, as_json=args.json)
+    return 0 if all(result.ok for _, result in results) else 1
+
+
 def _start_command(args: argparse.Namespace) -> int:
     paths = default_paths()
     result = start_helper(
@@ -1744,6 +2032,25 @@ def build_parser() -> argparse.ArgumentParser:
     launchd.add_argument("--dry-run", action="store_true")
     launchd.add_argument("--json", action="store_true")
     launchd.set_defaults(func=_launchd_command)
+
+    launchd_drill = subparsers.add_parser(
+        "launchd-drill",
+        help="validate launchd-managed helper lifecycle",
+    )
+    launchd_drill.add_argument("--bundle")
+    launchd_drill.add_argument("--helper", "--helper-path", dest="helper_path")
+    launchd_drill.add_argument("--socket", "--socket-path", dest="socket_path")
+    launchd_drill.add_argument("--log-dir")
+    launchd_drill.add_argument("--plist-output")
+    launchd_drill.add_argument("--label")
+    launchd_drill.add_argument("--uid", type=int)
+    launchd_drill.add_argument("--python")
+    launchd_drill.add_argument("--write-plist", action="store_true")
+    launchd_drill.add_argument("--create-dirs", action="store_true")
+    launchd_drill.add_argument("--skip-smoke", action="store_true")
+    launchd_drill.add_argument("--dry-run", action="store_true")
+    launchd_drill.add_argument("--json", action="store_true")
+    launchd_drill.set_defaults(func=_launchd_drill_command)
 
     start = subparsers.add_parser("start", help="start the helper")
     start.add_argument("--helper", "--helper-path", dest="helper_path")
