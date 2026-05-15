@@ -39,6 +39,23 @@ const NON_CHAT_MODEL_HINTS = ["rerank", "moderation", "safety"]
 const hasAnyHint = (value: string, hints: string[]): boolean =>
   hints.some((hint) => value.includes(hint))
 
+const isAbortLikeModelFetchError = (error: unknown): boolean => {
+  const candidate = error as
+    | (Error & {
+        code?: unknown
+        status?: unknown
+      })
+    | null
+    | undefined
+  const message =
+    candidate instanceof Error ? candidate.message.toLowerCase() : ""
+  return (
+    candidate?.name === "AbortError" ||
+    candidate?.code === "REQUEST_ABORTED" ||
+    message.includes("abort")
+  )
+}
+
 export interface ModelInfo {
   id: string
   name: string
@@ -155,7 +172,7 @@ export class TldwModelsService {
     this.cacheScopeKey = scopeKey
 
     const now = Date.now()
-    
+
     // Return cached models if available and not expired
     if (!forceRefresh && this.cachedModels && (now - this.lastFetchTime) < this.CACHE_DURATION) {
       return this.cachedModels
@@ -175,12 +192,12 @@ export class TldwModelsService {
       return this.cachedModels || []
     }
 
-    const fetchPromise = (async () => {
+    const fetchFromServer = async () => {
       await tldwClient.initialize()
       const models = await tldwClient.getModels({
         refreshOpenRouter: options?.refreshOpenRouter === true
       })
-      
+
       // Transform tldw models to our format
       this.cachedModels = models.map(model => this.transformModel(model))
       this.lastFetchTime = Date.now()
@@ -188,9 +205,19 @@ export class TldwModelsService {
         this.lastForcedFetchTime = this.lastFetchTime
       }
       await this.persistCache()
-      
+
       return this.cachedModels
-    })().catch((error) => {
+    }
+
+    const fetchPromise = fetchFromServer().catch(async (error) => {
+      if (isAbortLikeModelFetchError(error) && !this.cachedModels) {
+        try {
+          return await fetchFromServer()
+        } catch (retryError) {
+          error = retryError
+        }
+      }
+
       if (!import.meta.env?.DEV) {
         console.error('Failed to fetch models from tldw:', error)
       }
@@ -282,7 +309,7 @@ export class TldwModelsService {
   async getModelsByProvider(): Promise<Map<string, ModelInfo[]>> {
     const models = await this.getModels()
     const grouped = new Map<string, ModelInfo[]>()
-    
+
     for (const model of models) {
       const provider = model.provider
       if (!grouped.has(provider)) {
@@ -290,7 +317,7 @@ export class TldwModelsService {
       }
       grouped.get(provider)!.push(model)
     }
-    
+
     return grouped
   }
 

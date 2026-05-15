@@ -50,6 +50,7 @@ import {
   type ChatModelSettings,
   useStoreChatModelSettings,
 } from "@/store/model";
+import { getDesignSystemState } from "@/design-system";
 import { useSmartScroll } from "@/hooks/useSmartScroll";
 import { ChevronDown, Keyboard, Search, X } from "lucide-react";
 import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings";
@@ -112,6 +113,9 @@ import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return";
 
 const toText = (value: unknown): string =>
   typeof value === "string" ? value : String(value);
+
+const UNAVAILABLE_DESIGN_STATE_LABEL =
+  getDesignSystemState("unavailable").label;
 
 const LazyArtifactsPanel = React.lazy(() =>
   import("@/components/Sidepanel/Chat/ArtifactsPanel").then((module) => ({
@@ -270,6 +274,7 @@ export const Playground = () => {
     reasoningEffort,
     apiProvider,
     activeSettingsScope,
+    setActiveSettingsScope,
     scopedSettingsByModelKey,
   } = useStoreChatModelSettings();
   const [selectedSystemPromptRecord, setSelectedSystemPromptRecord] =
@@ -282,6 +287,7 @@ export const Playground = () => {
     (state) => state.discoveredTools.length,
   );
   const chatMcpToolCount = useMcpToolsStore((state) => state.chatTools.length);
+  const mcpToolCounts = useMcpToolsStore((state) => state.toolCounts);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -1796,6 +1802,11 @@ export const Playground = () => {
     selectedProvider: apiProvider,
     selectedModel,
   });
+  React.useEffect(() => {
+    if (typeof setActiveSettingsScope === "function") {
+      setActiveSettingsScope(providerRouteSummary.providerRouteLabel ?? null);
+    }
+  }, [providerRouteSummary.providerRouteLabel, setActiveSettingsScope]);
   const contextFileItems = Array.isArray(contextFiles) ? contextFiles : [];
   const selectedKnowledgeItems = Array.isArray(selectedKnowledge)
     ? selectedKnowledge
@@ -2045,10 +2056,14 @@ export const Playground = () => {
       : null,
   ].filter((item): item is RuntimeSettingSummary => Boolean(item));
   const openModelSettingsFromCockpit = React.useCallback(() => {
+    if (typeof setActiveSettingsScope === "function") {
+      setActiveSettingsScope(providerRouteSummary.providerRouteLabel ?? null);
+    }
     openModelSettings({
       returnFocusSelector: COCKPIT_MODEL_SETTINGS_TRIGGER_SELECTOR,
+      settingsScope: providerRouteSummary.providerRouteLabel ?? null,
     });
-  }, []);
+  }, [providerRouteSummary.providerRouteLabel, setActiveSettingsScope]);
   const openMcpSettingsFromCockpit = React.useCallback(() => {
     openMcpSettings({
       returnFocusSelector: COCKPIT_MCP_SETTINGS_TRIGGER_SELECTOR,
@@ -2172,6 +2187,7 @@ export const Playground = () => {
         toolsLoading: mcpToolsLoading,
         discoveredCount: discoveredMcpToolCount,
         chatToolCount: chatMcpToolCount,
+        toolCounts: mcpToolCounts,
         copy: {
           availableDetail: (chatToolCount, discoveredCount) => {
             const chatToolsLabel =
@@ -2199,11 +2215,23 @@ export const Playground = () => {
             );
             return `${chatToolsLabel}${discoveredSuffix}`;
           },
+          chatEnabledLabel: toText(
+            t("playground:cockpit.mcpChatEnabledLabel", "Chat-enabled"),
+          ),
+          discoveredLabel: toText(
+            t("playground:cockpit.mcpDiscoveredLabel", "Discovered"),
+          ),
           emptyDetail: toText(
             t("playground:composer.mcpToolsEmpty", "No MCP tools available"),
           ),
+          executableLabel: toText(
+            t("playground:cockpit.mcpExecutableLabel", "Executable"),
+          ),
           loadingDetail: toText(
             t("playground:composer.mcpToolsLoading", "Loading tools..."),
+          ),
+          nameConflictsLabel: toText(
+            t("playground:cockpit.mcpNameConflictsLabel", "Name conflicts"),
           ),
           offlineDetail: toText(
             t("playground:composer.mcpToolsUnhealthy", "MCP tools are offline"),
@@ -2217,6 +2245,15 @@ export const Playground = () => {
           ),
           unavailableLabel: toText(
             t("playground:composer.mcpUnavailable", "MCP unavailable"),
+          ),
+          unavailableToolsLabel: toText(
+            t(
+              "playground:cockpit.mcpUnavailableToolsLabel",
+              UNAVAILABLE_DESIGN_STATE_LABEL,
+            ),
+          ),
+          userDisabledLabel: toText(
+            t("playground:cockpit.mcpUserDisabledLabel", "User-disabled"),
           ),
         },
       })}

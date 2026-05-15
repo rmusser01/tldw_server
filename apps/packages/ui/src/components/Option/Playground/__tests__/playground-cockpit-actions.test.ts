@@ -43,18 +43,23 @@ describe("playground cockpit actions", () => {
   });
 
   it("opens model settings through the existing model-settings event", async () => {
-    const event = nextCustomEvent<{ returnFocusSelector: string }>(
+    const event = nextCustomEvent<{
+      returnFocusSelector: string;
+      settingsScope: string;
+    }>(
       OPEN_MODEL_SETTINGS_EVENT,
     );
 
     openModelSettings({
       returnFocusSelector: "[data-testid='cockpit-model-settings-trigger']",
+      settingsScope: "openai:gpt-4o",
     });
 
     await expect(event).resolves.toMatchObject({
       type: OPEN_MODEL_SETTINGS_EVENT,
       detail: {
         returnFocusSelector: "[data-testid='cockpit-model-settings-trigger']",
+        settingsScope: "openai:gpt-4o",
       },
     });
   });

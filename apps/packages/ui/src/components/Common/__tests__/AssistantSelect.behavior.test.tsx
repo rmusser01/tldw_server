@@ -7,6 +7,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({
   listAllCharacters: vi.fn(async () => []),
   listPersonaProfiles: vi.fn(async () => []),
+  selectedAssistant: {
+    value: null as null | {
+      kind: "character" | "persona"
+      id: string
+      name: string
+    }
+  },
   setSelectedAssistant: vi.fn(async () => undefined)
 }))
 
@@ -31,7 +38,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 
 vi.mock("@/hooks/useSelectedAssistant", () => ({
   useSelectedAssistant: () => [
-    null,
+    mocks.selectedAssistant.value,
     mocks.setSelectedAssistant,
     { isLoading: false, setRenderValue: vi.fn() }
   ]
@@ -120,6 +127,7 @@ const renderAssistantSelect = () => {
 describe("AssistantSelect behavior", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.selectedAssistant.value = null
     mocks.listAllCharacters.mockResolvedValue([
       { id: "char-1", name: "Alpha" },
       { id: "char-2", name: "Beta" }
@@ -381,6 +389,56 @@ describe("AssistantSelect behavior", () => {
           }
         }
       })
+    )
+  })
+
+  it.each([
+    {
+      label: "character to another character",
+      source: { kind: "character" as const, id: "char-1", name: "Alpha" },
+      targetTab: "Characters",
+      targetName: "Beta",
+      expected: { kind: "character", id: "char-2", name: "Beta" }
+    },
+    {
+      label: "character to persona",
+      source: { kind: "character" as const, id: "char-1", name: "Alpha" },
+      targetTab: "Personas",
+      targetName: "Guide Persona",
+      expected: { kind: "persona", id: "persona-1", name: "Guide Persona" }
+    },
+    {
+      label: "persona to character",
+      source: { kind: "persona" as const, id: "persona-1", name: "Guide Persona" },
+      targetTab: "Characters",
+      targetName: "Alpha",
+      expected: { kind: "character", id: "char-1", name: "Alpha" }
+    },
+    {
+      label: "none to persona",
+      source: null,
+      targetTab: "Personas",
+      targetName: "Guide Persona",
+      expected: { kind: "persona", id: "persona-1", name: "Guide Persona" }
+    }
+  ])("supports $label from the assistant selector", async ({ source, targetTab, targetName, expected }) => {
+    const user = userEvent.setup()
+    mocks.selectedAssistant.value = source
+    renderAssistantSelect()
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: source?.name ?? "Select character or persona"
+      })
+    )
+
+    await user.click(await screen.findByRole("tab", { name: targetTab }))
+    mocks.setSelectedAssistant.mockClear()
+    await user.click(await screen.findByRole("button", { name: targetName }))
+
+    expect(mocks.setSelectedAssistant).toHaveBeenCalledTimes(1)
+    expect(mocks.setSelectedAssistant).toHaveBeenLastCalledWith(
+      expect.objectContaining(expected)
     )
   })
 

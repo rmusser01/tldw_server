@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { PlaygroundRuntimeInspector } from "../PlaygroundRuntimeInspector";
@@ -199,8 +199,24 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
         state: "available",
         label: "MCP tools",
         detail: "3 chat tools enabled",
+        stateCounts: [
+          { label: "Discovered", value: 4 },
+          { label: "Executable", value: 3 },
+          { label: "Chat-enabled", value: 2 },
+          { label: "User-disabled", value: 1 },
+        ],
       },
     });
+
+    const mcpCounts = screen.getByLabelText("MCP tool state counts");
+    expect(within(mcpCounts).getByText("Discovered")).toBeInTheDocument();
+    expect(within(mcpCounts).getByText("4")).toBeInTheDocument();
+    expect(within(mcpCounts).getByText("Executable")).toBeInTheDocument();
+    expect(within(mcpCounts).getByText("3")).toBeInTheDocument();
+    expect(within(mcpCounts).getByText("Chat-enabled")).toBeInTheDocument();
+    expect(within(mcpCounts).getByText("2")).toBeInTheDocument();
+    expect(within(mcpCounts).getByText("User-disabled")).toBeInTheDocument();
+    expect(within(mcpCounts).getByText("1")).toBeInTheDocument();
 
     expect(
       screen.getByRole("button", { name: "MCP tool choice Auto" }),

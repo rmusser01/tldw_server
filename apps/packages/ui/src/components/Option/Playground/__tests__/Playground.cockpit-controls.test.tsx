@@ -317,6 +317,13 @@ describe("Playground cockpit controls", () => {
       toolsLoading: false,
       discoveredTools: [{ name: "search" } as never],
       chatTools: [{ name: "search" } as never],
+      toolCounts: {
+        discovered: 4,
+        executable: 3,
+        disabled: 1,
+        colliding: 0,
+        chatEnabled: 2,
+      },
     });
   });
 
@@ -451,6 +458,29 @@ describe("Playground cockpit controls", () => {
       ).toBeInTheDocument();
       expect(within(runtimeInspector).getByText("2 messages")).toBeInTheDocument();
       expect(within(runtimeInspector).getByText("Mira Vale")).toBeInTheDocument();
+      const mcpCounts = within(runtimeInspector).getByLabelText(
+        "MCP tool state counts",
+      );
+      expect(within(mcpCounts).getByText("Discovered")).toBeInTheDocument();
+      expect(
+        within(mcpCounts).getByText("Discovered").nextElementSibling,
+      ).toHaveTextContent("4");
+      expect(within(mcpCounts).getByText("Executable")).toBeInTheDocument();
+      expect(
+        within(mcpCounts).getByText("Executable").nextElementSibling,
+      ).toHaveTextContent("3");
+      expect(within(mcpCounts).getByText("Chat-enabled")).toBeInTheDocument();
+      expect(
+        within(mcpCounts).getByText("Chat-enabled").nextElementSibling,
+      ).toHaveTextContent("2");
+      expect(within(mcpCounts).getByText("User-disabled")).toBeInTheDocument();
+      expect(
+        within(mcpCounts).getByText("User-disabled").nextElementSibling,
+      ).toHaveTextContent("1");
+      expect(within(mcpCounts).getByText("Unavailable")).toBeInTheDocument();
+      expect(
+        within(mcpCounts).getByText("Unavailable").nextElementSibling,
+      ).toHaveTextContent("1");
 
       fireEvent.click(
         within(runtimeInspector).getByRole("button", {
@@ -477,9 +507,11 @@ describe("Playground cockpit controls", () => {
       expect(
         (openModelSettings.mock.calls[0]?.[0] as CustomEvent<{
           returnFocusSelector: string;
+          settingsScope: string;
         }>).detail,
       ).toEqual({
         returnFocusSelector: "[data-cockpit-model-settings-trigger]",
+        settingsScope: "openai:gpt-4.1-mini",
       });
       expect(openAssistantSelect).toHaveBeenCalledTimes(1);
       expect(openActorSettings).not.toHaveBeenCalled();

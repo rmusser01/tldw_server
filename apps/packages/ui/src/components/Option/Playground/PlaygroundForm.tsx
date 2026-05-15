@@ -583,6 +583,8 @@ export const PlaygroundForm = ({
     typeof window === "undefined" ? 0 : window.innerHeight,
   );
   const [openModelSettings, setOpenModelSettings] = React.useState(false);
+  const [modelSettingsScopeOverride, setModelSettingsScopeOverride] =
+    React.useState<string | null>(null);
   const modelSettingsReturnFocusSelectorRef = React.useRef<string | null>(null);
   const mcpSettingsReturnFocusSelectorRef = React.useRef<string | null>(null);
   const [openActorSettings, setOpenActorSettings] = React.useState(false);
@@ -1126,6 +1128,7 @@ export const PlaygroundForm = ({
     (nextOpen: boolean) => {
       setOpenModelSettings(nextOpen);
       if (!nextOpen) {
+        setModelSettingsScopeOverride(null);
         restoreModelSettingsFocus();
       }
     },
@@ -1147,6 +1150,11 @@ export const PlaygroundForm = ({
       const detail = (event as CustomEvent<ModelSettingsOpenDetail>).detail;
       modelSettingsReturnFocusSelectorRef.current = normalizeFocusSelector(
         detail?.returnFocusSelector,
+      );
+      setModelSettingsScopeOverride(
+        typeof detail?.settingsScope === "string" && detail.settingsScope.trim()
+          ? detail.settingsScope.trim()
+          : null,
       );
       setOpenModelSettings(true);
     };
@@ -5792,6 +5800,7 @@ export const PlaygroundForm = ({
             <LazyCurrentChatModelSettings
               open={openModelSettings}
               setOpen={setOpenModelSettingsWithFocusRestore}
+              settingsScope={modelSettingsScopeOverride}
               isOCREnabled={useOCR}
             />
           </React.Suspense>

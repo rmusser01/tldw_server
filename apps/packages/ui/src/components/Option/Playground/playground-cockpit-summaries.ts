@@ -3,10 +3,12 @@ import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provid
 import type { PlaygroundPromptSummary } from "./PlaygroundContextRail";
 import type {
   RuntimeAssistantSummary,
+  RuntimeToolStateCount,
   RuntimeToolSummary,
 } from "./PlaygroundRuntimeInspector";
 import type { McpHealthState } from "@/store/mcp-tools";
-import { READY_STATE_LABEL } from "@/design-system";
+import { getDesignSystemState, READY_STATE_LABEL } from "@/design-system";
+import type { ChatToolFilterCounts } from "@/utils/chat-tools";
 
 type LegacyCharacterSelection = {
   id?: string | number;
@@ -43,12 +45,18 @@ type PromptSummaryCopy = Partial<{
 
 type McpSummaryCopy = Partial<{
   availableDetail: (chatToolCount: number, discoveredCount: number) => string;
+  chatEnabledLabel: string;
+  discoveredLabel: string;
   emptyDetail: string;
+  executableLabel: string;
   loadingDetail: string;
+  nameConflictsLabel: string;
   offlineDetail: string;
   toolsLabel: string;
   unavailableDetail: string;
   unavailableLabel: string;
+  unavailableToolsLabel: string;
+  userDisabledLabel: string;
 }>;
 
 type SessionSummaryCopy = Partial<{
@@ -105,12 +113,18 @@ const defaultMcpCopy = {
       discoveredCount > chatToolCount ? ` (${discoveredCount} discovered)` : "";
     return `${chatToolsLabel} available${discoveredSuffix}`;
   },
+  chatEnabledLabel: "Chat-enabled",
+  discoveredLabel: "Discovered",
   emptyDetail: "No MCP tools available",
+  executableLabel: "Executable",
   loadingDetail: "Loading tools...",
+  nameConflictsLabel: "Name conflicts",
   offlineDetail: "MCP tools are offline",
   toolsLabel: "MCP tools",
   unavailableDetail: "MCP tools unavailable",
   unavailableLabel: "MCP unavailable",
+  unavailableToolsLabel: getDesignSystemState("unavailable").label,
+  userDisabledLabel: "User-disabled",
 } satisfies Required<McpSummaryCopy>;
 
 const defaultSessionCopy = {
@@ -151,6 +165,36 @@ const formatCountLabel = (
   singular: string,
   plural: string,
 ): string => `${count} ${count === 1 ? singular : plural}`;
+
+const buildMcpToolStateCounts = (
+  counts: ChatToolFilterCounts | null | undefined,
+  copy: Required<McpSummaryCopy>,
+): RuntimeToolStateCount[] | undefined => {
+  if (!counts || counts.discovered <= 0) return undefined;
+  const unavailableCount = Math.max(0, counts.discovered - counts.executable);
+  const stateCounts: RuntimeToolStateCount[] = [
+    { label: copy.discoveredLabel, value: counts.discovered },
+    { label: copy.executableLabel, value: counts.executable },
+    { label: copy.chatEnabledLabel, value: counts.chatEnabled },
+    { label: copy.userDisabledLabel, value: counts.disabled },
+  ];
+
+  if (unavailableCount > 0) {
+    stateCounts.push({
+      label: copy.unavailableToolsLabel,
+      value: unavailableCount,
+    });
+  }
+
+  if (counts.colliding > 0) {
+    stateCounts.push({
+      label: copy.nameConflictsLabel,
+      value: counts.colliding,
+    });
+  }
+
+  return stateCounts;
+};
 
 export function buildCockpitAssistantSummary(input: {
   selectedAssistant: AssistantSelection | null | undefined;
@@ -271,10 +315,18 @@ export function buildCockpitMcpSummary(input: {
   toolsLoading: boolean;
   discoveredCount: number;
   chatToolCount: number;
+  toolCounts?: ChatToolFilterCounts | null;
   disabledReason?: string;
   copy?: McpSummaryCopy;
 }): RuntimeToolSummary {
   const copy = { ...defaultMcpCopy, ...input.copy };
+  const resolvedToolCounts =
+    input.toolCounts && input.toolCounts.discovered > 0
+      ? input.toolCounts
+      : null;
+  const toolStateCounts = buildMcpToolStateCounts(resolvedToolCounts, copy);
+  const discoveredCount = resolvedToolCounts?.discovered ?? input.discoveredCount;
+  const chatToolCount = resolvedToolCounts?.chatEnabled ?? input.chatToolCount;
   if (!input.hasMcp || input.healthState === "unavailable") {
     return {
       state: "unavailable",
@@ -288,6 +340,7 @@ export function buildCockpitMcpSummary(input: {
       state: "degraded",
       label: copy.toolsLabel,
       detail: input.disabledReason || copy.offlineDetail,
+      stateCounts: toolStateCounts,
     };
   }
 
@@ -296,21 +349,24 @@ export function buildCockpitMcpSummary(input: {
       state: "disabled",
       label: copy.toolsLabel,
       detail: input.disabledReason || copy.loadingDetail,
+      stateCounts: toolStateCounts,
     };
   }
 
-  if (input.chatToolCount <= 0) {
+  if (chatToolCount <= 0) {
     return {
       state: "disabled",
       label: copy.toolsLabel,
       detail: input.disabledReason || copy.emptyDetail,
+      stateCounts: toolStateCounts,
     };
   }
 
   return {
     state: "available",
     label: copy.toolsLabel,
-    detail: copy.availableDetail(input.chatToolCount, input.discoveredCount),
+    detail: copy.availableDetail(chatToolCount, discoveredCount),
+    stateCounts: toolStateCounts,
   };
 }
 
