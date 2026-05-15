@@ -1558,11 +1558,10 @@ describe("VisualPackEditor", () => {
         "does not have a visual pack yet"
       )
     )
-    expect(await screen.findByTestId("persona-visual-starter-pack-select")).toHaveValue(
-      "research-buddy-starter"
-    )
+    const setupCard = await screen.findByTestId("visual-buddy-setup-choice-card")
+    expect(setupCard).toHaveTextContent("Research Buddy Starter")
 
-    fireEvent.click(screen.getByTestId("persona-visual-starter-copy-button"))
+    fireEvent.click(within(setupCard).getByRole("button", { name: "Use default" }))
 
     await waitFor(() =>
       expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue(
@@ -1650,12 +1649,9 @@ describe("VisualPackEditor", () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByTestId("persona-visual-starter-pack-select")).toHaveValue(
-        "persona-2-starter"
+      expect(screen.getByTestId("visual-buddy-setup-choice-card")).toHaveTextContent(
+        "Persona 2 Starter"
       )
-    )
-    expect(screen.getByTestId("persona-visual-starter-title-input")).toHaveValue(
-      "Persona 2 Starter"
     )
 
     await act(async () => {
@@ -1679,11 +1675,11 @@ describe("VisualPackEditor", () => {
       await firstStarterResponse.promise
     })
 
-    expect(screen.getByTestId("persona-visual-starter-pack-select")).toHaveValue(
-      "persona-2-starter"
-    )
-    expect(screen.getByTestId("persona-visual-starter-title-input")).toHaveValue(
+    expect(screen.getByTestId("visual-buddy-setup-choice-card")).toHaveTextContent(
       "Persona 2 Starter"
+    )
+    expect(screen.getByTestId("visual-buddy-setup-choice-card")).not.toHaveTextContent(
+      "Persona 1 Starter"
     )
   })
 
