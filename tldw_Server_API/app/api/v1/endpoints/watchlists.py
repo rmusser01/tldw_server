@@ -150,6 +150,7 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
     RunDetail,
     RunsListResponse,
     ScrapedItem,
+    ScrapedItemSortMode,
     ScrapedItemSmartCountsResponse,
     ScrapedItemsListResponse,
     ScrapedItemUpdateRequest,
@@ -177,6 +178,8 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
     WatchlistContentAlertRuleCreate,
     WatchlistContentAlertRuleList,
     WatchlistContentAlertRuleUpdate,
+    WatchlistContentAlertSeverity,
+    WatchlistContentAlertStatus,
     WatchlistContentAlertUpdate,
     WatchlistContainer,
     WatchlistCreateRequest,
@@ -1077,6 +1080,7 @@ def _row_to_scraped_item(row) -> ScrapedItem:
         reviewed=reviewed_flag,
         queued_for_briefing=queued_for_briefing,
         created_at=row.created_at,
+        alert_summary=getattr(row, "alert_summary", None),
     )
 
 
@@ -4739,6 +4743,10 @@ async def get_scraped_item_smart_counts(
     q: str | None = Query(None, description="Search by title/summary/content substring"),
     since: str | None = Query(None, description="ISO date filter (created_at >= since)"),
     until: str | None = Query(None, description="ISO date filter (created_at <= until)"),
+    has_alert: bool | None = Query(None, description="Filter counts by whether items have content alerts"),
+    alert_status: WatchlistContentAlertStatus | None = Query(None, description="Filter counts by linked content alert status"),
+    alert_severity: WatchlistContentAlertSeverity | None = Query(None, description="Filter counts by linked content alert severity"),
+    alert_rule_id: int | None = Query(None, ge=1, description="Filter counts by linked content alert rule ID"),
     queue_run_id: int | None = Query(None, description="Optional queued-count run filter"),
     current_user: User = Depends(get_request_user),
     db = Depends(get_watchlists_db_for_user),
@@ -4750,8 +4758,8 @@ async def get_scraped_item_smart_counts(
     )
     _ensure_watchlist_exists(target_db, watchlist_id)
     today_since = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-    return ScrapedItemSmartCountsResponse(
-        **target_db.get_item_smart_counts(
+    try:
+        counts = target_db.get_item_smart_counts(
             run_id=run_id,
             job_id=job_id,
             source_id=source_id,
@@ -4760,10 +4768,16 @@ async def get_scraped_item_smart_counts(
             search=q,
             since=since,
             until=until,
+            has_alert=has_alert,
+            alert_status=alert_status,
+            alert_severity=alert_severity,
+            alert_rule_id=alert_rule_id,
             queue_run_id=queue_run_id,
             today_since=today_since,
         )
-    )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ScrapedItemSmartCountsResponse(**counts)
 
 
 @router.get("/items", response_model=ScrapedItemsListResponse, summary="List scraped items across runs")
@@ -4775,6 +4789,12 @@ async def list_scraped_items(
     status: str | None = Query(None),
     reviewed: bool | None = Query(None),
     queued_for_briefing: bool | None = Query(None),
+    sort: ScrapedItemSortMode | None = Query(None, description="Server-side item sort mode"),
+    has_alert: bool | None = Query(None, description="Filter items by whether they have content alerts"),
+    alert_status: WatchlistContentAlertStatus | None = Query(None, description="Filter items by linked content alert status"),
+    alert_severity: WatchlistContentAlertSeverity | None = Query(None, description="Filter items by linked content alert severity"),
+    alert_rule_id: int | None = Query(None, ge=1, description="Filter items by linked content alert rule ID"),
+    include_alert_summary: bool = Query(False, description="Include compact content-alert summary per item"),
     target_user_id: int | None = Query(
         None,
         ge=1,
@@ -4796,20 +4816,29 @@ async def list_scraped_items(
     limit = size
     offset = (page - 1) * limit
     _ensure_watchlist_exists(target_db, watchlist_id)
-    rows, total = target_db.list_items(
-        run_id=run_id,
-        job_id=job_id,
-        source_id=source_id,
-        watchlist_id=watchlist_id,
-        status=status,
-        reviewed=reviewed,
-        queued_for_briefing=queued_for_briefing,
-        search=q,
-        since=since,
-        until=until,
-        limit=limit,
-        offset=offset,
-    )
+    try:
+        rows, total = target_db.list_items(
+            run_id=run_id,
+            job_id=job_id,
+            source_id=source_id,
+            watchlist_id=watchlist_id,
+            status=status,
+            reviewed=reviewed,
+            queued_for_briefing=queued_for_briefing,
+            search=q,
+            since=since,
+            until=until,
+            sort=sort,
+            has_alert=has_alert,
+            alert_status=alert_status,
+            alert_severity=alert_severity,
+            alert_rule_id=alert_rule_id,
+            include_alert_summary=include_alert_summary,
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     items = [_row_to_scraped_item(r) for r in rows]
     return ScrapedItemsListResponse(
         items=items,

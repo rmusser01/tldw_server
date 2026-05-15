@@ -196,6 +196,7 @@ class ScrapedItemRow:
     reviewed: int
     queued_for_briefing: int
     created_at: str
+    alert_summary: dict[str, Any] | None = None
 
     def tags(self) -> list[str]:
         if not self.tags_json:
@@ -2841,6 +2842,156 @@ class WatchlistsDatabase:
             raise KeyError("item_not_found")
         return ScrapedItemRow(**row)
 
+    @staticmethod
+    def _validate_item_sort(sort: str | None) -> str:
+        value = str(sort or "created_desc").strip()
+        aliases = {
+            "newest": "created_desc",
+            "oldest": "created_asc",
+            "unreadFirst": "unread_first",
+            "unread_first": "unread_first",
+        }
+        normalized = aliases.get(value, value.lower())
+        if normalized not in {
+            "created_desc",
+            "created_asc",
+            "published_desc",
+            "published_asc",
+            "unread_first",
+            "source_asc",
+            "alert_severity_desc",
+        }:
+            raise ValueError("invalid_item_sort")
+        return normalized
+
+    @staticmethod
+    def _item_order_sql(sort: str) -> str:
+        if sort == "created_asc":
+            return "si.created_at ASC, si.id ASC"
+        if sort == "published_desc":
+            return "COALESCE(si.published_at, si.created_at) DESC, si.id DESC"
+        if sort == "published_asc":
+            return "COALESCE(si.published_at, si.created_at) ASC, si.id ASC"
+        if sort == "unread_first":
+            return "si.reviewed ASC, si.created_at DESC, si.id DESC"
+        if sort == "source_asc":
+            return "si.source_id ASC, si.created_at DESC, si.id DESC"
+        if sort == "alert_severity_desc":
+            return """
+                COALESCE((
+                    SELECT MAX(
+                        CASE wca.severity
+                            WHEN 'critical' THEN 5
+                            WHEN 'high' THEN 4
+                            WHEN 'medium' THEN 3
+                            WHEN 'low' THEN 2
+                            WHEN 'info' THEN 1
+                            ELSE 0
+                        END
+                    )
+                    FROM watchlist_content_alerts wca
+                    WHERE wca.user_id = sj.user_id
+                      AND wca.watchlist_id = sj.watchlist_id
+                      AND wca.item_id = si.id
+                ), 0) DESC,
+                si.created_at DESC,
+                si.id DESC
+            """
+        return "si.created_at DESC, si.id DESC"
+
+    def _build_item_alert_exists_clause(
+        self,
+        *,
+        alert_status: str | None = None,
+        alert_severity: str | None = None,
+        alert_rule_id: int | None = None,
+    ) -> tuple[str, list[Any]]:
+        where = [
+            "wca.user_id = sj.user_id",
+            "wca.watchlist_id = sj.watchlist_id",
+            "wca.item_id = si.id",
+        ]
+        params: list[Any] = []
+        if alert_status is not None:
+            where.append("wca.status = ?")
+            params.append(self._validate_content_alert_status(alert_status))
+        if alert_severity is not None:
+            where.append("wca.severity = ?")
+            params.append(self._validate_content_alert_severity(alert_severity))
+        if alert_rule_id is not None:
+            where.append("wca.rule_id = ?")
+            params.append(int(alert_rule_id))
+        clause = f"EXISTS (SELECT 1 FROM watchlist_content_alerts wca WHERE {' AND '.join(where)})"  # nosec B608
+        return clause, params
+
+    def get_item_alert_summaries(
+        self,
+        item_ids: list[int],
+        *,
+        watchlist_id: int | None = None,
+    ) -> dict[int, dict[str, Any]]:
+        if not item_ids:
+            return {}
+        placeholders = ",".join("?" for _ in item_ids)
+        where = ["user_id = ?", f"item_id IN ({placeholders})"]
+        params: list[Any] = [self.user_id, *[int(item_id) for item_id in item_ids]]
+        if watchlist_id is not None:
+            where.append("watchlist_id = ?")
+            params.append(int(watchlist_id))
+        rows = self.backend.execute(
+            f"""
+            SELECT id, item_id, rule_id, severity, status, created_at, matched_text
+            FROM watchlist_content_alerts
+            WHERE {' AND '.join(where)}
+            ORDER BY item_id ASC, created_at ASC, id ASC
+            """,  # nosec B608
+            tuple(params),
+        ).rows
+        summaries: dict[int, dict[str, Any]] = {}
+        severity_rank = {"info": 1, "low": 2, "medium": 3, "high": 4, "critical": 5}
+        for row in rows:
+            item_id = int(row["item_id"])
+            summary = summaries.setdefault(
+                item_id,
+                {
+                    "total": 0,
+                    "unread": 0,
+                    "read": 0,
+                    "dismissed": 0,
+                    "highest_severity": None,
+                    "latest_alert_id": None,
+                    "latest_alert_status": None,
+                    "latest_alert_created_at": None,
+                    "latest_matched_text": None,
+                    "rule_ids": [],
+                    "severities": [],
+                },
+            )
+            status = str(row.get("status") or "")
+            severity = str(row.get("severity") or "")
+            summary["total"] += 1
+            if status in {"unread", "read", "dismissed"}:
+                summary[status] += 1
+            rule_id = int(row["rule_id"])
+            if rule_id not in summary["rule_ids"]:
+                summary["rule_ids"].append(rule_id)
+            if severity and severity not in summary["severities"]:
+                summary["severities"].append(severity)
+            highest = summary["highest_severity"]
+            if highest is None or severity_rank.get(severity, 0) > severity_rank.get(str(highest), 0):
+                summary["highest_severity"] = severity
+
+            created_at = str(row.get("created_at") or "")
+            latest_created_at = str(summary["latest_alert_created_at"] or "")
+            latest_id = int(summary["latest_alert_id"] or 0)
+            row_id = int(row["id"])
+            if (created_at, row_id) >= (latest_created_at, latest_id):
+                summary["latest_alert_id"] = row_id
+                summary["latest_alert_status"] = status
+                summary["latest_alert_created_at"] = created_at
+                summary["latest_matched_text"] = row.get("matched_text")
+        return summaries
+
     def list_items(
         self,
         *,
@@ -2854,9 +3005,16 @@ class WatchlistsDatabase:
         since: str | None = None,
         until: str | None = None,
         watchlist_id: int | None = None,
+        sort: str | None = None,
+        has_alert: bool | None = None,
+        alert_status: str | None = None,
+        alert_severity: str | None = None,
+        alert_rule_id: int | None = None,
+        include_alert_summary: bool = False,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[ScrapedItemRow], int]:
+        sort_mode = self._validate_item_sort(sort)
         where = ["sj.user_id = ?"]
         params: list[Any] = [self.user_id]
         if run_id is not None:
@@ -2890,7 +3048,19 @@ class WatchlistsDatabase:
             like = f"%{search}%"
             where.append("(si.title LIKE ? OR si.summary LIKE ? OR si.content LIKE ?)")
             params.extend([like, like, like])
+        alert_filters_requested = alert_status is not None or alert_severity is not None or alert_rule_id is not None
+        if has_alert is False and alert_filters_requested:
+            raise ValueError("alert_filters_conflict_with_has_alert_false")
+        if has_alert is not None or alert_filters_requested:
+            alert_clause, alert_params = self._build_item_alert_exists_clause(
+                alert_status=alert_status,
+                alert_severity=alert_severity,
+                alert_rule_id=alert_rule_id,
+            )
+            where.append(alert_clause if has_alert is not False else f"NOT {alert_clause}")
+            params.extend(alert_params)
         where_sql = " AND ".join(where)
+        order_sql = self._item_order_sql(sort_mode)
         total = int(
             self.backend.execute(
                 f"SELECT COUNT(*) AS cnt FROM scraped_items si JOIN scrape_jobs sj ON sj.id = si.job_id WHERE {where_sql}",  # nosec B608
@@ -2905,12 +3075,20 @@ class WatchlistsDatabase:
             FROM scraped_items si
             JOIN scrape_jobs sj ON sj.id = si.job_id
             WHERE {where_sql}
-            ORDER BY si.created_at DESC
+            ORDER BY {order_sql}
             LIMIT ? OFFSET ?
             """.format_map(locals()),  # nosec B608
             tuple(params + [limit, offset]),
         ).rows
-        return [ScrapedItemRow(**r) for r in rows], total
+        items = [ScrapedItemRow(**r) for r in rows]
+        if include_alert_summary and items:
+            summaries = self.get_item_alert_summaries(
+                [int(item.id) for item in items],
+                watchlist_id=watchlist_id,
+            )
+            for item in items:
+                item.alert_summary = summaries.get(int(item.id))
+        return items, total
 
     # ------------------------
     # Content alert rules and alerts
@@ -3380,6 +3558,10 @@ class WatchlistsDatabase:
         since: str | None = None,
         until: str | None = None,
         watchlist_id: int | None = None,
+        has_alert: bool | None = None,
+        alert_status: str | None = None,
+        alert_severity: str | None = None,
+        alert_rule_id: int | None = None,
         queue_run_id: int | None = None,
         today_since: str | None = None,
     ) -> dict[str, int]:
@@ -3410,6 +3592,17 @@ class WatchlistsDatabase:
             like = f"%{search}%"
             where.append("(si.title LIKE ? OR si.summary LIKE ? OR si.content LIKE ?)")
             params.extend([like, like, like])
+        alert_filters_requested = alert_status is not None or alert_severity is not None or alert_rule_id is not None
+        if has_alert is False and alert_filters_requested:
+            raise ValueError("alert_filters_conflict_with_has_alert_false")
+        if has_alert is not None or alert_filters_requested:
+            alert_clause, alert_params = self._build_item_alert_exists_clause(
+                alert_status=alert_status,
+                alert_severity=alert_severity,
+                alert_rule_id=alert_rule_id,
+            )
+            where.append(alert_clause if has_alert is not False else f"NOT {alert_clause}")
+            params.extend(alert_params)
 
         today_cutoff = today_since
         if not today_cutoff:

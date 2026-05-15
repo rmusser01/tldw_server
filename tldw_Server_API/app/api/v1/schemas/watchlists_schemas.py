@@ -14,6 +14,15 @@ WatchlistContentAlertRuleKind = Literal["keyword", "regex", "descriptor", "class
 WatchlistContentAlertMatchMode = Literal["contains", "exact", "regex"]
 WatchlistContentAlertSeverity = Literal["info", "low", "medium", "high", "critical"]
 WatchlistContentAlertStatus = Literal["unread", "read", "dismissed"]
+ScrapedItemSortMode = Literal[
+    "created_desc",
+    "created_asc",
+    "published_desc",
+    "published_asc",
+    "unread_first",
+    "source_asc",
+    "alert_severity_desc",
+]
 
 
 def _default_offset_pagination_aliases(response):
@@ -629,6 +638,20 @@ class RunDetail(BaseModel):
     audio_briefing_truncated: bool = False
 
 
+class ScrapedItemAlertSummary(BaseModel):
+    total: int = 0
+    unread: int = 0
+    read: int = 0
+    dismissed: int = 0
+    highest_severity: WatchlistContentAlertSeverity | None = None
+    latest_alert_id: int | None = None
+    latest_alert_status: WatchlistContentAlertStatus | None = None
+    latest_alert_created_at: str | None = None
+    latest_matched_text: str | None = None
+    rule_ids: list[int] = Field(default_factory=list)
+    severities: list[WatchlistContentAlertSeverity] = Field(default_factory=list)
+
+
 class ScrapedItem(BaseModel):
     id: int
     run_id: int
@@ -646,6 +669,7 @@ class ScrapedItem(BaseModel):
     reviewed: bool
     queued_for_briefing: bool = False
     created_at: str
+    alert_summary: ScrapedItemAlertSummary | None = None
 
 
 class ScrapedItemsListResponse(BaseModel):
