@@ -1,10 +1,10 @@
 ---
 id: TASK-368.5
 title: Implement llama.cpp guided admin UI
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-15 03:45'
-updated_date: '2026-05-15 03:45'
+updated_date: '2026-05-15 15:02'
 labels:
   - implementation
   - frontend
@@ -33,6 +33,12 @@ Implement the guided WebUI slice from the implementation plan. Reshape the llama
 - [ ] #4 The chat wiring action appears after a running managed server is available and is never called automatically.
 - [ ] #5 Focused frontend component tests pass.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Started Task 5 guided admin UI slice after TASK-368.4 was finalized and committed at cdb0578d4. Scope is the llama.cpp admin page/panel components and focused tests from the implementation plan. Preserve existing advanced launch controls, admin guard behavior, preset import/export, and warnings-first hardware behavior.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
