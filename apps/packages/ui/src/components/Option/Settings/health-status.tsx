@@ -21,6 +21,7 @@ import {
 } from "@/hooks/useConnectionState"
 import { cleanUrl } from "@/libs/clean-url"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
+import { getDesignSystemState } from "@/design-system"
 
 type Check = {
   key: string
@@ -107,6 +108,10 @@ const makeChecks = (t: TFunction): Check[] => {
     }
   ]
 }
+
+const READY_STATE_LABEL = getDesignSystemState("ready")?.label
+const DEGRADED_STATE_LABEL = getDesignSystemState("degraded")?.label
+const LOADING_STATE_LABEL = getDesignSystemState("loading")?.label
 
 type Result = { status: 'unknown'|'healthy'|'unhealthy', detail?: any, statusCode?: number, durationMs?: number }
 
@@ -340,12 +345,12 @@ export default function HealthStatus() {
 
   const describeStatus = (status: Result['status']): string => {
     if (status === 'healthy') {
-      return t('healthPage.statusReady', 'Ready')
+      return t('healthPage.statusReady', READY_STATE_LABEL)
     }
     if (status === 'unhealthy') {
-      return t('healthPage.statusDegraded', 'Degraded')
+      return t('healthPage.statusDegraded', DEGRADED_STATE_LABEL)
     }
-    return t('healthPage.statusLoading', 'Loading')
+    return t('healthPage.statusLoading', LOADING_STATE_LABEL)
   }
 
   const showAuthCallout =
@@ -732,12 +737,12 @@ export default function HealthStatus() {
                 <Space size="middle" className="flex flex-wrap">
                   {r.status === 'healthy' ? (
                     <Tag color="green" className={recentHealthy.has(c.key) ? 'animate-pulse ring-2 ring-emerald-400' : undefined}>
-                      {t('healthPage.ready', 'Ready')}
+                      {t('healthPage.ready', READY_STATE_LABEL)}
                     </Tag>
                   ) : r.status === 'unhealthy' ? (
-                    <Tag color="red">{t('healthPage.degraded', 'Degraded')}</Tag>
+                    <Tag color="red">{t('healthPage.degraded', DEGRADED_STATE_LABEL)}</Tag>
                   ) : (
-                    <Tag>{t('healthPage.loadingState', 'Loading')}</Tag>
+                    <Tag>{t('healthPage.loadingState', LOADING_STATE_LABEL)}</Tag>
                   )}
                   <Typography.Text type="secondary">{c.path}</Typography.Text>
                   {typeof r.statusCode !== 'undefined' && (
