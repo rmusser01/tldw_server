@@ -132,6 +132,209 @@ def test_valid_manifest_resolves_required_states_and_normalizes_frames() -> None
     ]
 
 
+def test_manifest_accepts_declared_custom_state_catalog_references() -> None:
+    manifest = _activatable_manifest()
+    manifest["state_catalog"] = {
+        "tool.notes_search": {
+            "label": "Searching notes",
+            "kind": "tool_variant",
+            "description": "Shown while the notes search tool runs.",
+            "tags": ["tool", "notes"],
+        }
+    }
+    manifest["states"]["tool.notes_search"] = {"animation_id": "tool-notes-search"}
+    manifest["animations"]["tool-notes-search"] = {
+        "asset_ids": ["asset-tool-notes-search"],
+        "frame_rate": 8,
+        "loop": True,
+    }
+    manifest["fallbacks"]["tool.notes_search"] = ["tool_running", "thinking", "idle"]
+    manifest["authored_triggers"] = [
+        {
+            "id": "notes-search-tool",
+            "source": "tool_name",
+            "match": "notes.search",
+            "state": "tool.notes_search",
+            "duration_ms": 2400,
+            "priority": 80,
+        }
+    ]
+
+    result = validate_visual_manifest(
+        manifest,
+        available_asset_ids={
+            "asset-idle",
+            "asset-listen",
+            "asset-think",
+            "asset-speak",
+            "asset-error",
+            "asset-tool-notes-search",
+        },
+        require_activatable=True,
+    )
+
+    assert set(result.resolved_required_states) == REQUIRED_VISUAL_STATES
+    assert result.manifest["states"]["tool.notes_search"]["animation_id"] == "tool-notes-search"
+    assert result.manifest["authored_triggers"][0]["source"] == "tool_name"
+
+
+def test_manifest_rejects_builtin_state_catalog_redeclarations() -> None:
+    manifest = _activatable_manifest()
+    manifest["state_catalog"] = {
+        "idle": {
+            "label": "Custom idle",
+            "kind": "reaction",
+        }
+    }
+
+    with pytest.raises(PersonaVisualManifestError, match="reserved"):
+        validate_visual_manifest(
+            manifest,
+            available_asset_ids={
+                "asset-idle",
+                "asset-listen",
+                "asset-think",
+                "asset-speak",
+                "asset-error",
+            },
+            require_activatable=True,
+        )
+
+
+@pytest.mark.parametrize(
+    ("state_id", "catalog_entry", "message"),
+    [
+        ("Tool.Search", {"label": "Bad case", "kind": "tool_variant"}, "state_catalog"),
+        ("tool/search", {"label": "Bad slash", "kind": "tool_variant"}, "state_catalog"),
+        ("tool.notes_search", {"label": "No kind"}, "kind"),
+        ("tool.notes_search", {"label": "Bad kind", "kind": "unknown"}, "kind"),
+        ("tool.notes_search", {"label": "", "kind": "tool_variant"}, "label"),
+    ],
+)
+def test_manifest_rejects_invalid_state_catalog_entries(
+    state_id: str,
+    catalog_entry: dict[str, object],
+    message: str,
+) -> None:
+    manifest = _activatable_manifest()
+    manifest["state_catalog"] = {state_id: catalog_entry}
+
+    with pytest.raises(PersonaVisualManifestError, match=message):
+        validate_visual_manifest(
+            manifest,
+            available_asset_ids={
+                "asset-idle",
+                "asset-listen",
+                "asset-think",
+                "asset-speak",
+                "asset-error",
+            },
+            require_activatable=True,
+        )
+
+
+def test_manifest_rejects_excessive_state_catalog_size() -> None:
+    manifest = _activatable_manifest()
+    manifest["state_catalog"] = {
+        f"tool.extra_{index}": {"label": f"Extra {index}", "kind": "tool_variant"}
+        for index in range(257)
+    }
+
+    with pytest.raises(PersonaVisualManifestError, match="state_catalog"):
+        validate_visual_manifest(
+            manifest,
+            available_asset_ids={
+                "asset-idle",
+                "asset-listen",
+                "asset-think",
+                "asset-speak",
+                "asset-error",
+            },
+            require_activatable=True,
+        )
+
+
+def test_manifest_rejects_excessive_authored_triggers() -> None:
+    manifest = _activatable_manifest()
+    manifest["authored_triggers"] = [
+        {
+            "id": f"trigger-{index}",
+            "source": "live_state",
+            "match": "thinking",
+            "state": "thinking",
+            "duration_ms": 1000,
+            "priority": 10,
+        }
+        for index in range(513)
+    ]
+
+    with pytest.raises(PersonaVisualManifestError, match="authored_triggers"):
+        validate_visual_manifest(
+            manifest,
+            available_asset_ids={
+                "asset-idle",
+                "asset-listen",
+                "asset-think",
+                "asset-speak",
+                "asset-error",
+            },
+            require_activatable=True,
+        )
+
+
+def test_manifest_rejects_fallback_depth_over_eight() -> None:
+    manifest = _activatable_manifest()
+    manifest["fallbacks"] = {
+        "idle": ["wake_armed"],
+        "wake_armed": ["listening"],
+        "listening": ["thinking"],
+        "thinking": ["speaking"],
+        "speaking": ["tool_running"],
+        "tool_running": ["approval_needed"],
+        "approval_needed": ["error"],
+        "error": ["offline"],
+        "offline": [],
+    }
+
+    with pytest.raises(PersonaVisualManifestError, match="depth"):
+        validate_visual_manifest(
+            manifest,
+            available_asset_ids={
+                "asset-idle",
+                "asset-listen",
+                "asset-think",
+                "asset-speak",
+                "asset-error",
+            },
+            require_activatable=True,
+        )
+
+
+def test_manifest_rejects_custom_fallback_cycles() -> None:
+    manifest = _activatable_manifest()
+    manifest["state_catalog"] = {
+        "reaction.one": {"label": "One", "kind": "reaction"},
+        "reaction.two": {"label": "Two", "kind": "reaction"},
+    }
+    manifest["fallbacks"] = {
+        "reaction.one": ["reaction.two"],
+        "reaction.two": ["reaction.one"],
+    }
+
+    with pytest.raises(PersonaVisualManifestError, match="cycle"):
+        validate_visual_manifest(
+            manifest,
+            available_asset_ids={
+                "asset-idle",
+                "asset-listen",
+                "asset-think",
+                "asset-speak",
+                "asset-error",
+            },
+            require_activatable=True,
+        )
+
+
 @pytest.mark.parametrize("renderer_type", ["live2d", "static_image", "sprite_sheet", "not_real"])
 def test_manifest_rejects_unsupported_renderer_types(renderer_type: str) -> None:
     manifest = _activatable_manifest()
