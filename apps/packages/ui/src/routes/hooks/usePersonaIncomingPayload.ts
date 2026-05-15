@@ -2,7 +2,11 @@ import React from "react"
 import type { PersonaSetupStep } from "@/hooks/usePersonaSetupWizard"
 import type { SetupTestOutcome } from "@/components/PersonaGarden/SetupTestAndFinishStep"
 import { usePersonaVisualRuntimeStore } from "@/store/persona-visual-runtime"
-import type { PersonaVisualStateId } from "@/types/persona-visuals"
+import type { PersonaVisualBuiltinStateId } from "@/types/persona-visuals"
+import {
+  isPersonaVisualBuiltinStateId,
+  PERSONA_VISUAL_BUILTIN_STATES
+} from "@/types/persona-visuals"
 import {
   coerceGovernanceContext as _coerceGovernanceContext,
   formatGovernanceDenyMessage as _formatGovernanceDenyMessage,
@@ -87,18 +91,10 @@ export const usePersonaIncomingPayload = ({
 
       if (eventType === "visual_state_override") {
         const state = String(payload?.state || payload?.visual_state || "").trim()
-        const allowedStates = new Set<PersonaVisualStateId>([
-          "idle",
-          "wake_armed",
-          "listening",
-          "thinking",
-          "speaking",
-          "tool_running",
-          "approval_needed",
-          "error",
-          "offline"
-        ])
-        if (!allowedStates.has(state as PersonaVisualStateId)) return
+        const allowedStates = new Set<PersonaVisualBuiltinStateId>(
+          PERSONA_VISUAL_BUILTIN_STATES
+        )
+        if (!isPersonaVisualBuiltinStateId(state) || !allowedStates.has(state)) return
         const durationMsRaw =
           typeof payload?.duration_ms === "number"
             ? payload.duration_ms
@@ -113,7 +109,7 @@ export const usePersonaIncomingPayload = ({
             : sessionId
               ? String(sessionId)
               : null,
-          state: state as PersonaVisualStateId,
+          state,
           reason: payload?.reason ? String(payload.reason) : null,
           expiresAt: Date.now() + durationMs
         })

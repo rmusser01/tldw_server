@@ -2,6 +2,8 @@ import React from "react"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import { asPersonaVisualCustomStateId } from "@/types/persona-visuals"
+
 const mocks = vi.hoisted(() => ({
   fetchWithAuth: vi.fn(),
   translate: vi.fn(
@@ -129,6 +131,20 @@ const readyGenerationReadiness = {
   reasons: []
 }
 
+const mockVisualPackBackgroundGet = (path: string, method: string) => {
+  if (method !== "GET") return null
+  if (path.endsWith("/generation-readiness")) {
+    return okResponse(readyGenerationReadiness)
+  }
+  if (path === "/api/v1/persona/catalog") {
+    return okResponse([])
+  }
+  if (path === "/api/v1/persona/visual-library") {
+    return okResponse({ items: [] })
+  }
+  return null
+}
+
 describe("VisualPackEditor", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -184,6 +200,8 @@ describe("VisualPackEditor", () => {
       if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
         return okResponse([pack])
       }
+      const backgroundResponse = mockVisualPackBackgroundGet(path, method)
+      if (backgroundResponse) return backgroundResponse
       if (
         path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
         method === "GET"
@@ -310,6 +328,8 @@ describe("VisualPackEditor", () => {
       if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
         return okResponse([pack])
       }
+      const backgroundResponse = mockVisualPackBackgroundGet(path, method)
+      if (backgroundResponse) return backgroundResponse
       if (
         path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
         method === "GET"
@@ -1023,6 +1043,111 @@ describe("VisualPackEditor", () => {
         )
       ).toHaveLength(2)
     )
+  })
+
+  it("clamps stale generation target states after switching packs", async () => {
+    const queuedPayloads: any[] = []
+    const customState = asPersonaVisualCustomStateId("tool.notes_search")
+    const customManifest = {
+      ...structuredClone(baseManifest),
+      state_catalog: {
+        [customState]: {
+          label: "Searching notes",
+          kind: "tool_variant"
+        }
+      },
+      states: {
+        ...structuredClone(baseManifest).states,
+        [customState]: { animation_id: "thinking" }
+      }
+    }
+    const customPack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Custom pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: customManifest,
+      assets: visualAssets,
+      version: 3
+    }
+    const plainPack = {
+      id: "pack-2",
+      persona_id: "persona-1",
+      title: "Plain pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 1
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([customPack, plainPack])
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-2/generation-jobs" &&
+        method === "POST"
+      ) {
+        queuedPayloads.push(parseJsonBody(init?.body))
+        return okResponse({ job_id: "job-created", status: "queued" })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue("pack-1")
+    )
+    fireEvent.change(screen.getByTestId("persona-visual-generation-target-state-select"), {
+      target: { value: "tool.notes_search" }
+    })
+    expect(screen.getByTestId("persona-visual-generation-target-state-select")).toHaveValue(
+      "tool.notes_search"
+    )
+
+    fireEvent.change(screen.getByTestId("persona-visual-pack-select"), {
+      target: { value: "pack-2" }
+    })
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue("pack-2")
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-generation-target-state-select")).toHaveValue(
+        "thinking"
+      )
+    )
+
+    fireEvent.change(screen.getByTestId("persona-visual-generation-prompt-input"), {
+      target: { value: "make a thinking pose" }
+    })
+    fireEvent.click(screen.getByTestId("persona-visual-generation-enqueue-button"))
+
+    await waitFor(() => expect(queuedPayloads).toHaveLength(1))
+    expect(queuedPayloads[0]).toMatchObject({
+      target_state: "thinking"
+    })
   })
 
   it("disables visual generation when the Jobs worker is unavailable", async () => {

@@ -50,6 +50,7 @@ import type {
   PersonaVisualAsset,
   PersonaVisualAssetRole,
   PersonaVisualAuthoredTrigger,
+  PersonaVisualBuiltinStateId,
   PersonaVisualCandidate,
   PersonaVisualDuplicateTarget,
   PersonaVisualLibraryItem,
@@ -67,6 +68,10 @@ import type {
   PersonaVisualPortabilityJobResponse,
   PersonaVisualRendererImportPreview,
   PersonaVisualStateId
+} from "@/types/persona-visuals"
+import {
+  asPersonaVisualCustomStateId,
+  asPersonaVisualStateId
 } from "@/types/persona-visuals"
 import { getDesignSystemState } from "@/design-system"
 import {
@@ -216,7 +221,7 @@ const getGenerationReadinessCopy = (
   }
 }
 
-const REQUIRED_VISUAL_STATES: PersonaVisualStateId[] = [
+const REQUIRED_VISUAL_STATES: PersonaVisualBuiltinStateId[] = [
   "idle",
   "listening",
   "thinking",
@@ -224,7 +229,7 @@ const REQUIRED_VISUAL_STATES: PersonaVisualStateId[] = [
   "error"
 ]
 
-const OPTIONAL_VISUAL_STATES: PersonaVisualStateId[] = [
+const OPTIONAL_VISUAL_STATES: PersonaVisualBuiltinStateId[] = [
   "wake_armed",
   "tool_running",
   "approval_needed",
@@ -247,6 +252,7 @@ const ASSET_ROLES: PersonaVisualAssetRole[] = [
 const TRIGGER_SOURCES: PersonaVisualAuthoredTrigger["source"][] = [
   "live_state",
   "tool_category",
+  "tool_name",
   "mcp_runtime"
 ]
 
@@ -415,6 +421,7 @@ const DEFAULT_MANIFEST: PersonaVisualManifest = {
   states: {},
   animations: {},
   fallbacks: {},
+  state_catalog: {},
   authored_triggers: []
 }
 
@@ -447,6 +454,9 @@ const normalizeManifest = (
     fallbacks: {
       ...(source.fallbacks || {})
     },
+    state_catalog: {
+      ...(source.state_catalog || {})
+    },
     authored_triggers: Array.isArray(source.authored_triggers)
       ? source.authored_triggers
       : []
@@ -467,6 +477,16 @@ const normalizeFrames = (
 
 const formatStateLabel = (state: PersonaVisualStateId): string =>
   state.replace(/_/g, " ")
+
+const resolveGenerationTargetState = (
+  current: PersonaVisualStateId,
+  availableStates: PersonaVisualStateId[]
+): PersonaVisualStateId => {
+  if (availableStates.includes(current)) return current
+  return availableStates.includes("thinking")
+    ? "thinking"
+    : availableStates[0] ?? "thinking"
+}
 
 const stringifyPreviewValue = (value: unknown): string => {
   if (value == null) return ""
@@ -781,6 +801,8 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   >(null)
   const [importTargetMode, setImportTargetMode] =
     React.useState<PersonaVisualImportTargetMode | "">("create_new")
+  const [importTargetChoicePreviewId, setImportTargetChoicePreviewId] =
+    React.useState("")
   const [importReplacePackId, setImportReplacePackId] = React.useState("")
   const [importDraftTitle, setImportDraftTitle] = React.useState("")
   const [importCommitJob, setImportCommitJob] = React.useState<
@@ -873,6 +895,25 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const animationIds = React.useMemo(
     () => getAnimationIds(draftManifest),
     [draftManifest]
+  )
+  const customVisualStates = React.useMemo(
+    () =>
+      Object.keys(draftManifest.state_catalog || {}).sort((a, b) =>
+        a.localeCompare(b)
+      ).map(asPersonaVisualCustomStateId),
+    [draftManifest.state_catalog]
+  )
+  const activeVisualStates: PersonaVisualStateId[] = React.useMemo(
+    () => [...VISUAL_STATES, ...customVisualStates],
+    [customVisualStates]
+  )
+  const editableFallbackStates: PersonaVisualStateId[] = React.useMemo(
+    () => [...OPTIONAL_VISUAL_STATES, ...customVisualStates],
+    [customVisualStates]
+  )
+  const normalizedGenerationTargetState = React.useMemo(
+    () => resolveGenerationTargetState(generationTargetState, activeVisualStates),
+    [activeVisualStates, generationTargetState]
   )
   const selectedAnimation =
     selectedAnimationId && draftManifest.animations[selectedAnimationId]
@@ -1141,6 +1182,12 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       setSelectedAnimationId(animationIds[0] || "")
     }
   }, [animationIds, selectedAnimationId])
+
+  React.useEffect(() => {
+    if (generationTargetState !== normalizedGenerationTargetState) {
+      setGenerationTargetState(normalizedGenerationTargetState)
+    }
+  }, [generationTargetState, normalizedGenerationTargetState])
 
   React.useEffect(() => {
     setExportJob(null)
@@ -1491,6 +1538,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       setImportPreview(preview)
       setImportCommitJob(null)
       setImportTargetMode("create_new")
+      setImportTargetChoicePreviewId("")
       setImportReplacePackId("")
       setImportDraftTitle("")
       setSelectedImportPreviewFile(null)
@@ -1537,7 +1585,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     if (!selectedPersonaId || !fullImportPreview?.preview_id) return
     if (fullImportPreview.status !== "completed") return
     if (!importPreviewCommitEligible) return
-    if (importConflictChoiceRequired && !importTargetMode) return
+    if (importConflictChoiceRequired && !importConflictChoiceValid) return
     importCommitInFlightRef.current = true
     setCommittingImport(true)
     setError(null)
@@ -1721,12 +1769,19 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     setEnqueueingGeneration(true)
     setError(null)
     try {
+      const targetState = resolveGenerationTargetState(
+        generationTargetState,
+        activeVisualStates
+      )
+      if (targetState !== generationTargetState) {
+        setGenerationTargetState(targetState)
+      }
       const job = await createPersonaVisualGenerationJob(
         selectedPersonaId,
         selectedPack.id,
         {
           prompt: generationPrompt.trim(),
-          target_state: generationTargetState || null,
+          target_state: targetState || null,
           backend: generationBackend.trim() || null
         }
       )
@@ -1816,8 +1871,8 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       const fallbacks = { ...(manifest.fallbacks || {}) }
       const nextValues = value
         .split(",")
-        .map((item) => item.trim() as PersonaVisualStateId)
-        .filter((item) => VISUAL_STATES.includes(item))
+        .map((item) => asPersonaVisualStateId(item.trim()))
+        .filter((item) => activeVisualStates.includes(item))
       if (nextValues.length) {
         fallbacks[state] = nextValues
       } else {
@@ -2145,10 +2200,17 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const importAllowedTargetModes = getAllowedImportTargetModes(importTargetChoice)
   const replaceableImportConflicts = getReplaceableImportConflicts(importPreviewConflicts)
   const importConflictChoiceRequired = Boolean(importTargetChoice)
+  const importConflictChoiceSelected =
+    !importConflictChoiceRequired ||
+    (Boolean(importTargetMode) &&
+      importTargetChoicePreviewId === fullImportPreview?.preview_id)
   const importConflictChoiceValid =
     !importConflictChoiceRequired ||
-    importTargetMode === "create_new" ||
-    Boolean(importReplacePackId)
+    (importConflictChoiceSelected &&
+      importAllowedTargetModes.includes(
+        importTargetMode as PersonaVisualImportTargetMode
+      ) &&
+      (importTargetMode !== "replace_draft" || Boolean(importReplacePackId)))
   const canCommitImportPreview = fullImportPreview?.status === "completed"
   const importPreviewCommitEligible = isImportPreviewCommitEligible(
     fullImportPreview,
@@ -2168,12 +2230,14 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   React.useEffect(() => {
     if (!fullImportPreview) {
       setImportTargetMode("create_new")
+      setImportTargetChoicePreviewId("")
       setImportReplacePackId("")
       setImportDraftTitle("")
       return
     }
     const choice = getImportTargetChoice(fullImportPreview)
     setImportTargetMode(choice ? "" : "create_new")
+    setImportTargetChoicePreviewId(choice ? "" : fullImportPreview.preview_id)
     setImportReplacePackId("")
     setImportDraftTitle(getDefaultImportDraftTitle(fullImportPreview))
   }, [fullImportPreview?.preview_id])
@@ -2782,6 +2846,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                                   const nextMode = event.target
                                     .value as PersonaVisualImportTargetMode | ""
                                   setImportTargetMode(nextMode)
+                                  setImportTargetChoicePreviewId(
+                                    nextMode ? fullImportPreview?.preview_id || "" : ""
+                                  )
                                   if (nextMode !== "replace_draft") {
                                     setImportReplacePackId("")
                                   } else if (!importReplacePackId) {
@@ -2919,8 +2986,37 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 </label>
               ))}
             </div>
+            {customVisualStates.length ? (
+              <>
+                <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+                  Custom States
+                </div>
+                <div className="mt-2 grid gap-2 md:grid-cols-2">
+                  {customVisualStates.map((state) => (
+                    <label key={state} className="text-xs text-text-muted">
+                      <span className="mb-1 flex items-center gap-1">
+                        <span>{formatStateLabel(state)}</span>
+                        <Tag color="blue">
+                          {draftManifest.state_catalog?.[state]?.kind || "custom"}
+                        </Tag>
+                      </span>
+                      <select
+                        data-testid={`persona-visual-state-${state}-select`}
+                        className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                        value={draftManifest.states?.[state]?.animation_id || ""}
+                        onChange={(event) =>
+                          handleStateMappingChange(state, event.target.value)
+                        }
+                      >
+                        {renderAnimationOptions()}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+              </>
+            ) : null}
             <div className="mt-3 grid gap-2 md:grid-cols-2">
-              {OPTIONAL_VISUAL_STATES.map((state) => (
+              {editableFallbackStates.map((state) => (
                 <label key={state} className="text-xs text-text-muted">
                   <span className="mb-1 block">{`${formatStateLabel(state)} fallbacks`}</span>
                   <input
@@ -3205,11 +3301,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 onChange={(event) =>
                   setTriggerDraft((current) => ({
                     ...current,
-                    state: event.target.value as PersonaVisualStateId
+                    state: asPersonaVisualStateId(event.target.value)
                   }))
                 }
               >
-                {VISUAL_STATES.map((state) => (
+                {activeVisualStates.map((state) => (
                   <option key={state} value={state}>
                     {state}
                   </option>
@@ -3349,12 +3445,12 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 <select
                   data-testid="persona-visual-generation-target-state-select"
                   className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
-                  value={generationTargetState}
+                  value={normalizedGenerationTargetState}
                   onChange={(event) =>
-                    setGenerationTargetState(event.target.value as PersonaVisualStateId)
+                    setGenerationTargetState(asPersonaVisualStateId(event.target.value))
                   }
                 >
-                  {VISUAL_STATES.map((state) => (
+                  {activeVisualStates.map((state) => (
                     <option key={state} value={state}>
                       {state}
                     </option>

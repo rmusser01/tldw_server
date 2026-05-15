@@ -126,6 +126,34 @@ const formatActiveToolStatus = (tool: unknown, why: unknown): string => {
   return `Running ${toolName}: ${whyText}`
 }
 
+const getRecordValue = (value: unknown, key: string): unknown => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  return (value as Record<string, unknown>)[key]
+}
+
+const normalizeToolNameCandidate = (value: unknown): string => {
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value).trim()
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return ""
+  }
+  return (
+    normalizeToolNameCandidate(getRecordValue(value, "tool_name")) ||
+    normalizeToolNameCandidate(getRecordValue(value, "name")) ||
+    normalizeToolNameCandidate(getRecordValue(getRecordValue(value, "function"), "name"))
+  )
+}
+
+const getPayloadToolName = (payload: PersonaLiveVoicePayload): string => {
+  if (!payload || typeof payload !== "object") return ""
+  return (
+    normalizeToolNameCandidate(payload.tool_name) ||
+    normalizeToolNameCandidate(payload.tool) ||
+    normalizeToolNameCandidate(payload.name)
+  )
+}
+
 const WAKE_REJECTION_MESSAGES: Record<string, string> = {
   not_saved_in_profile:
     "Wake phrase was heard, but it is not a saved trigger phrase for this " +
@@ -185,6 +213,7 @@ export const usePersonaLiveVoiceController = ({
   const [state, setState] = React.useState<PersonaLiveVoiceState>("idle")
   const [heardText, setHeardText] = React.useState("")
   const [lastCommittedText, setLastCommittedText] = React.useState("")
+  const [activeToolName, setActiveToolName] = React.useState("")
   const [activeToolStatus, setActiveToolStatus] = React.useState("")
   const [warning, setWarning] = React.useState<string | null>(null)
   const [warningReasonCode, setWarningReasonCode] =
@@ -554,6 +583,7 @@ export const usePersonaLiveVoiceController = ({
     clearTransientWarning()
     setHeardText("")
     heardTranscriptRef.current = ""
+    setActiveToolName("")
     setActiveToolStatus("")
     setRecoveryMode("none")
     clearThinkingRecovery()
@@ -667,6 +697,7 @@ export const usePersonaLiveVoiceController = ({
     setHeardText("")
     heardTranscriptRef.current = ""
     setLastCommittedText("")
+    setActiveToolName("")
     setActiveToolStatus("")
     if (!manualModeRequiredRef.current && !textOnlyDueToTtsFailureRef.current) {
       setVoiceWarning(null)
@@ -782,6 +813,7 @@ export const usePersonaLiveVoiceController = ({
       clearTransientWarning()
       setHeardText("")
       heardTranscriptRef.current = ""
+      setActiveToolName("")
       setActiveToolStatus("")
       setRecoveryMode("none")
       clearThinkingRecovery()
@@ -1043,6 +1075,7 @@ export const usePersonaLiveVoiceController = ({
     setHeardText("")
     heardTranscriptRef.current = ""
     setLastCommittedText("")
+    setActiveToolName("")
     setActiveToolStatus("")
     setRecoveryMode("none")
     setListeningRecoveryCount(0)
@@ -1095,6 +1128,7 @@ export const usePersonaLiveVoiceController = ({
       setRecoveryMode("none")
       setListeningRecoveryCount(0)
       setThinkingRecoveryCount(0)
+      setActiveToolName("")
       setActiveToolStatus("")
       setWakeRecoveryWarning(null)
       setListeningRecoveryRestartKey(0)
@@ -1246,6 +1280,7 @@ export const usePersonaLiveVoiceController = ({
         const text = String(payload?.text_delta || "").trim()
         if (!text) return
         clearAwaitingTtsTimeout()
+        setActiveToolName("")
         setActiveToolStatus("")
         clearThinkingRecovery()
         if (textOnlyDueToTtsFailure) {
@@ -1282,7 +1317,9 @@ export const usePersonaLiveVoiceController = ({
       }
 
       if (eventType === "tool_call") {
-        setActiveToolStatus(formatActiveToolStatus(payload?.tool, payload?.why))
+        const toolName = getPayloadToolName(payload)
+        setActiveToolName(toolName)
+        setActiveToolStatus(formatActiveToolStatus(toolName, payload?.why))
         if (state === "thinking") {
           armThinkingRecovery()
         }
@@ -1290,6 +1327,7 @@ export const usePersonaLiveVoiceController = ({
       }
 
       if (eventType === "tool_result") {
+        setActiveToolName("")
         setActiveToolStatus("")
         if (payload?.approval && typeof payload.approval === "object") {
           clearThinkingRecovery()
@@ -1305,6 +1343,7 @@ export const usePersonaLiveVoiceController = ({
 
       if (eventType === "tts_audio") {
         clearAwaitingTtsTimeout()
+        setActiveToolName("")
         setActiveToolStatus("")
         clearThinkingRecovery()
         const chunkIndex =
@@ -1359,6 +1398,7 @@ export const usePersonaLiveVoiceController = ({
         }
         if (reasonCode === "TTS_UNAVAILABLE_TEXT_ONLY") {
           clearAwaitingTtsTimeout()
+          setActiveToolName("")
           setActiveToolStatus("")
           clearThinkingRecovery()
           textOnlyDueToTtsFailureRef.current = true
@@ -1392,6 +1432,7 @@ export const usePersonaLiveVoiceController = ({
           if (committedTranscript) {
             setLastCommittedText(committedTranscript)
           }
+          setActiveToolName("")
           setActiveToolStatus("")
           if (!manualModeRequiredRef.current && !textOnlyDueToTtsFailureRef.current) {
             setVoiceWarning(null)
@@ -1402,6 +1443,7 @@ export const usePersonaLiveVoiceController = ({
           return
         }
         if (reasonCode === "VOICE_COMMIT_IGNORED_ALREADY_COMMITTED") {
+          setActiveToolName("")
           setActiveToolStatus("")
           setVoiceWarning(
             String(payload?.message || "This utterance was already committed."),
@@ -1411,6 +1453,7 @@ export const usePersonaLiveVoiceController = ({
           return
         }
         if (reasonCode === "VOICE_TRIGGER_NOT_HEARD") {
+          setActiveToolName("")
           setActiveToolStatus("")
           setHeardText("")
           heardTranscriptRef.current = ""
@@ -1426,6 +1469,7 @@ export const usePersonaLiveVoiceController = ({
           return
         }
         if (reasonCode === "VOICE_EMPTY_COMMAND_AFTER_TRIGGER") {
+          setActiveToolName("")
           setActiveToolStatus("")
           setHeardText("")
           heardTranscriptRef.current = ""
@@ -1444,6 +1488,7 @@ export const usePersonaLiveVoiceController = ({
           return
         }
         if (reasonCode === "TRANSCRIPT_REQUIRED") {
+          setActiveToolName("")
           setActiveToolStatus("")
           setVoiceWarning(
             "No speech transcript was captured for that live turn.",
@@ -1493,6 +1538,7 @@ export const usePersonaLiveVoiceController = ({
     thinkingRecoveryCount,
     heardText,
     lastCommittedText,
+    activeToolName,
     activeToolStatus,
     warning,
     warningReasonCode,
