@@ -362,6 +362,31 @@ async def test_llamacpp_start_server_by_path_rejects_outside_allowlist(tmp_path:
 
 
 @pytest.mark.asyncio
+async def test_llamacpp_start_server_by_path_handles_resolve_failure(monkeypatch, tmp_path: Path):
+    exe = tmp_path / "llama_server"
+    exe.write_text("#!/bin/sh\n")
+    model_dir = tmp_path / "models"
+    model_dir.mkdir()
+    model = model_dir / "loop.gguf"
+    original_resolve = Path.resolve
+
+    def fake_resolve(self: Path, *args, **kwargs):  # noqa: ANN002, ANN003
+        if self == model:
+            raise RuntimeError("symlink loop under /private/sensitive")
+        return original_resolve(self, *args, **kwargs)
+
+    cfg = LlamaCppConfig(executable_path=exe, models_dir=model_dir)
+    handler = LlamaCppHandler(cfg, global_app_config={})
+    monkeypatch.setattr(Path, "resolve", fake_resolve)
+
+    with pytest.raises(ServerError) as exc_info:
+        await handler.start_server_by_path(model)
+
+    assert "could not be resolved" in str(exc_info.value)
+    assert "sensitive" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_llamacpp_inference_http_5xx(monkeypatch, tmp_path: Path):
     # Setup handler and running process state
     exe = tmp_path / "llama_server"

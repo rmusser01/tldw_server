@@ -253,6 +253,148 @@ def test_register_path_persists_and_returns_inventory_item(monkeypatch, tmp_path
 
 
 @pytest.mark.unit
+def test_register_path_preserves_existing_paths_under_lock(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    existing = tmp_path / "external" / "existing.gguf"
+    new_model = tmp_path / "external" / "new.gguf"
+    existing.parent.mkdir()
+    existing.write_text("fake model")
+    new_model.write_text("fake model")
+    events: list[str] = []
+    updates: list[dict[str, dict[str, str]]] = []
+
+    class FakeLock:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            events.append("lock_init")
+
+        def __enter__(self) -> "FakeLock":
+            events.append("lock_enter")
+            return self
+
+        def __exit__(self, *exc: Any) -> None:
+            events.append("lock_exit")
+
+    def fake_load_config() -> ConfigParser:
+        events.append("read_config")
+        return _llamacpp_parser(models_dir, registered_model_paths=str(existing))
+
+    def fake_update_config(payload: dict[str, dict[str, str]]) -> None:
+        events.append("write_config")
+        updates.append(payload)
+
+    monkeypatch.setattr(llamacpp_inventory_service, "FileLock", FakeLock, raising=False)
+    monkeypatch.setattr(llamacpp_inventory_service, "load_comprehensive_config", fake_load_config)
+    monkeypatch.setattr(llamacpp_inventory_service.setup_manager, "update_config", fake_update_config)
+    monkeypatch.setattr(llamacpp_inventory_service, "refresh_config_cache", lambda: events.append("refresh"))
+
+    item = llamacpp_inventory_service.register_model_path(new_model)
+
+    persisted = updates[0]["LlamaCpp"]["registered_model_paths"]
+    assert item.basename == "new.gguf"
+    assert str(existing.resolve()) in persisted
+    assert str(new_model.resolve()) in persisted
+    assert events.index("lock_enter") < events.index("read_config") < events.index("write_config") < events.index("lock_exit")
+    assert events.index("write_config") < events.index("refresh") < events.index("lock_exit")
+
+
+@pytest.mark.unit
+def test_register_path_rejects_unresolvable_path_without_persisting(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+    from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    bad_path = tmp_path / "loop.gguf"
+    updates: list[dict[str, dict[str, str]]] = []
+    original_resolve = Path.resolve
+
+    def fake_resolve(self: Path, *args: Any, **kwargs: Any) -> Path:
+        if self == bad_path:
+            raise RuntimeError("symlink loop under /private/sensitive")
+        return original_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(models_dir),
+    )
+    monkeypatch.setattr(llamacpp_inventory_service.setup_manager, "update_config", updates.append)
+    monkeypatch.setattr(Path, "resolve", fake_resolve)
+
+    with pytest.raises(ServerError) as exc_info:
+        llamacpp_inventory_service.register_model_path(bad_path)
+
+    assert "could not be resolved" in str(exc_info.value)
+    assert "sensitive" not in str(exc_info.value)
+    assert updates == []
+
+
+@pytest.mark.unit
+def test_inventory_skips_unresolvable_scan_entry_with_warning(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    bad = models_dir / "bad.gguf"
+    good = models_dir / "good.gguf"
+    bad.write_text("bad")
+    good.write_text("good")
+    original_resolve = Path.resolve
+
+    def fake_resolve(self: Path, *args: Any, **kwargs: Any) -> Path:
+        if self == bad:
+            raise RuntimeError("symlink loop under /private/sensitive")
+        return original_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(models_dir),
+    )
+    monkeypatch.setattr(Path, "resolve", fake_resolve)
+
+    inventory = llamacpp_inventory_service.scan_inventory(limit=500)
+
+    assert [item.basename for item in inventory.models] == ["good.gguf"]
+    assert any("could not inspect" in warning.lower() for warning in inventory.warnings)
+    assert not any("sensitive" in warning for warning in inventory.warnings)
+
+
+@pytest.mark.unit
+def test_registered_paths_are_not_hidden_by_models_dir_scan_limit(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    for index in range(5):
+        (models_dir / f"model-{index}.gguf").write_text("fake model")
+    registered_dir = tmp_path / "registered"
+    registered_dir.mkdir()
+    registered_model = registered_dir / "explicit.gguf"
+    registered_model.write_text("fake model")
+
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(
+            models_dir,
+            allowed_paths=str(registered_dir),
+            registered_model_paths=str(registered_model),
+        ),
+    )
+
+    inventory = llamacpp_inventory_service.scan_inventory(limit=1)
+    resolved = llamacpp_inventory_service.resolve_model_id(llamacpp_inventory_service.model_id_for_path(registered_model))
+
+    assert [item.basename for item in inventory.models] == ["explicit.gguf"]
+    assert inventory.scan_limited is True
+    assert resolved == registered_model.resolve()
+
+
+@pytest.mark.unit
 def test_start_by_model_resolves_model_id_and_uses_handler_path_start(monkeypatch, tmp_path: Path):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
 

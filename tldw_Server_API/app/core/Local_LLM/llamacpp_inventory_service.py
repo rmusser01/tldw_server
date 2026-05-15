@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
 )
 from tldw_Server_API.app.core.Local_LLM import handler_utils
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ModelNotFoundError, ServerError
+from tldw_Server_API.app.core.Infrastructure.distributed_lock import FileLock, LockAcquisitionError
 from tldw_Server_API.app.core.Setup import setup_manager
 from tldw_Server_API.app.core.config import load_comprehensive_config, refresh_config_cache
 
@@ -25,7 +27,7 @@ _CTX_RE = re.compile(r"(?:^|[-_.])(?:ctx|context)[-_.]?(\d{3,6})(?:[-_.]|$)", re
 
 def model_id_for_path(path: Path) -> str:
     """Return the stable inventory ID for a canonical local GGUF path."""
-    canonical = str(path.expanduser().resolve())
+    canonical = str(_canonical_path(path, "Model"))
     digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:24]
     return f"gguf:{digest}"
 
@@ -41,6 +43,14 @@ def scan_inventory(config_state: dict[str, Any] | None = None, limit: int = 500)
     scan_limited = False
 
     allowed_bases = _allowed_bases_for_config(saved_config)
+    for path in registered_paths:
+        item = _item_for_path(path, source="registered_path", allowed_bases=allowed_bases, warnings=warnings)
+        if item is None:
+            continue
+        if item.model_id not in seen_ids:
+            items.append(item)
+            seen_ids.add(item.model_id)
+
     if models_dir is None:
         warnings.append("LlamaCpp.models_dir is not configured; only registered model paths were checked.")
     elif not models_dir.exists():
@@ -48,46 +58,63 @@ def scan_inventory(config_state: dict[str, Any] | None = None, limit: int = 500)
     elif not models_dir.is_dir():
         warnings.append(f"Configured models_dir '{models_dir}' is not a directory.")
     else:
-        for path in _iter_gguf_models(models_dir, warnings, limit):
-            if len(items) >= limit:
+        model_scan_limit = max(limit - len(items), 0)
+        if model_scan_limit <= 0:
+            scan_limited = _has_scannable_gguf(models_dir, warnings)
+        model_items_added = 0
+        for path in _iter_gguf_models(models_dir, warnings, model_scan_limit):
+            if model_items_added >= model_scan_limit:
                 scan_limited = True
                 break
-            item = _item_for_path(path, source="models_dir", allowed_bases=allowed_bases)
+            item = _item_for_path(path, source="models_dir", allowed_bases=allowed_bases, warnings=warnings)
+            if item is None:
+                continue
             if item.model_id not in seen_ids:
                 items.append(item)
                 seen_ids.add(item.model_id)
+                model_items_added += 1
 
-    for path in registered_paths:
-        if len(items) >= limit:
-            scan_limited = True
-            break
-        item = _item_for_path(path, source="registered_path", allowed_bases=allowed_bases)
-        if item.model_id not in seen_ids:
-            items.append(item)
-            seen_ids.add(item.model_id)
-
-    items.sort(key=lambda item: (item.source != "models_dir", item.basename.lower(), item.path))
+    items.sort(key=lambda item: (item.source != "registered_path", item.basename.lower(), item.path))
     return LlamaCppInventoryResponse(models=items, warnings=warnings, scan_limited=scan_limited)
 
 
 def register_model_path(path: Path) -> LlamaCppInventoryItem:
-    """Persist a local registered model path and return its inventory representation."""
-    canonical = path.expanduser().resolve()
-    saved_config = _read_saved_config()
-    existing = _path_list(saved_config.get("registered_model_paths"))
-    existing_by_id = {model_id_for_path(item): item.expanduser().resolve() for item in existing}
-    existing_by_id.setdefault(model_id_for_path(canonical), canonical)
+    """Persist a local registered model path and return its inventory representation.
 
-    registered_value = ", ".join(str(item) for item in existing_by_id.values())
+    Registration is intentionally visibility-first: outside, missing, or non-GGUF
+    paths are saved and reported with warnings. Unresolvable paths are rejected
+    because they cannot get a deterministic safe ID and should not be persisted.
+    """
+    canonical = _canonical_path(path, "Registered model")
     try:
-        setup_manager.update_config({"LlamaCpp": {"registered_model_paths": registered_value}})
-        refresh_config_cache()
+        with FileLock(_registration_lock_path(), timeout=10):
+            saved_config = _read_saved_config()
+            existing = _path_list(saved_config.get("registered_model_paths"))
+            existing_by_id: dict[str, Path] = {}
+            for item in existing:
+                try:
+                    existing_canonical = _canonical_path(item, "Registered model")
+                    existing_by_id[model_id_for_path(existing_canonical)] = existing_canonical
+                except ServerError:
+                    existing_by_id[_unresolved_path_key(item)] = item.expanduser()
+            existing_by_id.setdefault(model_id_for_path(canonical), canonical)
+
+            registered_value = ", ".join(str(item) for item in existing_by_id.values())
+            setup_manager.update_config({"LlamaCpp": {"registered_model_paths": registered_value}})
+            refresh_config_cache()
     except Exception as exc:
+        if isinstance(exc, LockAcquisitionError):
+            raise ServerError("Failed to acquire the llama.cpp registered model path lock.") from exc
+        if isinstance(exc, ServerError):
+            raise
         raise ServerError("Failed to persist registered llama.cpp model path.") from exc
 
     saved_config["registered_model_paths"] = [registered_value]
     allowed_bases = _allowed_bases_for_config(saved_config)
-    return _item_for_path(canonical, source="registered_path", allowed_bases=allowed_bases)
+    item = _item_for_path(canonical, source="registered_path", allowed_bases=allowed_bases)
+    if item is None:
+        raise ServerError("Registered model path could not be resolved.")
+    return item
 
 
 def resolve_model_id(model_id: str) -> Path:
@@ -101,7 +128,7 @@ def resolve_model_id(model_id: str) -> Path:
     inventory = scan_inventory(limit=500)
     for item in inventory.models:
         if item.model_id == wanted:
-            path = Path(item.path).expanduser().resolve()
+            path = _canonical_path(Path(item.path), "Model")
             if path.suffix.lower() != ".gguf" or not path.is_file():
                 raise ModelNotFoundError(f"Model ID {wanted} does not reference an available GGUF file.")
             if not allowed_bases or not handler_utils.is_path_allowed(path, allowed_bases):
@@ -111,6 +138,9 @@ def resolve_model_id(model_id: str) -> Path:
 
 
 def _iter_gguf_models(models_dir: Path, warnings: list[str], limit: int):
+    if limit <= 0:
+        return
+
     visited = 0
     max_visited = max(limit * 20, 1000)
 
@@ -133,8 +163,31 @@ def _iter_gguf_models(models_dir: Path, warnings: list[str], limit: int):
             yield Path(root) / filename
 
 
-def _item_for_path(path: Path, *, source: str, allowed_bases: list[Path]) -> LlamaCppInventoryItem:
-    canonical = path.expanduser().resolve()
+def _has_scannable_gguf(models_dir: Path, warnings: list[str]) -> bool:
+    def _on_error(error: OSError) -> None:
+        warnings.append(f"Could not scan '{error.filename}': {error.strerror or error.__class__.__name__}.")
+
+    for _root, _dirs, files in os.walk(models_dir, topdown=True, onerror=_on_error):
+        for filename in files:
+            lowered = filename.lower()
+            if lowered.endswith(".gguf") and not lowered.startswith("mmproj"):
+                return True
+    return False
+
+
+def _item_for_path(
+    path: Path,
+    *,
+    source: str,
+    allowed_bases: list[Path],
+    warnings: list[str] | None = None,
+) -> LlamaCppInventoryItem | None:
+    try:
+        canonical = _canonical_path(path, "Model")
+    except ServerError:
+        if warnings is not None:
+            warnings.append("Could not inspect a model inventory path because it could not be resolved.")
+        return None
     basename = canonical.name
     item_warnings: list[str] = []
     size_bytes: int | None = None
@@ -170,6 +223,22 @@ def _item_for_path(path: Path, *, source: str, allowed_bases: list[Path]) -> Lla
         metadata=_metadata_from_filename(basename),
         warnings=item_warnings,
     )
+
+
+def _canonical_path(path: Path, label: str) -> Path:
+    try:
+        return path.expanduser().resolve()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ServerError(f"{label} path could not be resolved.") from exc
+
+
+def _registration_lock_path() -> Path:
+    return Path(tempfile.gettempdir()) / "tldw_llamacpp_registered_model_paths.lock"
+
+
+def _unresolved_path_key(path: Path) -> str:
+    digest = hashlib.sha256(str(path.expanduser()).encode("utf-8")).hexdigest()[:24]
+    return f"unresolved:{digest}"
 
 
 def _metadata_from_filename(filename: str) -> LlamaCppModelMetadata:

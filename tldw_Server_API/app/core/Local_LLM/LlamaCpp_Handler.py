@@ -293,7 +293,10 @@ class LlamaCppHandler(BaseLLMHandler):
         """
         Starts the managed Llama.cpp server using a validated local GGUF path.
         """
-        model_path = model_path.expanduser().resolve()
+        try:
+            model_path = model_path.expanduser().resolve()
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ServerError("Model path could not be resolved.") from exc
         if not self._is_path_allowed(model_path):
             raise ServerError("Model path must be under allowed directories.")
         if model_path.suffix.lower() != ".gguf":
