@@ -1,4 +1,4 @@
-# Persona Buddy Default Catalog and Manifest V2 Visual States Design
+# Persona Buddy Default Catalog and State Catalog Extension Design
 
 Date: 2026-05-14
 Status: Approved direction; design slice for TASK-347
@@ -9,8 +9,8 @@ Backlog: TASK-347
 
 Define the next Persona/Buddy visual-pack design slice: a nine-pack default
 catalog, a user-facing asset creation flow based on a neutral identity anchor,
-and a manifest V2 extension that supports a large bounded set of custom state
-IDs and per-tool animation variants.
+and a V1-compatible state catalog extension that supports a large bounded set
+of custom state IDs and per-tool animation variants.
 
 This is not a new renderer. It extends the existing Persona Visual Pack contract
 that uses `renderer_type: "sprite_frames"`, state-to-animation mappings,
@@ -34,8 +34,9 @@ Current Persona Visual pack behavior already provides the base contract:
 - Starter packs can be copied to user-owned inactive drafts; activation remains
   explicit.
 - Renderer capabilities currently advertise supported manifest versions per
-  renderer. `sprite_frames` should advertise manifest V2 only after backend
-  validation and Buddy runtime support exist for V2 custom states.
+  renderer. `sprite_frames` remains `manifest_version: 1`; the state catalog
+  should be advertised as a separate feature only after backend validation and
+  Buddy runtime support exist for custom states.
 
 Relevant in-repo references:
 
@@ -45,13 +46,14 @@ Relevant in-repo references:
 - `Docs/superpowers/specs/2026-05-12-persona-buddy-sprite-atlas-v1-design.md`
 - `Docs/superpowers/specs/2026-05-12-persona-buddy-renderer-capability-registry-design.md`
 
-Puzzle Attack reference materials in the sibling repo supply the asset-pipeline
-model:
+Puzzle Attack reference materials in the separate sibling repo supply the
+asset-pipeline model. These are logical repo references, not paths that should
+be serialized into manifests or runtime data:
 
-- `/Users/macbook-dev/Documents/GitHub/puzzle-attack/content/blog/2026-03-22-ai-asset-pipeline.md`
-- `/Users/macbook-dev/Documents/GitHub/puzzle-attack/docs/plans/2026-03-26-anim16-art-pipeline-design.md`
-- `/Users/macbook-dev/Documents/GitHub/puzzle-attack/docs/plans/2026-03-29-fighting-animation-system-design.md`
-- `/Users/macbook-dev/Documents/GitHub/puzzle-attack/scripts/art-review/README.md`
+- `puzzle-attack:content/blog/2026-03-22-ai-asset-pipeline.md`
+- `puzzle-attack:docs/plans/2026-03-26-anim16-art-pipeline-design.md`
+- `puzzle-attack:docs/plans/2026-03-29-fighting-animation-system-design.md`
+- `puzzle-attack:scripts/art-review/README.md`
 
 The reusable idea is not "make a sheet of expressions and call it animation".
 The reusable idea is: define a consistent character identity and neutral pose,
@@ -66,8 +68,8 @@ review outputs, and only then compile accepted frames into runtime assets.
    buddies.
 3. Distinguish static talking/reaction sheets from real animation strips or
    atlases.
-4. Add manifest V2 custom-state semantics for a large bounded set of states and
-   per-tool animation variants.
+4. Add V1-compatible state catalog semantics for a large bounded set of states
+   and per-tool animation variants.
 5. Keep manifest V1 packs compatible and keep the V1 required-state activation
    gate.
 6. Keep generation/import review-first: background jobs produce drafts or
@@ -101,8 +103,9 @@ review outputs, and only then compile accepted frames into runtime assets.
   not the animation system.
 - There should be nine bundled defaults: three basic, three intermediate, and
   three intricate.
-- Manifest V2 should support custom state IDs and per-tool animation variants
-  at a large but bounded scale.
+- The sprite manifest should support custom state IDs and per-tool animation
+  variants at a large but bounded scale without redefining repo-wide Manifest
+  V2 terminology.
 
 ## Asset Creation Model
 
@@ -195,11 +198,12 @@ Starter art production notes:
   with Puzzle Attack-style production discipline, not a direct recreation of a
   known character.
 
-## Manifest V2 State Model
+## State Catalog Extension
 
-Manifest V2 should extend state naming while preserving the current runtime
-shape:
+The state catalog extension should extend state naming while preserving the
+current `sprite_frames` V1 runtime shape:
 
+- `sprite_frames` stays `manifest_version: 1`.
 - Built-in states remain reserved and retain their current meaning.
 - Required built-ins still gate activation: `idle`, `listening`, `thinking`,
   `speaking`, and `error`.
@@ -209,13 +213,15 @@ shape:
 - Authored triggers may target both built-ins and declared custom states.
 - Unknown custom states fail validation instead of silently becoming runtime
   surprises.
-- Manifest V1 remains valid as-is.
+- Existing Manifest V1 packs without `state_catalog` remain valid as-is.
+- This spec does not redefine Manifest V2. The repo-wide Manifest V2 contract
+  remains the boundary for non-sprite renderers such as Live2D.
 
 Example:
 
 ```json
 {
-  "manifest_version": 2,
+  "manifest_version": 1,
   "renderer_type": "sprite_frames",
   "state_catalog": {
     "tool.notes_search": {
@@ -293,16 +299,18 @@ Use a large bounded model rather than unbounded user text:
 - Maximum state ID length: 96 characters.
 - Pattern: `^[a-z][a-z0-9_.:-]{0,95}$`.
 - Built-in IDs are reserved and cannot be redeclared in `state_catalog`.
-- Case-sensitive IDs should be rejected unless already lowercase.
 - Newlines, slashes, backslashes, shell-like prefixes, and obvious secret
   markers should be rejected.
 - Fallback traversal should cap at depth 8 and detect cycles.
 
-Recommended `state_catalog` fields:
+Required `state_catalog` fields:
 
 - `label`: user-facing name, length-bounded.
-- `kind`: one of `tool_variant`, `reaction`, `live_variant`, `mcp_runtime`,
-  `mood`, or `pack_private`.
+- `kind`: mandatory, one of `tool_variant`, `reaction`, `live_variant`,
+  `mcp_runtime`, `mood`, or `pack_private`.
+
+Optional `state_catalog` fields:
+
 - `description`: optional, length-bounded helper text.
 - `tags`: optional short strings for editor filtering.
 
@@ -312,14 +320,15 @@ Recommended text bounds:
 - `description`: 280 characters.
 - `tags`: at most 16 tags, 32 characters each.
 
-Keep top-level `fallbacks` as the canonical fallback graph so V2 builds on the
-existing resolver shape. The editor can display fallback controls inside custom
-state rows, but the serialized manifest should avoid two competing fallback
-locations.
+Keep top-level `fallbacks` as the canonical fallback graph so the extension
+builds on the existing resolver shape. The editor can display fallback controls
+inside custom state rows, but the serialized manifest should avoid two
+competing fallback locations.
 
 ### Trigger Matching
 
-Manifest V2 should keep the current trigger sources and add exact tool matching:
+The state catalog extension should keep the current trigger sources and add
+exact tool matching:
 
 - Existing: `live_state`, `tool_category`, `mcp_runtime`.
 - New: `tool_name`.
@@ -347,7 +356,7 @@ field is present.
 ### MCP Behavior
 
 The Persona Visuals MCP module should stop treating target states as a static
-enum once manifest V2 is enabled for a pack.
+enum once the state catalog extension is enabled for a pack.
 
 Rules:
 
@@ -364,8 +373,8 @@ Rules:
 
 ## Editor UX
 
-Persona Garden and related Buddy visual-pack surfaces should present V2 states
-as three groups:
+Persona Garden and related Buddy visual-pack surfaces should present visual
+states as three groups:
 
 1. Core states
    - Required: `idle`, `listening`, `thinking`, `speaking`, `error`.
@@ -425,24 +434,25 @@ Goal: Land this spec and task record.
 Success criteria:
 
 - TASK-347 links the design artifact.
-- The spec captures default catalog, asset pipeline, manifest V2 state model,
-  staged implementation, and verification.
+- The spec captures default catalog, asset pipeline, state catalog extension
+  model, staged implementation, and verification.
 
-### Stage 2: Backend Manifest V2 Validation
+### Stage 2: Backend State Catalog Validation
 
-Goal: Extend backend validation to understand manifest V2 custom states.
+Goal: Extend backend validation to understand `state_catalog` on
+`sprite_frames` V1 manifests.
 
 Success criteria:
 
-- Manifest V1 remains accepted without `state_catalog`.
-- Manifest V2 accepts declared custom states in `states`, `fallbacks`, and
-  `authored_triggers`.
+- Plain Manifest V1 remains accepted without `state_catalog`.
+- The V1 state catalog extension accepts declared custom states in `states`,
+  `fallbacks`, and `authored_triggers`.
 - Unknown custom state references fail validation.
-- State ID, custom-state count, trigger count, and fallback-cycle limits are
-  tested.
+- State ID, custom-state count, trigger count, fallback-depth cap 8, and
+  fallback-cycle detection are tested.
 - Required built-in activation behavior is unchanged.
-- `sprite_frames` renderer capabilities advertise manifest versions `[1, 2]`
-  only after V2 validation is implemented.
+- `sprite_frames` renderer capabilities advertise the state catalog feature
+  only after validation and Buddy runtime support are implemented.
 
 ### Stage 3: Frontend Types, Resolver, and Editor
 
@@ -503,7 +513,7 @@ Goal: Make the feature understandable and testable.
 
 Success criteria:
 
-- Persona Visual docs explain manifest V2 custom states and neutral-anchor
+- Persona Visual docs explain the state catalog extension and neutral-anchor
   asset creation.
 - User-facing docs explain simple upload, guided generation, and tool variants.
 - Backend, frontend, MCP, and starter-catalog tests cover the behavior above.
@@ -514,8 +524,9 @@ Success criteria:
 Backend:
 
 - Validate V1 manifests continue to pass.
-- Validate V2 required built-ins, declared custom states, unknown-state
-  rejection, unsafe IDs, count caps, trigger caps, and fallback-cycle detection.
+- Validate V1 state catalog required built-ins, declared custom states,
+  unknown-state rejection, unsafe IDs, count caps, trigger caps, fallback-depth
+  cap 8, and fallback-cycle detection.
 - Validate activation still requires the five required built-ins.
 
 Frontend:
@@ -552,7 +563,7 @@ not applicable until backend Python code changes are made.
 | Generated art loses identity over animation frames | Neutral anchor, validation checks, review/promote gate, regeneration notes |
 | Defaults are too complex for normal users to imitate | Three complexity tiers and a basic user-art example |
 | Lo-fi default looks like protected IP | Make it an original study companion; document style/mood without copying character design |
-| V2 breaks existing packs | V1 compatibility, reserved built-ins, and unchanged activation requirements |
+| State catalog extension breaks existing packs | V1 compatibility, reserved built-ins, and unchanged activation requirements |
 
 ## Open Questions for Implementation
 
