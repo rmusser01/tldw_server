@@ -1,10 +1,10 @@
 ---
 id: TASK-368.7
 title: Address PR 1727 llama.cpp register_model_path review feedback
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-15 19:15'
-updated_date: '2026-05-15 19:17'
+updated_date: '2026-05-15 19:20'
 labels:
   - llamacpp
   - pr-review
@@ -26,7 +26,7 @@ Fix the unresolved PR #1727 review finding that register_model_path persists pat
 <!-- AC:BEGIN -->
 - [x] #1 register_model_path rejects paths outside configured models_dir/allowed_paths before persistence
 - [x] #2 Focused inventory tests cover allowed and rejected registration paths
-- [ ] #3 PR branch is pushed with the review-fix commit and the unresolved review thread is addressed
+- [x] #3 PR branch is pushed with the review-fix commit and the unresolved review thread is addressed
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -44,14 +44,22 @@ Fix the unresolved PR #1727 review finding that register_model_path persists pat
 Live PR sweep for #1727 found one unresolved actionable thread: Gemini's comment on register_model_path persisting paths before allowlist validation. CodeRabbit skipped review, Qodo posted summary/status only, and gh pr checks did not show failing CI.
 
 Implemented fail-closed allowlist validation before register_model_path writes registered_model_paths. Focused inventory test passed (12 passed), broader llama.cpp backend slice passed (124 passed, 6 warnings), git diff --check passed, and Bandit on llamacpp_inventory_service.py reported zero findings. Pytest still emits existing post-success Loguru closed-stream cleanup warnings.
+
+Pushed review-fix commit 757c01fab to PR #1727, replied to the Gemini review thread, and resolved it on GitHub.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
+- [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Resolved the PR #1727 review finding by making register_model_path validate the requested canonical path against configured llama.cpp allowed bases before persisting registered_model_paths. Added regression coverage for explicit allowed registration and outside-path rejection with no config write. Verification: focused inventory tests passed, broader llama.cpp backend slice passed, git diff --check passed, and Bandit on the touched service reported zero findings. The PR branch was pushed and the Gemini review thread was replied to and resolved.
+<!-- SECTION:FINAL_SUMMARY:END -->
