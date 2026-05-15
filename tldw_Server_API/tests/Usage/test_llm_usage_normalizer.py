@@ -144,6 +144,39 @@ def test_normalize_bounds_and_redacts_raw_usage_metadata() -> None:
     assert normalized.raw_usage_metadata["debug_prompt"] == "[redacted]"
 
 
+def test_raw_usage_metadata_preserves_nested_numeric_prompt_like_usage_counters() -> None:
+    normalized = normalize_llm_usage(
+        provider="custom",
+        usage={
+            "prompt_tokens": 5,
+            "completion_tokens": 2,
+            "input": {
+                "text_tokens": 12,
+                "audio_tokens": "4",
+                "unit": "tokens",
+                "content": "private source prompt",
+            },
+            "text": {
+                "tokens": 16,
+                "characters": 128,
+                "sample": "private text sample",
+            },
+        },
+    )
+
+    metadata = normalized.raw_usage_metadata
+    serialized = json.dumps(metadata, sort_keys=True)
+    assert metadata["input"]["text_tokens"] == 12
+    assert metadata["input"]["audio_tokens"] == "4"
+    assert metadata["input"]["unit"] == "tokens"
+    assert metadata["input"]["content"] == "[redacted]"
+    assert metadata["text"]["tokens"] == 16
+    assert metadata["text"]["characters"] == 128
+    assert metadata["text"]["sample"] == "[redacted]"
+    assert "private source prompt" not in serialized
+    assert "private text sample" not in serialized
+
+
 def test_normalize_missing_and_stream_estimated_usage_sources() -> None:
     stream_estimate = normalize_llm_usage(
         provider="openai",

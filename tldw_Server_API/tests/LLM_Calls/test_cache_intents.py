@@ -82,6 +82,46 @@ def test_cache_intent_metadata_is_bounded_and_omits_hint_values() -> None:
     assert len(metadata["static_segment_fingerprint"]) <= 96
 
 
+def test_anthropic_cache_intent_marks_up_to_four_system_text_breakpoints() -> None:
+    from tldw_Server_API.app.core.LLM_Calls.cache_intents import apply_billing_prompt_cache_intent
+
+    payload, diagnostic = apply_billing_prompt_cache_intent(
+        "anthropic",
+        {
+            "model": "claude-3-5-sonnet",
+            "system": [
+                {"type": "text", "text": "static primer"},
+                {"type": "text", "text": "world book pinned facts"},
+                {"type": "image", "source": {"type": "base64", "data": "ignored"}},
+                {"type": "text", "text": "style rules"},
+                {"type": "text", "text": "safety rules"},
+                {"type": "text", "text": "latest static summary"},
+            ],
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        {
+            "billing_prompt_cache_intent": {
+                "enabled": True,
+                "scope": ["system", "world_book"],
+                "ttl_seconds": 3600,
+            }
+        },
+    )
+
+    system = payload["system"]
+    marked_indexes = [
+        index
+        for index, item in enumerate(system)
+        if isinstance(item, dict) and "cache_control" in item
+    ]
+    assert marked_indexes == [1, 3, 4, 5]
+    assert "cache_control" not in system[0]
+    assert "cache_control" not in system[2]
+    assert diagnostic.cache_intent_applied is True
+    assert diagnostic.applied_fields == ("system.cache_control",)
+    assert "world book pinned facts" not in str(diagnostic.to_metadata())
+
+
 def test_chat_request_passes_explicit_cache_intent_to_provider_call_params() -> None:
     request = ChatCompletionRequest(
         model="gpt-5.4",

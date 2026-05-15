@@ -12,6 +12,7 @@ SUPPORTED_BILLING_CACHE_INTENT_PROVIDERS: frozenset[str] = frozenset(
 )
 _MAX_FINGERPRINT_METADATA_CHARS = 96
 _MAX_PROMPT_CACHE_KEY_CHARS = 64
+_ANTHROPIC_MAX_CACHE_BREAKPOINTS = 4
 _OPENROUTER_PROVIDER_KEYS = frozenset(
     {
         "allow_fallbacks",
@@ -248,7 +249,12 @@ def _apply_openai(
     )
 
 
-def _mark_content_block(content: Any, cache_control: Mapping[str, str]) -> tuple[Any, bool]:
+def _mark_content_block(
+    content: Any,
+    cache_control: Mapping[str, str],
+    *,
+    max_breakpoints: int = 1,
+) -> tuple[Any, bool]:
     if isinstance(content, str):
         if not content:
             return content, False
@@ -257,14 +263,18 @@ def _mark_content_block(content: Any, cache_control: Mapping[str, str]) -> tuple
         return content, False
 
     copied = copy.deepcopy(content)
+    marked = 0
+    breakpoint_limit = max(1, min(max_breakpoints, _ANTHROPIC_MAX_CACHE_BREAKPOINTS))
     for item in reversed(copied):
         if not isinstance(item, dict):
             continue
         if item.get("type") != "text" or not isinstance(item.get("text"), str) or not item.get("text"):
             continue
         item["cache_control"] = dict(cache_control)
-        return copied, True
-    return copied, False
+        marked += 1
+        if marked >= breakpoint_limit:
+            break
+    return copied, marked > 0
 
 
 def _apply_anthropic(
@@ -277,7 +287,11 @@ def _apply_anthropic(
     if payload.get("system") is not None and (
         not intent.scope or any(scope in intent.scope for scope in ("system", "static", "world_book"))
     ):
-        system_content, applied = _mark_content_block(payload.get("system"), control)
+        system_content, applied = _mark_content_block(
+            payload.get("system"),
+            control,
+            max_breakpoints=_anthropic_cache_breakpoint_limit(intent),
+        )
         payload["system"] = system_content
         if applied:
             applied_fields.append("system.cache_control")
@@ -294,6 +308,28 @@ def _apply_anthropic(
 def _nested_hint(intent: BillingPromptCacheIntent, key: str) -> Mapping[str, Any]:
     value = intent.provider_hint.get(key)
     return value if isinstance(value, Mapping) else {}
+
+
+def _bounded_positive_int(value: Any, *, maximum: int) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed <= 0:
+        return None
+    return min(parsed, maximum)
+
+
+def _anthropic_cache_breakpoint_limit(intent: BillingPromptCacheIntent) -> int:
+    anthropic_hint = _nested_hint(intent, "anthropic")
+    for source in (anthropic_hint, intent.provider_hint):
+        for key in ("max_cache_breakpoints", "cache_breakpoints", "anthropic_cache_breakpoints"):
+            parsed = _bounded_positive_int(source.get(key), maximum=_ANTHROPIC_MAX_CACHE_BREAKPOINTS)
+            if parsed is not None:
+                return parsed
+    return _ANTHROPIC_MAX_CACHE_BREAKPOINTS
 
 
 def _gemini_cached_content_name(intent: BillingPromptCacheIntent) -> str | None:
