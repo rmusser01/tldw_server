@@ -1274,6 +1274,35 @@ def test_launchd_drill_cli_json_dry_run_stdout_is_parseable(
     )
 
 
+def test_launchd_drill_cli_json_captures_launchd_subprocess_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    helperctl = load_helperctl()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    subprocess_kwargs: list[dict[str, Any]] = []
+
+    def fake_subprocess_run(argv: list[str], **kwargs: Any) -> CompletedProcess[str]:
+        subprocess_kwargs.append(kwargs)
+        return CompletedProcess(argv, 0, stdout="child stdout", stderr="child stderr")
+
+    def fake_run_launchd_drill(**kwargs: Any) -> list[tuple[str, helperctl.CheckResult]]:
+        code = kwargs["launchd_runner"](["launchctl", "print", "gui/501/org.tldw.test"], dry_run=False)
+        return [("launchd_preflight", helperctl.CheckResult(ok=code == 0))]
+
+    monkeypatch.setattr(helperctl.subprocess, "run", fake_subprocess_run)
+    monkeypatch.setattr(helperctl, "run_launchd_drill", fake_run_launchd_drill)
+
+    code = helperctl.main(["launchd-drill", "--skip-smoke", "--json"])
+
+    output = json.loads(capsys.readouterr().out)
+    CASE.assertEqual(code, 0)
+    CASE.assertEqual(output[0]["name"], "launchd_preflight")
+    CASE.assertEqual(subprocess_kwargs[0]["stdout"], helperctl.subprocess.PIPE)
+    CASE.assertEqual(subprocess_kwargs[0]["stderr"], helperctl.subprocess.PIPE)
+
+
 def test_launchd_drill_cli_bundle_with_skip_smoke_passes_no_bundle(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

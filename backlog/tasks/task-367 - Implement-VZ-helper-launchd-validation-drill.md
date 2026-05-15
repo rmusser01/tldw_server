@@ -4,13 +4,15 @@ title: Implement VZ helper launchd validation drill
 status: Done
 assignee: []
 created_date: '2026-05-15 03:37'
+updated_date: '2026-05-15 05:52'
 labels:
   - Sandbox
 dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1442'
 documentation:
-  - Docs/superpowers/specs/2026-05-15-vz-helper-launchd-validation-drill-design.md
+  - >-
+    Docs/superpowers/specs/2026-05-15-vz-helper-launchd-validation-drill-design.md
   - Docs/superpowers/plans/2026-05-15-vz-helper-launchd-validation-drill.md
 priority: medium
 ---
@@ -30,6 +32,20 @@ Implement the reviewed and planned VZ helper launchd validation drill. Add an ex
 - [x] #5 Operator docs and host-gated policy document the drill, expected skips, cleanup behavior, and manual/host-gated validation boundaries.
 - [x] #6 Focused helperctl tests, `git diff --check`, and Bandit on touched Python code are run or documented with explicit host-gated skips.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-05-15 PR #1720 review fix: verified the JSON-mode subprocess-output finding. Added a failing regression for launchd-drill --json wiring a captured launchd runner through the CLI path, then added a captured command runner for JSON mode only so child stdout/stderr cannot reach the JSON stream while human dry-run output stays unchanged. Verification so far: regression failed before implementation; focused JSON pytest passed; full helperctl pytest passed 124 passed, 1 skipped; git diff --check passed; Bandit JSON at /tmp/bandit_vz_launchd_drill_1720_review_fix.json reported errors=0 and results=0.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented the opt-in VZ helper `launchd-drill` workflow. The helperctl CLI now has isolated launchd drill defaults, pre-bootstrap loaded-service protection, drill-owned cleanup, launchd-managed helper readiness checks, optional external-helper `vz_linux` host smoke through the launchd-managed socket, JSON/human output, and portable unit coverage. Operator docs and host-gated policy now describe cleanup, expected skips, manual LaunchAgent validation boundaries, and that the default direct-helper smoke path remains unchanged.
+
+PR #1720 review follow-up: JSON mode now injects a captured launchd command runner, so launchctl child stdout/stderr are piped instead of inheriting the CLI streams. Added regression coverage that exercises the CLI JSON path and asserts the runner uses subprocess.PIPE for both stdout and stderr. Verification: red test failed before implementation; focused JSON pytest passed; full helperctl pytest passed 124 passed, 1 skipped; git diff --check passed; Bandit reported errors=0 and results=0 at /tmp/bandit_vz_launchd_drill_1720_review_fix.json.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
@@ -51,9 +67,3 @@ Implement the reviewed and planned VZ helper launchd validation drill. Add an ex
 - Verification: `python -m bandit -r tools/macos-vz-helper/scripts/vz-helperctl.py -f json -o /tmp/bandit_vz_launchd_drill.json` completed with 0 errors and 0 findings.
 - Host-gated real launchd/VM smoke: not run in this final portable verification pass; documented as an explicit prepared-host/manual validation path.
 <!-- SECTION:NOTES:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the opt-in VZ helper `launchd-drill` workflow. The helperctl CLI now has isolated launchd drill defaults, pre-bootstrap loaded-service protection, drill-owned cleanup, launchd-managed helper readiness checks, optional external-helper `vz_linux` host smoke through the launchd-managed socket, JSON/human output, and portable unit coverage. Operator docs and host-gated policy now describe cleanup, expected skips, manual LaunchAgent validation boundaries, and that the default direct-helper smoke path remains unchanged.
-<!-- SECTION:FINAL_SUMMARY:END -->

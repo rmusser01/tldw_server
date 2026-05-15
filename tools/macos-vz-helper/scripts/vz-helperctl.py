@@ -445,6 +445,24 @@ def run_command(argv: list[str], *, dry_run: bool = False, env: dict[str, str] |
     return int(completed.returncode)
 
 
+def run_command_captured(argv: list[str], *, dry_run: bool = False, env: dict[str, str] | None = None) -> int:
+    """Run a command without letting child stdout/stderr reach the CLI stream."""
+    if dry_run:
+        return 0
+    # argv is executed directly without a shell.
+    try:
+        completed = subprocess.run(  # nosec B603
+            argv,
+            env=env,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        return 127
+    return int(completed.returncode)
+
+
 def _is_default_run_command(runner: Callable[..., int]) -> bool:
     return getattr(runner, "__module__", None) == __name__ and getattr(runner, "__name__", None) == "run_command"
 
@@ -1875,6 +1893,7 @@ def _launchd_drill_command(args: argparse.Namespace) -> int:
         "python_path": Path(args.python) if args.python else None,
     }
     if args.json:
+        drill_kwargs["launchd_runner"] = run_command_captured
         with contextlib.redirect_stdout(io.StringIO()):
             results = run_launchd_drill(**drill_kwargs)
     else:
