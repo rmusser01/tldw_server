@@ -1960,7 +1960,8 @@ describe("VisualPackEditor", () => {
         method === "POST"
       ) {
         const form = init?.body as FormData
-        expect((form.get("file") as File).name).toBe("portable.tldw-persona-vpack")
+        expect(form.get("file")).toBeNull()
+        expect((form.get("archive") as File).name).toBe("portable.tldw-persona-vpack")
         return okResponse({
           preview_id: "preview-1",
           job_id: "preview-job-1",
@@ -2118,15 +2119,182 @@ describe("VisualPackEditor", () => {
         "completed"
       )
     )
-    expect(screen.getByTestId("persona-visual-import-commit-refresh-button")).toBeDisabled()
     await waitFor(() =>
-      expect(screen.getByTestId("persona-visual-pack-select")).toHaveTextContent(
-        "Imported Visuals"
+      expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue(
+        "pack-imported"
       )
     )
+    expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent("draft")
     expect(
       calls.some((call) => call.includes("/activate") || call.includes("/manifest"))
     ).toBe(false)
+  })
+
+  it("rejects unsupported visual import archive filenames before upload", async () => {
+    const calls: string[] = []
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent(
+        "draft"
+      )
+    )
+    const archive = new File(["not a portable pack"], "visuals.zip", {
+      type: "application/zip"
+    })
+    fireEvent.change(screen.getByTestId("persona-visual-import-preview-input"), {
+      target: { files: [archive] }
+    })
+
+    expect(
+      await screen.findByTestId("persona-visual-import-preview-file-error")
+    ).toHaveTextContent(".tldw-persona-vpack")
+    expect(screen.getByTestId("persona-visual-import-preview-button")).toBeDisabled()
+
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-button"))
+
+    expect(
+      calls.some((call) => call.includes("/visual-packs/import-previews"))
+    ).toBe(false)
+  })
+
+  it("shows import preview failure copy from the job response", async () => {
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/import-previews" &&
+        method === "POST"
+      ) {
+        return okResponse({
+          preview_id: "preview-1",
+          job_id: "preview-job-1",
+          portability_job_id: "portability-preview-1",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "queued",
+          stage: "queued"
+        })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/import-previews/preview-1" &&
+        method === "GET"
+      ) {
+        return okResponse({
+          preview_id: "preview-1",
+          job_id: "preview-job-1",
+          portability_job_id: "portability-preview-1",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "failed",
+          visual_status: "failed",
+          stage: "validate_archive",
+          bundle_summary: {},
+          validation_warnings: [],
+          conflicts: [],
+          proposed_plan: {},
+          quota_estimate: {},
+          required_choices: [],
+          target_warnings: [],
+          error_code: "invalid_archive",
+          error_message: "The archive could not be opened as a Persona Visual pack."
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent(
+        "draft"
+      )
+    )
+    const archive = new File(["portable archive"], "portable.tldw-persona-vpack", {
+      type: "application/octet-stream"
+    })
+    fireEvent.change(screen.getByTestId("persona-visual-import-preview-input"), {
+      target: { files: [archive] }
+    })
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-preview-status")).toHaveTextContent(
+        "queued"
+      )
+    )
+
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-refresh-button"))
+
+    expect(
+      await screen.findByTestId("persona-visual-import-preview-job-copy")
+    ).toHaveTextContent("The archive could not be opened as a Persona Visual pack.")
   })
 
   it("surfaces blocked renderer import diagnostics and disables commit", async () => {

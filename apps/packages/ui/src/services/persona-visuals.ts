@@ -440,7 +440,7 @@ export async function createPersonaVisualImportPreview(
   file: File
 ): Promise<PersonaVisualImportPreviewStartResponse> {
   const formData = new FormData()
-  formData.append("file", file)
+  formData.append("archive", file)
   return fetchPersonaVisualJson<PersonaVisualImportPreviewStartResponse>(
     personaVisualPath(personaId, "/visual-packs/import-previews"),
     {
