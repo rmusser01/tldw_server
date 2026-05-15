@@ -51,28 +51,31 @@ describe("TldwModelsService caching", () => {
 
   it("dedupes concurrent in-flight model fetches", async () => {
     vi.useFakeTimers()
-    mocks.getModels.mockImplementation(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 25))
-      return [
-        { id: "model-a", name: "Model A", provider: "openai", type: "chat" }
-      ]
-    })
+    try {
+      mocks.getModels.mockImplementation(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 25))
+        return [
+          { id: "model-a", name: "Model A", provider: "openai", type: "chat" }
+        ]
+      })
 
-    const { TldwModelsService } = await importService()
-    const service = new TldwModelsService()
+      const { TldwModelsService } = await importService()
+      const service = new TldwModelsService()
 
-    const first = service.getModels(true)
-    const second = service.getModels(true)
+      const first = service.getModels(true)
+      const second = service.getModels(true)
 
-    await vi.advanceTimersByTimeAsync(26)
+      await vi.advanceTimersByTimeAsync(26)
 
-    const [a, b] = await Promise.all([first, second])
+      const [a, b] = await Promise.all([first, second])
 
-    expect(a).toHaveLength(1)
-    expect(b).toHaveLength(1)
-    expect(mocks.getModels).toHaveBeenCalledTimes(1)
-    vi.useRealTimers()
-  })
+      expect(a).toHaveLength(1)
+      expect(b).toHaveLength(1)
+      expect(mocks.getModels).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  }, 10_000)
 
   it("resets cached models when server scope changes", async () => {
     mocks.getModels
@@ -127,6 +130,34 @@ describe("TldwModelsService caching", () => {
 
     await expect(Promise.all([first, second])).resolves.toEqual([[], []])
     expect(mocks.getModels).toHaveBeenCalledTimes(1)
+  })
+
+  it("retries aborted model metadata requests before returning an empty model list", async () => {
+    const abortError = Object.assign(
+      new Error("signal is aborted without reason"),
+      {
+        name: "AbortError",
+        code: "REQUEST_ABORTED",
+        status: 0
+      }
+    )
+    mocks.getModels
+      .mockRejectedValueOnce(abortError)
+      .mockResolvedValueOnce([
+        { id: "gpt-4o", name: "gpt-4o", provider: "openai", type: "chat" }
+      ])
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    await expect(service.getModels(true)).resolves.toEqual([
+      expect.objectContaining({
+        id: "gpt-4o",
+        provider: "openai",
+        type: "chat"
+      })
+    ])
+    expect(mocks.getModels).toHaveBeenCalledTimes(2)
   })
 
   it("reuses cached models during the forced refresh cooldown", async () => {

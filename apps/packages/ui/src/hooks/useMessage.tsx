@@ -65,6 +65,7 @@ import { documentChatMode } from "./chat-modes/documentChatMode";
 import { updatePageTitle } from "@/utils/update-page-title";
 import { useAntdNotification } from "./useAntdNotification";
 import { useChatBaseState } from "@/hooks/chat/useChatBaseState";
+import { useSelectedModel } from "@/hooks/chat/useSelectedModel";
 import { normalizeConversationState } from "@/utils/conversation-state";
 import {
   resolveApiProviderForModel,
@@ -123,10 +124,7 @@ export const useMessage = () => {
   const invalidateServerChatHistory = React.useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] });
   }, [queryClient]);
-  const [selectedModel, setSelectedModel] = useStorage<string | null>(
-    "selectedModel",
-    null,
-  );
+  const { selectedModel, setSelectedModel } = useSelectedModel();
   const currentChatModelSettings = useStoreChatModelSettings();
   const {
     setIsSearchingInternet,

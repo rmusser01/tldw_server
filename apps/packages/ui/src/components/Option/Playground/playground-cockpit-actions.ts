@@ -32,6 +32,7 @@ export type SearchAndContextTab = "search" | "context";
 
 export type ModelSettingsOpenDetail = {
   returnFocusSelector?: string;
+  settingsScope?: string | null;
 };
 
 export type McpSettingsOpenDetail = {
@@ -60,10 +61,11 @@ export const openSearchAndContext = (
 };
 
 export const openModelSettings = (
-  options: { returnFocusSelector?: string } = {},
+  options: { returnFocusSelector?: string; settingsScope?: string | null } = {},
 ) => {
   dispatchCockpitEvent<ModelSettingsOpenDetail>(OPEN_MODEL_SETTINGS_EVENT, {
     returnFocusSelector: options.returnFocusSelector,
+    settingsScope: options.settingsScope,
   });
 };
 

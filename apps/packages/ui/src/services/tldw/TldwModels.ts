@@ -39,6 +39,23 @@ const NON_CHAT_MODEL_HINTS = ["rerank", "moderation", "safety"]
 const hasAnyHint = (value: string, hints: string[]): boolean =>
   hints.some((hint) => value.includes(hint))
 
+const isAbortLikeModelFetchError = (error: unknown): boolean => {
+  const candidate = error as
+    | (Error & {
+        code?: unknown
+        status?: unknown
+      })
+    | null
+    | undefined
+  const message =
+    candidate instanceof Error ? candidate.message.toLowerCase() : ""
+  return (
+    candidate?.name === "AbortError" ||
+    candidate?.code === "REQUEST_ABORTED" ||
+    message.includes("abort")
+  )
+}
+
 export interface ModelInfo {
   id: string
   name: string
@@ -175,7 +192,7 @@ export class TldwModelsService {
       return this.cachedModels || []
     }
 
-    const fetchPromise = (async () => {
+    const fetchFromServer = async () => {
       await tldwClient.initialize()
       const models = await tldwClient.getModels({
         refreshOpenRouter: options?.refreshOpenRouter === true
@@ -190,7 +207,17 @@ export class TldwModelsService {
       await this.persistCache()
       
       return this.cachedModels
-    })().catch((error) => {
+    }
+
+    const fetchPromise = fetchFromServer().catch(async (error) => {
+      if (isAbortLikeModelFetchError(error) && !this.cachedModels) {
+        try {
+          return await fetchFromServer()
+        } catch (retryError) {
+          error = retryError
+        }
+      }
+
       if (!import.meta.env?.DEV) {
         console.error('Failed to fetch models from tldw:', error)
       }

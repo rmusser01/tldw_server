@@ -26,6 +26,12 @@ import {
   buildActorSettingsFromForm,
   estimateActorTokens
 } from "@/utils/actor"
+import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
+import {
+  getCanonicalModelKey,
+  getModelId,
+  getModelProvider
+} from "@/hooks/playground/modelSelectorUtils"
 import type { Character } from "@/types/character"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
@@ -43,6 +49,7 @@ type Props = {
   setOpen: (open: boolean) => void
   useDrawer?: boolean
   isOCREnabled?: boolean
+  settingsScope?: string | null
 }
 
 type ModelConfigData = {
@@ -138,7 +145,8 @@ export const CurrentChatModelSettings = ({
   open,
   setOpen,
   useDrawer,
-  isOCREnabled
+  isOCREnabled,
+  settingsScope
 }: Props) => {
   const { t } = useTranslation("common")
   const [form] = Form.useForm<CurrentChatModelFormValues>()
@@ -176,6 +184,8 @@ export const CurrentChatModelSettings = ({
     systemPrompt,
     ocrLanguage,
     updateSetting,
+    updateScopedSetting,
+    setActiveSettingsScope,
     setOcrLanguage
   } = useStoreChatModelSettings(
     (state) => ({
@@ -212,6 +222,8 @@ export const CurrentChatModelSettings = ({
       systemPrompt: state.systemPrompt,
       ocrLanguage: state.ocrLanguage,
       updateSetting: state.updateSetting,
+      updateScopedSetting: state.updateScopedSetting,
+      setActiveSettingsScope: state.setActiveSettingsScope,
       setOcrLanguage: state.setOcrLanguage
     }),
     shallow
@@ -322,10 +334,93 @@ export const CurrentChatModelSettings = ({
     recomputeActorPreview()
   }, [actorSettings, open, recomputeActorPreview])
 
+  const { data: composerModels = [], isLoading: modelsLoading } = useQuery<
+    ChatModel[]
+  >({
+    queryKey: ["playground:chatModels", open],
+    queryFn: async () => {
+      try {
+        return await fetchChatModels({ returnEmpty: true })
+      } catch (error) {
+        console.error("Failed to fetch chat models:", error)
+        throw error
+      }
+    },
+    enabled: open,
+    retry: 2
+  })
+
+  const selectedModelSettingsScope = useMemo(() => {
+    if (!selectedModel) return null
+
+    const selected = selectedModel.trim()
+    if (!selected) return null
+
+    const selectedLower = selected.toLowerCase()
+    const models = Array.isArray(composerModels) ? composerModels : []
+    const providerSelection = parseProviderQualifiedModelSelection(selected)
+
+    const canonicalMatch = models.find(
+      (model) => getCanonicalModelKey(model).toLowerCase() === selectedLower
+    )
+    if (canonicalMatch) {
+      return getCanonicalModelKey(canonicalMatch)
+    }
+
+    const selectedModelId = providerSelection.modelId
+    const selectedProviderHint =
+      providerSelection.provider ||
+      (typeof apiProvider === "string" && apiProvider.trim()
+        ? apiProvider.trim().toLowerCase()
+        : null)
+
+    const providerMatch = selectedProviderHint
+      ? models.find(
+          (model) =>
+            getModelId(model) === selectedModelId &&
+            getModelProvider(model) === selectedProviderHint
+        )
+      : null
+    if (providerMatch) {
+      return getCanonicalModelKey(providerMatch)
+    }
+
+    const modelIdMatch = models.find((model) => {
+      const modelId = getModelId(model)
+      return (
+        modelId === selectedModelId ||
+        String(model.model || "") === selectedModelId
+      )
+    })
+    if (modelIdMatch) {
+      return getCanonicalModelKey(modelIdMatch)
+    }
+
+    return getCanonicalModelKey(selectedProviderHint || "custom", selectedModelId)
+  }, [apiProvider, composerModels, selectedModel])
+
   const saveSettings = useCallback(
     (values: CurrentChatModelFormValues) => {
+      const latestSettingsState = useStoreChatModelSettings.getState()
+      const explicitSettingsScope =
+        typeof settingsScope === "string" && settingsScope.trim()
+          ? settingsScope.trim()
+          : null
+      const targetSettingsScope =
+        explicitSettingsScope ||
+        latestSettingsState.activeSettingsScope ||
+        selectedModelSettingsScope
+
+      if (targetSettingsScope) {
+        setActiveSettingsScope(targetSettingsScope)
+      }
+
       Object.keys(values).forEach((key) => {
         if (!isChatModelSettingKey(key)) return
+        if (targetSettingsScope) {
+          updateScopedSetting(targetSettingsScope, key, values[key])
+          return
+        }
         updateSetting(key, values[key])
       })
 
@@ -348,7 +443,11 @@ export const CurrentChatModelSettings = ({
       historyId,
       personaChatActive,
       serverChatId,
+      settingsScope,
+      selectedModelSettingsScope,
+      setActiveSettingsScope,
       setActorSettings,
+      updateScopedSetting,
       updateSetting
     ]
   )
@@ -496,22 +595,6 @@ export const CurrentChatModelSettings = ({
     enabled: open && !selectedCharacterMeta.isLoading && !personaChatActive,
     refetchOnMount: false,
     refetchOnWindowFocus: false
-  })
-
-  const { data: composerModels = [], isLoading: modelsLoading } = useQuery<
-    ChatModel[]
-  >({
-    queryKey: ["playground:chatModels", open],
-    queryFn: async () => {
-      try {
-        return await fetchChatModels({ returnEmpty: true })
-      } catch (error) {
-        console.error("Failed to fetch chat models:", error)
-        throw error
-      }
-    },
-    enabled: open,
-    retry: 2
   })
 
   const modelOptions = useMemo(() => {

@@ -33,10 +33,16 @@ export type RuntimeSettingSummary = {
   source?: "default" | "override";
 };
 
+export type RuntimeToolStateCount = {
+  label: string;
+  value: number | string;
+};
+
 export type RuntimeToolSummary = {
   state: "available" | "unavailable" | "disabled" | "degraded";
   label: string;
   detail?: string | null;
+  stateCounts?: RuntimeToolStateCount[];
   onOpen?: () => void;
 };
 
@@ -306,6 +312,22 @@ export const PlaygroundRuntimeInspector = ({
                 ) : null}
               </div>
             </div>
+            {toolSummary.stateCounts?.length ? (
+              <dl
+                aria-label={t(
+                  "cockpit.mcpToolStateCounts",
+                  "MCP tool state counts",
+                )}
+                className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-1 text-[11px] text-text-muted"
+              >
+                {toolSummary.stateCounts.map((count) => (
+                  <React.Fragment key={count.label}>
+                    <dt className="truncate">{count.label}</dt>
+                    <dd className="font-medium text-text">{count.value}</dd>
+                  </React.Fragment>
+                ))}
+              </dl>
+            ) : null}
             {toolSummary.onOpen ? (
               <button
                 type="button"
