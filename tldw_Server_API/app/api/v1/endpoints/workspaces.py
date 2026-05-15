@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
@@ -37,8 +38,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.exceptions import WorkspaceArtifactExportStateError
 from tldw_Server_API.app.core.Workspaces.workspace_artifact_exports import (
-    WorkspaceArtifactExportStateError,
     export_workspace_artifact_version,
 )
 
@@ -132,11 +133,7 @@ def _workspace_artifact_version_for_export(
     if artifact_version_id is None:
         return artifact
 
-    versions = db.list_workspace_artifact_versions(workspace_id, artifact_id)
-    version = next(
-        (item for item in versions if item.get("artifact_version_id") == artifact_version_id),
-        None,
-    )
+    version = db.get_workspace_artifact_version(workspace_id, artifact_id, artifact_version_id)
     if version is None:
         raise HTTPException(status_code=404, detail="Workspace artifact version not found")
     merged = {**artifact, **version}
@@ -499,8 +496,8 @@ async def export_artifact(
     current_user: User = Depends(get_request_user),
 ) -> WorkspaceArtifactExportResponse:
     """Export an accepted workspace artifact version as Markdown, HTML, or JSON."""
-    _require_workspace(db, workspace_id)
     try:
+        _require_workspace(db, workspace_id)
         artifact = _workspace_artifact_version_for_export(
             db,
             workspace_id,
@@ -510,9 +507,29 @@ async def export_artifact(
         payload = export_workspace_artifact_version(artifact, export_format=body.format)
         db.append_workspace_artifact_export_ref(workspace_id, artifact_id, payload["export_ref"])
     except WorkspaceArtifactExportStateError as exc:
+        logger.warning(
+            "Workspace artifact export rejected: workspace_id={} artifact_id={} artifact_version_id={} "
+            "format={} reason={}",
+            workspace_id,
+            artifact_id,
+            body.artifact_version_id,
+            body.format,
+            str(exc),
+        )
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
-        raise map_db_error_to_http(exc, default_detail="Failed to export workspace artifact") from exc
+        logger.exception(
+            "Workspace artifact export failed: workspace_id={} artifact_id={} artifact_version_id={} format={}",
+            workspace_id,
+            artifact_id,
+            body.artifact_version_id,
+            body.format,
+        )
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to export workspace artifact",
+            log_error=False,
+        ) from exc
     return WorkspaceArtifactExportResponse(**payload)
 
 

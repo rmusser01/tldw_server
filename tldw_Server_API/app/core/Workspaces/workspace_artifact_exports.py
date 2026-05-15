@@ -1,24 +1,27 @@
 """Export helpers for traceable workspace artifact versions."""
 from __future__ import annotations
 
+import base64
 import json
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from html import escape
 from typing import Any
 
+import markdown
+
+from tldw_Server_API.app.core.exceptions import WorkspaceArtifactExportStateError
+
 ALLOWED_WORKSPACE_ARTIFACT_EXPORT_FORMATS = ("md", "html", "json")
 
 
-class WorkspaceArtifactExportStateError(ValueError):
-    """Raised when an artifact version is not eligible for export."""
-
-
 def _utc_now_iso() -> str:
+    """Return a second-precision UTC timestamp for deterministic export metadata."""
     return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 def _artifact_identity(artifact: Mapping[str, Any]) -> dict[str, Any]:
+    """Build the stable artifact identity block shared by all export formats."""
     artifact_id = str(artifact.get("id") or artifact.get("artifact_id") or "")
     version = int(artifact.get("version") or 1)
     return {
@@ -36,6 +39,7 @@ def _artifact_identity(artifact: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _export_metadata(artifact: Mapping[str, Any], *, export_format: str, generated_at: str) -> dict[str, Any]:
+    """Collect traceability metadata that travels with an artifact export."""
     return {
         "artifact": _artifact_identity(artifact),
         "review_state": artifact.get("review_state") or "draft",
@@ -51,10 +55,26 @@ def _export_metadata(artifact: Mapping[str, Any], *, export_format: str, generat
     }
 
 
+def _metadata_json(metadata: Mapping[str, Any]) -> str:
+    """Serialize export metadata with stable ordering for reproducible payloads."""
+    return json.dumps(metadata, ensure_ascii=True, sort_keys=True)
+
+
+def _metadata_base64(metadata: Mapping[str, Any]) -> str:
+    """Encode metadata for HTML-comment-safe Markdown embedding."""
+    return base64.b64encode(_metadata_json(metadata).encode("utf-8")).decode("ascii")
+
+
+def _render_markdown_body_html(body: Any) -> str:
+    """Render artifact Markdown to HTML while escaping raw inline HTML."""
+    safe_markdown = escape(str(body or ""))
+    return markdown.markdown(safe_markdown, extensions=["extra", "sane_lists"], output_format="html5")
+
+
 def _render_markdown_export(artifact: Mapping[str, Any], metadata: Mapping[str, Any]) -> str:
+    """Render an accepted artifact version as Markdown with trace metadata."""
     identity = metadata["artifact"]
     body = artifact.get("content") or ""
-    metadata_json = json.dumps(metadata, ensure_ascii=True, sort_keys=True)
     return (
         "---\n"
         f"artifact_id: {identity['id']}\n"
@@ -64,17 +84,18 @@ def _render_markdown_export(artifact: Mapping[str, Any], metadata: Mapping[str, 
         f"format: {metadata['export']['format']}\n"
         f"generated_at: {metadata['export']['generated_at']}\n"
         "---\n\n"
-        "<!-- tldw-artifact-metadata: "
-        f"{metadata_json}"
+        "<!-- tldw-artifact-metadata-base64: "
+        f"{_metadata_base64(metadata)}"
         " -->\n\n"
         f"{body}"
     )
 
 
 def _render_html_export(artifact: Mapping[str, Any], metadata: Mapping[str, Any]) -> str:
+    """Render an accepted artifact version as standalone HTML."""
     identity = metadata["artifact"]
     body = artifact.get("content") or ""
-    metadata_json = json.dumps(metadata, ensure_ascii=True, sort_keys=True)
+    metadata_json = _metadata_json(metadata)
     script_metadata_json = (
         metadata_json
         .replace("&", "\\u0026")
@@ -99,7 +120,7 @@ def _render_html_export(artifact: Mapping[str, Any], metadata: Mapping[str, Any]
         f' data-review-state="{escape(str(metadata["review_state"]), quote=True)}"'
         ">\n"
         f"    <h1>{escape(str(title))}</h1>\n"
-        f"    <pre>{escape(str(body))}</pre>\n"
+        f"    <section class=\"artifact-content\">\n{_render_markdown_body_html(body)}\n    </section>\n"
         "  </article>\n"
         '  <script type="application/json" data-tldw-artifact-metadata>'
         f"{script_metadata_json}"
@@ -110,6 +131,7 @@ def _render_html_export(artifact: Mapping[str, Any], metadata: Mapping[str, Any]
 
 
 def _render_json_export(artifact: Mapping[str, Any], metadata: Mapping[str, Any]) -> str:
+    """Render an accepted artifact version as a structured JSON document."""
     return json.dumps(
         {
             "artifact": metadata["artifact"],
