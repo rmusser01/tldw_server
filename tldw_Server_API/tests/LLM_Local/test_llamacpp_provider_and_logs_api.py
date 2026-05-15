@@ -297,6 +297,9 @@ def test_log_tail_redacts_api_exposed_secret_syntaxes(tmp_path: Path):
                 "api_key: sk-colon-abcdefghijklmnopqrstuvwxyz123456",
                 '{"api_key": "sk-json-abcdefghijklmnopqrstuvwxyz123456"}',
                 "--api-key sk-cli-abcdefghijklmnopqrstuvwxyz123456 --hf-token hf_cli_secret --token plain_cli_secret",
+                "--api-key=sk-cli-equals-abcdefghijklmnopqrstuvwxyz123456",
+                'api_key="quoted-secret-value"',
+                "'token' = 'quoted-token-secret'",
                 "token = spaced-secret-value",
                 "standalone sk-standalone-abcdefghijklmnopqrstuvwxyz123456",
             ]
@@ -322,11 +325,14 @@ def test_log_tail_redacts_api_exposed_secret_syntaxes(tmp_path: Path):
     assert "sk-colon" not in text
     assert "sk-json" not in text
     assert "sk-cli" not in text
+    assert "sk-cli-equals" not in text
     assert "hf_cli_secret" not in text
     assert "plain_cli_secret" not in text
+    assert "quoted-secret-value" not in text
+    assert "quoted-token-secret" not in text
     assert "spaced-secret-value" not in text
     assert "sk-standalone" not in text
-    assert text.count("[REDACTED") >= 8
+    assert text.count("[REDACTED") >= 11
 
 
 @pytest.mark.unit

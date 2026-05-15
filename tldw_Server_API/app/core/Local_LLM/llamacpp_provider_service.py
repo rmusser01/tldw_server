@@ -22,6 +22,7 @@ LLAMA_PROVIDER_ENDPOINT_ENV_KEYS: tuple[str, ...] = ()
 _MAX_LOG_LINES = 1000
 _MAX_LOG_BYTES = 256 * 1024
 _REDACTION_FIELD_PATTERN = r"(?:api_key|token|hf_token|openai_api_key|anthropic_api_key)"
+_REDACTION_VALUE_PATTERN = r"(?:\"[^\"\r\n]*\"|'[^'\r\n]*'|[^\s\"',}\]]+)"
 
 
 class ManagedServerNotRunningError(RuntimeError):
@@ -161,25 +162,32 @@ def _endpoint_from_status_or_handler(status: dict[str, Any], handler: Any) -> st
 
 
 def _redact_log_line(line: str) -> str:
+    def _redacted_value(match: re.Match[str]) -> str:
+        prefix = match.group(1)
+        value = match.group(2)
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            return f"{prefix}{value[0]}[REDACTED]{value[-1]}"
+        return f"{prefix}[REDACTED]"
+
     redacted = line
     redacted = re.sub(
-        r"(?i)(Authorization\s*:\s*Bearer\s+)([^\s\"',]+)",
-        r"\1[REDACTED]",
+        rf"(?i)(Authorization\s*:\s*Bearer\s+)({_REDACTION_VALUE_PATTERN})",
+        _redacted_value,
         redacted,
     )
     redacted = re.sub(
-        rf"(?i)(--(?:api-key|hf-token|token)\s+)([^\s\"',]+)",
-        r"\1[REDACTED]",
+        rf"(?i)(--(?:api-key|hf-token|token)(?:\s*=\s*|\s+))({_REDACTION_VALUE_PATTERN})",
+        _redacted_value,
         redacted,
     )
     redacted = re.sub(
-        rf"(?i)(\b{_REDACTION_FIELD_PATTERN}\b\s*[:=]\s*)([^\s\"',]+)",
-        r"\1[REDACTED]",
+        rf"(?i)(\b{_REDACTION_FIELD_PATTERN}\b\s*[:=]\s*)({_REDACTION_VALUE_PATTERN})",
+        _redacted_value,
         redacted,
     )
     redacted = re.sub(
-        rf"(?i)([\"']\b{_REDACTION_FIELD_PATTERN}\b[\"']\s*:\s*[\"'])([^\"']+)([\"'])",
-        r"\1[REDACTED]\3",
+        rf"(?i)([\"']\b{_REDACTION_FIELD_PATTERN}\b[\"']\s*[:=]\s*)({_REDACTION_VALUE_PATTERN})",
+        _redacted_value,
         redacted,
     )
     redacted = re.sub(
