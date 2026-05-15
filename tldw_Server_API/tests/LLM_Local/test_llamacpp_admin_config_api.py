@@ -318,6 +318,24 @@ def test_llamacpp_config_service_rejects_environment_overridden_fields(monkeypat
 
 
 @pytest.mark.unit
+def test_llamacpp_registered_model_paths_is_not_advertised_as_env_override():
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_config_service
+
+    assert "registered_model_paths" not in llamacpp_config_service.LLAMACPP_ENV_OVERRIDES
+    assert "LLAMACPP_REGISTERED_MODEL_PATHS" not in llamacpp_config_service.LLAMACPP_ENV_OVERRIDES.values()
+
+
+@pytest.mark.unit
+def test_llamacpp_config_write_lock_path_is_config_sibling(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_config_lock
+
+    config_path = tmp_path / "config.txt"
+    monkeypatch.setattr(llamacpp_config_lock.setup_manager, "get_config_file_path", lambda: config_path)
+
+    assert llamacpp_config_lock.llamacpp_config_lock_path() == tmp_path / ".llamacpp.lock"
+
+
+@pytest.mark.unit
 def test_llamacpp_config_put_updates_with_setup_manager_and_refreshes_cache(monkeypatch):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_config_service
 
@@ -355,14 +373,26 @@ def test_llamacpp_config_put_updates_with_setup_manager_and_refreshes_cache(monk
         },
     )
 
+    class FakeLock:
+        def __enter__(self) -> "FakeLock":
+            calls.append(("lock_enter", None))
+            return self
+
+        def __exit__(self, *exc: Any) -> None:
+            calls.append(("lock_exit", None))
+
+    monkeypatch.setattr(llamacpp_config_service, "llamacpp_config_write_lock", lambda: FakeLock(), raising=False)
+
     result = llamacpp_config_service.update_config_state(
         {"models_dir": "models/new", "allowed_paths": ["models/new"], "default_port": None},
         _ManagerWithoutHandler(),
     )
 
     assert calls == [
+        ("lock_enter", None),
         ("update_config", {"LlamaCpp": {"models_dir": "models/new", "allowed_paths": "models/new"}}),
         ("refresh_config_cache", None),
+        ("lock_exit", None),
     ]
     assert result["saved_config"]["models_dir"] == "models/new"
 

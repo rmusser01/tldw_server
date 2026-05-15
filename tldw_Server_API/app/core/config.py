@@ -2741,7 +2741,6 @@ def get_llamacpp_handler_config() -> Optional["LlamaCppConfig"]:
         LLAMACPP_PORT_AUTOSELECT
         LLAMACPP_PORT_PROBE_MAX
         LLAMACPP_ALLOWED_PATHS  (comma separated)
-        LLAMACPP_REGISTERED_MODEL_PATHS  (comma separated; consumed by inventory service)
         LLAMACPP_LOG_OUTPUT_FILE
     """
     try:

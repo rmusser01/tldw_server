@@ -187,6 +187,17 @@ async def start_llamacpp_by_model_endpoint(
     try:
         target = _resolve_llamacpp_target(llm_manager, ("start_server_by_path",))
         model_path = llamacpp_inventory_service.resolve_model_id(payload.model_id)
+    except HTTPException:
+        raise
+    except InferenceError as e:
+        raise _llamacpp_unavailable(str(e)) from e
+    except (ModelNotFoundError, ServerError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        _log_sanitized_manager_error(llm_manager, "Unexpected error resolving Llama.cpp model ID")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred.") from e
+
+    try:
         result = await target.start_server_by_path(
             model_path,
             model_label=model_path.name,
@@ -201,8 +212,9 @@ async def start_llamacpp_by_model_endpoint(
         raise
     except InferenceError as e:
         raise _llamacpp_unavailable(str(e)) from e
-    except (ModelNotFoundError, ServerError) as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    except ServerError as e:
+        _log_sanitized_manager_error(llm_manager, "Failed to start Llama.cpp server by model ID")
+        raise HTTPException(status_code=400, detail="Failed to start llama.cpp server for the selected model.") from e
     except Exception as e:
         _log_sanitized_manager_error(llm_manager, "Unexpected error starting Llama.cpp server by model ID")
         raise HTTPException(status_code=500, detail="An unexpected error occurred.") from e

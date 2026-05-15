@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -15,7 +14,7 @@ from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
 )
 from tldw_Server_API.app.core.Local_LLM import handler_utils
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ModelNotFoundError, ServerError
-from tldw_Server_API.app.core.Infrastructure.distributed_lock import FileLock, LockAcquisitionError
+from tldw_Server_API.app.core.Local_LLM.llamacpp_config_lock import LockAcquisitionError, llamacpp_config_write_lock
 from tldw_Server_API.app.core.Setup import setup_manager
 from tldw_Server_API.app.core.config import load_comprehensive_config, refresh_config_cache
 
@@ -87,7 +86,7 @@ def register_model_path(path: Path) -> LlamaCppInventoryItem:
     """
     canonical = _canonical_path(path, "Registered model")
     try:
-        with FileLock(_registration_lock_path(), timeout=10):
+        with llamacpp_config_write_lock():
             saved_config = _read_saved_config()
             existing = _path_list(saved_config.get("registered_model_paths"))
             existing_by_id: dict[str, Path] = {}
@@ -104,7 +103,7 @@ def register_model_path(path: Path) -> LlamaCppInventoryItem:
             refresh_config_cache()
     except Exception as exc:
         if isinstance(exc, LockAcquisitionError):
-            raise ServerError("Failed to acquire the llama.cpp registered model path lock.") from exc
+            raise ServerError("Failed to acquire the llama.cpp config write lock.") from exc
         if isinstance(exc, ServerError):
             raise
         raise ServerError("Failed to persist registered llama.cpp model path.") from exc
@@ -230,10 +229,6 @@ def _canonical_path(path: Path, label: str) -> Path:
         return path.expanduser().resolve()
     except (OSError, RuntimeError, ValueError) as exc:
         raise ServerError(f"{label} path could not be resolved.") from exc
-
-
-def _registration_lock_path() -> Path:
-    return Path(tempfile.gettempdir()) / "tldw_llamacpp_registered_model_paths.lock"
 
 
 def _unresolved_path_key(path: Path) -> str:

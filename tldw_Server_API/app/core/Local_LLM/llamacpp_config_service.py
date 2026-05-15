@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from tldw_Server_API.app.core.Local_LLM.llamacpp_config_lock import LockAcquisitionError, llamacpp_config_write_lock
 from tldw_Server_API.app.core.Setup import setup_manager
 from tldw_Server_API.app.core.config import load_comprehensive_config, refresh_config_cache
 
@@ -26,7 +27,6 @@ LLAMACPP_ENV_OVERRIDES = {
     "port_autoselect": "LLAMACPP_PORT_AUTOSELECT",
     "port_probe_max": "LLAMACPP_PORT_PROBE_MAX",
     "allowed_paths": "LLAMACPP_ALLOWED_PATHS",
-    "registered_model_paths": "LLAMACPP_REGISTERED_MODEL_PATHS",
     "log_output_file": "LLAMACPP_LOG_OUTPUT_FILE",
 }
 
@@ -124,10 +124,13 @@ def update_config_state(payload: Any, llm_manager: Any) -> dict[str, Any]:
         )
 
     try:
-        setup_manager.update_config({"LlamaCpp": updates})
-        refresh_config_cache()
+        with llamacpp_config_write_lock():
+            setup_manager.update_config({"LlamaCpp": updates})
+            refresh_config_cache()
     except HTTPException:
         raise
+    except LockAcquisitionError as exc:
+        raise HTTPException(status_code=500, detail="Failed to update llama.cpp configuration.") from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Failed to update llama.cpp configuration.") from exc
     return get_config_state(llm_manager)

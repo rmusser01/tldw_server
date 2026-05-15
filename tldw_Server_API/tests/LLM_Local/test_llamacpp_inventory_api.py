@@ -12,6 +12,7 @@ from starlette.requests import Request
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import llamacpp as lp
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
 
 
 def _admin_principal() -> AuthPrincipal:
@@ -54,11 +55,32 @@ class _Handler:
         return {"status": "started", "model": model_label, "path": str(model_path)}
 
 
+class _FailingStartHandler:
+    started = None
+
+    async def start_server_by_path(
+        self,
+        model_path: Path,
+        *,
+        model_label: str | None = None,
+        server_args: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        _ = (model_path, model_label, server_args)
+        raise ServerError("llama-server stderr: failed loading /private/sensitive/model.gguf")
+
+
 class _Manager:
     logger = _Logger()
 
     def __init__(self) -> None:
         self.llamacpp = _Handler()
+
+
+class _ManagerWithFailingStart:
+    logger = _Logger()
+
+    def __init__(self) -> None:
+        self.llamacpp = _FailingStartHandler()
 
 
 def _make_app_with_manager(manager: _Manager) -> FastAPI:
@@ -267,9 +289,6 @@ def test_register_path_preserves_existing_paths_under_lock(monkeypatch, tmp_path
     updates: list[dict[str, dict[str, str]]] = []
 
     class FakeLock:
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            events.append("lock_init")
-
         def __enter__(self) -> "FakeLock":
             events.append("lock_enter")
             return self
@@ -285,7 +304,7 @@ def test_register_path_preserves_existing_paths_under_lock(monkeypatch, tmp_path
         events.append("write_config")
         updates.append(payload)
 
-    monkeypatch.setattr(llamacpp_inventory_service, "FileLock", FakeLock, raising=False)
+    monkeypatch.setattr(llamacpp_inventory_service, "llamacpp_config_write_lock", lambda: FakeLock(), raising=False)
     monkeypatch.setattr(llamacpp_inventory_service, "load_comprehensive_config", fake_load_config)
     monkeypatch.setattr(llamacpp_inventory_service.setup_manager, "update_config", fake_update_config)
     monkeypatch.setattr(llamacpp_inventory_service, "refresh_config_cache", lambda: events.append("refresh"))
@@ -470,3 +489,31 @@ def test_start_by_model_rejects_outside_registered_path_before_fake_handler(monk
     assert "outside allowed" in start_response.json()["detail"].lower()
     assert str(outside_model) not in start_response.text
     assert manager.llamacpp.started is None
+
+
+@pytest.mark.unit
+def test_start_by_model_sanitizes_handler_startup_server_error(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    model = models_dir / "launch.gguf"
+    model.write_text("fake model")
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(models_dir),
+    )
+    model_id = llamacpp_inventory_service.model_id_for_path(model)
+    app = _make_app_with_manager(_ManagerWithFailingStart())
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/llamacpp/start-by-model",
+            json={"model_id": model_id, "server_args": {"port": 8123}},
+        )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "Failed to start llama.cpp server for the selected model."
+    assert "private" not in response.text
+    assert "stderr" not in response.text
