@@ -95,7 +95,14 @@ export const PAGES: PageEntry[] = [
   // ═══════════════════════════════════════════════════════════════════════════
   { path: "/flashcards", name: "Flashcards", category: "workspace" },
   { path: "/quiz", name: "Quiz", category: "workspace" },
-  { path: "/moderation-playground", name: "Moderation Playground", category: "workspace" },
+  { path: "/moderation", name: "Moderation Review", category: "workspace", expectedTestId: "moderation-review-shell" },
+  { path: "/moderation/rules", name: "Content Rules", category: "workspace" },
+  {
+    path: "/moderation-playground",
+    name: "Moderation Playground Legacy Redirect",
+    category: "workspace",
+    skip: "Legacy alias covered by the route alias contract."
+  },
   { path: "/kanban", name: "Kanban", category: "workspace" },
   { path: "/data-tables", name: "Data Tables", category: "workspace" },
   { path: "/content-review", name: "Content Review", category: "workspace" },
@@ -120,7 +127,7 @@ export const PAGES: PageEntry[] = [
   // ═══════════════════════════════════════════════════════════════════════════
   // Knowledge
   // ═══════════════════════════════════════════════════════════════════════════
-  { path: "/knowledge", name: "Knowledge", category: "knowledge" },
+  { path: "/knowledge", name: "Knowledge QA", category: "knowledge" },
   { path: "/world-books", name: "World Books", category: "knowledge" },
   { path: "/dictionaries", name: "Dictionaries", category: "knowledge" },
   { path: "/characters", name: "Characters", category: "knowledge" },
@@ -178,7 +185,7 @@ export const PAGES: PageEntry[] = [
   { path: "/presentation-studio", name: "Presentation Studio", category: "workspace" },
   { path: "/repo2txt", name: "Repo2Txt", category: "workspace" },
   { path: "/workflow-editor", name: "Workflow Editor", category: "workspace" },
-  { path: "/workspace-playground", name: "Workspace Playground", category: "workspace" },
+  { path: "/research-studio", name: "Research Studio", category: "workspace" },
   {
     path: "/writing-playground",
     name: "Writing Playground",

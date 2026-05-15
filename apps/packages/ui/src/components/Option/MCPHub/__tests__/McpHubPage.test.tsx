@@ -28,6 +28,9 @@ vi.mock("../ToolCatalogsTab", () => ({
 vi.mock("../ExternalServersTab", () => ({
   ExternalServersTab: () => <div>credentials tab</div>
 }))
+vi.mock("../DeploymentDiagnosticsPanel", () => ({
+  DeploymentDiagnosticsPanel: () => <div>deployment diagnostics</div>
+}))
 vi.mock("../GovernanceAuditTab", () => ({
   GovernanceAuditTab: ({ onOpen }: { onOpen?: (target: { tab: string; object_kind: string; object_id: string }) => void }) => (
     <button
@@ -88,6 +91,12 @@ describe("McpHubPage", () => {
       "aria-pressed",
       "true"
     )
+  })
+
+  it("shows deployment diagnostics in the Setup workflow", () => {
+    renderMcpHubPage()
+
+    expect(screen.getByText("deployment diagnostics")).toBeTruthy()
   })
 
   it("derives the active workflow and view from query state", () => {

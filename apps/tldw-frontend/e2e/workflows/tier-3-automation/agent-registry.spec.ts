@@ -60,13 +60,12 @@ test.describe("Agent Registry", () => {
       await registry.assertPageReady()
 
       // Either health data is loaded or the warning is shown
-      const healthLoaded = await registry.isHealthDataLoaded()
-      const healthUnavailable = await registry.isHealthUnavailable()
+      const healthState = await registry.getHealthState()
 
-      expect(healthLoaded || healthUnavailable).toBe(true)
+      expect(healthState.loaded || healthState.unavailable).toBe(true)
 
       // If health data is loaded, all three indicators should be visible
-      if (healthLoaded) {
+      if (healthState.loaded) {
         await expect(registry.runnerBinaryLabel).toBeVisible()
         await expect(registry.agentStatusLabel).toBeVisible()
         await expect(registry.apiKeysLabel).toBeVisible()

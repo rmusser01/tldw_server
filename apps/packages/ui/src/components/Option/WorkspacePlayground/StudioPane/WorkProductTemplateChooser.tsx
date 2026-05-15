@@ -14,7 +14,7 @@ type WorkProductTemplateChooserProps = {
   disabled?: boolean
 }
 
-const isActionableTemplate = (template: WorkProductTemplate) =>
+export const isActionableWorkProductTemplate = (template: WorkProductTemplate) =>
   template.id === "executive_brief"
 
 export const WorkProductTemplateChooser: React.FC<
@@ -25,6 +25,10 @@ export const WorkProductTemplateChooser: React.FC<
   onSelectTemplate,
   disabled = false
 }) => {
+  const visibleTemplates = WORK_PRODUCT_TEMPLATES.filter(
+    isActionableWorkProductTemplate
+  )
+
   return (
     <section aria-label="Work product templates" className="space-y-2">
       <div className="flex items-center justify-between gap-2">
@@ -36,11 +40,10 @@ export const WorkProductTemplateChooser: React.FC<
         </span>
       </div>
       <div className="grid gap-2">
-        {WORK_PRODUCT_TEMPLATES.map((template) => {
+        {visibleTemplates.map((template) => {
           const sourceRequirementMet =
             selectedSourceCount >= template.minSelectedSources
-          const actionable = isActionableTemplate(template)
-          const unavailable = disabled || !actionable || !sourceRequirementMet
+          const unavailable = disabled || !sourceRequirementMet
           const selected = selectedTemplateId === template.id
           let unavailableReason = template.description
           if (disabled) {
@@ -49,8 +52,6 @@ export const WorkProductTemplateChooser: React.FC<
             unavailableReason = `Requires ${template.minSelectedSources} selected source${
               template.minSelectedSources === 1 ? "" : "s"
             }.`
-          } else if (!actionable) {
-            unavailableReason = "Planned"
           }
 
           return (
@@ -85,11 +86,6 @@ export const WorkProductTemplateChooser: React.FC<
                       <span className="text-xs font-medium text-text">
                         {template.label}
                       </span>
-                      {!actionable && (
-                        <span className="rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] font-medium text-text-muted">
-                          Planned
-                        </span>
-                      )}
                     </span>
                     <span className="mt-1 block text-[11px] leading-snug text-text-muted">
                       {template.description}

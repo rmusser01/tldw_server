@@ -14,15 +14,25 @@ vi.mock('@web/lib/api', () => ({
 }));
 
 import {
+  activateVNPlayGenerationRevision,
+  cancelVNPlayGenerationRequest,
+  confirmVNPlayGenerationRequest,
   createVNPlayCheckpoint,
   createVNPlaySession,
   deleteVNPlaySession,
+  getVNPlayBranchNavigation,
+  getVNPlayGenerationRevision,
+  getVNPlayGenerationRevisionDebug,
   getVNPlaySession,
+  listVNPlayGenerationRevisions,
+  listVNPlayGenerations,
   listVNPlayBranches,
   listVNPlayCheckpoints,
   listVNPlayEvents,
   listVNPlaySessions,
   listVNPlaySetupOptions,
+  regenerateVNPlayGeneration,
+  restoreVNPlayBranch,
   restoreVNPlaySession,
   retryLastVNPlayTurn,
   submitVNPlayTurn,
@@ -54,11 +64,35 @@ describe('vnPlay api client', () => {
     });
 
     expect(session.id).toBe(1);
-    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn-play/sessions', {
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-play/sessions', {
       mode: 'freeform',
       title: 'Library',
       primary_character_id: 1,
       vn_asset_pack_id: 2,
+    });
+  });
+
+  it('creates a scripted-story VN play session with script identifiers and policy acknowledgements', async () => {
+    await createVNPlaySession({
+      mode: 'scripted_story',
+      title: 'Published route',
+      primary_character_id: 7,
+      vn_asset_pack_id: 12,
+      content_rating: 'teen',
+      script_id: 44,
+      script_version_id: 5,
+      acknowledgements: ['script_policy_review'],
+    });
+
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-play/sessions', {
+      mode: 'scripted_story',
+      title: 'Published route',
+      primary_character_id: 7,
+      vn_asset_pack_id: 12,
+      content_rating: 'teen',
+      script_id: 44,
+      script_version_id: 5,
+      acknowledgements: ['script_policy_review'],
     });
   });
 
@@ -74,7 +108,7 @@ describe('vnPlay api client', () => {
       idempotency_key: 'turn-1',
     });
 
-    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn-play/sessions/1/turn', {
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-play/sessions/1/turn', {
       input_text: 'Hello',
       client_scene_version: 0,
       idempotency_key: 'turn-1',
@@ -90,27 +124,48 @@ describe('vnPlay api client', () => {
     await listVNPlayEvents(1);
     await createVNPlayCheckpoint(1, { label: 'Before choice' });
     await listVNPlayCheckpoints(1);
-    await restoreVNPlaySession(1, { checkpoint_id: 5, idempotency_key: 'restore-1' });
+    await restoreVNPlaySession(1, {
+      checkpoint_id: 5,
+      client_scene_version: 2,
+      idempotency_key: 'restore-1',
+    });
     await listVNPlayBranches(1);
 
-    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-play/sessions');
-    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-play/sessions/1');
-    expect(mocks.apiClient.patch).toHaveBeenCalledWith('/vn-play/sessions/1', { title: 'Updated' });
-    expect(mocks.apiClient.delete).toHaveBeenCalledWith('/vn-play/sessions/1');
-    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn-play/sessions/1/retry-last-turn', {
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-play/sessions');
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-play/sessions/1');
+    expect(mocks.apiClient.patch).toHaveBeenCalledWith('/vn/vn-play/sessions/1', { title: 'Updated' });
+    expect(mocks.apiClient.delete).toHaveBeenCalledWith('/vn/vn-play/sessions/1');
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-play/sessions/1/retry-last-turn', {
       client_scene_version: 2,
       idempotency_key: 'retry-1',
     });
-    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-play/sessions/1/events');
-    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn-play/sessions/1/checkpoint', {
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-play/sessions/1/events');
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-play/sessions/1/checkpoint', {
       label: 'Before choice',
     });
-    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-play/sessions/1/checkpoints');
-    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn-play/sessions/1/restore', {
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-play/sessions/1/checkpoints');
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-play/sessions/1/restore', {
       checkpoint_id: 5,
+      client_scene_version: 2,
       idempotency_key: 'restore-1',
     });
-    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-play/sessions/1/branches');
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-play/sessions/1/branches');
+  });
+
+  it('calls branch navigation and guarded branch restore endpoints', async () => {
+    await getVNPlayBranchNavigation(1);
+    await restoreVNPlayBranch(1, 12, {
+      client_scene_version: 6,
+      idempotency_key: 'restore-branch-12',
+      target: 'choice_point',
+    });
+
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-play/sessions/1/branch-navigation');
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-play/sessions/1/branches/12/restore', {
+      client_scene_version: 6,
+      idempotency_key: 'restore-branch-12',
+      target: 'choice_point',
+    });
   });
 
   it('loads VN play setup options with server-side selector parameters', async () => {
@@ -127,21 +182,83 @@ describe('vnPlay api client', () => {
     });
 
     await listVNPlaySetupOptions({
-      mode: 'story',
+      mode: 'scripted_story',
       selected_character_id: 7,
       content_rating: 'mature',
       character_query: 'mira',
       pack_query: 'archive',
     });
 
-    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-play/setup-options', {
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-play/setup-options', {
       params: {
-        mode: 'story',
+        mode: 'scripted_story',
         selected_character_id: 7,
         content_rating: 'mature',
         character_query: 'mira',
         pack_query: 'archive',
       },
     });
+  });
+
+  it('calls scripted generation history and command endpoints', async () => {
+    await listVNPlayGenerations(1, { limit: 10, offset: 20, status: 'succeeded', active: true });
+    await listVNPlayGenerationRevisions(1, 12, { limit: 5, offset: 0 });
+    await getVNPlayGenerationRevision(1, 12, 31);
+    await getVNPlayGenerationRevisionDebug(1, 12, 31);
+    await getVNPlayGenerationRevisionDebug(1, 12, 31, {
+      include_blocked_raw: true,
+      confirm: 'REVEAL_MODERATION_BLOCKED',
+    });
+    await confirmVNPlayGenerationRequest(1, 91, {
+      client_scene_version: 4,
+      idempotency_key: 'confirm-1',
+    });
+    await cancelVNPlayGenerationRequest(1, 91, {
+      client_scene_version: 4,
+      idempotency_key: 'cancel-1',
+    });
+    await regenerateVNPlayGeneration(1, 12, {
+      client_scene_version: 7,
+      idempotency_key: 'regen-1',
+    });
+    await activateVNPlayGenerationRevision(1, 12, 31, {
+      client_scene_version: 9,
+      idempotency_key: 'activate-1',
+    });
+
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-play/sessions/1/script/generations', {
+      params: { limit: 10, offset: 20, status: 'succeeded', active: true },
+    });
+    expect(mocks.apiClient.get).toHaveBeenCalledWith(
+      '/vn/vn-play/sessions/1/script/generations/12/revisions',
+      { params: { limit: 5, offset: 0 } }
+    );
+    expect(mocks.apiClient.get).toHaveBeenCalledWith(
+      '/vn/vn-play/sessions/1/script/generations/12/revisions/31'
+    );
+    expect(mocks.apiClient.get).toHaveBeenCalledWith(
+      '/vn/vn-play/sessions/1/script/generations/12/revisions/31/debug',
+      { params: {} }
+    );
+    expect(mocks.apiClient.get).toHaveBeenCalledWith(
+      '/vn/vn-play/sessions/1/script/generations/12/revisions/31/debug',
+      { params: { include_blocked_raw: true, confirm: 'REVEAL_MODERATION_BLOCKED' } }
+    );
+    expect(mocks.apiClient.post).toHaveBeenCalledWith(
+      '/vn/vn-play/sessions/1/script/generation-requests/91/confirm',
+      { client_scene_version: 4, idempotency_key: 'confirm-1' }
+    );
+    expect(mocks.apiClient.post).toHaveBeenCalledWith(
+      '/vn/vn-play/sessions/1/script/generation-requests/91/cancel',
+      { client_scene_version: 4, idempotency_key: 'cancel-1' }
+    );
+    expect(mocks.apiClient.post).toHaveBeenCalledWith(
+      '/vn/vn-play/sessions/1/script/generations/12/regenerate',
+      { client_scene_version: 7, idempotency_key: 'regen-1' }
+    );
+    expect(mocks.apiClient.post).toHaveBeenCalledWith(
+      '/vn/vn-play/sessions/1/script/generations/12/revisions/31/activate',
+      { client_scene_version: 9, idempotency_key: 'activate-1' }
+    );
   });
 });

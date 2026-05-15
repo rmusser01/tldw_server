@@ -493,9 +493,10 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
       "/admin",
       "/admin/server",
       "/notes",
-      "/moderation-playground",
+      "/moderation",
+      "/moderation/rules",
       "/chunking-playground",
-      "/workspace-playground",
+      "/research-studio",
       "/stt",
       "/speech",
       "/tts",
@@ -651,7 +652,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
       "Dense smoke sweeps can rate-limit model metadata probes; treated as environment noise for these routes.",
     owner: "Platform",
     expiresOn: "2026-03-31",
-    routes: ["/content-review", "/claims-review", "/workspace-playground"]
+    routes: ["/content-review", "/claims-review", "/research-studio"]
   },
   {
     id: "m5-model-metadata-abort-noise",
@@ -659,10 +660,10 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     pattern:
       /Failed to fetch models from tldw:\s+AbortError:\s+signal is aborted without reason/i,
     rationale:
-      "Workspace Playground can abort in-flight model metadata fetches during route hydration without user-impacting breakage.",
+      "Research Studio can abort in-flight model metadata fetches during route hydration without user-impacting breakage.",
     owner: "WebUI",
     expiresOn: "2026-03-31",
-    routes: ["/workspace-playground"]
+    routes: ["/research-studio"]
   },
   {
     id: "m5-chatbooks-evaluations-cors-noise",
@@ -720,7 +721,8 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
       "/data-tables",
       "/kanban",
       "/chunking-playground",
-      "/moderation-playground",
+      "/moderation",
+      "/moderation/rules",
       "/collections",
       "/world-books",
       "/dictionaries",
@@ -745,7 +747,8 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
       "/data-tables",
       "/kanban",
       "/chunking-playground",
-      "/moderation-playground",
+      "/moderation",
+      "/moderation/rules",
       "/collections",
       "/world-books",
       "/dictionaries",

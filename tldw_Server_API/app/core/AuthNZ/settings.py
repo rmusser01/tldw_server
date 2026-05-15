@@ -323,6 +323,10 @@ class Settings(BaseSettings):
             "media.delete",
             "claims.review",
             "claims.admin",
+            "moderation.review.read",
+            "moderation.review.decide",
+            "moderation.review.bulk_decide",
+            "moderation.audit.read",
         ],
         description="Default permissions granted to the single-user principal in single_user mode",
     )

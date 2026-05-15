@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 from math import ceil
 from typing import Any, Optional
 
@@ -105,6 +106,125 @@ def _parse_csv_values(raw_value: str | None) -> list[str]:
     if not raw_value:
         return []
     return [value.strip() for value in str(raw_value).split(",") if value.strip()]
+
+
+def _as_optional_str(raw_value: Any) -> str | None:
+    """Return a stripped string value for whitelisted source-picker fields."""
+    if raw_value is None:
+        return None
+    value = str(raw_value).strip()
+    return value or None
+
+
+def _as_optional_bool(raw_value: Any) -> bool | None:
+    """Coerce common stored boolean encodings without exposing unknown values."""
+    if isinstance(raw_value, bool):
+        return raw_value
+    if isinstance(raw_value, int):
+        return bool(raw_value)
+    if isinstance(raw_value, str):
+        value = raw_value.strip().lower()
+        if value in {"1", "true", "yes", "y"}:
+            return True
+        if value in {"0", "false", "no", "n"}:
+            return False
+    return None
+
+
+def _as_metadata_mapping(raw_value: Any) -> dict[str, Any]:
+    """Parse safe_metadata into a mapping for field-by-field allowlisting."""
+    if isinstance(raw_value, Mapping):
+        return dict(raw_value)
+    if not isinstance(raw_value, str) or not raw_value.strip():
+        return {}
+    try:
+        parsed = json.loads(raw_value)
+    except (TypeError, ValueError):
+        return {}
+    return dict(parsed) if isinstance(parsed, Mapping) else {}
+
+
+def _first_present(record: Mapping[str, Any], metadata: Mapping[str, Any], *keys: str) -> Any:
+    """Find the first non-empty value across row fields and safe metadata."""
+    for key in keys:
+        value = record.get(key)
+        if value not in (None, ""):
+            return value
+        value = metadata.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _workspace_metadata(
+    record: Mapping[str, Any],
+    metadata: Mapping[str, Any],
+) -> tuple[str | None, str | None]:
+    """Extract workspace identity from accepted flat or nested metadata shapes."""
+    workspace_record = record.get("workspace")
+    workspace_metadata = metadata.get("workspace")
+    workspace = workspace_record if isinstance(workspace_record, Mapping) else workspace_metadata
+    workspace = workspace if isinstance(workspace, Mapping) else {}
+
+    workspace_id = _as_optional_str(
+        _first_present(record, metadata, "workspace_id", "workspaceId") or workspace.get("id")
+    )
+    workspace_name = _as_optional_str(
+        _first_present(record, metadata, "workspace_name", "workspaceName") or workspace.get("name")
+    )
+    return workspace_id, workspace_name
+
+
+def _source_picker_metadata(record: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Return only source-picker-safe metadata fields for list/search payloads."""
+    if record is None:
+        return {}
+
+    safe_metadata = _as_metadata_mapping(record.get("safe_metadata"))
+    workspace_id, workspace_name = _workspace_metadata(record, safe_metadata)
+    source_metadata: dict[str, Any] = {}
+
+    status_value = _as_optional_str(
+        _first_present(record, safe_metadata, "status", "processing_status", "chunking_status")
+    )
+    if status_value:
+        source_metadata["status"] = status_value
+
+    created_at = _as_optional_str(
+        _first_present(record, safe_metadata, "created_at", "ingestion_date", "imported_at")
+    )
+    if created_at:
+        source_metadata["created_at"] = created_at
+
+    updated_at = _as_optional_str(_first_present(record, safe_metadata, "updated_at", "last_modified"))
+    if updated_at:
+        source_metadata["updated_at"] = updated_at
+
+    if workspace_id:
+        source_metadata["workspace_id"] = workspace_id
+    if workspace_name:
+        source_metadata["workspace_name"] = workspace_name
+
+    bool_fields = {
+        "workspace_artifact": ("workspace_artifact", "is_workspace_artifact"),
+        "is_generated": ("is_generated", "generated"),
+        "test_artifact": ("test_artifact", "is_test"),
+    }
+    for output_key, input_keys in bool_fields.items():
+        value = _as_optional_bool(_first_present(record, safe_metadata, *input_keys))
+        if value is not None:
+            source_metadata[output_key] = value
+
+    for output_key in ("artifact_kind", "source_kind"):
+        value = _as_optional_str(_first_present(record, safe_metadata, output_key))
+        if value:
+            source_metadata[output_key] = value
+
+    kind_value = _as_optional_str(_first_present(record, safe_metadata, "kind"))
+    if kind_value and "artifact_kind" not in source_metadata:
+        source_metadata["artifact_kind"] = kind_value
+
+    return source_metadata
 
 
 @router.get(
@@ -240,9 +360,10 @@ async def list_media_endpoint(
         media_ids: list[int] = []
         skipped_count = 0
         for r in rows or []:
-            rid_raw = r["id"] if isinstance(r, dict) else r[0]
-            title = r["title"] if isinstance(r, dict) else r[1]
-            rtype = r["type"] if isinstance(r, dict) else r[2]
+            row_record = r if isinstance(r, Mapping) else None
+            rid_raw = r["id"] if isinstance(r, Mapping) else r[0]
+            title = r["title"] if isinstance(r, Mapping) else r[1]
+            rtype = r["type"] if isinstance(r, Mapping) else r[2]
             try:
                 rid = int(rid_raw)
             except (TypeError, ValueError):
@@ -256,6 +377,7 @@ async def list_media_endpoint(
                     "id": rid,
                     "title": str(title),
                     "type": str(rtype),
+                    **_source_picker_metadata(row_record),
                 }
             )
 
@@ -308,9 +430,7 @@ async def list_media_endpoint(
         for item in base_items:
             mid = item["id"]
             base_payload: dict[str, Any] = {
-                "id": mid,
-                "title": item["title"],
-                "type": item["type"],
+                **item,
                 "url": f"/api/v1/media/{mid}",
             }
             if include_keywords:
@@ -1028,6 +1148,7 @@ async def search_media_items(
                 title=item["title"],
                 type=item["type"],
                 url=f"/api/v1/media/{item['id']}",
+                **_source_picker_metadata(item),
             )
             for item in items_data
         ]
@@ -1051,7 +1172,7 @@ async def search_media_items(
                 pagination=pagination_info,
             )
 
-            payload_dict = response_obj.model_dump()
+            payload_dict = response_obj.model_dump(exclude_none=True)
             payload_dict["results"] = payload_dict.get("items", [])
 
             etag = generate_etag(payload_dict)

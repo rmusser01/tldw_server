@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   hasCompletedFirstRun: true,
   navigate: vi.fn(),
   checkOnce: vi.fn(),
+  queryData: [] as Array<Record<string, unknown>>,
   promptSearch: {
     query: "",
     setQuery: vi.fn(),
@@ -42,6 +43,14 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
+vi.mock("@/design-system", () => ({
+  getDesignSystemState: (key: string) => ({
+    key,
+    label: key === "ready" ? "Registry Ready" : key,
+    severity: "neutral"
+  })
+}))
+
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>(
     "react-router-dom"
@@ -54,7 +63,7 @@ vi.mock("react-router-dom", async () => {
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({
-    data: [],
+    data: mocks.queryData,
     isFetching: false,
     refetch: vi.fn()
   })
@@ -72,21 +81,50 @@ vi.mock("antd", () => {
       {children}
     </button>
   )
+  const InputBase = ({
+    allowClear: _allowClear,
+    onPressEnter: _onPressEnter,
+    ...props
+  }: React.InputHTMLAttributes<HTMLInputElement> & {
+    allowClear?: boolean
+    onPressEnter?: () => void
+  }) => <input {...props} />
 
   return {
     Button,
     Checkbox: () => <input type="checkbox" />,
     Divider: () => <hr />,
     Empty: ({ description }: { description?: React.ReactNode }) => <div>{description}</div>,
-    Input: Object.assign(
-      (props: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
+    Input: Object.assign(InputBase, {
+      TextArea: (
+        props: React.TextareaHTMLAttributes<HTMLTextAreaElement>
+      ) => <textarea {...props} />
+    }),
+    List: Object.assign(
+      ({
+        children,
+        dataSource = [],
+        renderItem
+      }: {
+        children?: React.ReactNode
+        dataSource?: unknown[]
+        renderItem?: (item: unknown, index: number) => React.ReactNode
+      }) => (
+        <div>
+          {children}
+          {dataSource.map((item, index) => (
+            <React.Fragment key={index}>
+              {renderItem?.(item, index)}
+            </React.Fragment>
+          ))}
+        </div>
+      ),
       {
-        TextArea: (
-          props: React.TextareaHTMLAttributes<HTMLTextAreaElement>
-        ) => <textarea {...props} />
+        Item: ({ children }: { children?: React.ReactNode }) => (
+          <div>{children}</div>
+        )
       }
     ),
-    List: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
     Space: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
     Spin: () => <div>loading</div>,
     Tag: ({ children }: { children?: React.ReactNode }) => <span>{children}</span>,
@@ -99,6 +137,9 @@ vi.mock("antd", () => {
     Select: ({ children }: { children?: React.ReactNode }) => <select>{children}</select>,
     Pagination: () => <div />,
     Radio: {
+      Button: ({ children }: { children?: React.ReactNode }) => (
+        <button type="button">{children}</button>
+      ),
       Group: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>
     },
     Modal: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
@@ -190,7 +231,12 @@ vi.mock("@/components/Review/usePromptSearch", () => ({
 
 vi.mock("@/utils/demo-content", () => ({
   getDemoMediaItems: () => [
-    { title: "Demo review item", meta: "Demo metadata", status: "Ready" }
+    {
+      title: "Demo review item",
+      meta: "Demo metadata",
+      statusKey: "ready",
+      statusLabel: "Ready"
+    }
   ]
 }))
 
@@ -293,6 +339,7 @@ describe("ReviewPage connection states", () => {
     mocks.hasCompletedFirstRun = true
     mocks.navigate.mockReset()
     mocks.checkOnce.mockReset()
+    mocks.queryData = []
     mocks.promptSearch.setQuery.mockReset()
     mocks.promptSearch.setIncludeLocal.mockReset()
     mocks.promptSearch.setIncludeServer.mockReset()
@@ -339,5 +386,21 @@ describe("ReviewPage connection states", () => {
     expect(
       screen.queryByText("Add your credentials to use Review")
     ).not.toBeInTheDocument()
+  })
+
+  it("uses the design-system registry fallback for ready status labels", () => {
+    mocks.queryData = [
+      {
+        kind: "media",
+        id: "ready-media",
+        title: "Ready media",
+        meta: { status: "ready" },
+        raw: {}
+      }
+    ]
+
+    renderPage()
+
+    expect(screen.getByText("Registry Ready")).toBeInTheDocument()
   })
 })

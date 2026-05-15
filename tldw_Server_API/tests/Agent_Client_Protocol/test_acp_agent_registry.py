@@ -28,6 +28,10 @@ agents:
     env: {}
     requires_api_key: null
     default: false
+    support_state: supported_with_caveats
+    verification_level: stub_smoke_tested
+    compatibility_notes: Stub protocol coverage only
+    compatibility_docs_url: /docs-static/Development/ACP_Compatibility_Matrix.md
 """
 
 
@@ -98,6 +102,27 @@ agents:
     assert entry.mcp_llm_model == "gpt-4o"
     assert entry.mcp_max_iterations == 7
     assert entry.mcp_refresh_tools is True
+
+
+def test_registry_loads_compatibility_fields_from_yaml(registry_file):
+    """YAML-defined compatibility fields should populate registry entries and availability."""
+    from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistry
+
+    reg = AgentRegistry(yaml_path=registry_file)
+    reg.load()
+
+    entry = reg.get_entry("test_agent")
+    assert entry is not None
+    assert entry.support_state == "supported_with_caveats"
+    assert entry.verification_level == "stub_smoke_tested"
+    assert entry.compatibility_notes == "Stub protocol coverage only"
+    assert entry.compatibility_docs_url == "/docs-static/Development/ACP_Compatibility_Matrix.md"
+
+    availability = entry.check_availability()
+    assert availability["support_state"] == "supported_with_caveats"
+    assert availability["verification_level"] == "stub_smoke_tested"
+    assert availability["compatibility_notes"] == "Stub protocol coverage only"
+    assert availability["compatibility_docs_url"] == "/docs-static/Development/ACP_Compatibility_Matrix.md"
 
 
 def test_registry_get_entry_none(registry_file):

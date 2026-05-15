@@ -3,15 +3,16 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
 
+from tldw_Server_API.app.core.Agent_Orchestration.models import TaskStatus
 from tldw_Server_API.app.core.Agent_Orchestration.orchestration_service import (
     OrchestrationService,
 )
-from tldw_Server_API.app.core.Agent_Orchestration.models import TaskStatus
 from tldw_Server_API.app.core.DB_Management.Orchestration_DB import OrchestrationDB
 
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
@@ -98,9 +99,9 @@ async def test_multiple_runs_per_task(svc):
     project = await svc.create_project(name="P1", user_id=1)
     task = await svc.create_task(project.id, title="T1", user_id=1)
 
-    r1 = await svc.create_run(task.id, session_id="s1")
-    r2 = await svc.create_run(task.id, session_id="s2")
-    r3 = await svc.create_run(task.id, session_id="s3")
+    await svc.create_run(task.id, session_id="s1")
+    await svc.create_run(task.id, session_id="s2")
+    await svc.create_run(task.id, session_id="s3")
 
     runs = await svc.list_runs(task.id)
     assert len(runs) == 3
@@ -272,6 +273,14 @@ class _TestUser:
     id_int = 1
 
 
+class _CanonicalWorkspaceDB:
+    def __init__(self, workspaces: dict[str, dict[str, Any]] | None = None) -> None:
+        self.workspaces = dict(workspaces or {})
+
+    def get_workspace(self, workspace_id: str) -> dict[str, Any] | None:
+        return self.workspaces.get(workspace_id)
+
+
 class _NoopSessionStore:
     async def check_session_quota(self, _user_id):
         return None
@@ -310,6 +319,39 @@ class _SuccessfulClient:
                 '<acp-task-completion>{"status":"completed",'
                 '"summary":"Implemented dispatch work"}</acp-task-completion>'
             ),
+            "usage": {},
+        }
+
+
+class _ArtifactPromotionClient:
+    async def create_session(self, *_args, **_kwargs):
+        return "session-promotion-1"
+
+    async def prompt(self, *_args, **_kwargs):
+        return {
+            "stopReason": "end",
+            "taskCompletion": {
+                "status": "completed",
+                "summary": "Brief ready",
+                "artifacts": [
+                    {
+                        "id": "brief-1",
+                        "artifact_type": "workspace_brief",
+                        "title": "ACP Research Brief",
+                        "content": "# Brief\nGrounded answer.",
+                        "summary": "Grounded answer.",
+                        "source_lineage": {
+                            "sources": [
+                                {
+                                    "source_id": "src-1",
+                                    "source_type": "media",
+                                    "label": "Transcript",
+                                }
+                            ]
+                        },
+                    }
+                ],
+            },
             "usage": {},
         }
 
@@ -386,11 +428,11 @@ class _ReviewerDecisionClient:
 
 
 class _WorkspaceSessionCaptureClient:
-    def __init__(self):
+    def __init__(self) -> None:
         self.create_session_calls = []
 
-    async def create_session(self, *_args, **kwargs):
-        self.create_session_calls.append(kwargs)
+    async def create_session(self, *_args: Any, **kwargs: Any) -> str:
+        self.create_session_calls.append({"args": _args, "kwargs": kwargs})
         return "session-workspace-env"
 
     async def prompt(self, *_args, **_kwargs):
@@ -402,6 +444,309 @@ class _WorkspaceSessionCaptureClient:
             },
             "usage": {},
         }
+
+
+async def test_canonical_workspace_bridge_creates_linked_execution_workspace(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    canonical_db = _CanonicalWorkspaceDB(
+        {"workspace-alpha": {"id": "workspace-alpha", "name": "Alpha Workspace"}}
+    )
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: (tmp_path.resolve(),))
+
+    try:
+        response = await orch_mod.ensure_canonical_workspace_bridge(
+            orch_mod.CanonicalWorkspaceBridgeRequest(
+                canonical_workspace_id="workspace-alpha",
+                root_path=str(workspace_root),
+                metadata={"existing": "kept"},
+            ),
+            user=_TestUser(),
+            canonical_db=canonical_db,
+        )
+
+        assert response.id > 0
+        assert response.root_path == str(workspace_root)
+        assert response.metadata["existing"] == "kept"
+        assert response.metadata["canonical_workspace_id"] == "workspace-alpha"
+        assert response.metadata["canonical_workspace_source"] == "workspace_playground"
+        assert response.metadata["link_status"] == "linked"
+        assert response.canonical_workspace.canonical_workspace_id == "workspace-alpha"
+        assert response.canonical_workspace.acp_workspace_id == response.id
+    finally:
+        db.close()
+
+
+async def test_canonical_workspace_bridge_reuses_existing_link(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    db.create_workspace(
+        name="Linked",
+        root_path=str(workspace_root),
+        metadata={
+            "canonical_workspace_id": "workspace-alpha",
+            "canonical_workspace_source": "workspace_playground",
+            "link_status": "linked",
+        },
+    )
+    canonical_db = _CanonicalWorkspaceDB(
+        {"workspace-alpha": {"id": "workspace-alpha", "name": "Alpha Workspace"}}
+    )
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: (tmp_path.resolve(),))
+
+    try:
+        response = await orch_mod.ensure_canonical_workspace_bridge(
+            orch_mod.CanonicalWorkspaceBridgeRequest(
+                canonical_workspace_id="workspace-alpha",
+                root_path=str(workspace_root),
+            ),
+            user=_TestUser(),
+            canonical_db=canonical_db,
+        )
+
+        assert response.name == "Linked"
+        assert len(db.list_workspaces()) == 1
+    finally:
+        db.close()
+
+
+async def test_canonical_workspace_bridge_links_existing_unlinked_root(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    existing = db.create_workspace(
+        name="Existing Root",
+        root_path=str(workspace_root),
+        metadata={"owner": "research"},
+    )
+    canonical_db = _CanonicalWorkspaceDB(
+        {"workspace-alpha": {"id": "workspace-alpha", "name": "Alpha Workspace"}}
+    )
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: (tmp_path.resolve(),))
+
+    try:
+        response = await orch_mod.ensure_canonical_workspace_bridge(
+            orch_mod.CanonicalWorkspaceBridgeRequest(
+                canonical_workspace_id="workspace-alpha",
+                root_path=str(workspace_root),
+            ),
+            user=_TestUser(),
+            canonical_db=canonical_db,
+        )
+
+        assert response.id == existing.id
+        assert response.metadata["owner"] == "research"
+        assert response.metadata["canonical_workspace_id"] == "workspace-alpha"
+        assert len(db.list_workspaces()) == 1
+    finally:
+        db.close()
+
+
+async def test_canonical_workspace_bridge_rejects_missing_canonical_workspace(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: (tmp_path.resolve(),))
+
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await orch_mod.ensure_canonical_workspace_bridge(
+                orch_mod.CanonicalWorkspaceBridgeRequest(
+                    canonical_workspace_id="workspace-missing",
+                    root_path=str(workspace_root),
+                ),
+                user=_TestUser(),
+                canonical_db=_CanonicalWorkspaceDB(),
+            )
+
+        assert exc_info.value.status_code == 404
+        assert db.list_workspaces() == []
+    finally:
+        db.close()
+
+
+async def test_canonical_workspace_bridge_requires_allowed_root(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    canonical_db = _CanonicalWorkspaceDB(
+        {"workspace-alpha": {"id": "workspace-alpha", "name": "Alpha Workspace"}}
+    )
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: ())
+
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await orch_mod.ensure_canonical_workspace_bridge(
+                orch_mod.CanonicalWorkspaceBridgeRequest(
+                    canonical_workspace_id="workspace-alpha",
+                    root_path=str(workspace_root),
+                ),
+                user=_TestUser(),
+                canonical_db=canonical_db,
+            )
+
+        assert exc_info.value.status_code == 503
+        assert db.list_workspaces() == []
+    finally:
+        db.close()
+
+
+async def test_canonical_workspace_bridge_rejects_root_linked_to_other_workspace(
+    monkeypatch,
+    tmp_path,
+):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    db.create_workspace(
+        name="Linked Elsewhere",
+        root_path=str(workspace_root),
+        metadata={
+            "canonical_workspace_id": "workspace-other",
+            "canonical_workspace_source": "workspace_playground",
+            "link_status": "linked",
+        },
+    )
+    canonical_db = _CanonicalWorkspaceDB(
+        {"workspace-alpha": {"id": "workspace-alpha", "name": "Alpha Workspace"}}
+    )
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: (tmp_path.resolve(),))
+
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await orch_mod.ensure_canonical_workspace_bridge(
+                orch_mod.CanonicalWorkspaceBridgeRequest(
+                    canonical_workspace_id="workspace-alpha",
+                    root_path=str(workspace_root),
+                ),
+                user=_TestUser(),
+                canonical_db=canonical_db,
+            )
+
+        assert exc_info.value.status_code == 409
+        assert exc_info.value.detail["code"] == "canonical_workspace_bridge_conflict"
+    finally:
+        db.close()
+
+
+async def test_project_and_task_detail_include_canonical_workspace(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    workspace = db.create_workspace(
+        name="Linked",
+        root_path=str(tmp_path / "workspace"),
+        metadata={
+            "canonical_workspace_id": "workspace-alpha",
+            "canonical_workspace_source": "workspace_playground",
+            "link_status": "linked",
+        },
+    )
+    project = db.create_project(name="P1", workspace_id=workspace.id)
+    task = db.create_task(project.id, title="T1", description="Dispatch me", agent_type="codex")
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+
+    try:
+        project_detail = await orch_mod.get_project(project.id, user=_TestUser())
+        task_detail = await orch_mod.get_task(task.id, user=_TestUser())
+
+        assert project_detail.workspace.canonical_workspace.canonical_workspace_id == "workspace-alpha"
+        assert project_detail.canonical_workspace.canonical_workspace_id == "workspace-alpha"
+        assert project_detail.canonical_workspace.acp_workspace_id == workspace.id
+        assert task_detail.canonical_workspace.canonical_workspace_id == "workspace-alpha"
+        assert task_detail.canonical_workspace.acp_workspace_id == workspace.id
+    finally:
+        db.close()
+
+
+async def test_dispatch_run_inherits_trusted_root_from_canonical_bridge(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    workspace_root = tmp_path / "workspace"
+    (workspace_root / "src").mkdir(parents=True)
+    workspace = db.create_workspace(
+        name="Linked",
+        root_path=str(workspace_root),
+        metadata={
+            "canonical_workspace_id": "workspace-alpha",
+            "canonical_workspace_source": "workspace_playground",
+            "link_status": "linked",
+        },
+    )
+    project = db.create_project(name="P1", workspace_id=workspace.id)
+    task = db.create_task(project.id, title="T1", description="Dispatch me", agent_type="codex")
+    client = _WorkspaceSessionCaptureClient()
+
+    async def fake_store():
+        return _NoopSessionStore()
+
+    async def fake_client():
+        return client
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: (tmp_path.resolve(),))
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
+        fake_store,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client",
+        fake_client,
+    )
+
+    try:
+        result = await orch_mod.dispatch_run(
+            task.id,
+            orch_mod.RunDispatchRequest(cwd="src"),
+            user=_TestUser(),
+        )
+
+        assert result["status"] == TaskStatus.COMPLETE
+        assert client.create_session_calls[0]["args"][0] == str(workspace_root / "src")
+
+        escape_task = db.create_task(
+            project.id,
+            title="T2",
+            description="Reject escaped cwd",
+            agent_type="codex",
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            await orch_mod.dispatch_run(
+                escape_task.id,
+                orch_mod.RunDispatchRequest(cwd="../outside"),
+                user=_TestUser(),
+            )
+        assert exc_info.value.status_code == 403
+    finally:
+        db.close()
 
 
 def _clear_acp_audit_events() -> None:
@@ -774,6 +1119,141 @@ async def test_dispatch_run_valid_completion_without_reviewer_completes_task(mon
         db.close()
 
 
+async def test_dispatch_run_promotes_completion_artifact_to_canonical_workspace(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    note_db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
+    note_db.upsert_workspace("workspace-alpha", "Alpha Workspace")
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    workspace = db.create_workspace(
+        name="Linked",
+        root_path=str(workspace_root),
+        metadata={
+            "canonical_workspace_id": "workspace-alpha",
+            "canonical_workspace_source": "workspace_playground",
+            "link_status": "linked",
+        },
+    )
+    project = db.create_project(name="P1", workspace_id=workspace.id)
+    task = db.create_task(project.id, title="T1", description="Create a brief", agent_type="codex")
+    client = _ArtifactPromotionClient()
+
+    async def fake_store():
+        return _NoopSessionStore()
+
+    async def fake_client():
+        return client
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
+        fake_store,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client",
+        fake_client,
+    )
+    monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: (tmp_path.resolve(),))
+
+    try:
+        result = await orch_mod.dispatch_run(
+            task.id,
+            orch_mod.RunDispatchRequest(),
+            user=_TestUser(),
+            canonical_db=note_db,
+        )
+
+        assert result["status"] == TaskStatus.COMPLETE
+        assert result["artifact_promotion"] == {
+            "created_artifact_ids": ["brief-1"],
+            "updated_artifact_ids": [],
+            "skipped": [],
+            "errors": [],
+        }
+        [artifact] = note_db.list_workspace_artifacts("workspace-alpha")
+        assert artifact["id"] == "brief-1"
+        assert artifact["review_state"] == "accepted"
+        assert artifact["producer_metadata"]["producer_type"] == "acp"
+        assert artifact["producer_metadata"]["run_id"] == str(result["run_id"])
+        assert artifact["producer_metadata"]["session_id"] == "session-promotion-1"
+        assert artifact["source_lineage"]["sources"][0]["source_id"] == "src-1"
+    finally:
+        note_db.close_all_connections()
+        db.close()
+
+
+async def test_dispatch_run_reports_artifact_promotion_failure_without_rolling_back_task(
+    monkeypatch,
+    tmp_path,
+):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    note_db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
+    note_db.upsert_workspace("workspace-alpha", "Alpha Workspace")
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    workspace = db.create_workspace(
+        name="Linked",
+        root_path=str(workspace_root),
+        metadata={
+            "canonical_workspace_id": "workspace-alpha",
+            "canonical_workspace_source": "workspace_playground",
+            "link_status": "linked",
+        },
+    )
+    project = db.create_project(name="P1", workspace_id=workspace.id)
+    task = db.create_task(project.id, title="T1", description="Create a brief", agent_type="codex")
+    client = _ArtifactPromotionClient()
+
+    async def fake_store():
+        return _NoopSessionStore()
+
+    async def fake_client():
+        return client
+
+    def failing_promotion(*_args, **_kwargs):
+        raise RuntimeError("promotion backend unavailable")
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
+        fake_store,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client",
+        fake_client,
+    )
+    monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: (tmp_path.resolve(),))
+    monkeypatch.setattr(orch_mod, "promote_acp_completion_artifacts", failing_promotion)
+
+    try:
+        result = await orch_mod.dispatch_run(
+            task.id,
+            orch_mod.RunDispatchRequest(),
+            user=_TestUser(),
+            canonical_db=note_db,
+        )
+
+        assert result["status"] == TaskStatus.COMPLETE
+        assert result["artifact_promotion"] == {
+            "created_artifact_ids": [],
+            "updated_artifact_ids": [],
+            "skipped": [],
+            "errors": [{"artifact_id": "all", "reason": "promotion_failed"}],
+        }
+        updated_task = db.get_task(task.id)
+        assert updated_task.status == TaskStatus.COMPLETE
+        assert note_db.list_workspace_artifacts("workspace-alpha") == []
+    finally:
+        note_db.close_all_connections()
+        db.close()
+
+
 async def test_dispatch_run_injects_workspace_env_and_mcp_servers(monkeypatch, tmp_path):
     from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
 
@@ -826,8 +1306,8 @@ async def test_dispatch_run_injects_workspace_env_and_mcp_servers(monkeypatch, t
         )
 
         assert result["status"] == TaskStatus.COMPLETE
-        assert client.create_session_calls[0]["session_env"] == {"WORKSPACE_TOKEN": "abc"}
-        assert client.create_session_calls[0]["mcp_servers"] == [
+        assert client.create_session_calls[0]["kwargs"]["session_env"] == {"WORKSPACE_TOKEN": "abc"}
+        assert client.create_session_calls[0]["kwargs"]["mcp_servers"] == [
             {
                 "name": "workspace-files",
                 "type": "stdio",

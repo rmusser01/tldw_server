@@ -16,6 +16,11 @@ import { PersonaPolicySummary } from "@/components/Option/MCPHub"
 import type { PersonaTurnDetectionValues } from "@/components/PersonaGarden/PersonaTurnDetectionControls"
 import { AssistantVoiceCard } from "@/components/PersonaGarden/AssistantVoiceCard"
 import { AssistantDefaultsPanel } from "@/components/PersonaGarden/AssistantDefaultsPanel"
+import { PersonaBuddyDiagnosticsPanel } from "@/components/PersonaGarden/PersonaBuddyDiagnosticsPanel"
+import {
+  buildPersonaBuddyDiagnostics,
+  type PersonaBuddyProfileState
+} from "@/components/PersonaGarden/personaBuddyDiagnostics"
 import {
   PersonaSetupHandoffCard,
 } from "@/components/PersonaGarden/PersonaSetupHandoffCard"
@@ -192,6 +197,9 @@ const SidepanelPersona = ({
     number | null
   >(null)
   const [personaProfileLoading, setPersonaProfileLoading] = React.useState(false)
+  const [personaProfileError, setPersonaProfileError] = React.useState<string | null>(
+    null
+  )
   const [liveSessionVoiceDefaultsBaseline, setLiveSessionVoiceDefaultsBaseline] =
     React.useState<PersonaVoiceDefaults | null>(null)
   const [activeTab, setActiveTab] = React.useState<PersonaGardenTabKey>("live")
@@ -221,8 +229,12 @@ const SidepanelPersona = ({
   })
   const setBuddyShellRenderContext = useSetBuddyShellRenderContext()
   const visualRuntimeOverride = usePersonaVisualRuntimeStore((state) => state.override)
+  const visualRuntimeDiagnostics = usePersonaVisualRuntimeStore(
+    (state) => state.runtimeDiagnostics
+  )
   const [buddyShellLiveContext, setBuddyShellLiveContext] = React.useState({
     live_voice_state: "idle",
+    active_tool_name: "",
     active_tool_status: "",
     wake_armed: false,
     recovery_mode: "none"
@@ -264,6 +276,7 @@ const SidepanelPersona = ({
           null,
         live_session_id: sessionId,
         live_voice_state: buddyShellLiveContext.live_voice_state,
+        active_tool_name: buddyShellLiveContext.active_tool_name,
         active_tool_status: buddyShellLiveContext.active_tool_status,
         wake_armed: buddyShellLiveContext.wake_armed,
         recovery_mode: buddyShellLiveContext.recovery_mode,
@@ -301,6 +314,7 @@ const SidepanelPersona = ({
       setSavedPersonaSetup(null)
       setSavedPersonaProfileVersion(null)
       setPersonaProfileLoading(false)
+      setPersonaProfileError(null)
       if (!connected) {
         setLiveSessionVoiceDefaultsBaseline(null)
       }
@@ -311,6 +325,7 @@ const SidepanelPersona = ({
     setSavedPersonaBuddySummary(null)
     setSavedPersonaBuddySummaryPersonaId(null)
     setPersonaProfileLoading(true)
+    setPersonaProfileError(null)
     ;(async () => {
       try {
         const response = await tldwClient.fetchWithAuth(
@@ -329,14 +344,20 @@ const SidepanelPersona = ({
           setSavedPersonaProfileVersion(
             typeof payload?.version === "number" ? payload.version : null
           )
+          setPersonaProfileError(null)
         }
-      } catch {
+      } catch (profileError) {
         if (!cancelled) {
           setSavedPersonaBuddySummary(null)
           setSavedPersonaBuddySummaryPersonaId(null)
           setSavedPersonaVoiceDefaults(null)
           setSavedPersonaSetup(null)
           setSavedPersonaProfileVersion(null)
+          setPersonaProfileError(
+            profileError instanceof Error
+              ? profileError.message
+              : "Failed to load persona profile"
+          )
         }
       } finally {
         if (!cancelled) {
@@ -580,11 +601,13 @@ const SidepanelPersona = ({
   React.useEffect(() => {
     setBuddyShellLiveContext({
       live_voice_state: liveVoiceController.state,
+      active_tool_name: liveVoiceController.activeToolName,
       active_tool_status: liveVoiceController.activeToolStatus,
       wake_armed: liveVoiceController.wakeArmed,
       recovery_mode: liveVoiceController.recoveryMode
     })
   }, [
+    liveVoiceController.activeToolName,
     liveVoiceController.activeToolStatus,
     liveVoiceController.recoveryMode,
     liveVoiceController.state,
@@ -1118,6 +1141,82 @@ const SidepanelPersona = ({
         fallbackReason: null
       }
     : undefined
+
+  const activeBuddySummary =
+    (savedPersonaBuddySummaryPersonaId === selectedPersonaId
+      ? savedPersonaBuddySummary
+      : null) ??
+    selectedCatalogPersona?.buddy_summary ??
+    null
+  const personaProfileState: PersonaBuddyProfileState = personaProfileLoading
+    ? "loading"
+    : personaProfileError
+      ? "error"
+      : selectedPersonaId
+        ? "loaded"
+        : "idle"
+  const activeVisualRuntimeDiagnostics =
+    visualRuntimeDiagnostics &&
+    visualRuntimeDiagnostics.personaId === normalizedLivePersonaId &&
+    (!sessionId ||
+      !visualRuntimeDiagnostics.sessionId ||
+      visualRuntimeDiagnostics.sessionId === sessionId)
+      ? visualRuntimeDiagnostics
+      : null
+  const liveSessionLastEvent = error
+    ? `error: ${error}`
+    : connecting
+      ? "connecting"
+      : connected
+        ? "connected"
+        : sessionId
+          ? "disconnected"
+          : null
+  const personaBuddyDiagnostics = buildPersonaBuddyDiagnostics({
+    selectedPersona: {
+      id: selectedPersonaId,
+      name: selectedPersonaName
+    },
+    profileState: personaProfileState,
+    profileError: personaProfileError,
+    buddySummary: activeBuddySummary,
+    capabilities,
+    capabilitiesLoading: capsLoading,
+    liveSession: {
+      connected,
+      connecting,
+      sessionId,
+      error,
+      lastEvent: liveSessionLastEvent
+    },
+    liveVoice: {
+      state: liveVoiceController.state,
+      recoveryMode: liveVoiceController.recoveryMode,
+      warning: liveVoiceController.warning,
+      warningReasonCode: liveVoiceController.warningReasonCode,
+      activeToolStatus: liveVoiceController.activeToolStatus,
+      textOnlyDueToTtsFailure: liveVoiceController.textOnlyDueToTtsFailure,
+      manualModeRequired: liveVoiceController.manualModeRequired
+    },
+    wake: {
+      armed: liveVoiceController.wakeArmed,
+      detectorState: liveVoiceController.wakeDetectorState,
+      warning: liveVoiceController.wakeWarning,
+      warningReasonCode: liveVoiceController.wakeWarningReasonCode,
+      triggerPhrases: liveVoiceController.wakeTriggerPhrases,
+      behavior: liveVoiceController.sessionWakeBehavior
+    },
+    visual: {
+      packId: activeVisualRuntimeDiagnostics?.packId ?? null,
+      packTitle: activeVisualRuntimeDiagnostics?.packTitle ?? null,
+      packLoadStatus: activeVisualRuntimeDiagnostics?.packLoadStatus ?? "idle",
+      visualState: activeVisualRuntimeDiagnostics?.visualState ?? resolvedLiveVisualState,
+      diagnostic: activeVisualRuntimeDiagnostics?.diagnostic ?? null
+    }
+  })
+  const personaBuddyDiagnosticsPanel = !isCompanionMode ? (
+    <PersonaBuddyDiagnosticsPanel diagnostics={personaBuddyDiagnostics} />
+  ) : null
 
   const assistantVoiceCard = (
     <AssistantVoiceCard
@@ -1788,6 +1887,7 @@ const SidepanelPersona = ({
         <LazyLiveSessionPanel
           controls={liveSessionControls}
           assistantVoice={assistantVoiceCard}
+          diagnostics={personaBuddyDiagnosticsPanel}
           error={liveSessionStatusPanels}
           pendingPlan={pendingPlanCard}
           transcript={transcriptPanel}

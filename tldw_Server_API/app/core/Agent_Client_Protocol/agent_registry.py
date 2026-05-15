@@ -11,6 +11,7 @@ import os
 import shutil
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -20,6 +21,55 @@ try:
     import yaml
 except ImportError:
     yaml = None  # type: ignore[assignment]
+
+
+ACP_COMPATIBILITY_DOCS_URL = "/docs-static/Development/ACP_Compatibility_Matrix.md"
+AgentEntrypointStrategy = Literal[
+    "native_acp",
+    "adapter_acp",
+    "documented_candidate",
+    "custom_template",
+]
+AgentProbeState = Literal["ready_to_probe", "blocked", "custom_template", "documented_only"]
+_SHELL_BUILTIN_COMMANDS = frozenset({"alias", "cd", "export", "set", "source", "unset"})
+
+
+def _coerce_entrypoint_strategy(value: Any) -> AgentEntrypointStrategy:
+    """Return a valid entrypoint strategy, defaulting unknown input conservatively."""
+    if value in {"native_acp", "adapter_acp", "documented_candidate", "custom_template"}:
+        return value
+    return "documented_candidate"
+
+
+@dataclass(frozen=True)
+class AgentEntrypointClassification:
+    """Deterministic ACP entrypoint readiness without launching the agent."""
+    profile_key: str
+    entrypoint_strategy: AgentEntrypointStrategy
+    probe_state: AgentProbeState
+    acp_command: str
+    acp_args: tuple[str, ...]
+    primary_blocker: str | None
+    blockers: tuple[str, ...]
+    status_message: str
+    docs_url: str | None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "acp_args", tuple(self.acp_args))
+        object.__setattr__(self, "blockers", tuple(self.blockers))
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "profile_key": self.profile_key,
+            "entrypoint_strategy": self.entrypoint_strategy,
+            "probe_state": self.probe_state,
+            "acp_command": self.acp_command,
+            "acp_args": list(self.acp_args),
+            "primary_blocker": self.primary_blocker,
+            "blockers": list(self.blockers),
+            "status_message": self.status_message,
+            "docs_url": self.docs_url,
+        }
 
 
 @dataclass
@@ -35,6 +85,28 @@ class AgentRegistryEntry:
     default: bool = False
     install_instructions: list[str] = field(default_factory=list)
     docs_url: str | None = None
+    support_state: Literal[
+        "supported",
+        "supported_with_caveats",
+        "experimental",
+        "documented_unverified",
+        "unsupported",
+    ] = "documented_unverified"
+    verification_level: Literal[
+        "documented_only",
+        "stub_smoke_tested",
+        "live_e2e_tested",
+        "sandbox_tested",
+        "production_supported",
+    ] = "documented_only"
+    compatibility_notes: str = "Configured locally; live-agent ACP compatibility has not been certified."
+    compatibility_docs_url: str | None = ACP_COMPATIBILITY_DOCS_URL
+    entrypoint_strategy: AgentEntrypointStrategy = "documented_candidate"
+    acp_command: str = ""
+    acp_args: list[str] = field(default_factory=list)
+    adapter_source: str | None = None
+    adapter_docs_url: str | None = None
+    certification_blocker: str | None = None
 
     # Protocol adapter fields (new for agent workspace harness)
     protocol: Literal["stdio", "mcp", "openai_tool_use"] = "stdio"
@@ -61,6 +133,10 @@ class AgentRegistryEntry:
             "type": self.type,
             "name": self.name,
             "description": self.description,
+            "support_state": self.support_state,
+            "verification_level": self.verification_level,
+            "compatibility_notes": self.compatibility_notes,
+            "compatibility_docs_url": self.compatibility_docs_url,
         }
 
         # Check binary
@@ -90,6 +166,105 @@ class AgentRegistryEntry:
 
         result["is_configured"] = result["status"] == "available"
         return result
+
+
+def classify_agent_entrypoint(
+    entry: AgentRegistryEntry,
+    *,
+    command_resolver: Callable[[str], str | None] = shutil.which,
+    env_getter: Callable[[str], str | None] = os.getenv,
+) -> AgentEntrypointClassification:
+    """Classify ACP entrypoint readiness without starting the agent."""
+    strategy = entry.entrypoint_strategy
+    acp_command = entry.acp_command
+    acp_args = list(entry.acp_args)
+    docs_url = entry.compatibility_docs_url or entry.docs_url
+
+    def classification(
+        probe_state: AgentProbeState,
+        *,
+        blockers: tuple[str, ...] = (),
+        status_message: str,
+        command: str = acp_command,
+        args: list[str] | None = None,
+    ) -> AgentEntrypointClassification:
+        normalized_blockers = tuple(dict.fromkeys(str(blocker) for blocker in blockers if blocker))
+        primary_blocker = normalized_blockers[0] if normalized_blockers else None
+        return AgentEntrypointClassification(
+            profile_key=entry.type,
+            entrypoint_strategy=strategy,
+            probe_state=probe_state,
+            acp_command=command,
+            acp_args=tuple(args if args is not None else acp_args),
+            primary_blocker=primary_blocker,
+            blockers=normalized_blockers,
+            status_message=status_message,
+            docs_url=docs_url,
+        )
+
+    def blocked_status(blockers: list[str]) -> str:
+        """Return a readable status for one or more deterministic blockers."""
+        messages = {
+            "entrypoint_strategy_missing": "Registry entry has no explicit ACP stdio command.",
+            "shell_builtin_collision": "Configured ACP command matches a shell builtin or alias-like value.",
+            "credentials_missing": "Required API key or credential environment variable is missing.",
+            "adapter_missing": "Configured ACP adapter command is not available on PATH.",
+            "binary_missing": "Configured ACP entrypoint command is not available on PATH.",
+        }
+        if not blockers:
+            return "ACP entrypoint readiness is blocked."
+        status_message = messages.get(blockers[0], "ACP entrypoint readiness is blocked.")
+        if len(blockers) > 1:
+            status_message += " Additional blockers: " + ", ".join(blockers[1:]) + "."
+        return status_message
+
+    if strategy == "custom_template":
+        return classification(
+            "custom_template",
+            blockers=("custom_template",),
+            status_message=(
+                "Create a named custom ACP profile with command, args, env, "
+                "workspace policy, and evidence bundle."
+            ),
+            command="",
+            args=[],
+        )
+
+    if strategy == "documented_candidate":
+        return classification(
+            "documented_only",
+            blockers=(entry.certification_blocker,) if entry.certification_blocker else (),
+            status_message="Agent is documented as a candidate and is not eligible for live ACP probing yet.",
+            command="",
+            args=[],
+        )
+
+    blockers: list[str] = []
+    if not acp_command:
+        blockers.append("entrypoint_strategy_missing")
+
+    shell_builtin_collision = bool(acp_command and acp_command in _SHELL_BUILTIN_COMMANDS)
+    if shell_builtin_collision:
+        blockers.append("shell_builtin_collision")
+
+    if entry.requires_api_key and not env_getter(entry.requires_api_key):
+        blockers.append("credentials_missing")
+
+    if acp_command and not shell_builtin_collision and not command_resolver(acp_command):
+        blocker = "adapter_missing" if strategy == "adapter_acp" else "binary_missing"
+        blockers.append(blocker)
+
+    if blockers:
+        return classification(
+            "blocked",
+            blockers=tuple(blockers),
+            status_message=blocked_status(blockers),
+        )
+
+    return classification(
+        "ready_to_probe",
+        status_message="Configured ACP entrypoint is ready for a bounded initialize probe.",
+    )
 
 
 class AgentRegistry:
@@ -159,6 +334,21 @@ class AgentRegistry:
                 default=bool(item.get("default", False)),
                 install_instructions=list(item.get("install_instructions", [])),
                 docs_url=item.get("docs_url"),
+                support_state=item.get("support_state", "documented_unverified"),
+                verification_level=item.get("verification_level", "documented_only"),
+                compatibility_notes=str(
+                    item.get(
+                        "compatibility_notes",
+                        "Configured locally; live-agent ACP compatibility has not been certified.",
+                    )
+                ),
+                compatibility_docs_url=item.get("compatibility_docs_url", ACP_COMPATIBILITY_DOCS_URL),
+                entrypoint_strategy=_coerce_entrypoint_strategy(item.get("entrypoint_strategy")),
+                acp_command=str(item.get("acp_command") or ""),
+                acp_args=list(item.get("acp_args", [])),
+                adapter_source=item.get("adapter_source"),
+                adapter_docs_url=item.get("adapter_docs_url"),
+                certification_blocker=item.get("certification_blocker"),
                 mcp_orchestration=item.get("mcp_orchestration", "agent_driven"),
                 mcp_entry_tool=str(item.get("mcp_entry_tool", "execute")),
                 mcp_structured_response=bool(item.get("mcp_structured_response", False)),
@@ -229,6 +419,18 @@ class AgentRegistry:
                     default=bool(row.get("is_default", 0)),
                     install_instructions=self._load_json(row.get("install_instructions"), []),
                     docs_url=row.get("docs_url"),
+                    support_state="documented_unverified",
+                    verification_level="documented_only",
+                    compatibility_notes="Registered dynamically; live-agent ACP compatibility has not been certified.",
+                    compatibility_docs_url=ACP_COMPATIBILITY_DOCS_URL,
+                    entrypoint_strategy=_coerce_entrypoint_strategy(
+                        row.get("entrypoint_strategy")
+                    ),
+                    acp_command=row.get("acp_command", ""),
+                    acp_args=self._load_json(row.get("acp_args"), []),
+                    adapter_source=row.get("adapter_source"),
+                    adapter_docs_url=row.get("adapter_docs_url"),
+                    certification_blocker=row.get("certification_blocker"),
                     mcp_orchestration=row.get("mcp_orchestration", "agent_driven"),
                     mcp_entry_tool=row.get("mcp_entry_tool", "execute"),
                     mcp_structured_response=bool(row.get("mcp_structured_response", 0)),
@@ -294,9 +496,16 @@ class AgentRegistry:
         mcp_llm_model: str | None = None,
         mcp_max_iterations: int = 20,
         mcp_refresh_tools: bool = False,
+        entrypoint_strategy: AgentEntrypointStrategy = "documented_candidate",
+        acp_command: str = "",
+        acp_args: list[str] | None = None,
+        adapter_source: str | None = None,
+        adapter_docs_url: str | None = None,
+        certification_blocker: str | None = None,
     ) -> AgentRegistryEntry:
         """Register or update a dynamic agent entry."""
         with self._lock:
+            normalized_entrypoint_strategy = _coerce_entrypoint_strategy(entrypoint_strategy)
             entry = AgentRegistryEntry(
                 type=type,
                 name=name,
@@ -314,6 +523,12 @@ class AgentRegistry:
                 mcp_llm_model=mcp_llm_model,
                 mcp_max_iterations=mcp_max_iterations,
                 mcp_refresh_tools=mcp_refresh_tools,
+                entrypoint_strategy=normalized_entrypoint_strategy,
+                acp_command=acp_command,
+                acp_args=acp_args or [],
+                adapter_source=adapter_source,
+                adapter_docs_url=adapter_docs_url,
+                certification_blocker=certification_blocker,
             )
             if self._db is not None:
                 self._db.save_agent_entry({
@@ -333,6 +548,12 @@ class AgentRegistry:
                     "mcp_llm_model": mcp_llm_model,
                     "mcp_max_iterations": mcp_max_iterations,
                     "mcp_refresh_tools": mcp_refresh_tools,
+                    "entrypoint_strategy": normalized_entrypoint_strategy,
+                    "acp_command": acp_command,
+                    "acp_args": json.dumps(acp_args or []),
+                    "adapter_source": adapter_source,
+                    "adapter_docs_url": adapter_docs_url,
+                    "certification_blocker": certification_blocker,
                     "source": "api",
                 })
             self._api_entries = [e for e in self._api_entries if e.type != type]
@@ -352,12 +573,30 @@ class AgentRegistry:
     _UPDATABLE_FIELDS = frozenset({
         "name", "description", "command", "args", "env",
         "requires_api_key", "install_instructions", "docs_url",
+        "entrypoint_strategy", "acp_command", "acp_args", "adapter_source",
+        "adapter_docs_url", "certification_blocker",
         "mcp_orchestration", "mcp_entry_tool", "mcp_structured_response",
         "mcp_llm_provider", "mcp_llm_model", "mcp_max_iterations", "mcp_refresh_tools",
     })
 
     # Defaults for fields that must never be None at runtime
-    _FIELD_DEFAULTS: dict[str, Any] = {"args": [], "env": {}, "install_instructions": []}
+    _FIELD_DEFAULT_FACTORIES: dict[str, Callable[[], Any]] = {
+        "args": list,
+        "env": dict,
+        "install_instructions": list,
+        "acp_args": list,
+    }
+    _NON_NULLABLE_SCALAR_FIELDS = frozenset({
+        "name",
+        "description",
+        "command",
+        "acp_command",
+        "mcp_orchestration",
+        "mcp_entry_tool",
+        "mcp_structured_response",
+        "mcp_max_iterations",
+        "mcp_refresh_tools",
+    })
 
     def update_agent(self, agent_type: str, **kwargs: Any) -> AgentRegistryEntry | None:
         """Update fields on an existing dynamic agent entry."""
@@ -372,8 +611,12 @@ class AgentRegistry:
             for key, value in kwargs.items():
                 if key in self._UPDATABLE_FIELDS:
                     # Normalize None → safe default for collection fields
-                    if value is None and key in self._FIELD_DEFAULTS:
-                        value = self._FIELD_DEFAULTS[key]
+                    if value is None and key in self._FIELD_DEFAULT_FACTORIES:
+                        value = self._FIELD_DEFAULT_FACTORIES[key]()
+                    elif value is None and key in self._NON_NULLABLE_SCALAR_FIELDS:
+                        continue
+                    if key == "entrypoint_strategy":
+                        value = _coerce_entrypoint_strategy(value)
                     setattr(existing, key, value)
             if self._db is not None:
                 self._db.save_agent_entry({
@@ -393,6 +636,12 @@ class AgentRegistry:
                     "mcp_llm_model": existing.mcp_llm_model,
                     "mcp_max_iterations": existing.mcp_max_iterations,
                     "mcp_refresh_tools": existing.mcp_refresh_tools,
+                    "entrypoint_strategy": existing.entrypoint_strategy,
+                    "acp_command": existing.acp_command,
+                    "acp_args": json.dumps(existing.acp_args),
+                    "adapter_source": existing.adapter_source,
+                    "adapter_docs_url": existing.adapter_docs_url,
+                    "certification_blocker": existing.certification_blocker,
                     "source": "api",
                 })
             return existing

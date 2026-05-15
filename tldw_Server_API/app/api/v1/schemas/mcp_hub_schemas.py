@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ScopeType = Literal["global", "org", "team", "user"]
 CapabilityAdapterScopeType = Literal["global", "org", "team"]
@@ -583,6 +583,34 @@ class ExternalServerUpdateRequest(BaseModel):
     owner_scope_type: ScopeType | None = None
     owner_scope_id: int | None = None
     enabled: bool | None = None
+
+
+class ExternalServerDiscoveryRefreshRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    server_id: str | None = Field(default=None, max_length=128)
+
+    @field_validator("server_id")
+    @classmethod
+    def normalize_server_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("server_id must be a non-empty string")
+        return normalized
+
+
+class ExternalServerDiscoveryRefreshResponse(BaseModel):
+    ok: bool
+    server_id: str | None = None
+    reconciled_servers: int = 0
+    refreshed_servers: int = 0
+    total_servers: int = 0
+    virtual_tools: int = 0
+    errors: dict[str, str] = Field(default_factory=dict)
+    requires_restart: bool = False
+    message: str | None = None
 
 
 class ExternalServerCredentialSlotCreateRequest(BaseModel):

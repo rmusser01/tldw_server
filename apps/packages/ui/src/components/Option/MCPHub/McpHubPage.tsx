@@ -12,6 +12,7 @@ import { PolicyAssignmentsTab } from "./PolicyAssignmentsTab"
 import { SharedWorkspacesTab } from "./SharedWorkspacesTab"
 import { ToolCatalogsTab } from "./ToolCatalogsTab"
 import { ExternalServersTab } from "./ExternalServersTab"
+import { DeploymentDiagnosticsPanel } from "./DeploymentDiagnosticsPanel"
 import { WorkspaceSetsTab } from "./WorkspaceSetsTab"
 import type {
   McpHubDrillAction,
@@ -109,7 +110,16 @@ export const McpHubPage = () => {
   }
 
   const tabContentByView: Record<McpHubViewKey, ReactNode> = {
-    "tool-catalogs": <ToolCatalogsTab />,
+    "tool-catalogs": (
+      <ToolCatalogsTab
+        onAddServer={() =>
+          updateRouteState({
+            workflow: "setup",
+            view: "credentials"
+          })
+        }
+      />
+    ),
     credentials: (
       <ExternalServersTab
         drillTarget={drillTarget}
@@ -200,6 +210,7 @@ export const McpHubPage = () => {
       >
         {activeWorkflow.description}
       </Typography.Text>
+      {routeState.workflow === "setup" ? <DeploymentDiagnosticsPanel /> : null}
       <Tabs
         data-testid="mcp-hub-tabs"
         activeKey={routeState.view}

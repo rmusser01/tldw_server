@@ -43,6 +43,27 @@ def test_metrics_logger_bridge_records_histogram():
 
 
 @pytest.mark.unit
+def test_metrics_registry_sample_counts_use_cumulative_histogram_series():
+    registry = get_metrics_registry()
+    registry.reset()
+
+    metric_name = "bridge_histogram_sample_count_test_seconds"
+    metrics_logger.log_histogram(metric_name, 0.5, labels={"assistant_kind": "persona"})
+    metrics_logger.log_histogram(metric_name, 0.7, labels={"assistant_kind": "persona"})
+    metrics_logger.log_histogram(metric_name, 0.3, labels={"assistant_kind": "character"})
+
+    normalized_name = registry.normalize_metric_name(metric_name)
+    registry.values[normalized_name].clear()
+    registry.values[metric_name].clear()
+
+    assert registry.get_metric_sample_counts_by_label(
+        metric_name,
+        "assistant_kind",
+        missing_label="none",
+    ) == {"character": 1, "persona": 2}
+
+
+@pytest.mark.unit
 def test_metrics_logger_bridge_records_gauge():
     registry = get_metrics_registry()
     registry.reset()

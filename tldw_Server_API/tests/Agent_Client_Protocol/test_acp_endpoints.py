@@ -308,6 +308,52 @@ def test_acp_agent_registration_records_sanitized_audit_event(
     assert "/private/bin/audit-agent" not in serialized
 
 
+def test_acp_agent_registration_forwards_entrypoint_kwargs(
+    client_user_only,
+    monkeypatch,
+):
+    """Dynamic registration forwards ACP entrypoint metadata into the registry."""
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+    import tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry as registry_mod
+
+    captured: dict[str, object] = {}
+
+    class _Registry:
+        def register_agent(self, **kwargs):
+            captured.update(kwargs)
+            return types.SimpleNamespace(type=kwargs["type"], name=kwargs["name"])
+
+    async def _admin_user():
+        return types.SimpleNamespace(id=1, is_admin=True)
+
+    monkeypatch.setattr(registry_mod, "get_agent_registry", lambda: _Registry())
+    client_user_only.app.dependency_overrides[acp_endpoints.get_request_user] = _admin_user
+    try:
+        response = client_user_only.post(
+            "/api/v1/acp/agents/register",
+            json={
+                "agent_type": "adapter_agent",
+                "name": "Adapter Agent",
+                "entrypoint_strategy": "adapter_acp",
+                "acp_command": "adapter-agent-acp",
+                "acp_args": ["--stdio"],
+                "adapter_source": "https://example.test/adapter",
+                "adapter_docs_url": "https://example.test/adapter/docs",
+                "certification_blocker": "adapter_missing",
+            },
+        )
+    finally:
+        client_user_only.app.dependency_overrides.pop(acp_endpoints.get_request_user, None)
+
+    assert response.status_code == 200
+    assert captured["entrypoint_strategy"] == "adapter_acp"
+    assert captured["acp_command"] == "adapter-agent-acp"
+    assert captured["acp_args"] == ["--stdio"]
+    assert captured["adapter_source"] == "https://example.test/adapter"
+    assert captured["adapter_docs_url"] == "https://example.test/adapter/docs"
+    assert captured["certification_blocker"] == "adapter_missing"
+
+
 def test_acp_list_audit_events_reads_persisted_rows(tmp_path, monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
     import tldw_Server_API.app.core.DB_Management.ACP_Audit_DB as audit_db_mod
@@ -332,6 +378,52 @@ def test_acp_list_audit_events_reads_persisted_rows(tmp_path, monkeypatch):
     assert len(events) == 1
     assert events[0]["action"] == "session_created"
     assert events[0]["metadata"]["agent_type"] == "codex"
+
+
+def test_acp_list_audit_events_filters_in_memory_events_by_retention(monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+    import tldw_Server_API.app.core.DB_Management.ACP_Audit_DB as audit_db_mod
+
+    class _EmptyAuditDB:
+        _retention_days = 1
+
+        def flush(self):
+            return 0
+
+        def query_events(self, **_kwargs):
+            return []
+
+        def get_hot_cache(self, **_kwargs):
+            return []
+
+    monkeypatch.setattr(audit_db_mod, "get_acp_audit_db", lambda: _EmptyAuditDB())
+    with acp_endpoints._ACP_AUDIT_LOCK:
+        acp_endpoints._ACP_AUDIT_EVENTS.clear()
+        acp_endpoints._ACP_AUDIT_EVENTS.append(
+            {
+                "timestamp": "2000-01-01T00:00:00+00:00",
+                "action": "old",
+                "user_id": 1,
+                "session_id": "retention-session",
+                "metadata": {},
+            }
+        )
+        acp_endpoints._ACP_AUDIT_EVENTS.append(
+            {
+                "timestamp": "2999-01-01T00:00:00+00:00",
+                "action": "fresh",
+                "user_id": 1,
+                "session_id": "retention-session",
+                "metadata": {},
+            }
+        )
+    try:
+        events = acp_endpoints._acp_list_audit_events(session_id="retention-session")
+    finally:
+        with acp_endpoints._ACP_AUDIT_LOCK:
+            acp_endpoints._ACP_AUDIT_EVENTS.clear()
+
+    assert [event["action"] for event in events] == ["fresh"]
 
 
 def test_agent_audit_scope_is_admin_readable_without_runner_session(

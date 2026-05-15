@@ -329,6 +329,12 @@ EMBEDDINGS_ADMIN = "embeddings.admin"
 CLAIMS_REVIEW = "claims.review"
 CLAIMS_ADMIN = "claims.admin"
 
+# Moderation review permissions
+MODERATION_REVIEW_READ = "moderation.review.read"
+MODERATION_REVIEW_DECIDE = "moderation.review.decide"
+MODERATION_REVIEW_BULK_DECIDE = "moderation.review.bulk_decide"
+MODERATION_AUDIT_READ = "moderation.audit.read"
+
 # Reminders / notifications permissions
 TASKS_READ = "tasks.read"
 TASKS_CONTROL = "tasks.control"

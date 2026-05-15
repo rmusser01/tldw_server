@@ -1,6 +1,7 @@
 import React from "react"
 import { Card, Tag, Button, Empty, Spin, message, Modal, Input } from "antd"
 import { ExternalLink, Copy, Users } from "lucide-react"
+import { useNavigate } from "react-router-dom"
 import { useSharedWithMe, useCloneWorkspace } from "@/hooks/useSharing"
 import {
   ACCESS_LEVEL_LABELS,
@@ -11,6 +12,7 @@ import {
 export const SharedWithMe: React.FC = () => {
   const { data, isLoading, error } = useSharedWithMe()
   const cloneMutation = useCloneWorkspace()
+  const navigate = useNavigate()
   const [cloneTarget, setCloneTarget] = React.useState<{
     shareId: number
     name: string
@@ -75,7 +77,7 @@ export const SharedWithMe: React.FC = () => {
                   type="link"
                   size="small"
                   icon={<ExternalLink className="h-3.5 w-3.5" />}
-                  href={`/workspace-playground?shared=${item.share_id}`}
+                  onClick={() => navigate(`/research-studio?shared=${item.share_id}`)}
                 >
                   Open
                 </Button>,

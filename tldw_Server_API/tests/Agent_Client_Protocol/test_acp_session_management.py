@@ -6,6 +6,7 @@ import importlib.machinery
 import os
 import sys
 import tempfile
+import time
 import types
 from types import SimpleNamespace
 
@@ -160,6 +161,33 @@ async def test_session_eviction(session_store):
 
 
 @pytest.mark.asyncio
+async def test_retention_maintenance_purges_expired_sessions_and_audit_events(session_store, tmp_path):
+    """Store-level retention maintenance enforces session and audit retention."""
+    from tldw_Server_API.app.core.DB_Management.ACP_Audit_DB import ACPAuditDB
+
+    session_store.configure_retention(session_retention_days=0, audit_retention_days=0)
+    await session_store.register_session("s1", user_id=1, name="Session 1")
+    await session_store.record_prompt(
+        "s1",
+        [{"role": "user", "content": "secret prompt"}],
+        {"content": "secret response", "usage": {}},
+    )
+    await session_store.close_session("s1")
+
+    audit_db = ACPAuditDB(db_path=str(tmp_path / "audit.db"), retention_days=0)
+    audit_db.record_event(action="session_close", user_id=1, session_id="s1")
+    audit_db.flush()
+
+    result = await session_store.run_retention_maintenance(audit_db=audit_db)
+
+    assert result["sessions_evicted"] == 0
+    assert result["sessions_purged"] == 1
+    assert result["audit_events_purged"] == 1
+    assert await session_store.get_session("s1") is None
+    assert audit_db.query_events(session_id="s1") == []
+
+
+@pytest.mark.asyncio
 async def test_quota_status(session_store):
     """Quota status returns current usage."""
     session_store.configure_quotas(max_concurrent_per_user=5, max_tokens_per_session=1000)
@@ -256,6 +284,83 @@ def test_audit_db_purge():
         assert len(events) == 0
 
         db.close()
+
+
+def test_audit_db_purge_trims_hot_cache():
+    """Retention maintenance removes stale events from SQLite and hot cache."""
+    from tldw_Server_API.app.core.DB_Management.ACP_Audit_DB import ACPAuditDB
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db = ACPAuditDB(db_path=os.path.join(tmpdir, "audit.db"), retention_days=0)
+        db.record_event(action="old", user_id=1, session_id="s1")
+        db.flush()
+
+        deleted = db.purge_old_events(now=time.time() + 5)
+
+        assert deleted >= 1
+        assert db.query_events(session_id="s1") == []
+        assert db.get_hot_cache(session_id="s1") == []
+
+        db.close()
+
+
+def test_audit_db_negative_retention_does_not_use_future_cutoff():
+    """Negative retention values are normalized before cutoff calculation."""
+    from tldw_Server_API.app.core.DB_Management.ACP_Audit_DB import ACPAuditDB
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db = ACPAuditDB(db_path=os.path.join(tmpdir, "audit.db"), retention_days=-10)
+        db.record_event(action="future-safe", user_id=1, session_id="s1")
+        db.flush()
+        conn = db._get_conn()
+        conn.execute("UPDATE acp_audit_events SET created_at = ?", (2000.0,))
+        conn.commit()
+
+        deleted = db.purge_old_events(now=1000.0)
+
+        assert deleted == 0
+        assert len(db.query_events(session_id="s1")) == 1
+
+        db.close()
+
+
+def test_audit_db_singleton_updates_explicit_retention(monkeypatch):
+    """Explicit retention overrides are applied to an existing audit singleton."""
+    import tldw_Server_API.app.core.DB_Management.ACP_Audit_DB as audit_db_module
+
+    monkeypatch.setattr(audit_db_module, "_audit_db", None)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = os.path.join(tmpdir, "audit.db")
+        first = audit_db_module.get_acp_audit_db(db_path=db_path, retention_days=30)
+        second = audit_db_module.get_acp_audit_db(db_path=db_path, retention_days=0)
+
+        assert second is first
+        second.record_event(action="retention_override", user_id=1, session_id="s1")
+        second.flush()
+
+        deleted = second.purge_old_events(now=time.time() + 5)
+        assert deleted >= 1
+        assert second.query_events() == []
+
+        second.close()
+        monkeypatch.setattr(audit_db_module, "_audit_db", None)
+
+
+def test_audit_db_singleton_clamps_negative_explicit_retention(monkeypatch):
+    """Explicit singleton retention overrides cannot remain negative."""
+    import tldw_Server_API.app.core.DB_Management.ACP_Audit_DB as audit_db_module
+
+    monkeypatch.setattr(audit_db_module, "_audit_db", None)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = os.path.join(tmpdir, "audit.db")
+        first = audit_db_module.get_acp_audit_db(db_path=db_path, retention_days=30)
+        second = audit_db_module.get_acp_audit_db(db_path=db_path, retention_days=-5)
+
+        assert second is first
+        assert second._retention_days == 0
+
+        second.close()
+        monkeypatch.setattr(audit_db_module, "_audit_db", None)
 
 
 def test_audit_db_double_flush_is_idempotent():

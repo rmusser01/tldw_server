@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
+import { getDesignSystemState } from "@/design-system"
 import type { RagPresetName, RagSource } from "@/services/rag/unified-rag"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { cn } from "@/libs/utils"
@@ -30,11 +32,16 @@ import { AnswerModelMenu } from "./AnswerModelMenu"
 // ---------------------------------------------------------------------------
 
 const PROFILES_STORAGE_KEY = "tldw:knowledge-qa:saved-profiles"
-const MAX_SAVED_PROFILES = 5
+const MAX_SAVED_PROFILES = 12
+const READY_STATE_LABEL = getDesignSystemState("ready").label
+const ERROR_STATE_LABEL = getDesignSystemState("error").label
+const UNAVAILABLE_STATE_LABEL = getDesignSystemState("unavailable").label
 
 type SearchProfile = {
   name: string
   sources: RagSource[]
+  includeMediaIds?: number[]
+  includeNoteIds?: string[]
   preset: RagPresetName
   enableWebFallback: boolean
 }
@@ -47,18 +54,27 @@ const VALID_PRESET_KEYS: ReadonlySet<RagPresetName> = new Set([
 ])
 
 function isSearchProfile(value: unknown): value is SearchProfile {
+  const record = value as Record<string, unknown>
   return (
     typeof value === "object" &&
     value !== null &&
-    typeof (value as SearchProfile).name === "string" &&
-    (value as SearchProfile).name.trim().length > 0 &&
-    Array.isArray((value as SearchProfile).sources) &&
-    (value as SearchProfile).sources.every(
+    typeof record.name === "string" &&
+    record.name.trim().length > 0 &&
+    Array.isArray(record.sources) &&
+    record.sources.every(
       (source): source is RagSource => isRagSource(source)
     ) &&
-    typeof (value as SearchProfile).preset === "string" &&
-    VALID_PRESET_KEYS.has((value as SearchProfile).preset) &&
-    typeof (value as SearchProfile).enableWebFallback === "boolean"
+    (record.includeMediaIds === undefined ||
+      (Array.isArray(record.includeMediaIds) && record.includeMediaIds.every(
+        (id): id is number => typeof id === "number" && Number.isInteger(id) && id > 0
+      ))) &&
+    (record.includeNoteIds === undefined ||
+      (Array.isArray(record.includeNoteIds) && record.includeNoteIds.every(
+        (id): id is string => typeof id === "string" && id.trim().length > 0
+      ))) &&
+    typeof record.preset === "string" &&
+    VALID_PRESET_KEYS.has(record.preset as RagPresetName) &&
+    typeof record.enableWebFallback === "boolean"
   )
 }
 
@@ -79,6 +95,31 @@ function persistProfiles(profiles: SearchProfile[]): void {
     localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(profiles.slice(0, MAX_SAVED_PROFILES)))
   } catch {
     // localStorage full or unavailable -- silently ignore
+  }
+}
+
+function dedupeProfilesByName(profiles: SearchProfile[]): SearchProfile[] {
+  const profilesByName = new Map<string, SearchProfile>()
+  profiles.forEach((profile) => {
+    const name = profile.name.trim()
+    if (name.length > 0) {
+      profilesByName.set(name, { ...profile, name })
+    }
+  })
+  return Array.from(profilesByName.values())
+}
+
+function parseProfileImport(rawValue: string): SearchProfile[] {
+  try {
+    const parsed = JSON.parse(rawValue)
+    const records = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.profiles)
+        ? parsed.profiles
+        : []
+    return dedupeProfilesByName(records.filter(isSearchProfile)).slice(0, MAX_SAVED_PROFILES)
+  } catch {
+    return []
   }
 }
 
@@ -116,6 +157,11 @@ type GranularSourceOption<T extends string | number> = {
   id: T
   label: string
   meta?: string
+  status: string
+  recent: boolean
+  workspaceId?: string
+  workspaceName?: string
+  hiddenByDefault: boolean
 }
 
 const PRESET_OPTIONS: Array<{ value: PresetKey; label: string }> = [
@@ -220,6 +266,86 @@ function asNumber(value: unknown): number | null {
   return null
 }
 
+function asBoolean(value: unknown): boolean {
+  if (typeof value === "boolean") return value
+  if (typeof value === "number") return value !== 0
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase()
+    return normalized === "true" || normalized === "yes" || normalized === "1"
+  }
+  return false
+}
+
+function normalizeOptionStatus(record: Record<string, unknown>): string {
+  return (
+    asString(record.status) ??
+    asString(record.processing_status) ??
+    asString(record.indexing_status) ??
+    asString(record.ingest_status) ??
+    "ready"
+  ).toLowerCase()
+}
+
+function getWorkspaceMetadata(record: Record<string, unknown>): {
+  workspaceId?: string
+  workspaceName?: string
+} {
+  const workspace = asRecord(record.workspace)
+  const workspaceId =
+    asString(record.workspace_id) ??
+    asString(record.workspaceId) ??
+    asString(workspace?.id)
+  const workspaceName =
+    asString(record.workspace_name) ??
+    asString(record.workspaceName) ??
+    asString(workspace?.name)
+
+  return {
+    workspaceId: workspaceId ?? undefined,
+    workspaceName: workspaceName ?? workspaceId ?? undefined,
+  }
+}
+
+function isRecentImport(record: Record<string, unknown>): boolean {
+  if (
+    asBoolean(record.recent_import) ||
+    asBoolean(record.recently_imported) ||
+    asBoolean(record.recently_ingested)
+  ) {
+    return true
+  }
+
+  const timestamp =
+    asString(record.imported_at) ??
+    asString(record.created_at) ??
+    asString(record.updated_at)
+  if (!timestamp) return false
+  const parsed = Date.parse(timestamp)
+  if (!Number.isFinite(parsed)) return false
+  const sevenDaysMs = 7 * 24 * 60 * 60 * 1000
+  return Date.now() - parsed <= sevenDaysMs
+}
+
+function isHiddenArtifact(record: Record<string, unknown>): boolean {
+  const artifactKind = (
+    asString(record.artifact_kind) ??
+    asString(record.source_kind) ??
+    asString(record.kind) ??
+    ""
+  ).toLowerCase()
+  return (
+    asBoolean(record.is_generated) ||
+    asBoolean(record.generated) ||
+    asBoolean(record.test_artifact) ||
+    asBoolean(record.is_test) ||
+    asBoolean(record.workspace_artifact) ||
+    asBoolean(record.is_workspace_artifact) ||
+    artifactKind.includes("generated") ||
+    artifactKind.includes("test") ||
+    artifactKind.includes("workspace_artifact")
+  )
+}
+
 function extractResponseItems(payload: unknown): unknown[] {
   const record = asRecord(payload)
   if (!record) return []
@@ -249,10 +375,25 @@ function normalizeMediaOptions(payload: unknown): GranularSourceOption<number>[]
       asString(record.url) ??
       `Media ${id}`
 
-    const meta = asString(record.type) ?? asString(record.media_type)
+    const status = normalizeOptionStatus(record)
+    const { workspaceId, workspaceName } = getWorkspaceMetadata(record)
+    const metaParts = [
+      asString(record.type) ?? asString(record.media_type),
+      status,
+      workspaceName,
+    ].filter((part): part is string => Boolean(part))
 
     seen.add(id)
-    normalized.push({ id, label, meta: meta ?? undefined })
+    normalized.push({
+      id,
+      label,
+      meta: metaParts.join(" • ") || undefined,
+      status,
+      recent: isRecentImport(record),
+      workspaceId,
+      workspaceName,
+      hiddenByDefault: isHiddenArtifact(record),
+    })
   }
 
   return normalized.sort((left, right) => left.label.localeCompare(right.label))
@@ -272,10 +413,25 @@ function normalizeNoteOptions(payload: unknown): GranularSourceOption<string>[] 
     const contentPreview = asString(record.content)?.slice(0, 80)
     const label = asString(record.title) ?? asString(record.name) ?? contentPreview ?? `Note ${id}`
 
-    const meta = asString(record.updated_at) ?? asString(record.created_at)
+    const status = normalizeOptionStatus(record)
+    const { workspaceId, workspaceName } = getWorkspaceMetadata(record)
+    const metaParts = [
+      asString(record.updated_at) ?? asString(record.created_at),
+      status,
+      workspaceName,
+    ].filter((part): part is string => Boolean(part))
 
     seen.add(id)
-    normalized.push({ id, label, meta: meta ?? undefined })
+    normalized.push({
+      id,
+      label,
+      meta: metaParts.join(" • ") || undefined,
+      status,
+      recent: isRecentImport(record),
+      workspaceId,
+      workspaceName,
+      hiddenByDefault: isHiddenArtifact(record),
+    })
   }
 
   return normalized.sort((left, right) => left.label.localeCompare(right.label))
@@ -300,10 +456,14 @@ export function KnowledgeContextBar({
   scopeChangeDetails = [],
   onOpenSettings,
 }: KnowledgeContextBarProps) {
+  const { t } = useTranslation("knowledge")
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false)
   const [granularMenuOpen, setGranularMenuOpen] = useState(false)
   const [granularTab, setGranularTab] = useState<"media" | "notes">("media")
   const [granularQuery, setGranularQuery] = useState("")
+  const [granularStatusFilter, setGranularStatusFilter] = useState("all")
+  const [granularRecentFilter, setGranularRecentFilter] = useState("all")
+  const [granularWorkspaceFilter, setGranularWorkspaceFilter] = useState("")
   const [granularLoading, setGranularLoading] = useState(false)
   const [granularError, setGranularError] = useState<string | null>(null)
   const [granularLoaded, setGranularLoaded] = useState(false)
@@ -315,9 +475,13 @@ export function KnowledgeContextBar({
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [profileSaveMode, setProfileSaveMode] = useState(false)
   const [profileNameInput, setProfileNameInput] = useState("")
+  const [profileTransferMode, setProfileTransferMode] = useState<"none" | "export" | "import">("none")
+  const [profileImportInput, setProfileImportInput] = useState("")
+  const [profileImportError, setProfileImportError] = useState<string | null>(null)
 
   const sourceMenuRef = useRef<HTMLDivElement | null>(null)
   const granularMenuRef = useRef<HTMLDivElement | null>(null)
+  const granularSearchInputRef = useRef<HTMLInputElement | null>(null)
   const granularLoadRequestIdRef = useRef(0)
 
   const normalizedSources = useMemo(
@@ -363,6 +527,7 @@ export function KnowledgeContextBar({
 
   const selectedMediaSet = useMemo(() => new Set(normalizedMediaIds), [normalizedMediaIds])
   const selectedNoteSet = useMemo(() => new Set(normalizedNoteIds), [normalizedNoteIds])
+  const exportedProfilesJson = useMemo(() => JSON.stringify(savedProfiles, null, 2), [savedProfiles])
 
   const presetDetail = preset === "custom" ? null : PRESET_DETAILS[preset]
   const presetDescription =
@@ -376,27 +541,45 @@ export function KnowledgeContextBar({
     (source) => source === "media_db" || source === "notes"
   )
 
-  const filteredMediaOptions = useMemo(() => {
-    const query = granularQuery.trim().toLowerCase()
-    if (!query) return mediaOptions.slice(0, MAX_VISIBLE_GRANULAR_RESULTS)
-    return mediaOptions
-      .filter((option) => {
-        const haystack = `${option.label} ${option.meta || ""}`.toLowerCase()
-        return haystack.includes(query)
+  const workspaceOptions = useMemo(() => {
+    const seen = new Set<string>()
+    const options: Array<{ id: string; label: string }> = []
+    ;[...mediaOptions, ...noteOptions].forEach((option) => {
+      if (!option.workspaceId || seen.has(option.workspaceId)) return
+      seen.add(option.workspaceId)
+      options.push({
+        id: option.workspaceId,
+        label: option.workspaceName ?? option.workspaceId,
       })
-      .slice(0, MAX_VISIBLE_GRANULAR_RESULTS)
-  }, [granularQuery, mediaOptions])
+    })
+    return options.sort((left, right) => left.label.localeCompare(right.label))
+  }, [mediaOptions, noteOptions])
+
+  const filterGranularOptions = useCallback(
+    <T extends string | number>(options: GranularSourceOption<T>[]) => {
+      const query = granularQuery.trim().toLowerCase()
+      return options
+        .filter((option) => {
+          if (!granularWorkspaceFilter && option.hiddenByDefault) return false
+          if (granularWorkspaceFilter && option.workspaceId !== granularWorkspaceFilter) return false
+          if (granularStatusFilter !== "all" && option.status !== granularStatusFilter) return false
+          if (granularRecentFilter === "recent" && !option.recent) return false
+          if (!query) return true
+          const haystack = `${option.label} ${option.meta || ""}`.toLowerCase()
+          return haystack.includes(query)
+        })
+        .slice(0, MAX_VISIBLE_GRANULAR_RESULTS)
+    },
+    [granularQuery, granularRecentFilter, granularStatusFilter, granularWorkspaceFilter]
+  )
+
+  const filteredMediaOptions = useMemo(() => {
+    return filterGranularOptions(mediaOptions)
+  }, [filterGranularOptions, mediaOptions])
 
   const filteredNoteOptions = useMemo(() => {
-    const query = granularQuery.trim().toLowerCase()
-    if (!query) return noteOptions.slice(0, MAX_VISIBLE_GRANULAR_RESULTS)
-    return noteOptions
-      .filter((option) => {
-        const haystack = `${option.label} ${option.meta || ""}`.toLowerCase()
-        return haystack.includes(query)
-      })
-      .slice(0, MAX_VISIBLE_GRANULAR_RESULTS)
-  }, [granularQuery, noteOptions])
+    return filterGranularOptions(noteOptions)
+  }, [filterGranularOptions, noteOptions])
 
   const loadGranularOptions = useCallback(async () => {
     const requestId = granularLoadRequestIdRef.current + 1
@@ -440,15 +623,17 @@ export function KnowledgeContextBar({
     }
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return
+      event.preventDefault()
+      event.stopPropagation()
       setSourceMenuOpen(false)
       setGranularMenuOpen(false)
     }
 
     document.addEventListener("mousedown", handleClickOutside)
-    document.addEventListener("keydown", handleEscape)
+    document.addEventListener("keydown", handleEscape, true)
     return () => {
       document.removeEventListener("mousedown", handleClickOutside)
-      document.removeEventListener("keydown", handleEscape)
+      document.removeEventListener("keydown", handleEscape, true)
     }
   }, [sourceMenuOpen, granularMenuOpen])
 
@@ -456,6 +641,14 @@ export function KnowledgeContextBar({
     if (!granularMenuOpen || granularLoaded || granularLoading) return
     void loadGranularOptions()
   }, [granularMenuOpen, granularLoaded, granularLoading, loadGranularOptions])
+
+  useEffect(() => {
+    if (!granularMenuOpen) return
+    const focusTimer = window.setTimeout(() => {
+      granularSearchInputRef.current?.focus()
+    }, 0)
+    return () => window.clearTimeout(focusTimer)
+  }, [granularMenuOpen, granularTab])
 
   const toggleSource = (sourceKey: RagSource) => {
     const exists = normalizedSources.includes(sourceKey)
@@ -515,6 +708,87 @@ export function KnowledgeContextBar({
     onIncludeNoteIdsChange([])
   }
 
+  const selectVisibleSpecificSources = () => {
+    if (granularTab === "media") {
+      const visibleIds = filteredMediaOptions.map((option) => option.id)
+      if (visibleIds.length === 0) return
+      if (!normalizedSources.includes("media_db")) {
+        onSourcesChange([...normalizedSources, "media_db"])
+      }
+      onIncludeMediaIdsChange(
+        Array.from(new Set([...normalizedMediaIds, ...visibleIds])).sort((left, right) => left - right)
+      )
+      return
+    }
+
+    const visibleIds = filteredNoteOptions.map((option) => option.id)
+    if (visibleIds.length === 0) return
+    if (!normalizedSources.includes("notes")) {
+      onSourcesChange([...normalizedSources, "notes"])
+    }
+    onIncludeNoteIdsChange(
+      Array.from(new Set([...normalizedNoteIds, ...visibleIds])).sort((left, right) =>
+        left.localeCompare(right)
+      )
+    )
+  }
+
+  const clearVisibleSpecificSources = () => {
+    if (granularTab === "media") {
+      const visibleIds = new Set(filteredMediaOptions.map((option) => option.id))
+      onIncludeMediaIdsChange(normalizedMediaIds.filter((id) => !visibleIds.has(id)))
+      return
+    }
+
+    const visibleIds = new Set(filteredNoteOptions.map((option) => option.id))
+    onIncludeNoteIdsChange(normalizedNoteIds.filter((id) => !visibleIds.has(id)))
+  }
+
+  const selectRecentSpecificSources = () => {
+    if (granularTab === "media") {
+      const recentIds = filteredMediaOptions
+        .filter((option) => option.recent)
+        .map((option) => option.id)
+      if (recentIds.length === 0) return
+      if (!normalizedSources.includes("media_db")) {
+        onSourcesChange([...normalizedSources, "media_db"])
+      }
+      onIncludeMediaIdsChange(recentIds)
+      return
+    }
+
+    const recentIds = filteredNoteOptions
+      .filter((option) => option.recent)
+      .map((option) => option.id)
+    if (recentIds.length === 0) return
+    if (!normalizedSources.includes("notes")) {
+      onSourcesChange([...normalizedSources, "notes"])
+    }
+    onIncludeNoteIdsChange(recentIds)
+  }
+
+  const handleGranularMenuKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    const target = event.target
+    const targetElement = target instanceof HTMLElement ? target : null
+    const isFormControl =
+      targetElement instanceof HTMLInputElement ||
+      targetElement instanceof HTMLTextAreaElement ||
+      targetElement instanceof HTMLSelectElement
+
+    if (isFormControl) return
+
+    if (event.key === "]") {
+      event.preventDefault()
+      setGranularTab("notes")
+    } else if (event.key === "[") {
+      event.preventDefault()
+      setGranularTab("media")
+    } else if (event.key === "/") {
+      event.preventDefault()
+      granularSearchInputRef.current?.focus()
+    }
+  }, [])
+
   // ---- Saved search profile handlers ----
 
   const saveCurrentProfile = useCallback(() => {
@@ -523,6 +797,8 @@ export function KnowledgeContextBar({
     const newProfile: SearchProfile = {
       name: trimmed,
       sources: [...normalizedSources],
+      includeMediaIds: [...normalizedMediaIds],
+      includeNoteIds: [...normalizedNoteIds],
       preset,
       enableWebFallback: webEnabled,
     }
@@ -534,11 +810,21 @@ export function KnowledgeContextBar({
     persistProfiles(updated)
     setProfileSaveMode(false)
     setProfileNameInput("")
-  }, [profileNameInput, normalizedSources, preset, webEnabled, savedProfiles])
+  }, [
+    profileNameInput,
+    normalizedSources,
+    normalizedMediaIds,
+    normalizedNoteIds,
+    preset,
+    webEnabled,
+    savedProfiles,
+  ])
 
   const loadProfile = useCallback(
     (profile: SearchProfile) => {
       onSourcesChange(profile.sources)
+      onIncludeMediaIdsChange(profile.includeMediaIds ?? [])
+      onIncludeNoteIdsChange(profile.includeNoteIds ?? [])
       onPresetChange(profile.preset)
       // Only toggle web fallback if the profile value differs from current state.
       // Note: only a toggle callback is available (no direct setter).
@@ -547,7 +833,7 @@ export function KnowledgeContextBar({
       }
       setProfileMenuOpen(false)
     },
-    [onSourcesChange, onPresetChange, onToggleWeb, webEnabled]
+    [onIncludeMediaIdsChange, onIncludeNoteIdsChange, onSourcesChange, onPresetChange, onToggleWeb, webEnabled]
   )
 
   const deleteProfile = useCallback(
@@ -559,6 +845,25 @@ export function KnowledgeContextBar({
     [savedProfiles]
   )
 
+  const importProfiles = useCallback(() => {
+    const imported = parseProfileImport(profileImportInput)
+    if (imported.length === 0) {
+      setProfileImportError("Paste a valid profile export.")
+      return
+    }
+
+    const importedNames = new Set(imported.map((profile) => profile.name))
+    const updated = [
+      ...imported,
+      ...savedProfiles.filter((profile) => !importedNames.has(profile.name)),
+    ].slice(0, MAX_SAVED_PROFILES)
+    setSavedProfiles(updated)
+    persistProfiles(updated)
+    setProfileImportInput("")
+    setProfileImportError(null)
+    setProfileTransferMode("none")
+  }, [profileImportInput, savedProfiles])
+
   const activeGranularOptions = granularTab === "media" ? filteredMediaOptions : filteredNoteOptions
 
   return (
@@ -568,7 +873,7 @@ export function KnowledgeContextBar({
           <div className="mb-2 flex items-center gap-2">
             <Layers className="h-4 w-4 text-primary" />
             <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-              Source Scope
+              {t("contextBar.sourceScope", "Source Scope")}
             </h3>
             <Tooltip title="Choose which types of content to include in your search. Select categories, then optionally pick specific items within each.">
               <Info className="h-3.5 w-3.5 text-text-subtle cursor-help" />
@@ -594,24 +899,26 @@ export function KnowledgeContextBar({
                   id="knowledge-source-menu"
                   className="absolute left-0 z-30 mt-2 w-64 rounded-lg border border-border/80 bg-surface p-2 shadow-lg"
                   role="menu"
-                  aria-label="Source selector"
+                  aria-label={t("contextBar.sourceSelector", "Source selector")}
                 >
                   <div className="mb-2 flex items-center justify-between px-1">
-                    <span className="text-xs font-semibold text-text-muted">Source categories</span>
+                    <span className="text-xs font-semibold text-text-muted">
+                      {t("contextBar.sourceCategories", "Source categories")}
+                    </span>
                     <div className="flex items-center gap-1">
                       <button
                         type="button"
                         className="rounded px-1.5 py-0.5 text-[11px] text-text-muted hover:bg-hover hover:text-text transition-colors"
                         onClick={selectAllSources}
                       >
-                        All
+                        {t("contextBar.all", "All")}
                       </button>
                       <button
                         type="button"
                         className="rounded px-1.5 py-0.5 text-[11px] text-text-muted hover:bg-hover hover:text-text transition-colors"
                         onClick={clearSources}
                       >
-                        None
+                        {t("contextBar.none", "None")}
                       </button>
                     </div>
                   </div>
@@ -645,7 +952,10 @@ export function KnowledgeContextBar({
                   </div>
                   {normalizedSources.length === 0 ? (
                     <p className="mt-2 rounded-md border border-warn/30 bg-warn/10 px-2 py-1.5 text-[11px] text-warn">
-                      No sources selected. Searches may return empty results.
+                      {t(
+                        "contextBar.noSourcesSelected",
+                        "No sources selected. Searches may return empty results."
+                      )}
                     </p>
                   ) : null}
                 </div>
@@ -673,16 +983,20 @@ export function KnowledgeContextBar({
                   id="knowledge-granular-source-menu"
                   role="dialog"
                   aria-label="Specific source selector"
+                  aria-keyshortcuts="[ ] /"
+                  onKeyDown={handleGranularMenuKeyDown}
                 className="absolute left-0 z-30 mt-2 w-[28rem] max-w-[85vw] rounded-lg border border-border/80 bg-surface p-3 shadow-lg"
               >
                   <div className="mb-2 flex items-start justify-between gap-3">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-                        Specific source scope
+                        {t("contextBar.specificSourceScope", "Specific source scope")}
                       </p>
                       <p className="text-xs text-text-muted">
-                        Choose exact docs or notes. Leave this empty to search all items inside selected
-                        categories.
+                        {t(
+                          "contextBar.specificSourceDescription",
+                          "Choose exact docs or notes. Leave this empty to search all items inside selected categories."
+                        )}
                       </p>
                     </div>
                     <button
@@ -690,7 +1004,7 @@ export function KnowledgeContextBar({
                       onClick={clearSpecificSources}
                       className="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text transition-colors"
                     >
-                      Use all
+                      {t("contextBar.useAll", "Use all")}
                     </button>
                   </div>
 
@@ -705,7 +1019,7 @@ export function KnowledgeContextBar({
                           : "text-text hover:bg-surface2"
                       )}
                     >
-                      Documents & Media ({mediaOptions.length})
+                      {t("contextBar.documentsAndMedia", "Documents & Media")} ({mediaOptions.length})
                     </button>
                     <button
                       type="button"
@@ -717,7 +1031,7 @@ export function KnowledgeContextBar({
                           : "text-text hover:bg-surface2"
                       )}
                     >
-                      Notes ({noteOptions.length})
+                      {t("contextBar.notes", "Notes")} ({noteOptions.length})
                     </button>
                     <button
                       type="button"
@@ -727,25 +1041,102 @@ export function KnowledgeContextBar({
                       }}
                       className="ml-auto inline-flex h-7 items-center rounded-md px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text transition-colors"
                     >
-                      Reload
+                      {t("contextBar.reload", "Reload")}
                     </button>
                   </div>
 
                   <label className="mb-2 flex h-9 items-center gap-2 rounded-md border border-border bg-surface2/70 px-2">
                     <Search className="h-3.5 w-3.5 text-text-muted" />
                     <input
+                      ref={granularSearchInputRef}
                       type="text"
                       value={granularQuery}
                       onChange={(event) => setGranularQuery(event.target.value)}
-                      placeholder={`Filter ${granularTab === "media" ? "docs" : "notes"} by title`}
+                      placeholder={
+                        granularTab === "media"
+                          ? t("contextBar.filterDocsPlaceholder", "Filter docs by title")
+                          : t("contextBar.filterNotesPlaceholder", "Filter notes by title")
+                      }
                       className="w-full bg-transparent text-[11px] text-text outline-none placeholder:text-text-muted"
                     />
                   </label>
 
+                  <div className="mb-2 grid gap-2 sm:grid-cols-3">
+                    <label className="text-[11px] font-medium text-text-muted">
+                      {t("contextBar.sourceStatus", "Source status")}
+                      <select
+                        aria-label={t("contextBar.sourceStatus", "Source status")}
+                        value={granularStatusFilter}
+                        onChange={(event) => setGranularStatusFilter(event.target.value)}
+                        className="mt-1 h-8 w-full rounded-md border border-border bg-surface2 px-2 text-[11px] text-text outline-none focus:border-primary"
+                      >
+                        <option value="all">{t("contextBar.allStatuses", "All statuses")}</option>
+                        <option value="ready">{READY_STATE_LABEL}</option>
+                        <option value="indexing">{t("contextBar.indexing", "Indexing")}</option>
+                        <option value="error">{ERROR_STATE_LABEL}</option>
+                        <option value="unavailable">{UNAVAILABLE_STATE_LABEL}</option>
+                      </select>
+                    </label>
+
+                    <label className="text-[11px] font-medium text-text-muted">
+                      {t("contextBar.recentImports", "Recent imports")}
+                      <select
+                        aria-label={t("contextBar.recentImports", "Recent imports")}
+                        value={granularRecentFilter}
+                        onChange={(event) => setGranularRecentFilter(event.target.value)}
+                        className="mt-1 h-8 w-full rounded-md border border-border bg-surface2 px-2 text-[11px] text-text outline-none focus:border-primary"
+                      >
+                        <option value="all">{t("contextBar.allDates", "All dates")}</option>
+                        <option value="recent">{t("contextBar.recentImports", "Recent imports")}</option>
+                      </select>
+                    </label>
+
+                    <label className="text-[11px] font-medium text-text-muted">
+                      {t("contextBar.workspaceScope", "Workspace scope")}
+                      <select
+                        aria-label={t("contextBar.workspaceScope", "Workspace scope")}
+                        value={granularWorkspaceFilter}
+                        onChange={(event) => setGranularWorkspaceFilter(event.target.value)}
+                        className="mt-1 h-8 w-full rounded-md border border-border bg-surface2 px-2 text-[11px] text-text outline-none focus:border-primary"
+                      >
+                        <option value="">{t("contextBar.noWorkspaceScope", "No workspace scope")}</option>
+                        {workspaceOptions.map((workspace) => (
+                          <option key={workspace.id} value={workspace.id}>
+                            {workspace.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={selectVisibleSpecificSources}
+                      className="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text transition-colors"
+                    >
+                      {t("contextBar.selectVisible", "Select visible")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearVisibleSpecificSources}
+                      className="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text transition-colors"
+                    >
+                      {t("contextBar.clearVisible", "Clear visible")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={selectRecentSpecificSources}
+                      className="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text transition-colors"
+                    >
+                      {t("contextBar.selectRecentImports", "Select recent imports")}
+                    </button>
+                  </div>
+
                   {granularLoading ? (
                     <div className="flex items-center justify-center gap-2 rounded-md border border-border/80 bg-surface2/60 py-8 text-xs text-text-muted">
                       <LoaderCircle className="h-4 w-4 animate-spin" />
-                      Loading available sources...
+                      {t("contextBar.loadingAvailableSources", "Loading available sources...")}
                     </div>
                   ) : null}
 
@@ -759,7 +1150,9 @@ export function KnowledgeContextBar({
                     <div className="max-h-64 overflow-y-auto rounded-md border border-border/80 bg-surface2/40">
                       {activeGranularOptions.length === 0 ? (
                         <p className="px-3 py-6 text-center text-xs text-text-muted">
-                          No matching {granularTab === "media" ? "documents" : "notes"}.
+                          {granularTab === "media"
+                            ? t("contextBar.noMatchingDocuments", "No matching documents.")
+                            : t("contextBar.noMatchingNotes", "No matching notes.")}
                         </p>
                       ) : (
                         <ul className="divide-y divide-border" role="list">
@@ -792,7 +1185,13 @@ export function KnowledgeContextBar({
                                   <span className="min-w-0 flex-1">
                                     <span className="block truncate text-text">{option.label}</span>
                                     <span className="block text-[11px] text-text-muted">
-                                      {option.meta ? `${option.meta} • ` : ""}ID: {option.id}
+                                      {[
+                                        t("contextBar.itemId", {
+                                          id: option.id,
+                                          defaultValue: `ID: ${option.id}`,
+                                        }),
+                                        option.meta,
+                                      ].filter(Boolean).join(" • ")}
                                     </span>
                                   </span>
                                 </label>
@@ -928,6 +1327,11 @@ export function KnowledgeContextBar({
           menuAlign="right"
         />
 
+        <p className="basis-full text-[11px] text-text-subtle">
+          Queries stay on your tldw server unless web fallback is enabled.
+          When enabled, fallback uses your configured server default provider.
+        </p>
+
         <Popover
           trigger="click"
           open={profileMenuOpen}
@@ -936,6 +1340,9 @@ export function KnowledgeContextBar({
             if (!open) {
               setProfileSaveMode(false)
               setProfileNameInput("")
+              setProfileTransferMode("none")
+              setProfileImportInput("")
+              setProfileImportError(null)
             }
           }}
           placement="topLeft"
@@ -944,11 +1351,14 @@ export function KnowledgeContextBar({
               id="knowledge-profile-menu"
               role="menu"
               aria-label="Saved search profiles"
-              className="w-60"
+              className="w-72"
             >
               <div className="mb-1.5 px-1 text-xs font-semibold text-text-muted">
                 Saved Profiles
               </div>
+              <p className="mb-2 rounded-md border border-border/70 bg-surface2/60 px-2 py-1.5 text-[11px] leading-snug text-text-muted">
+                Saved locally in this browser. Export includes selected source IDs and web fallback state; copied exports cannot be revoked.
+              </p>
               {savedProfiles.length === 0 && !profileSaveMode ? (
                 <p className="px-2 py-3 text-center text-[11px] text-text-muted">
                   No saved profiles yet.
@@ -987,7 +1397,87 @@ export function KnowledgeContextBar({
                   </button>
                 </div>
               ))}
+              {profileTransferMode === "export" ? (
+                <div className="mt-1.5 rounded-md border border-border/80 bg-surface2/40 p-2">
+                  <p className="mb-1 text-[11px] leading-snug text-text-muted">
+                    Export includes selected source IDs and web fallback state, not source contents or credentials. Copied exports cannot be revoked.
+                  </p>
+                  <textarea
+                    aria-label="Exported profile JSON"
+                    readOnly
+                    value={exportedProfilesJson}
+                    className="h-24 w-full resize-none rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-[10px] text-text outline-none"
+                  />
+                </div>
+              ) : null}
+              {profileTransferMode === "import" ? (
+                <div className="mt-1.5 rounded-md border border-border/80 bg-surface2/40 p-2">
+                  <label className="block text-[11px] font-medium text-text-muted">
+                    Profile import JSON
+                    <span className="block font-normal leading-snug">
+                      Importing stores the profile locally. Server access rules still control whether selected sources can be used.
+                    </span>
+                    <textarea
+                      aria-label="Profile import JSON"
+                      value={profileImportInput}
+                      onChange={(event) => {
+                        setProfileImportInput(event.target.value)
+                        setProfileImportError(null)
+                      }}
+                      className="mt-1 h-24 w-full resize-none rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-[10px] text-text outline-none focus:border-primary"
+                    />
+                  </label>
+                  {profileImportError ? (
+                    <p className="mt-1 text-[11px] text-danger">{profileImportError}</p>
+                  ) : null}
+                  <div className="mt-1.5 flex justify-end gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileTransferMode("none")
+                        setProfileImportInput("")
+                        setProfileImportError(null)
+                      }}
+                      className="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={importProfiles}
+                      disabled={!profileImportInput.trim()}
+                      className="inline-flex h-7 items-center rounded-md bg-primary px-2 text-[11px] font-medium text-white disabled:opacity-50 hover:bg-primary/90 transition-colors"
+                    >
+                      Import
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               <div className="mt-1 border-t border-border/60 pt-1.5">
+                <div className="mb-1.5 grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfileSaveMode(false)
+                      setProfileTransferMode("export")
+                    }}
+                    disabled={savedProfiles.length === 0}
+                    className="rounded-md border border-border px-2 py-1.5 text-left text-xs text-text-muted hover:bg-surface2 hover:text-text disabled:opacity-50 disabled:hover:bg-transparent transition-colors"
+                  >
+                    Export profiles
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfileSaveMode(false)
+                      setProfileImportError(null)
+                      setProfileTransferMode("import")
+                    }}
+                    className="rounded-md border border-border px-2 py-1.5 text-left text-xs text-text-muted hover:bg-surface2 hover:text-text transition-colors"
+                  >
+                    Import profiles
+                  </button>
+                </div>
                 {profileSaveMode ? (
                   <div className="flex items-center gap-1.5 px-1">
                     <input
@@ -1020,6 +1510,7 @@ export function KnowledgeContextBar({
                     type="button"
                     onClick={() => {
                       if (savedProfiles.length >= MAX_SAVED_PROFILES) return
+                      setProfileTransferMode("none")
                       setProfileSaveMode(true)
                     }}
                     disabled={savedProfiles.length >= MAX_SAVED_PROFILES}

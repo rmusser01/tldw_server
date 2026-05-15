@@ -361,10 +361,12 @@ export const Header: React.FC<Props> = ({
         notificationCount={notificationCount}
         onOpenNotifications={onOpenNotifications}
       />
-      <TtsClipsDrawer
-        open={ttsClipsOpen}
-        onClose={() => setTtsClipsOpen(false)}
-      />
+      {ttsClipsOpen ? (
+        <TtsClipsDrawer
+          open={ttsClipsOpen}
+          onClose={() => setTtsClipsOpen(false)}
+        />
+      ) : null}
       <Modal
         open={shareModalOpen}
         onCancel={() => setShareModalOpen(false)}

@@ -17,6 +17,7 @@ const severityColor: Record<string, string> = {
 
 export const CategoryPicker: React.FC<CategoryPickerProps> = ({ value, onChange, disabled }) => {
   const [customInput, setCustomInput] = React.useState("")
+  const customInputId = React.useId()
   const selected = new Set(value)
 
   const toggle = (cat: string) => {
@@ -45,6 +46,7 @@ export const CategoryPicker: React.FC<CategoryPickerProps> = ({ value, onChange,
                 type="button"
                 disabled={disabled}
                 onClick={() => toggle(cat.value)}
+                aria-pressed={isSelected}
                 className={`
                   text-left px-3 py-2 rounded-lg border text-sm transition-all
                   ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:border-blue-400"}
@@ -68,8 +70,12 @@ export const CategoryPicker: React.FC<CategoryPickerProps> = ({ value, onChange,
           )
         })}
       </div>
-      <div className="flex gap-2 mt-3">
+      <div className="flex flex-col gap-2 mt-3 sm:flex-row">
+        <label htmlFor={customInputId} className="sr-only">
+          Custom category
+        </label>
         <input
+          id={customInputId}
           type="text"
           placeholder="Add custom category..."
           value={customInput}

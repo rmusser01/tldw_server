@@ -1,5 +1,5 @@
 /**
- * Page Object for Workspace Playground workflow coverage
+ * Page Object for Research Studio workflow coverage
  */
 import { type Locator, type Page, expect } from "@playwright/test"
 import { dispatchKeyboardShortcut, waitForConnection } from "../helpers"
@@ -76,7 +76,7 @@ export class WorkspacePlaygroundPage {
   }
 
   async goto(): Promise<void> {
-    await this.page.goto("/workspace-playground", {
+    await this.page.goto("/research-studio", {
       waitUntil: "domcontentloaded"
     })
     await waitForConnection(this.page).catch(() => {})

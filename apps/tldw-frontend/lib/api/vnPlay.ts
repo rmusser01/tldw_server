@@ -1,9 +1,19 @@
 import { apiClient } from '@web/lib/api';
 import type {
   VNPlayBranch,
+  VNPlayBranchNavigationResponse,
+  VNPlayBranchRestoreRequest,
+  VNPlayBranchRestoreResponse,
   VNPlayCheckpoint,
   VNPlayCheckpointCreate,
   VNPlayEvent,
+  VNPlayGenerationActionRequest,
+  VNPlayGenerationDebugQuery,
+  VNPlayGenerationHistoryItem,
+  VNPlayGenerationHistoryResponse,
+  VNPlayGenerationListQuery,
+  VNPlayGenerationRevisionDebugResponse,
+  VNPlayGenerationRevisionListResponse,
   VNPlayRestoreRequest,
   VNPlayRetryTurnRequest,
   VNPlaySession,
@@ -15,7 +25,13 @@ import type {
   VNPlayTurnResponse,
 } from '@web/types/vn-play';
 
-const VN_PLAY_BASE = '/vn-play';
+const VN_PLAY_BASE = '/vn/vn-play';
+
+type QueryParams = Record<string, string | number | boolean | null | undefined>;
+
+function toQueryParams<T extends object>(query: T): QueryParams {
+  return { ...query } as QueryParams;
+}
 
 export function createVNPlaySession(request: VNPlaySessionCreate): Promise<VNPlaySession> {
   return apiClient.post(`${VN_PLAY_BASE}/sessions`, request);
@@ -24,7 +40,7 @@ export function createVNPlaySession(request: VNPlaySessionCreate): Promise<VNPla
 export function listVNPlaySetupOptions(
   query: VNPlaySetupOptionsQuery = {}
 ): Promise<VNPlaySetupOptionsResponse> {
-  return apiClient.get(`${VN_PLAY_BASE}/setup-options`, { params: query });
+  return apiClient.get(`${VN_PLAY_BASE}/setup-options`, { params: toQueryParams(query) });
 }
 
 export function listVNPlaySessions(): Promise<VNPlaySession[]> {
@@ -84,4 +100,105 @@ export function restoreVNPlaySession(
 
 export function listVNPlayBranches(sessionId: number): Promise<VNPlayBranch[]> {
   return apiClient.get(`${VN_PLAY_BASE}/sessions/${sessionId}/branches`);
+}
+
+export function getVNPlayBranchNavigation(
+  sessionId: number
+): Promise<VNPlayBranchNavigationResponse> {
+  return apiClient.get(`${VN_PLAY_BASE}/sessions/${sessionId}/branch-navigation`);
+}
+
+export function restoreVNPlayBranch(
+  sessionId: number,
+  branchId: number,
+  request: VNPlayBranchRestoreRequest
+): Promise<VNPlayBranchRestoreResponse> {
+  return apiClient.post(`${VN_PLAY_BASE}/sessions/${sessionId}/branches/${branchId}/restore`, request);
+}
+
+export function listVNPlayGenerations(
+  sessionId: number,
+  query: VNPlayGenerationListQuery = {}
+): Promise<VNPlayGenerationHistoryResponse> {
+  return apiClient.get(`${VN_PLAY_BASE}/sessions/${sessionId}/script/generations`, {
+    params: toQueryParams(query),
+  });
+}
+
+export function listVNPlayGenerationRevisions(
+  sessionId: number,
+  generationId: number,
+  query: Pick<VNPlayGenerationListQuery, 'limit' | 'offset' | 'status' | 'source'> = {}
+): Promise<VNPlayGenerationRevisionListResponse> {
+  return apiClient.get(
+    `${VN_PLAY_BASE}/sessions/${sessionId}/script/generations/${generationId}/revisions`,
+    { params: toQueryParams(query) }
+  );
+}
+
+export function getVNPlayGenerationRevision(
+  sessionId: number,
+  generationId: number,
+  revisionId: number
+): Promise<VNPlayGenerationHistoryItem> {
+  return apiClient.get(
+    `${VN_PLAY_BASE}/sessions/${sessionId}/script/generations/${generationId}/revisions/${revisionId}`
+  );
+}
+
+export function getVNPlayGenerationRevisionDebug(
+  sessionId: number,
+  generationId: number,
+  revisionId: number,
+  query: VNPlayGenerationDebugQuery = {}
+): Promise<VNPlayGenerationRevisionDebugResponse> {
+  return apiClient.get(
+    `${VN_PLAY_BASE}/sessions/${sessionId}/script/generations/${generationId}/revisions/${revisionId}/debug`,
+    { params: toQueryParams(query) }
+  );
+}
+
+export function confirmVNPlayGenerationRequest(
+  sessionId: number,
+  generationRequestId: number,
+  request: VNPlayGenerationActionRequest
+): Promise<VNPlayTurnResponse> {
+  return apiClient.post(
+    `${VN_PLAY_BASE}/sessions/${sessionId}/script/generation-requests/${generationRequestId}/confirm`,
+    request
+  );
+}
+
+export function cancelVNPlayGenerationRequest(
+  sessionId: number,
+  generationRequestId: number,
+  request: VNPlayGenerationActionRequest
+): Promise<VNPlayTurnResponse> {
+  return apiClient.post(
+    `${VN_PLAY_BASE}/sessions/${sessionId}/script/generation-requests/${generationRequestId}/cancel`,
+    request
+  );
+}
+
+export function regenerateVNPlayGeneration(
+  sessionId: number,
+  generationId: number,
+  request: VNPlayGenerationActionRequest
+): Promise<VNPlayTurnResponse> {
+  return apiClient.post(
+    `${VN_PLAY_BASE}/sessions/${sessionId}/script/generations/${generationId}/regenerate`,
+    request
+  );
+}
+
+export function activateVNPlayGenerationRevision(
+  sessionId: number,
+  generationId: number,
+  revisionId: number,
+  request: VNPlayGenerationActionRequest
+): Promise<VNPlayTurnResponse> {
+  return apiClient.post(
+    `${VN_PLAY_BASE}/sessions/${sessionId}/script/generations/${generationId}/revisions/${revisionId}/activate`,
+    request
+  );
 }

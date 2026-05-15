@@ -23,6 +23,10 @@ import {
   Sparkles,
   Users,
 } from "lucide-react"
+import {
+  MODERATION_REVIEW_PATH,
+  MODERATION_RULES_PATH
+} from "@/routes/route-paths"
 
 export type NavGroupKey = "server" | "knowledge" | "workspace" | "about"
 
@@ -200,11 +204,18 @@ export const SETTINGS_ROUTE_NAV_ITEMS: SettingsNavRouteMeta[] = [
     order: 1
   },
   {
-    path: "/moderation-playground",
+    path: MODERATION_REVIEW_PATH,
     group: "server",
-    labelToken: "option:moderationPlayground.nav",
-    icon: ShieldCheck,
+    labelToken: "option:moderationReview.nav",
+    icon: ClipboardList,
     order: 10
+  },
+  {
+    path: MODERATION_RULES_PATH,
+    group: "server",
+    labelToken: "option:moderationRules.nav",
+    icon: ShieldCheck,
+    order: 10.1
   },
   {
     path: "/settings/family-guardrails",

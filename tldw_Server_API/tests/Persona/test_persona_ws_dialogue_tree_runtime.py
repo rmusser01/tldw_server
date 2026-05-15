@@ -12,7 +12,12 @@ from starlette.datastructures import State
 
 from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 from tldw_Server_API.app.core.Persona.dialogue_tree_scorers import ScoreResult, ScoreSeverity
-from tldw_Server_API.app.core.Persona.runtime_explorer import RuntimeExplorerConfig
+from tldw_Server_API.app.core.Persona.runtime_explorer import (
+    ExplorationFallback,
+    RuntimeBudgetUsage,
+    RuntimeExplorationResult,
+    RuntimeExplorerConfig,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -58,11 +63,28 @@ def _mock_persona_ws_runtime(monkeypatch):
 
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
     monkeypatch.setattr(persona_ep, "is_persona_enabled", lambda: True)
+    fastapi_app.dependency_overrides.clear()
     if hasattr(fastapi_app.state, "persona_runtime_explorer_provider"):
         delattr(fastapi_app.state, "persona_runtime_explorer_provider")
+    yield
+    fastapi_app.dependency_overrides.clear()
 
 
 def _plan_for_text(text: str, *, session_id: str = "sess_runtime") -> dict:
+    events = _events_for_text(text, session_id=session_id)
+    for event in reversed(events):
+        if event.get("event") == "tool_plan":
+            return event
+    raise AssertionError("Expected tool_plan event")
+
+
+def _events_for_text(text: str, *, session_id: str = "sess_runtime") -> list[dict]:
+    events: list[dict] = []
+
+    def _capture_until_tool_plan(data: dict) -> bool:
+        events.append(data)
+        return data.get("event") == "tool_plan"
+
     with TestClient(fastapi_app) as client:
         with client.websocket_connect("/api/v1/persona/stream") as ws:
             _ = json.loads(ws.receive_text())
@@ -78,7 +100,31 @@ def _plan_for_text(text: str, *, session_id: str = "sess_runtime") -> dict:
                     }
                 )
             )
-            return _recv_until(ws, lambda data: data.get("event") == "tool_plan")
+            _recv_until(ws, _capture_until_tool_plan)
+    return events
+
+
+def _notice_for_text(text: str, *, reason_code: str, session_id: str = "sess_runtime") -> dict:
+    with TestClient(fastapi_app) as client:
+        with client.websocket_connect("/api/v1/persona/stream") as ws:
+            _ = json.loads(ws.receive_text())
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "user_message",
+                        "session_id": session_id,
+                        "text": text,
+                        "use_memory_context": False,
+                        "use_companion_context": False,
+                        "use_persona_state_context": False,
+                    }
+                )
+            )
+            return _recv_until(
+                ws,
+                lambda data: data.get("event") == "notice"
+                and data.get("reason_code") == reason_code,
+            )
 
 
 def test_runtime_explorer_provider_reuses_matching_explorer_instances() -> None:
@@ -127,6 +173,50 @@ def test_runtime_explorer_config_clamps_numeric_settings(monkeypatch) -> None:
     assert config.max_provider_calls == 100
     assert config.timeout_ms == 100
     assert config.max_tokens == 16
+
+
+def test_runtime_explorer_diagnostics_payload_defaults_missing_budget() -> None:
+    result = RuntimeExplorationResult(
+        selected_candidate=None,
+        fallback=ExplorationFallback.SOFT_EXISTING_BEHAVIOR,
+        safe_denial=None,
+        budget=None,  # type: ignore[arg-type]
+        diagnostics={"reason": "candidate_generation_timeout", "error_type": "TimeoutError"},
+    )
+
+    payload = persona_ep._runtime_explorer_diagnostics_payload(result)
+
+    assert payload["provider_calls"] == 0
+    assert payload["candidates_considered"] == 0
+    assert payload["hard_prunes"] == 0
+    assert payload["soft_prunes"] == 0
+    assert payload["elapsed_ms"] == 0
+    assert payload["reason"] == "candidate_generation_timeout"
+    assert payload["error_type"] == "TimeoutError"
+
+
+def test_runtime_explorer_diagnostics_payload_defaults_null_budget_fields() -> None:
+    result = RuntimeExplorationResult(
+        selected_candidate=None,
+        fallback=ExplorationFallback.SOFT_EXISTING_BEHAVIOR,
+        safe_denial=None,
+        budget=RuntimeBudgetUsage(
+            provider_calls=None,  # type: ignore[arg-type]
+            candidates_considered=None,  # type: ignore[arg-type]
+            hard_prunes=None,  # type: ignore[arg-type]
+            soft_prunes=None,  # type: ignore[arg-type]
+            elapsed_ms=None,  # type: ignore[arg-type]
+        ),
+        diagnostics={"reason": "candidate_generation_timeout"},
+    )
+
+    payload = persona_ep._runtime_explorer_diagnostics_payload(result)
+
+    assert payload["provider_calls"] == 0
+    assert payload["candidates_considered"] == 0
+    assert payload["hard_prunes"] == 0
+    assert payload["soft_prunes"] == 0
+    assert payload["elapsed_ms"] == 0
 
 
 def test_runtime_explorer_provider_context_is_minimized_and_redacted(monkeypatch) -> None:
@@ -254,6 +344,44 @@ def test_runtime_explorer_default_generator_can_select_safe_alternative(monkeypa
     assert plan["steps"][0]["policy"]["allow"] is True
 
 
+def test_runtime_explorer_boolean_safe_denial_uses_default_message(monkeypatch) -> None:
+    class _FakeExplorer:
+        def explore(self, _context: dict) -> RuntimeExplorationResult:
+            return RuntimeExplorationResult(
+                selected_candidate=None,
+                fallback=ExplorationFallback.HARD_SAFE_DENIAL,
+                safe_denial=True,  # type: ignore[arg-type]
+                budget=RuntimeBudgetUsage(),
+            )
+
+    class _FakeProvider:
+        def get(self, _config: RuntimeExplorerConfig) -> _FakeExplorer:
+            return _FakeExplorer()
+
+    monkeypatch.setattr(
+        persona_ep,
+        "_get_persona_runtime_explorer_config",
+        lambda: RuntimeExplorerConfig(enabled=True, max_provider_calls=1),
+        raising=False,
+    )
+
+    plan = persona_ep._apply_persona_runtime_explorer_to_plan(
+        base_plan={"steps": []},
+        user_message="unsafe request",
+        session_id="sess_runtime_bool_safe_denial",
+        persona_id="persona-default",
+        runtime_mode="global",
+        memory_context=[],
+        persona_state_fields=[],
+        companion_usage={},
+        persona_exemplar_selection={},
+        runtime_explorer_provider=_FakeProvider(),  # type: ignore[arg-type]
+    )
+
+    assert plan["steps"][0]["args"]["text"] == RuntimeExplorerConfig().safe_denial_text
+    assert plan["steps"][0]["args"]["text"] != "True"
+
+
 def test_runtime_explorer_disabled_preserves_existing_plan_without_debug_metadata(monkeypatch) -> None:
     monkeypatch.setattr(
         persona_ep,
@@ -268,6 +396,95 @@ def test_runtime_explorer_disabled_preserves_existing_plan_without_debug_metadat
     assert plan["steps"][0]["tool"] == "rag_search"
     assert "runtime_explorer" not in plan
     assert "candidate" not in json.dumps(plan).lower()
+
+
+def test_runtime_explorer_disabled_emits_no_runtime_diagnostic_notice(monkeypatch) -> None:
+    monkeypatch.setattr(
+        persona_ep,
+        "_get_persona_runtime_explorer_config",
+        lambda: RuntimeExplorerConfig(enabled=False),
+        raising=False,
+    )
+
+    events = _events_for_text("find notes about runtime explorer", session_id="sess_runtime_disabled_notice")
+
+    assert not [
+        event
+        for event in events
+        if event.get("event") == "notice"
+        and str(event.get("reason_code") or "").startswith("RUNTIME_EXPLORER_")
+    ]
+
+
+def test_runtime_explorer_fallback_notice_is_bounded_and_trace_safe(monkeypatch) -> None:
+    def _timeout(_context: dict) -> list[dict]:
+        raise TimeoutError("provider token=provider-secret")
+
+    monkeypatch.setattr(
+        persona_ep,
+        "_get_persona_runtime_explorer_config",
+        lambda: RuntimeExplorerConfig(enabled=True, timeout_ms=1, max_provider_calls=1),
+        raising=False,
+    )
+    monkeypatch.setattr(persona_ep, "_persona_runtime_candidate_generator", _timeout, raising=False)
+
+    notice = _notice_for_text(
+        "Authorization: Bearer user-secret find runtime notes",
+        reason_code="RUNTIME_EXPLORER_FALLBACK",
+        session_id="sess_runtime_fallback_notice",
+    )
+
+    diagnostics = notice["runtime_explorer"]
+    serialized_notice = json.dumps(notice, sort_keys=True)
+    assert diagnostics["fallback"] == "soft_existing_behavior"
+    assert diagnostics["reason"] == "candidate_generation_timeout"
+    assert diagnostics["error_type"] == "TimeoutError"
+    assert diagnostics["provider_calls"] == 1
+    assert "user-secret" not in serialized_notice
+    assert "provider-secret" not in serialized_notice
+
+
+def test_runtime_explorer_circuit_open_notice_has_distinct_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify circuit-open runtime fallback emits a distinct websocket notice."""
+    class _FakeExplorer:
+        def explore(self, _context: dict) -> RuntimeExplorationResult:
+            return RuntimeExplorationResult(
+                selected_candidate=None,
+                fallback=ExplorationFallback.CIRCUIT_OPEN,
+                safe_denial=None,
+                budget=RuntimeBudgetUsage(),
+                diagnostics={"reason": "runtime_explorer_circuit_open"},
+                circuit_open=True,
+            )
+
+    class _FakeProvider:
+        def get(self, _config: RuntimeExplorerConfig) -> _FakeExplorer:
+            return _FakeExplorer()
+
+    monkeypatch.setattr(
+        persona_ep,
+        "_get_persona_runtime_explorer_config",
+        lambda: RuntimeExplorerConfig(enabled=True),
+        raising=False,
+    )
+    fastapi_app.dependency_overrides[persona_ep.get_persona_runtime_explorer_provider] = (
+        lambda: _FakeProvider()
+    )
+
+    notice = _notice_for_text(
+        "find runtime notes while circuit is open",
+        reason_code="RUNTIME_EXPLORER_CIRCUIT_OPEN",
+        session_id="sess_runtime_circuit_open_notice",
+    )
+
+    diagnostics = notice["runtime_explorer"]
+    assert diagnostics["fallback"] == "circuit_open"
+    assert diagnostics["reason"] == "runtime_explorer_circuit_open"
+    assert diagnostics["provider_calls"] == 0
+    assert diagnostics["circuit_open"] is True
+    assert "temporarily" in str(notice.get("message", "")).lower()
 
 
 def test_runtime_explorer_enabled_selects_highest_scoring_safe_plan(monkeypatch) -> None:

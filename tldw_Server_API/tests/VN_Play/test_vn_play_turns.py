@@ -1134,6 +1134,58 @@ async def test_branch_restore_rejects_active_turn(
 
 
 @pytest.mark.asyncio
+async def test_branch_restore_recovers_expired_active_turn_lock(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNPlayRepository.initialized(chacha_db)
+    service = VNPlayService(
+        repo=repo,
+        owner_user_id=42,
+        adapter=InspectingStoryAdapter(repo, owner_user_id=42),
+    )
+    session = create_story_session_with_visible_choice(service, repo)
+    await service.submit_turn(
+        session.id,
+        choice_id="open",
+        client_scene_version=1,
+        idempotency_key="restore-expired-lock-open-turn",
+    )
+    branch = service.list_branches(session.id)[0]
+    stale_turn = repo.create_turn_request(
+        session_id=session.id,
+        owner_user_id=42,
+        idempotency_key="restore-expired-lock-marker",
+        request_payload_hash="restore-expired-lock-marker",
+        base_scene_version=2,
+        status="model_calling",
+    )
+    repo.update_turn_request(
+        stale_turn["id"],
+        {"locked_until": "2000-01-01 00:00:00", "lease_owner": "worker-1"},
+        owner_user_id=42,
+    )
+    repo.update_session(
+        session.id,
+        {"active_turn_request_id": int(stale_turn["id"])},
+        owner_user_id=42,
+    )
+
+    response = service.restore_branch(
+        session.id,
+        branch_id=int(branch["id"]),
+        client_scene_version=2,
+        idempotency_key="restore-expired-lock",
+    )
+
+    assert response["status"] == "completed"
+    assert response["scene_version"] == 3
+    recovered = repo.get_turn_request(stale_turn["id"])
+    assert recovered["status"] == "abandoned"
+    assert recovered["error"] == {"code": "turn_lock_abandoned"}
+    assert service.get_session(session.id).active_turn_request_id is None
+
+
+@pytest.mark.asyncio
 async def test_branch_restore_rejects_active_restore_action(
     chacha_db: CharactersRAGDB,
 ) -> None:
@@ -1409,11 +1461,13 @@ async def test_checkpoint_restore_duplicate_same_key_replays_response(
     first = service.restore_checkpoint(
         ready_session.id,
         int(checkpoint["id"]),
+        client_scene_version=2,
         idempotency_key="checkpoint-replay",
     )
     second = service.restore_checkpoint(
         ready_session.id,
         int(checkpoint["id"]),
+        client_scene_version=2,
         idempotency_key="checkpoint-replay",
     )
 
@@ -1447,6 +1501,7 @@ async def test_checkpoint_restore_same_key_different_checkpoint_conflicts(
     service.restore_checkpoint(
         ready_session.id,
         int(first_checkpoint["id"]),
+        client_scene_version=2,
         idempotency_key="checkpoint-conflict",
     )
 
@@ -1454,6 +1509,7 @@ async def test_checkpoint_restore_same_key_different_checkpoint_conflicts(
         service.restore_checkpoint(
             ready_session.id,
             int(second_checkpoint["id"]),
+            client_scene_version=2,
             idempotency_key="checkpoint-conflict",
         )
 
@@ -1480,6 +1536,7 @@ async def test_checkpoint_restore_advances_scene_version_by_one(
     response = service.restore_checkpoint(
         ready_session.id,
         int(checkpoint["id"]),
+        client_scene_version=2,
         idempotency_key="checkpoint-version",
     )
 
@@ -1776,13 +1833,146 @@ async def test_stale_scene_version_conflicts(
             idempotency_key="second",
         )
 
+    with pytest.raises(VNPlayConflictError, match="stale_scene_version"):
+        await service.submit_turn(
+            ready_session.id,
+            input_text="Second",
+            client_scene_version=0,
+            idempotency_key="second",
+        )
+
+
+@pytest.mark.asyncio
+async def test_submit_turn_recovers_expired_active_turn_lock(
+    service: VNPlayService,
+    ready_session,
+) -> None:
+    repo = service.repo
+    stale_turn = repo.create_turn_request(
+        session_id=ready_session.id,
+        owner_user_id=42,
+        idempotency_key="stale-active-turn",
+        request_payload_hash="stale-active-turn",
+        base_scene_version=0,
+        status="model_calling",
+    )
+    repo.update_turn_request(
+        stale_turn["id"],
+        {"locked_until": "2000-01-01 00:00:00", "lease_owner": "worker-1"},
+        owner_user_id=42,
+    )
+    repo.update_session(
+        ready_session.id,
+        {"active_turn_request_id": int(stale_turn["id"])},
+        owner_user_id=42,
+    )
+
+    response = await service.submit_turn(
+        ready_session.id,
+        input_text="After crash",
+        client_scene_version=0,
+        idempotency_key="after-crash",
+    )
+
+    assert response.status == "completed"
+    recovered = repo.get_turn_request(stale_turn["id"])
+    assert recovered["status"] == "abandoned"
+    assert recovered["error"] == {"code": "turn_lock_abandoned"}
+    session = service.get_session(ready_session.id)
+    assert session.scene_version == 1
+    assert session.active_turn_request_id is None
+
+
+@pytest.mark.asyncio
+async def test_submit_turn_recovers_expired_lock_before_idempotency_replay(
+    service: VNPlayService,
+    ready_session,
+) -> None:
+    repo = service.repo
+    stale_turn = repo.create_turn_request(
+        session_id=ready_session.id,
+        owner_user_id=42,
+        idempotency_key="same-key",
+        request_payload_hash="stale-active-turn",
+        base_scene_version=0,
+        status="model_calling",
+    )
+    repo.update_turn_request(
+        stale_turn["id"],
+        {"locked_until": "2000-01-01 00:00:00", "lease_owner": "worker-1"},
+        owner_user_id=42,
+    )
+    repo.update_session(
+        ready_session.id,
+        {"active_turn_request_id": int(stale_turn["id"])},
+        owner_user_id=42,
+    )
+
+    with pytest.raises(VNPlayConflictError, match="idempotency_key_conflict"):
+        await service.submit_turn(
+            ready_session.id,
+            input_text="After crash",
+            client_scene_version=0,
+            idempotency_key="same-key",
+        )
+
+    recovered = repo.get_turn_request(stale_turn["id"])
+    assert recovered["status"] == "abandoned"
+    assert recovered["error"] == {"code": "turn_lock_abandoned"}
+    assert service.get_session(ready_session.id).active_turn_request_id is None
+
+
+@pytest.mark.asyncio
+async def test_submit_turn_preserves_fresh_active_turn_lock(
+    service: VNPlayService,
+    ready_session,
+) -> None:
+    repo = service.repo
+    fresh_turn = repo.create_turn_request(
+        session_id=ready_session.id,
+        owner_user_id=42,
+        idempotency_key="fresh-active-turn",
+        request_payload_hash="fresh-active-turn",
+        base_scene_version=0,
+        status="model_calling",
+    )
+    repo.update_turn_request(
+        fresh_turn["id"],
+        {"locked_until": "2999-01-01 00:00:00", "lease_owner": "worker-1"},
+        owner_user_id=42,
+    )
+    repo.update_session(
+        ready_session.id,
+        {"active_turn_request_id": int(fresh_turn["id"])},
+        owner_user_id=42,
+    )
+
+    with pytest.raises(VNPlayConflictError, match="turn_in_progress"):
+        await service.submit_turn(
+            ready_session.id,
+            input_text="Still busy",
+            client_scene_version=0,
+            idempotency_key="still-busy",
+        )
+
+    assert repo.get_turn_request(fresh_turn["id"])["status"] == "model_calling"
+    assert service.get_session(ready_session.id).active_turn_request_id == fresh_turn["id"]
+
 
 @pytest.mark.asyncio
 async def test_model_failure_marks_turn_failed_and_clears_lock(
     service_with_failing_adapter: VNPlayService,
     failing_ready_session,
 ) -> None:
-    with pytest.raises(VNPlayTurnError):
+    with pytest.raises(VNPlayTurnError, match="model_failed"):
+        await service_with_failing_adapter.submit_turn(
+            failing_ready_session.id,
+            input_text="Break",
+            client_scene_version=0,
+            idempotency_key="fail-1",
+        )
+
+    with pytest.raises(VNPlayTurnError, match="model_failed"):
         await service_with_failing_adapter.submit_turn(
             failing_ready_session.id,
             input_text="Break",

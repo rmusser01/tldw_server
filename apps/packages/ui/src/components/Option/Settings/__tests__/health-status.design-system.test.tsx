@@ -21,6 +21,11 @@ const connectionStateMock = vi.hoisted(() => ({
   lastStatusCode: null as number | null,
   lastError: null as string | null
 }))
+const designSystemLabels = vi.hoisted(() => ({
+  ready: "Registry Ready",
+  degraded: "Registry Degraded",
+  loading: "Registry Loading"
+}))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -85,6 +90,33 @@ vi.mock("@/hooks/useServerCapabilities", () => ({
   })
 }))
 
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+
+        if (key === "ready") {
+          return { ...state, label: designSystemLabels.ready }
+        }
+
+        if (key === "degraded") {
+          return { ...state, label: designSystemLabels.degraded }
+        }
+
+        if (key === "loading") {
+          return { ...state, label: designSystemLabels.loading }
+        }
+
+        return state
+      }
+    )
+  }
+})
+
 const mockMatchMedia = () => {
   Object.defineProperty(window, "matchMedia", {
     writable: true,
@@ -133,8 +165,11 @@ describe("HealthStatus design-system states", () => {
     await renderHealth()
 
     await waitFor(() => {
-      expect(screen.getAllByText("Ready").length).toBeGreaterThan(0)
+      expect(screen.getAllByText(designSystemLabels.ready).length).toBeGreaterThan(0)
     })
+    expect(
+      screen.getByRole("group", { name: `Core API: ${designSystemLabels.ready}` })
+    ).toBeInTheDocument()
     expect(screen.getAllByText("/api/v1/health").length).toBeGreaterThan(0)
     expect(screen.getAllByText(/Raw response from/).length).toBeGreaterThan(0)
   })
@@ -151,9 +186,22 @@ describe("HealthStatus design-system states", () => {
     await renderHealth()
 
     await waitFor(() => {
-      expect(screen.getAllByText("Degraded").length).toBeGreaterThan(0)
+      expect(screen.getAllByText(designSystemLabels.degraded).length).toBeGreaterThan(0)
     })
+    expect(
+      screen.getByRole("group", { name: `RAG: ${designSystemLabels.degraded}` })
+    ).toBeInTheDocument()
     expect(screen.getByText(/RAG offline/)).toBeInTheDocument()
+  })
+
+  it("renders Loading through the design-system state registry while checks are pending", async () => {
+    apiSendMock.mockReturnValue(new Promise(() => {}))
+
+    render(<HealthStatus />)
+
+    await waitFor(() => {
+      expect(screen.getAllByText(designSystemLabels.loading).length).toBeGreaterThan(0)
+    })
   })
 
   it("renders Unavailable for unreachable connection callouts", async () => {

@@ -20,6 +20,7 @@ import type {
   PersonaBuddyRenderContext,
   PersonaBuddySummary
 } from "@/types/persona-buddy"
+import { PERSONA_VISUAL_PACK_ACTIVATED_EVENT } from "@/types/persona-visuals"
 import type { PersonaVisualPack } from "@/types/persona-visuals"
 
 import { useBuddyShellRenderContext } from "./BuddyShellRenderContext"
@@ -295,12 +296,22 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     React.useState<PersonaVisualPackLoadStatus>("idle")
   const [visualPackLoadError, setVisualPackLoadError] =
     React.useState<unknown>(null)
+  const [visualPackRefreshNonce, setVisualPackRefreshNonce] = React.useState(0)
   const [visualRenderError, setVisualRenderError] =
     React.useState<PersonaVisualRenderErrorState | null>(null)
   const runtimeOverride = usePersonaVisualRuntimeStore((state) => state.override)
+  const setVisualRuntimeDiagnostics = usePersonaVisualRuntimeStore(
+    (state) => state.setRuntimeDiagnostics
+  )
+  const clearVisualRuntimeDiagnostics = usePersonaVisualRuntimeStore(
+    (state) => state.clearRuntimeDiagnostics
+  )
   const clearExpiredVisualOverride = usePersonaVisualRuntimeStore(
     (state) => state.clearExpired
   )
+  const visualDiagnosticsSourceId = `${root}:${
+    renderContext.surface_id || "unknown"
+  }`
 
   React.useEffect(() => {
     clearExpiredVisualOverride()
@@ -308,6 +319,25 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     const timer = window.setInterval(() => clearExpiredVisualOverride(), 1000)
     return () => window.clearInterval(timer)
   }, [clearExpiredVisualOverride])
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return undefined
+    const handlePackActivated = (event: Event) => {
+      const detail = (event as CustomEvent<{ personaId?: unknown }>).detail
+      const eventPersonaId = String(detail?.personaId ?? "").trim()
+      const activePersonaId = String(resolvedPersona.activePersonaId ?? "").trim()
+      if (eventPersonaId && eventPersonaId === activePersonaId) {
+        setVisualPackRefreshNonce((current) => current + 1)
+      }
+    }
+    window.addEventListener(PERSONA_VISUAL_PACK_ACTIVATED_EVENT, handlePackActivated)
+    return () => {
+      window.removeEventListener(
+        PERSONA_VISUAL_PACK_ACTIVATED_EVENT,
+        handlePackActivated
+      )
+    }
+  }, [resolvedPersona.activePersonaId])
 
   React.useEffect(() => {
     const activePersonaId = String(resolvedPersona.activePersonaId || "").trim()
@@ -348,7 +378,11 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     return () => {
       cancelled = true
     }
-  }, [resolvedPersona.activePersonaId, resolvedPersona.hasTargetPersona])
+  }, [
+    resolvedPersona.activePersonaId,
+    resolvedPersona.hasTargetPersona,
+    visualPackRefreshNonce
+  ])
 
   const buddySummary = resolvedPersona.buddySummary
   const isDormant = resolvedPersona.hasTargetPersona && !buddySummary?.has_buddy
@@ -364,6 +398,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     renderContext.visual_state ??
     resolvePersonaVisualState({
       liveVoiceState: renderContext.live_voice_state,
+      activeToolName: renderContext.active_tool_name,
       activeToolStatus: renderContext.active_tool_status,
       wakeArmed: renderContext.wake_armed,
       recovering:
@@ -390,15 +425,59 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     },
     [visualRenderKey]
   )
-  const visualDiagnostic: PersonaVisualDiagnostic | null =
-    getPrimaryPersonaVisualDiagnostic({
-      pack: visualPack,
+  const visualDiagnostic: PersonaVisualDiagnostic | null = React.useMemo(
+    () =>
+      getPrimaryPersonaVisualDiagnostic({
+        pack: visualPack,
+        visualState,
+        loadStatus: visualPackLoadStatus,
+        loadError: visualPackLoadError,
+        renderError: activeVisualRenderError,
+        includeNoActivePack: visualPackLoadStatus === "loaded"
+      }),
+    [
+      activeVisualRenderError,
+      visualPack,
+      visualPackLoadError,
+      visualPackLoadStatus,
+      visualState
+    ]
+  )
+
+  React.useEffect(() => {
+    const activePersonaId = String(resolvedPersona.activePersonaId || "").trim()
+    if (!resolvedPersona.hasTargetPersona || !activePersonaId) {
+      clearVisualRuntimeDiagnostics(visualDiagnosticsSourceId)
+      return undefined
+    }
+
+    setVisualRuntimeDiagnostics({
+      sourceId: visualDiagnosticsSourceId,
+      personaId: activePersonaId,
+      sessionId: renderContext.live_session_id ?? null,
+      packId: visualPack?.id ?? null,
+      packTitle: visualPack?.title ?? null,
+      packLoadStatus: visualPackLoadStatus,
       visualState,
-      loadStatus: visualPackLoadStatus,
-      loadError: visualPackLoadError,
-      renderError: activeVisualRenderError,
-      includeNoActivePack: visualPackLoadStatus === "loaded"
+      diagnostic: visualDiagnostic,
+      updatedAt: Date.now()
     })
+    return () => {
+      clearVisualRuntimeDiagnostics(visualDiagnosticsSourceId)
+    }
+  }, [
+    clearVisualRuntimeDiagnostics,
+    renderContext.live_session_id,
+    resolvedPersona.activePersonaId,
+    resolvedPersona.hasTargetPersona,
+    setVisualRuntimeDiagnostics,
+    visualDiagnostic,
+    visualDiagnosticsSourceId,
+    visualPack?.id,
+    visualPack?.title,
+    visualPackLoadStatus,
+    visualState
+  ])
   const portalRoot = ensurePortalRoot()
 
   if (!resolvedPersona.hasTargetPersona) {

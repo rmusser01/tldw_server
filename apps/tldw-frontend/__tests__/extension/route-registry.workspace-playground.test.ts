@@ -21,9 +21,9 @@ const extensionRouteRegistrySource = readFileSync(
   "utf8"
 )
 
-describe("extension route registry workspace-playground parity", () => {
-  it("registers /workspace-playground options route", () => {
-    expect(extensionRouteRegistrySource).toMatch(/path:\s*"\/workspace-playground"/)
+describe("extension route registry research studio parity", () => {
+  it("registers /research-studio as the navigation route", () => {
+    expect(extensionRouteRegistrySource).toMatch(/path:\s*"\/research-studio"/)
   })
 
   it("exposes research studio navigation metadata", () => {

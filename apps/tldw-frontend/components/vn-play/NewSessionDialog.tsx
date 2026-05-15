@@ -1,4 +1,5 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { Button } from '@web/components/ui/Button';
 import { Input } from '@web/components/ui/Input';
 import { listVNPlaySetupOptions } from '@web/lib/api/vnPlay';
@@ -9,6 +10,8 @@ import type {
   VNPlaySetupCharacterOption,
   VNPlaySetupEmptyState,
   VNPlaySetupOptionsResponse,
+  VNPlaySetupScriptVersionOption,
+  VNPlaySetupWarningSummary,
 } from '@web/types/vn-play';
 
 export interface NewSessionDialogProps {
@@ -24,6 +27,7 @@ type SelectorMode = 'selectors' | 'manual';
 const SELECT_CLASS =
   'mt-1 block w-full rounded-md border-border bg-bg shadow-sm focus:border-primary focus:ring-primary';
 const EMPTY_ASSET_PACKS: VNPlaySetupAssetPackOption[] = [];
+const EMPTY_SCRIPT_VERSIONS: VNPlaySetupScriptVersionOption[] = [];
 const EMPTY_EMPTY_STATES: VNPlaySetupEmptyState[] = [];
 
 function parsePositiveInteger(value: string): number | null {
@@ -56,32 +60,40 @@ function humanizeValue(value: string): string {
   return value.replace(/_/g, ' ');
 }
 
-function requiresPackAcknowledgement(pack: VNPlaySetupAssetPackOption | null): boolean {
-  return Boolean(pack?.warning_summary.requires_acknowledgement);
+function requiresAcknowledgement(summary: VNPlaySetupWarningSummary | null | undefined): boolean {
+  return Boolean(summary?.requires_acknowledgement);
 }
 
-function acknowledgementWarningCodes(pack: VNPlaySetupAssetPackOption): string[] {
-  const requiredCodes = pack.warning_summary.warnings
-    .filter((warning) => warning.requires_acknowledgement)
-    .map((warning) => warning.code)
-    .filter(Boolean);
+function acknowledgementWarningCodes(summary: VNPlaySetupWarningSummary): string[] {
+  const requiredCodes = requiredAcknowledgementWarningCodes(summary);
 
   if (requiredCodes.length > 0) {
     return requiredCodes;
   }
 
-  return pack.warning_summary.warnings.map((warning) => warning.code).filter(Boolean);
+  return summary.warnings.map((warning) => warning.code).filter(Boolean);
+}
+
+function requiredAcknowledgementWarningCodes(summary: VNPlaySetupWarningSummary): string[] {
+  return summary.warnings
+    .filter((warning) => warning.requires_acknowledgement)
+    .map((warning) => warning.code)
+    .filter(Boolean);
+}
+
+function requiresPackAcknowledgement(pack: VNPlaySetupAssetPackOption | null): boolean {
+  return requiresAcknowledgement(pack?.warning_summary);
 }
 
 function acknowledgementKey(pack: VNPlaySetupAssetPackOption | null): string {
   if (!pack || !requiresPackAcknowledgement(pack)) return '';
-  return [pack.id, ...acknowledgementWarningCodes(pack)].join(':');
+  return [pack.id, ...acknowledgementWarningCodes(pack.warning_summary)].join(':');
 }
 
 function buildSetupAcknowledgement(pack: VNPlaySetupAssetPackOption) {
   return {
     asset_pack_id: pack.id,
-    warning_codes: acknowledgementWarningCodes(pack),
+    warning_codes: acknowledgementWarningCodes(pack.warning_summary),
     highest_severity: pack.warning_summary.highest_severity,
   };
 }
@@ -96,6 +108,22 @@ function packOptionLabel(pack: VNPlaySetupAssetPackOption): string {
   } else if (!pack.ready) {
     parts.push('not ready');
   } else if (requiresPackAcknowledgement(pack)) {
+    parts.push('review required');
+  }
+  return parts.join(' - ');
+}
+
+function scriptOptionLabel(script: VNPlaySetupScriptVersionOption): string {
+  const parts = [`${script.title} v${script.version_number}`];
+  if (script.label) {
+    parts.push(script.label);
+  }
+  if (script.recommended) {
+    parts.push('recommended');
+  }
+  if (!script.ready) {
+    parts.push('not ready');
+  } else if (requiresAcknowledgement(script.warning_summary)) {
     parts.push('review required');
   }
   return parts.join(' - ');
@@ -172,6 +200,11 @@ function packWarningMessages(pack: VNPlaySetupAssetPackOption | null): string[] 
   return messages.filter(Boolean);
 }
 
+function scriptWarningMessages(script: VNPlaySetupScriptVersionOption | null): string[] {
+  if (!script) return [];
+  return script.warning_summary.warnings.map((warning) => warning.message).filter(Boolean);
+}
+
 function emptyStatesFor(
   emptyStates: VNPlaySetupEmptyState[],
   codes: string[]
@@ -213,8 +246,11 @@ export default function NewSessionDialog({
   const [title, setTitle] = useState('Untitled VN play session');
   const [primaryCharacterId, setPrimaryCharacterId] = useState('1');
   const [vnAssetPackId, setVnAssetPackId] = useState('1');
+  const [scriptId, setScriptId] = useState('');
+  const [scriptVersionId, setScriptVersionId] = useState('');
   const [selectedCharacterId, setSelectedCharacterId] = useState('');
   const [selectedPackId, setSelectedPackId] = useState('');
+  const [selectedScriptVersionId, setSelectedScriptVersionId] = useState('');
   const [linkedChatId, setLinkedChatId] = useState('');
   const [contentRating, setContentRating] = useState('general');
   const [formError, setFormError] = useState<string | null>(null);
@@ -224,11 +260,16 @@ export default function NewSessionDialog({
   const [selectorError, setSelectorError] = useState<string | null>(null);
   const [acknowledgedSetupWarnings, setAcknowledgedSetupWarnings] = useState(false);
   const selectedPackIdRef = useRef(selectedPackId);
+  const selectedScriptVersionIdRef = useRef(selectedScriptVersionId);
   const applyingDefaultCharacterIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     selectedPackIdRef.current = selectedPackId;
   }, [selectedPackId]);
+
+  useEffect(() => {
+    selectedScriptVersionIdRef.current = selectedScriptVersionId;
+  }, [selectedScriptVersionId]);
 
   useEffect(() => {
     if (open) {
@@ -237,6 +278,8 @@ export default function NewSessionDialog({
       setTitle('Untitled VN play session');
       setPrimaryCharacterId('1');
       setVnAssetPackId('1');
+      setScriptId('');
+      setScriptVersionId('');
       setLinkedChatId('');
       setFormError(null);
       setSelectorError(null);
@@ -244,6 +287,7 @@ export default function NewSessionDialog({
       setSetupOptions(null);
       setSelectedCharacterId('');
       setSelectedPackId('');
+      setSelectedScriptVersionId('');
       setContentRating('general');
       setAcknowledgedSetupWarnings(false);
     }
@@ -276,6 +320,16 @@ export default function NewSessionDialog({
           nextSelectedCharacter,
           parsePositiveInteger(selectedPackIdRef.current)
         );
+        const currentScriptVersionId = parsePositiveInteger(selectedScriptVersionIdRef.current);
+        const nextScriptVersions = nextOptions.script_versions ?? EMPTY_SCRIPT_VERSIONS;
+        const nextScriptVersion =
+          nextScriptVersions.find((script) => script.id === currentScriptVersionId) ??
+          (nextOptions.defaults.script_version_id
+            ? nextScriptVersions.find((script) => script.id === nextOptions.defaults.script_version_id)
+            : undefined) ??
+          nextScriptVersions.find((script) => script.recommended) ??
+          nextScriptVersions.find((script) => script.ready) ??
+          nextScriptVersions[0];
         const nextCharacterIdValue = nextCharacterId ? String(nextCharacterId) : '';
         const nextPackIdValue = nextPackId ? String(nextPackId) : '';
 
@@ -285,6 +339,7 @@ export default function NewSessionDialog({
           setSelectedCharacterId(nextCharacterIdValue);
         }
         setSelectedPackId(nextPackIdValue);
+        setSelectedScriptVersionId(nextScriptVersion ? String(nextScriptVersion.id) : '');
       } catch (error) {
         if (!cancelled) {
           const message = error instanceof Error ? error.message : 'Failed to load setup options';
@@ -307,8 +362,10 @@ export default function NewSessionDialog({
 
   const selectedCharacterIdNumber = parsePositiveInteger(selectedCharacterId);
   const selectedPackIdNumber = parsePositiveInteger(selectedPackId);
+  const selectedScriptVersionIdNumber = parsePositiveInteger(selectedScriptVersionId);
   const characters = useMemo(() => setupCharacters(setupOptions), [setupOptions]);
   const assetPacks = setupOptions?.asset_packs ?? EMPTY_ASSET_PACKS;
+  const scriptVersions = setupOptions?.script_versions ?? EMPTY_SCRIPT_VERSIONS;
   const emptyStates = setupOptions?.empty_states ?? EMPTY_EMPTY_STATES;
 
   const selectedCharacter = useMemo(
@@ -319,14 +376,39 @@ export default function NewSessionDialog({
     () => assetPacks.find((pack) => pack.id === selectedPackIdNumber) ?? null,
     [assetPacks, selectedPackIdNumber]
   );
-  const selectedPackAcknowledgementKey = useMemo(() => acknowledgementKey(selectedPack), [selectedPack]);
+  const selectedScriptVersion = useMemo(
+    () => scriptVersions.find((script) => script.id === selectedScriptVersionIdNumber) ?? null,
+    [scriptVersions, selectedScriptVersionIdNumber]
+  );
+  const selectedScriptAssetPack = useMemo(
+    () =>
+      selectedScriptVersion
+        ? assetPacks.find((pack) => pack.id === selectedScriptVersion.asset_pack_id) ?? null
+        : null,
+    [assetPacks, selectedScriptVersion]
+  );
+  const selectedPackAcknowledgementKey = useMemo(
+    () =>
+      mode === 'scripted_story' && selectedScriptVersion
+        ? [
+            selectedScriptVersion.id,
+            ...acknowledgementWarningCodes(selectedScriptVersion.warning_summary),
+          ].join(':')
+        : acknowledgementKey(selectedPack),
+    [mode, selectedPack, selectedScriptVersion]
+  );
 
   useEffect(() => {
     setAcknowledgedSetupWarnings(false);
   }, [selectedPackAcknowledgementKey]);
 
   const selectedPackWarnings = useMemo(() => packWarningMessages(selectedPack), [selectedPack]);
+  const selectedScriptWarnings = useMemo(
+    () => scriptWarningMessages(selectedScriptVersion),
+    [selectedScriptVersion]
+  );
   const selectedPackRequiresAcknowledgement = requiresPackAcknowledgement(selectedPack);
+  const selectedScriptRequiresAcknowledgement = requiresAcknowledgement(selectedScriptVersion?.warning_summary);
   const incompatiblePacks = useMemo(
     () => assetPacks.filter((pack) => pack.compatibility.status === 'different_character'),
     [assetPacks]
@@ -334,8 +416,13 @@ export default function NewSessionDialog({
   const selectorSubmitDisabled =
     selectorMode === 'selectors' &&
     (isLoadingSelectors ||
-      hasBlockingPackIssue(selectedPack, selectedCharacter) ||
-      (selectedPackRequiresAcknowledgement && !acknowledgedSetupWarnings));
+      (mode === 'scripted_story'
+        ? !selectedScriptVersion ||
+          !selectedScriptVersion.ready ||
+          !selectedScriptAssetPack ||
+          (selectedScriptRequiresAcknowledgement && !acknowledgedSetupWarnings)
+        : hasBlockingPackIssue(selectedPack, selectedCharacter) ||
+          (selectedPackRequiresAcknowledgement && !acknowledgedSetupWarnings)));
 
   if (!open) return null;
 
@@ -344,20 +431,42 @@ export default function NewSessionDialog({
     const usingManualIds = selectorMode === 'manual';
     const parsedPrimaryCharacterId = usingManualIds
       ? parsePositiveInteger(primaryCharacterId)
-      : selectedCharacterIdNumber;
-    const parsedPackId = usingManualIds ? parsePositiveInteger(vnAssetPackId) : selectedPackIdNumber;
+      : mode === 'scripted_story'
+        ? selectedScriptAssetPack?.primary_character_id ?? null
+        : selectedCharacterIdNumber;
+    const parsedPackId = usingManualIds
+      ? parsePositiveInteger(vnAssetPackId)
+      : mode === 'scripted_story'
+        ? selectedScriptVersion?.asset_pack_id ?? null
+        : selectedPackIdNumber;
+    const parsedScriptId = usingManualIds && mode === 'scripted_story' ? parsePositiveInteger(scriptId) : null;
+    const parsedScriptVersionId =
+      usingManualIds && mode === 'scripted_story' ? parsePositiveInteger(scriptVersionId) : null;
     const trimmedTitle = title.trim();
 
     if (!trimmedTitle || !parsedPrimaryCharacterId || !parsedPackId) {
       setFormError('Enter a title, character ID, and asset pack ID.');
       return;
     }
+    if (usingManualIds && mode === 'scripted_story' && (!parsedScriptId || !parsedScriptVersionId)) {
+      setFormError('Enter script ID and script version ID for scripted story sessions.');
+      return;
+    }
 
-    if (!usingManualIds && hasBlockingPackIssue(selectedPack, selectedCharacter)) {
+    if (!usingManualIds && mode === 'scripted_story' && (!selectedScriptVersion || !selectedScriptVersion.ready || !selectedScriptAssetPack)) {
+      setFormError('Select a runtime-ready published script version.');
+      return;
+    }
+    if (!usingManualIds && mode !== 'scripted_story' && hasBlockingPackIssue(selectedPack, selectedCharacter)) {
       setFormError('Select a compatible runtime-ready character and asset pack.');
       return;
     }
-    if (!usingManualIds && selectedPackRequiresAcknowledgement && !acknowledgedSetupWarnings) {
+    if (
+      !usingManualIds &&
+      ((mode === 'scripted_story' && selectedScriptRequiresAcknowledgement) ||
+        (mode !== 'scripted_story' && selectedPackRequiresAcknowledgement)) &&
+      !acknowledgedSetupWarnings
+    ) {
       setFormError('Acknowledge setup warnings before creating this session.');
       return;
     }
@@ -369,10 +478,22 @@ export default function NewSessionDialog({
       primary_character_id: parsedPrimaryCharacterId,
       vn_asset_pack_id: parsedPackId,
       linked_chat_id: linkedChatId.trim() || null,
-      content_rating: contentRating.trim() || 'general',
+      content_rating:
+        !usingManualIds && mode === 'scripted_story' && selectedScriptVersion
+          ? selectedScriptVersion.content_rating
+          : contentRating.trim() || 'general',
     };
 
-    if (!usingManualIds && selectedPackRequiresAcknowledgement && acknowledgedSetupWarnings && selectedPack) {
+    if (!usingManualIds && mode === 'scripted_story' && selectedScriptVersion) {
+      request.script_id = selectedScriptVersion.script_id;
+      request.script_version_id = selectedScriptVersion.id;
+      if (selectedScriptRequiresAcknowledgement && acknowledgedSetupWarnings) {
+        request.acknowledgements = acknowledgementWarningCodes(selectedScriptVersion.warning_summary);
+      }
+    } else if (usingManualIds && mode === 'scripted_story' && parsedScriptId && parsedScriptVersionId) {
+      request.script_id = parsedScriptId;
+      request.script_version_id = parsedScriptVersionId;
+    } else if (!usingManualIds && selectedPackRequiresAcknowledgement && acknowledgedSetupWarnings && selectedPack) {
       request.settings = {
         setup_acknowledgements: [buildSetupAcknowledgement(selectedPack)],
       };
@@ -391,13 +512,20 @@ export default function NewSessionDialog({
     'no_ready_packs',
     'no_compatible_packs',
   ]);
+  const scriptEmptyStates = emptyStatesFor(emptyStates, [
+    'no_script_versions',
+    'no_ready_script_versions',
+    'no_published_scripts',
+  ]);
 
   return (
     <div className="rounded-md border border-border bg-surface p-4">
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">New VN play session</h2>
-          <p className="text-sm text-text-muted">{mode === 'story' ? 'Story/CYOA' : 'Freeform'}</p>
+          <p className="text-sm text-text-muted">
+            {mode === 'scripted_story' ? 'Scripted Story' : mode === 'story' ? 'Story/CYOA' : 'Freeform'}
+          </p>
         </div>
         <Button onClick={onClose} size="sm" type="button" variant="ghost">
           Close
@@ -414,6 +542,7 @@ export default function NewSessionDialog({
           >
             <option value="freeform">Freeform</option>
             <option value="story">Story/CYOA</option>
+            <option value="scripted_story">Scripted Story</option>
           </select>
         </label>
         <Input label="Title" value={title} onChange={(event) => setTitle(event.target.value)} />
@@ -437,9 +566,73 @@ export default function NewSessionDialog({
               value={vnAssetPackId}
               onChange={(event) => setVnAssetPackId(event.target.value)}
             />
+            {mode === 'scripted_story' && (
+              <>
+                <Input
+                  inputMode="numeric"
+                  label="Script ID"
+                  value={scriptId}
+                  onChange={(event) => setScriptId(event.target.value)}
+                />
+                <Input
+                  inputMode="numeric"
+                  label="Script version ID"
+                  value={scriptVersionId}
+                  onChange={(event) => setScriptVersionId(event.target.value)}
+                />
+              </>
+            )}
           </>
         ) : (
           <>
+            {mode === 'scripted_story' ? (
+              <div className="sm:col-span-2">
+                <label htmlFor="new-session-script-version" className="mb-1 block text-sm font-medium text-text">
+                  Published script version
+                </label>
+                <select
+                  className={SELECT_CLASS}
+                  disabled={isLoadingSelectors || scriptVersions.length === 0}
+                  id="new-session-script-version"
+                  value={selectedScriptVersionId}
+                  onChange={(event) => setSelectedScriptVersionId(event.target.value)}
+                >
+                  <option value="">Select a published script version</option>
+                  {scriptVersions.map((script) => (
+                    <option key={script.id} disabled={!script.ready} value={script.id}>
+                      {scriptOptionLabel(script)}
+                    </option>
+                  ))}
+                </select>
+                {!isLoadingSelectors && (
+                  <EmptyStateGuidance
+                    states={scriptEmptyStates}
+                    workspaceHref="/vn-scripts"
+                    workspaceLabel="VN scripts"
+                  />
+                )}
+                {!isLoadingSelectors && scriptVersions.length === 0 && scriptEmptyStates.length === 0 && (
+                  <div className="mt-2 rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn">
+                    No published VN script versions are available.{' '}
+                    <Link className="underline" href="/vn-scripts">
+                      Open VN scripts
+                    </Link>
+                  </div>
+                )}
+                {selectedScriptVersion && (
+                  <div className="mt-2 rounded-md border border-border bg-bg px-3 py-2 text-sm text-text-muted">
+                    <p className="font-medium text-text">
+                      {selectedScriptVersion.title} v{selectedScriptVersion.version_number}
+                    </p>
+                    <p>Content rating: {selectedScriptVersion.content_rating || 'general'}</p>
+                    <p>Asset pack: {selectedScriptVersion.asset_pack_id}</p>
+                    <p>Policy profile: {selectedScriptVersion.policy_profile_id}</p>
+                    <p>Generation profile: {selectedScriptVersion.generation_profile_key}</p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <>
             <div>
               <label htmlFor="new-session-character" className="mb-1 block text-sm font-medium text-text">
                 Character
@@ -519,8 +712,10 @@ export default function NewSessionDialog({
                 </div>
               )}
             </div>
+              </>
+            )}
 
-            {incompatiblePacks.length > 0 && selectedCharacter && (
+            {mode !== 'scripted_story' && incompatiblePacks.length > 0 && selectedCharacter && (
               <div className="rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn sm:col-span-2">
                 <p className="font-medium">Some packs are attached to other characters.</p>
                 <ul className="mt-1 list-disc space-y-1 pl-5">
@@ -534,7 +729,7 @@ export default function NewSessionDialog({
               </div>
             )}
 
-            {selectedPackWarnings.length > 0 && (
+            {mode !== 'scripted_story' && selectedPackWarnings.length > 0 && (
               <div className="rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn sm:col-span-2">
                 <p className="font-medium">Review pack readiness before starting.</p>
                 <ul className="mt-1 list-disc space-y-1 pl-5">
@@ -544,7 +739,18 @@ export default function NewSessionDialog({
                 </ul>
               </div>
             )}
-            {selectedPackRequiresAcknowledgement && (
+            {mode === 'scripted_story' && selectedScriptWarnings.length > 0 && (
+              <div className="rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn sm:col-span-2">
+                <p className="font-medium">Review script readiness before starting.</p>
+                <ul className="mt-1 list-disc space-y-1 pl-5">
+                  {selectedScriptWarnings.map((warning, index) => (
+                    <li key={`${warning}-${index}`}>{warning}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {((mode === 'scripted_story' && selectedScriptRequiresAcknowledgement) ||
+              (mode !== 'scripted_story' && selectedPackRequiresAcknowledgement)) && (
               <label className="flex items-start gap-2 rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn sm:col-span-2">
                 <input
                   checked={acknowledgedSetupWarnings}

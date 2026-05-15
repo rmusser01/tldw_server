@@ -9,6 +9,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
+from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
+    PersonaVisualRendererSetupStatus,
+)
+
 
 PersonaMode = Literal["session_scoped", "persistent_scoped"]
 PersonaScopeRuleType = Literal["conversation_id", "character_id", "media_id", "media_tag", "note_id"]
@@ -76,6 +80,27 @@ class PersonaVisualPackCreate(BaseModel):
 
 
 class PersonaVisualPackDuplicateRequest(BaseModel):
+    target_persona_id: str = Field(min_length=1, max_length=128)
+    title: str | None = Field(default=None, max_length=200)
+
+    @field_validator("target_persona_id")
+    @classmethod
+    def normalize_target_persona_id(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("target_persona_id is required")
+        return normalized
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+
+class PersonaVisualStarterPackCopyRequest(BaseModel):
     target_persona_id: str = Field(min_length=1, max_length=128)
     title: str | None = Field(default=None, max_length=200)
 
@@ -187,6 +212,37 @@ class PersonaVisualManifestUpdate(BaseModel):
     expected_version: int | None = Field(default=None, ge=1)
 
 
+class PersonaVisualRendererCapabilityResponse(BaseModel):
+    renderer_type: PersonaVisualRendererType
+    display_name: str
+    manifest_versions: list[int] = Field(default_factory=list)
+    can_validate: bool
+    can_activate: bool
+    buddy_runtime_supported: bool
+    import_supported: bool
+    export_supported: bool
+    disabled_reason: str | None = None
+    renderer_contract_versions: list[int] = Field(default_factory=list)
+    supported_asset_roles: list[str] = Field(default_factory=list)
+    required_role_categories: list[str] = Field(default_factory=list)
+    role_category_map: dict[str, list[str]] = Field(default_factory=dict)
+    allowed_mime_types: list[str] = Field(default_factory=list)
+    allowed_extensions: list[str] = Field(default_factory=list)
+    max_file_count: int | None = None
+    max_total_bytes: int | None = None
+    max_texture_width: int | None = None
+    max_texture_height: int | None = None
+    feature_flag: str | None = None
+    setup_status: PersonaVisualRendererSetupStatus = "supported"
+    setup_blockers: list[str] = Field(default_factory=list)
+    requires_static_fallback: bool = False
+    requires_license_ack: bool = False
+
+
+class PersonaVisualRendererCapabilitiesResponse(BaseModel):
+    renderers: list[PersonaVisualRendererCapabilityResponse] = Field(default_factory=list)
+
+
 class PersonaVisualAssetResponse(BaseModel):
     id: str
     pack_id: str
@@ -224,6 +280,36 @@ class PersonaVisualPackResponse(BaseModel):
     created_at: str
     last_modified: str
     version: int = 1
+
+
+class PersonaVisualStarterAssetResponse(BaseModel):
+    asset_key: str
+    filename: str
+    mime_type: str
+    asset_role: PersonaVisualAssetRole
+    byte_size: int
+
+
+class PersonaVisualStarterPackResponse(BaseModel):
+    id: str
+    title: str
+    description: str
+    renderer_type: PersonaVisualRendererType
+    manifest_version: int = 1
+    states_offered: list[str] = Field(default_factory=list)
+    asset_count: int = 0
+    total_bytes: int = 0
+    tags: list[str] = Field(default_factory=list)
+    license_label: str = "bundled"
+
+
+class PersonaVisualStarterPackDetailResponse(PersonaVisualStarterPackResponse):
+    manifest: dict[str, Any] = Field(default_factory=dict)
+    assets: list[PersonaVisualStarterAssetResponse] = Field(default_factory=list)
+
+
+class PersonaVisualStarterPackListResponse(BaseModel):
+    starter_packs: list[PersonaVisualStarterPackResponse] = Field(default_factory=list)
 
 
 class PersonaVisualLibraryItemResponse(BaseModel):

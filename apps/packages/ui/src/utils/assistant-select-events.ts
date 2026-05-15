@@ -5,6 +5,7 @@ export type AssistantSelectTab = "character" | "persona"
 export type AssistantSelectOpenDetail = {
   tab?: AssistantSelectTab
   source?: string
+  returnFocusSelector?: string
 }
 
 export function dispatchOpenAssistantSelect(

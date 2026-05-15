@@ -379,8 +379,8 @@ describe("ExportDialog accessibility", () => {
     expect(screen.getByRole("button", { name: "Revoke link" })).toBeEnabled()
     expect(messageOpenMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: "error",
-        content: "Unable to copy share link, but the link remains active.",
+        type: "warning",
+        content: "Share link created, but copying it to the clipboard failed.",
       })
     )
   })

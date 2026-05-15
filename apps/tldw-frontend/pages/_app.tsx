@@ -295,6 +295,7 @@ export default function App({ Component, pageProps }: AppProps) {
 
   const hideShellNav = !authResolved || !isAuthenticated
   const shouldBypassGates = isPublicAuthRoute || isSettingsRoute
+  const shouldAllowDegradedReadiness = routePath === "/chat"
   const firstRunSetupRoute = React.useMemo(
     () => buildFirstRunSetupRoute(router.asPath || routePath || "/"),
     [routePath, router.asPath]
@@ -338,7 +339,9 @@ export default function App({ Component, pageProps }: AppProps) {
       <ConfigurationGuard>
         <BackendRecoveryUiProvider routeRecoveryEnabled>
           <ErrorBoundary>
-            <ServerReadinessGate bypass={shouldBypassGates}>
+            <ServerReadinessGate
+              bypass={shouldBypassGates}
+              allowDegraded={shouldAllowDegradedReadiness}>
               {gatedContent}
             </ServerReadinessGate>
           </ErrorBoundary>

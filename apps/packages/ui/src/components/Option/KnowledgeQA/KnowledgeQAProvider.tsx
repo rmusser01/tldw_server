@@ -25,6 +25,7 @@ import type {
   KnowledgeQAThread,
   CitationRef,
   SearchRuntimeDetails,
+  KnowledgeSourceStatus,
   QueryStage,
   ScopeSnapshot,
   PinnedSourceFilters,
@@ -977,6 +978,36 @@ function extractRetrievalCoverage(
   }
 }
 
+function normalizeSourceStatus(value: unknown): Record<string, KnowledgeSourceStatus> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {}
+  }
+
+  const normalized: Record<string, KnowledgeSourceStatus> = {}
+  for (const [sourceId, rawStatus] of Object.entries(value as Record<string, unknown>)) {
+    if (!sourceId || !rawStatus || typeof rawStatus !== "object" || Array.isArray(rawStatus)) {
+      continue
+    }
+
+    const record = rawStatus as Record<string, unknown>
+    const status =
+      typeof record.status === "string" && record.status.trim().length > 0
+        ? record.status.trim()
+        : "searched"
+    const count = normalizeIntegerMetric(record.count) ?? 0
+    const reason =
+      typeof record.reason === "string" && record.reason.trim().length > 0
+        ? record.reason.trim()
+        : null
+
+    normalized[sourceId] = reason
+      ? { status, count, reason }
+      : { status, count }
+  }
+
+  return normalized
+}
+
 function buildSearchDetailsFromResponse(
   response: {
     expandedQueries: string[]
@@ -1008,6 +1039,7 @@ function buildSearchDetailsFromResponse(
     response.metadata,
     results.length
   )
+  const sourceStatus = normalizeSourceStatus(response.metadata?.source_status)
 
   return {
     expandedQueries: response.expandedQueries,
@@ -1017,6 +1049,7 @@ function buildSearchDetailsFromResponse(
         ? settings.reranking_strategy
         : "unknown",
     averageRelevance: calculateAverageRelevance(results),
+    sourceStatus,
     webFallbackEnabled: Boolean(settings.enable_web_fallback),
     webFallbackTriggered:
       typeof webFallbackMetadata?.triggered === "boolean"
@@ -1063,6 +1096,7 @@ function buildSearchDetailsFromResponse(
 function buildSearchDetailsFromStreaming(
   results: RagResult[],
   whyPayload: unknown,
+  sourceStatusPayload: unknown,
   settings: RagSettings
 ): SearchRuntimeDetails {
   const why =
@@ -1078,6 +1112,7 @@ function buildSearchDetailsFromStreaming(
         ? settings.reranking_strategy
         : "unknown",
     averageRelevance: calculateAverageRelevance(results),
+    sourceStatus: normalizeSourceStatus(sourceStatusPayload),
     webFallbackEnabled: Boolean(settings.enable_web_fallback),
     webFallbackTriggered: false,
     webFallbackEngine: null,
@@ -1840,6 +1875,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
           let streamAnswer = ""
           let receivedStreamEvent = false
           let streamWhyPayload: unknown = null
+          let streamSourceStatusPayload: unknown = null
 
           try {
             for await (const event of (tldwClient as {
@@ -1860,9 +1896,12 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
                 dispatch({ type: "SET_QUERY_STAGE", payload: "ranking" })
                 streamResults = mapStreamingContextsToResults(event.contexts)
                 streamWhyPayload = event?.why
+                streamSourceStatusPayload =
+                  event?.source_status ?? event?.metadata?.source_status ?? null
                 resolvedSearchDetails = buildSearchDetailsFromStreaming(
                   streamResults,
                   streamWhyPayload,
+                  streamSourceStatusPayload,
                   effectiveSettings
                 )
                 dispatch({
@@ -1922,6 +1961,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
               resolvedSearchDetails = buildSearchDetailsFromStreaming(
                 streamResults,
                 streamWhyPayload,
+                streamSourceStatusPayload,
                 effectiveSettings
               )
             }

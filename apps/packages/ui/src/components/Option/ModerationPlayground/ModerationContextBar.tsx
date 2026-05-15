@@ -38,6 +38,9 @@ export const ModerationContextBar: React.FC<ModerationContextBarProps> = ({
   onOpenTestTab
 }) => {
   const [quickTestOpen, setQuickTestOpen] = React.useState(false)
+  const scopeId = React.useId()
+  const userIdInputId = React.useId()
+  const quickTestButtonRef = React.useRef<HTMLButtonElement>(null)
 
   React.useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -50,13 +53,22 @@ export const ModerationContextBar: React.FC<ModerationContextBarProps> = ({
     return () => window.removeEventListener("keydown", handleKey)
   }, [])
 
+  const closeQuickTest = React.useCallback(() => {
+    setQuickTestOpen(false)
+    window.setTimeout(() => quickTestButtonRef.current?.focus(), 0)
+  }, [])
+
   return (
     <>
       <div className="sticky top-0 z-10 border-b border-border bg-bg/95 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3 py-2.5 flex-wrap">
             {/* Scope selector */}
+            <label htmlFor={scopeId} className="sr-only">
+              Moderation scope
+            </label>
             <select
+              id={scopeId}
               value={scope}
               onChange={(e) => onScopeChange(e.target.value as ModerationScope)}
               className="px-2 py-1 text-sm border border-border rounded bg-bg text-text"
@@ -68,7 +80,11 @@ export const ModerationContextBar: React.FC<ModerationContextBarProps> = ({
             {/* User ID input */}
             {scope === "user" && !activeUserId && (
               <>
+                <label htmlFor={userIdInputId} className="sr-only">
+                  User ID
+                </label>
                 <input
+                  id={userIdInputId}
                   type="text"
                   placeholder="Enter User ID"
                   value={userIdDraft}
@@ -91,7 +107,14 @@ export const ModerationContextBar: React.FC<ModerationContextBarProps> = ({
             {activeUserId && (
               <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-sm font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
                 Configuring: {activeUserId}
-                <button type="button" onClick={onClearUser} className="hover:text-blue-600 ml-0.5">&times;</button>
+                <button
+                  type="button"
+                  onClick={onClearUser}
+                  className="hover:text-blue-600 ml-0.5"
+                  aria-label={`Clear active user ${activeUserId}`}
+                >
+                  &times;
+                </button>
               </span>
             )}
 
@@ -120,8 +143,11 @@ export const ModerationContextBar: React.FC<ModerationContextBarProps> = ({
             {/* Quick test toggle */}
             <Tooltip title="Quick Test (Ctrl+T)">
               <button
+                ref={quickTestButtonRef}
                 type="button"
                 onClick={() => setQuickTestOpen((prev) => !prev)}
+                aria-label="Toggle quick test"
+                aria-expanded={quickTestOpen}
                 className={`p-1.5 rounded hover:bg-surface ${quickTestOpen ? "bg-surface" : ""}`}
               >
                 <Zap className="h-4 w-4 text-text-muted" />
@@ -130,7 +156,12 @@ export const ModerationContextBar: React.FC<ModerationContextBarProps> = ({
 
             {/* Reload */}
             <Tooltip title="Reload config from disk">
-              <button type="button" onClick={onReload} className="p-1.5 rounded hover:bg-surface">
+              <button
+                type="button"
+                onClick={onReload}
+                className="p-1.5 rounded hover:bg-surface"
+                aria-label="Reload moderation config"
+              >
                 <RefreshCw className="h-4 w-4 text-text-muted" />
               </button>
             </Tooltip>
@@ -152,7 +183,7 @@ export const ModerationContextBar: React.FC<ModerationContextBarProps> = ({
       {/* Quick test slide-down */}
       <QuickTestInline
         open={quickTestOpen}
-        onClose={() => setQuickTestOpen(false)}
+        onClose={closeQuickTest}
         onRunTest={onRunQuickTest}
         onOpenFull={onOpenTestTab}
         userId={activeUserId || undefined}

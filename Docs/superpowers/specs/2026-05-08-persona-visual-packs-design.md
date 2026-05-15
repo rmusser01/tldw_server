@@ -228,6 +228,20 @@ Recommended endpoint shape, adjusted to match existing route naming conventions 
 - `POST /api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/generated-candidates/{candidate_id}/accept`
 - `POST /api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/generated-candidates/{candidate_id}/reject`
 
+Bundled first-run defaults should be exposed through a server-owned starter
+catalog rather than global mutable packs:
+
+- `GET /api/v1/persona/visual-starter-packs`
+- `GET /api/v1/persona/visual-starter-packs/{starter_pack_id}`
+- `POST /api/v1/persona/visual-starter-packs/{starter_pack_id}/copy`
+
+Copying a starter pack should validate the bundled manifest and assets, copy
+the referenced fixture assets through the same Persona Visual storage path used
+by user uploads, remap fixture asset keys to user-owned asset IDs, and create an
+inactive draft pack for the target persona. It must not activate automatically;
+Buddy runtime rendering should only use the copied pack after the existing
+explicit activation step succeeds.
+
 Activation should be explicit. A draft pack can be saved while invalid, but activation should require every baseline state to resolve to a valid animation or valid fallback.
 
 ### Jobs Integration

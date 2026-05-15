@@ -119,7 +119,7 @@ Browser, interactive TUI, rich colored terminal output, shell completion install
 - Create: `tools/backlog-py/tests/test_inventory.py`
 - Modify: `backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md`
 
-- [ ] **Step 1: Write failing inventory tests**
+- [x] **Step 1: Write failing inventory tests**
 
 Create `tools/backlog-py/tests/test_inventory.py`:
 
@@ -146,7 +146,7 @@ def test_inventory_classifies_browser_and_interactive_deferrals():
     assert by_name["cli:interactive-board"].classification == "interactive-deferred"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -157,7 +157,7 @@ python -m pytest tools/backlog-py/tests/test_inventory.py -v
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'backlog_py'`.
 
-- [ ] **Step 3: Create package skeleton**
+- [x] **Step 3: Create package skeleton**
 
 Create `tools/backlog-py/pyproject.toml`:
 
@@ -229,7 +229,7 @@ This package is experimental. Do not put it on PATH as `backlog` and do not use
 it to mutate the live repository until the cutover gates in the design spec pass.
 ```
 
-- [ ] **Step 4: Implement inventory model**
+- [x] **Step 4: Implement inventory model**
 
 Create `tools/backlog-py/src/backlog_py/compat/inventory.py`:
 
@@ -268,7 +268,7 @@ def load_builtin_inventory() -> CompatibilityInventory:
     return CompatibilityInventory(items=items)
 ```
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run:
 
@@ -280,7 +280,7 @@ python -m pytest tools/backlog-py/tests/test_inventory.py -v
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 1**
+- [x] **Step 6: Commit Task 1**
 
 ```bash
 git add tools/backlog-py "backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md"
@@ -296,7 +296,7 @@ git commit -m "Add Backlog.md Python clone inventory scaffold"
 - Modify: `tools/backlog-py/README.md`
 - Modify: `backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md`
 
-- [ ] **Step 1: Write failing manifest tests**
+- [x] **Step 1: Write failing manifest tests**
 
 Create `tools/backlog-py/tests/test_oracle_manifest.py`:
 
@@ -323,7 +323,7 @@ def test_manifest_marks_agent_critical_fixtures():
     assert "mcp:workflow-overview" in names
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -334,7 +334,7 @@ python -m pytest tools/backlog-py/tests/test_oracle_manifest.py -v
 
 Expected: FAIL with missing `backlog_py.oracle`.
 
-- [ ] **Step 3: Add pinned manifest fixture**
+- [x] **Step 3: Add pinned manifest fixture**
 
 Create `tools/backlog-py/tests/fixtures/oracle/manifest.yml`:
 
@@ -369,7 +369,7 @@ fixtures:
     classification: "browser-deferred"
 ```
 
-- [ ] **Step 4: Implement manifest loader**
+- [x] **Step 4: Implement manifest loader**
 
 Create `tools/backlog-py/src/backlog_py/oracle/manifest.py`:
 
@@ -424,7 +424,7 @@ def load_oracle_manifest(path: Path) -> OracleManifest:
     )
 ```
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run:
 
@@ -435,7 +435,7 @@ python -m pytest tools/backlog-py/tests/test_oracle_manifest.py -v
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 2**
+- [x] **Step 6: Commit Task 2**
 
 ```bash
 git add tools/backlog-py "backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md"
@@ -451,7 +451,7 @@ git commit -m "Add pinned Backlog.md oracle manifest"
 - Create: `tools/backlog-py/tests/test_project_discovery.py`
 - Modify: `backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md`
 
-- [ ] **Step 1: Write failing discovery tests**
+- [x] **Step 1: Write failing discovery tests**
 
 Create `tools/backlog-py/tests/test_project_discovery.py`:
 
@@ -484,7 +484,7 @@ def test_backlog_cwd_overrides_process_cwd(tmp_path, monkeypatch):
     assert project.config.project_name == "env-demo"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -495,7 +495,7 @@ python -m pytest tools/backlog-py/tests/test_project_discovery.py -v
 
 Expected: FAIL with missing `backlog_py.storage`.
 
-- [ ] **Step 3: Implement config and project models**
+- [x] **Step 3: Implement config and project models**
 
 Create `tools/backlog-py/src/backlog_py/core/models.py`:
 
@@ -539,7 +539,7 @@ shape, and return the resolved backlog root plus loaded config.
 
 Support `backlog.config.yml`, `backlog/config.yml`, `.backlog/config.yml`, `BACKLOG_CWD`, and explicit `--cwd` precedence.
 
-- [ ] **Step 4: Add root and `.backlog` tests**
+- [x] **Step 4: Add root and `.backlog` tests**
 
 Add tests for:
 
@@ -549,7 +549,7 @@ Add tests for:
 - camelCase keys accepted when present in generated config output
 - `--no-git` style config with `remote_operations=false`, `auto_commit=false`, `check_active_branches=false`
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run:
 
@@ -560,7 +560,7 @@ python -m pytest tools/backlog-py/tests/test_project_discovery.py -v
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 3**
+- [x] **Step 6: Commit Task 3**
 
 ```bash
 git add tools/backlog-py "backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md"
@@ -576,11 +576,11 @@ git commit -m "Add Backlog.md project discovery"
 - Modify: `tools/backlog-py/src/backlog_py/core/models.py`
 - Modify: `backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md`
 
-- [ ] **Step 1: Write fixture task**
+- [x] **Step 1: Write fixture task**
 
 Create `tools/backlog-py/tests/fixtures/repos/basic/backlog/tasks/task-1 - Example-task.md` with frontmatter, unknown metadata, Description, Acceptance Criteria, Implementation Notes, Final Summary, and Definition of Done section markers.
 
-- [ ] **Step 2: Write failing parser tests**
+- [x] **Step 2: Write failing parser tests**
 
 Create `tools/backlog-py/tests/test_task_parser.py`:
 
@@ -609,7 +609,7 @@ def test_round_trip_without_mutation_is_exact():
     assert render_task_markdown(parsed) == source
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run:
 
@@ -620,7 +620,7 @@ python -m pytest tools/backlog-py/tests/test_task_parser.py -v
 
 Expected: FAIL with missing parser.
 
-- [ ] **Step 4: Implement parser**
+- [x] **Step 4: Implement parser**
 
 Implement a deliberately conservative parser:
 
@@ -631,7 +631,7 @@ Implement a deliberately conservative parser:
 - preserve all unrecognized body content
 - raise a structured error on unterminated owned sections
 
-- [ ] **Step 5: Run parser tests**
+- [x] **Step 5: Run parser tests**
 
 Run:
 
@@ -642,7 +642,7 @@ python -m pytest tools/backlog-py/tests/test_task_parser.py -v
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 4**
+- [x] **Step 6: Commit Task 4**
 
 ```bash
 git add tools/backlog-py "backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md"
@@ -659,7 +659,7 @@ git commit -m "Add Backlog.md task parser"
 - Create: `tools/backlog-py/tests/test_cli_readonly.py`
 - Modify: `backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md`
 
-- [ ] **Step 1: Write failing read-only repository tests**
+- [x] **Step 1: Write failing read-only repository tests**
 
 Test:
 
@@ -669,7 +669,7 @@ Test:
 - board grouping by status
 - no file changes after read-only operations
 
-- [ ] **Step 2: Write failing CLI tests**
+- [x] **Step 2: Write failing CLI tests**
 
 Use `click.testing.CliRunner`:
 
@@ -693,7 +693,7 @@ def test_config_list_outputs_safe_defaults(fixture_repo):
     assert "autoCommit: false" in result.output
 ```
 
-- [ ] **Step 3: Run tests to verify failure**
+- [x] **Step 3: Run tests to verify failure**
 
 Run:
 
@@ -704,7 +704,7 @@ python -m pytest tools/backlog-py/tests/test_readonly_repository.py tools/backlo
 
 Expected: FAIL with missing repository/CLI implementation.
 
-- [ ] **Step 4: Implement read-only repository and CLI**
+- [x] **Step 4: Implement read-only repository and CLI**
 
 Implement:
 
@@ -718,7 +718,7 @@ Implement:
 
 Keep console script as `backlog-py`, not `backlog`, until cutover gates pass.
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run:
 
@@ -729,7 +729,7 @@ python -m pytest tools/backlog-py/tests/test_readonly_repository.py tools/backlo
 
 Expected: PASS.
 
-- [ ] **Step 6: Run live read-only smoke against this repo**
+- [x] **Step 6: Run live read-only smoke against this repo**
 
 Run:
 
@@ -748,7 +748,7 @@ Expected: commands exit 0 and the before/after backlog status files match
 exactly. This avoids false failures from unrelated pre-existing dirty backlog
 task files while still proving the Python read-only commands did not write.
 
-- [ ] **Step 7: Commit Task 5**
+- [x] **Step 7: Commit Task 5**
 
 ```bash
 git add tools/backlog-py "backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md"
@@ -765,7 +765,7 @@ git commit -m "Add Backlog.md read-only CLI"
 - Modify: `tools/backlog-py/pyproject.toml` only after dependency verification
 - Modify: `backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md`
 
-- [ ] **Step 1: Verify MCP dependency availability before editing package deps**
+- [x] **Step 1: Verify MCP dependency availability before editing package deps**
 
 Run:
 
@@ -779,7 +779,7 @@ PY
 
 Expected: prints `True` if MCP SDK is already available. If `False`, do not add an unverified dependency yet; implement and test `resources.py` and `tools.py` as pure functions first, then ask before installing network dependencies.
 
-- [ ] **Step 2: Write failing pure registry tests**
+- [x] **Step 2: Write failing pure registry tests**
 
 Test:
 
@@ -789,7 +789,7 @@ Test:
 - task view tool returns fixture task
 - unsupported mutation tools return explicit not-implemented errors until Task 7
 
-- [ ] **Step 3: Implement resource and tool registry**
+- [x] **Step 3: Implement resource and tool registry**
 
 Implement pure functions:
 
@@ -802,11 +802,11 @@ repository layer:
 
 Do not expose generic shell execution.
 
-- [ ] **Step 4: Add stdio server adapter only when SDK is available**
+- [x] **Step 4: Add stdio server adapter only when SDK is available**
 
 If `mcp` SDK is installed, implement `server.py` as a thin adapter over the pure registry. If not installed, leave `server.py` with a clear import-time message and keep tests focused on pure functions.
 
-- [ ] **Step 5: Run MCP tests**
+- [x] **Step 5: Run MCP tests**
 
 Run:
 
@@ -817,7 +817,7 @@ python -m pytest tools/backlog-py/tests/test_mcp_resources.py -v
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 6**
+- [x] **Step 6: Commit Task 6**
 
 ```bash
 git add tools/backlog-py "backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md"
@@ -835,7 +835,7 @@ git commit -m "Add Backlog.md read-only MCP registry"
 - Modify: `tools/backlog-py/src/backlog_py/mcp/tools.py`
 - Modify: `backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md`
 
-- [ ] **Step 1: Write failing mutation/security tests**
+- [x] **Step 1: Write failing mutation/security tests**
 
 Test:
 
@@ -849,7 +849,7 @@ Test:
 - write atomically without partial file on validation error
 - `onStatusChange` disabled by default
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run:
 
@@ -860,7 +860,7 @@ python -m pytest tools/backlog-py/tests/test_security_paths.py tools/backlog-py/
 
 Expected: FAIL with missing mutation/security functions.
 
-- [ ] **Step 3: Implement safe writes**
+- [x] **Step 3: Implement safe writes**
 
 Implement:
 
@@ -871,7 +871,7 @@ Implement:
 - section-scoped mutations
 - disabled-by-default `onStatusChange` path with explicit not-implemented/disabled behavior
 
-- [ ] **Step 4: Add CLI/MCP mutation adapters**
+- [x] **Step 4: Add CLI/MCP mutation adapters**
 
 Implement only after core tests pass:
 
@@ -879,7 +879,11 @@ Implement only after core tests pass:
 - CLI `task edit --append-notes`, `--check-ac`, `--check-dod`, `--final-summary`
 - MCP task create/edit equivalents
 
-- [ ] **Step 5: Run mutation and regression tests**
+- [x] **Step 5: Run mutation and regression tests**
+
+Worker implementation note: focused mutation/security tests and the full
+`tools/backlog-py/tests` suite passed on 2026-05-10. Bandit, diff checks, and
+two-stage review remain controller-owned gates for TASK-244.8.
 
 Run:
 
@@ -892,7 +896,7 @@ git diff --check
 
 Expected: pytest PASS, Bandit has no new findings, diff check clean.
 
-- [ ] **Step 6: Commit Task 7**
+- [x] **Step 6: Commit Task 7**
 
 ```bash
 git add tools/backlog-py "backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md"
@@ -908,11 +912,13 @@ git commit -m "Add Backlog.md safe task mutations"
 - Create: `tools/backlog-py/tests/test_milestones.py`
 - Create: `tools/backlog-py/tests/test_definition_of_done.py`
 - Modify: `tools/backlog-py/src/backlog_py/core/repository.py`
+- Modify: `tools/backlog-py/src/backlog_py/storage/config.py`
 - Modify: `tools/backlog-py/src/backlog_py/cli/main.py`
 - Modify: `tools/backlog-py/src/backlog_py/mcp/tools.py`
-- Modify: `backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md`
+- Modify: `Docs/superpowers/plans/2026-05-10-backlog-md-python-compatibility-clone-implementation-plan.md`
+- Modify: `backlog/tasks/task-244.9 - Implement-Backlog.md-Python-clone-documents-milestones-and-Definition-of-Done-parity.md`
 
-- [ ] **Step 1: Write failing document tests**
+- [x] **Step 1: Write failing document tests**
 
 Test:
 
@@ -922,7 +928,7 @@ Test:
 - document update preserves omitted metadata
 - absolute paths and `..` traversal are rejected
 
-- [ ] **Step 2: Write failing milestone tests**
+- [x] **Step 2: Write failing milestone tests**
 
 Test:
 
@@ -932,7 +938,7 @@ Test:
 - milestone remove can clear task references
 - milestone archive moves the milestone to the archive path
 
-- [ ] **Step 3: Write failing Definition of Done tests**
+- [x] **Step 3: Write failing Definition of Done tests**
 
 Test:
 
@@ -941,7 +947,7 @@ Test:
 - new task creation inherits defaults unless disabled
 - task-specific DoD append does not mutate project defaults
 
-- [ ] **Step 4: Run tests to verify failure**
+- [x] **Step 4: Run tests to verify failure**
 
 Run:
 
@@ -956,18 +962,18 @@ python -m pytest \
 
 Expected: FAIL with missing document/milestone/DoD implementations.
 
-- [ ] **Step 5: Implement document and milestone services**
+- [x] **Step 5: Implement document and milestone services**
 
 Implement:
 
-- document ID allocation scoped globally under `backlog/docs`
+- document ID/path lookup scoped globally under `backlog/docs`
 - docs-relative path validation
 - decision/document frontmatter preservation
 - milestone file operations
 - task milestone reference updates through the task parser
 - DoD defaults get/upsert through config writes
 
-- [ ] **Step 6: Add CLI/MCP adapters**
+- [x] **Step 6: Add CLI/MCP adapters**
 
 Implement:
 
@@ -978,7 +984,7 @@ Implement:
 - MCP milestone tools
 - MCP Definition of Done defaults get/upsert tools
 
-- [ ] **Step 7: Run focused tests**
+- [x] **Step 7: Run focused tests**
 
 Run:
 
@@ -993,7 +999,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 8: Run security regression checks**
+- [x] **Step 8: Run security regression checks**
 
 Run:
 
@@ -1006,10 +1012,12 @@ git diff --check
 
 Expected: tests PASS, Bandit has no new findings, diff check clean.
 
-- [ ] **Step 9: Commit Task 8**
+- [x] **Step 9: Commit Task 8**
 
 ```bash
-git add tools/backlog-py "backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md"
+git add tools/backlog-py \
+  Docs/superpowers/plans/2026-05-10-backlog-md-python-compatibility-clone-implementation-plan.md \
+  "backlog/tasks/task-244.9 - Implement-Backlog.md-Python-clone-documents-milestones-and-Definition-of-Done-parity.md"
 git commit -m "Add Backlog.md document and milestone parity"
 ```
 
@@ -1021,13 +1029,14 @@ git commit -m "Add Backlog.md document and milestone parity"
 - Modify: `tools/backlog-py/src/backlog_py/compat/inventory.py`
 - Modify: `tools/backlog-py/tests/fixtures/oracle/manifest.yml`
 - Modify: `tools/backlog-py/README.md`
-- Modify: `backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md`
+- Modify: `Docs/superpowers/plans/2026-05-10-backlog-md-python-compatibility-clone-implementation-plan.md`
+- Modify: `backlog/tasks/task-244.10 - Implement-Backlog.md-Python-clone-agent-cutover-candidate-validation.md`
 
-- [ ] **Step 1: Write parity matrix doc**
+- [x] **Step 1: Write parity matrix doc**
 
 Document every agent-critical CLI/MCP operation, expected command/tool/resource, status, and fixture coverage.
 
-- [ ] **Step 2: Expand inventory and manifest coverage**
+- [x] **Step 2: Expand inventory and manifest coverage**
 
 Update `tools/backlog-py/src/backlog_py/compat/inventory.py` and
 `tools/backlog-py/tests/fixtures/oracle/manifest.yml` so every operation in the
@@ -1036,7 +1045,7 @@ a fixture or as an explicit later-milestone blocker. The matrix must not silentl
 ignore task create/edit, document operations, milestone operations, or Definition
 of Done tools.
 
-- [ ] **Step 3: Write matrix test**
+- [x] **Step 3: Write matrix test**
 
 The test should fail if any agent-critical item lacks fixture coverage or implementation status:
 
@@ -1060,7 +1069,7 @@ def test_agent_critical_inventory_has_fixture_coverage():
     assert missing == []
 ```
 
-- [ ] **Step 4: Run full local validation**
+- [x] **Step 4: Run full local validation**
 
 Run:
 
@@ -1073,7 +1082,7 @@ git diff --check
 
 Expected: all checks pass.
 
-- [ ] **Step 5: Run copied-repo mutation smoke**
+- [x] **Step 5: Run copied-repo mutation smoke**
 
 Run against a temporary copy only:
 
@@ -1087,10 +1096,12 @@ backlog-py --cwd "$tmpdir" task list --plain
 
 Expected: commands exit 0 and no live repository files change.
 
-- [ ] **Step 6: Commit Task 9**
+- [x] **Step 6: Commit Task 9**
 
 ```bash
-git add tools/backlog-py "backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md"
+git add tools/backlog-py \
+  Docs/superpowers/plans/2026-05-10-backlog-md-python-compatibility-clone-implementation-plan.md \
+  "backlog/tasks/task-244.10 - Implement-Backlog.md-Python-clone-agent-cutover-candidate-validation.md"
 git commit -m "Document Backlog.md agent parity gate"
 ```
 
@@ -1100,9 +1111,10 @@ git commit -m "Document Backlog.md agent parity gate"
 - Create: `tools/backlog-py/docs/browser-parity.md`
 - Create: `tools/backlog-py/docs/interactive-deferrals.md`
 - Modify: `tools/backlog-py/README.md`
-- Modify: `backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md`
+- Modify: `Docs/superpowers/plans/2026-05-10-backlog-md-python-compatibility-clone-implementation-plan.md`
+- Modify: `backlog/tasks/task-244.11 - Document-Backlog.md-Python-clone-browser-and-interactive-deferrals.md`
 
-- [ ] **Step 1: Document browser parity requirements**
+- [x] **Step 1: Document browser parity requirements**
 
 Cover:
 
@@ -1118,7 +1130,7 @@ Cover:
 - service mode
 - mobile behavior
 
-- [ ] **Step 2: Classify each browser item**
+- [x] **Step 2: Classify each browser item**
 
 Classify each as:
 
@@ -1127,7 +1139,7 @@ Classify each as:
 - intentionally deferred
 - rejected with reason
 
-- [ ] **Step 3: Document interactive CLI/TUI deferrals**
+- [x] **Step 3: Document interactive CLI/TUI deferrals**
 
 Cover:
 
@@ -1140,7 +1152,7 @@ Cover:
 - auto-commit and hook bypass
 - remote operations
 
-- [ ] **Step 4: Run docs verification**
+- [x] **Step 4: Run docs verification**
 
 Run:
 
@@ -1151,10 +1163,12 @@ git diff --check
 
 Expected: search finds documented decisions and diff check passes.
 
-- [ ] **Step 5: Commit Task 10**
+- [x] **Step 5: Commit Task 10**
 
 ```bash
-git add tools/backlog-py "backlog/tasks/task-244.1 - Write-Backlog.md-Python-compatibility-clone-implementation-plan.md"
+git add tools/backlog-py \
+  Docs/superpowers/plans/2026-05-10-backlog-md-python-compatibility-clone-implementation-plan.md \
+  "backlog/tasks/task-244.11 - Document-Backlog.md-Python-clone-browser-and-interactive-deferrals.md"
 git commit -m "Document Backlog.md browser parity deferrals"
 ```
 

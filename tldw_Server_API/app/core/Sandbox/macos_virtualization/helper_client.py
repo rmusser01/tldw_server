@@ -4,6 +4,7 @@ import json
 import math
 import os
 import socket
+import stat
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,20 @@ _MAX_EXEC_ENV_COUNT = 128
 _MAX_EXEC_ENV_BYTES = 32 * 1024
 _MAX_EXEC_TIMEOUT_SEC = 3_600.0
 _MAX_EXEC_OUTPUT_BYTES = 256 * 1024 * 1024
+_MAX_CREATE_VM_ID_BYTES = 128
+_MAX_CREATE_VM_TEXT_BYTES = 1024
+_MAX_CREATE_VM_PATH_BYTES = 4096
+_MAX_CREATE_VM_TIMEOUT_SEC = 3_600.0
+_ALLOWED_CREATE_VM_SYMLINK_PREFIXES = {Path(os.sep) / "tmp", Path(os.sep) / "var"}
+_CREATE_VM_TEXT_FIELDS = (
+    "owner",
+    "runtime",
+    "run_id",
+    "session_id",
+    "template_id",
+    "planning_source",
+    "created_at",
+)
 
 
 class MacOSVirtualizationHelperUnavailable(RuntimeError):
@@ -98,9 +113,10 @@ class MacOSVirtualizationHelperClient:
         return self._request("validate_template", request)
 
     def create_vm(self, request: dict[str, Any]) -> HelperVMReply:
+        self._validate_create_vm_request(request)
         if is_truthy(os.getenv("TEST_MODE")):
             vm_name = str(request.get("vm_name") or "").strip() or "vm-test"
-            runtime = str(request.get("runtime") or "").strip() or "vz_linux"
+            runtime = (str(request.get("runtime") or "").strip().lower() or "vz_linux")
             network_policy = self._normalize_network_policy(request.get("network_policy"))
             if network_policy != "deny_all":
                 raise MacOSVirtualizationHelperFailure(
@@ -359,6 +375,132 @@ class MacOSVirtualizationHelperClient:
     def _network_policy_error_code(network_policy: str) -> str:
         """Return the stable helper error code for an unsupported normalized network policy."""
         return "strict_allowlist_not_supported" if network_policy == "allowlist" else "unsupported_network_policy"
+
+    @classmethod
+    def _validate_create_vm_request(cls, request: dict[str, Any]) -> None:
+        """Validate create_vm request shape before contacting or emulating the helper."""
+        if not isinstance(request, dict):
+            raise MacOSVirtualizationHelperFailure("invalid_request", "invalid_request")
+
+        runtime = (
+            cls._optional_create_vm_string(request, "runtime", default="vz_linux").strip().lower()
+            or "vz_linux"
+        )
+        if runtime != "vz_linux":
+            raise MacOSVirtualizationHelperFailure("runtime_unsupported", runtime)
+
+        network_policy = cls._optional_create_vm_string(
+            request,
+            "network_policy",
+            default="deny_all",
+        ).strip().lower() or "deny_all"
+        if network_policy != "deny_all":
+            raise MacOSVirtualizationHelperFailure(
+                error_code=cls._network_policy_error_code(network_policy),
+                message=network_policy,
+            )
+
+        vm_id = cls._optional_create_vm_string(
+            request,
+            "vm_name",
+            default="",
+        )
+        if not vm_id:
+            vm_id = cls._optional_create_vm_string(request, "run_id", default="")
+        cls._validate_create_vm_id(vm_id)
+
+        template_path = cls._optional_create_vm_string(
+            request,
+            "template",
+            default="",
+        )
+        if not template_path:
+            template_path = cls._optional_create_vm_string(request, "template_path", default="")
+        cls._validate_create_vm_path(template_path, "template_path_invalid", required=True)
+
+        workspace_path = cls._optional_create_vm_string(request, "workspace_path", default="")
+        cls._validate_create_vm_path(workspace_path, "workspace_path_invalid", required=True)
+
+        run_manifest_path = cls._optional_create_vm_string(request, "run_manifest_path", default="")
+        cls._validate_create_vm_path(run_manifest_path, "run_manifest_path_invalid", required=False)
+
+        for field in _CREATE_VM_TEXT_FIELDS:
+            cls._validate_create_vm_text_field(
+                cls._optional_create_vm_string(request, field, default=""),
+                f"{field}_invalid",
+            )
+
+        if "timeout_sec" in request:
+            raw_timeout = request.get("timeout_sec")
+            if isinstance(raw_timeout, bool) or not isinstance(raw_timeout, (int, float)):
+                raise MacOSVirtualizationHelperFailure("invalid_request", "invalid_request")
+            timeout_sec = cls._finite_positive_timeout(raw_timeout)
+            if timeout_sec is None or timeout_sec > _MAX_CREATE_VM_TIMEOUT_SEC:
+                raise MacOSVirtualizationHelperFailure(
+                    "create_vm_timeout_invalid",
+                    "timeout_out_of_range",
+                )
+
+    @staticmethod
+    def _optional_create_vm_string(request: dict[str, Any], key: str, *, default: str) -> str:
+        if key not in request:
+            return default
+        value = request[key]
+        if value is None or not isinstance(value, str):
+            raise MacOSVirtualizationHelperFailure("invalid_request", "invalid_request")
+        return value
+
+    @staticmethod
+    def _raise_invalid_create_vm(reason: str) -> None:
+        raise MacOSVirtualizationHelperFailure("create_vm_request_invalid", reason)
+
+    @classmethod
+    def _validate_create_vm_id(cls, vm_id: str) -> None:
+        if not vm_id or vm_id.strip() != vm_id or "\x00" in vm_id:
+            cls._raise_invalid_create_vm("vm_id_invalid")
+        if len(vm_id.encode("utf-8")) > _MAX_CREATE_VM_ID_BYTES:
+            cls._raise_invalid_create_vm("vm_id_invalid")
+        allowed_extra = {"-", "_", "."}
+        if any(not (character.isalnum() or character in allowed_extra) for character in vm_id):
+            cls._raise_invalid_create_vm("vm_id_invalid")
+
+    @classmethod
+    def _validate_create_vm_text_field(cls, value: str, reason: str) -> None:
+        if "\x00" in value or len(value.encode("utf-8")) > _MAX_CREATE_VM_TEXT_BYTES:
+            cls._raise_invalid_create_vm(reason)
+        if any(ord(character) < 0x20 or ord(character) == 0x7F for character in value):
+            cls._raise_invalid_create_vm(reason)
+
+    @classmethod
+    def _validate_create_vm_path(cls, value: str, reason: str, *, required: bool) -> None:
+        if not value:
+            if required:
+                cls._raise_invalid_create_vm(reason)
+            return
+        if "\x00" in value or len(value.encode("utf-8")) > _MAX_CREATE_VM_PATH_BYTES:
+            cls._raise_invalid_create_vm(reason)
+        try:
+            path = Path(value)
+        except (OSError, ValueError):
+            cls._raise_invalid_create_vm(reason)
+        if not path.is_absolute():
+            cls._raise_invalid_create_vm(reason)
+        try:
+            cls._validate_create_vm_path_components(path, reason)
+        except (OSError, ValueError):
+            cls._raise_invalid_create_vm(reason)
+
+    @classmethod
+    def _validate_create_vm_path_components(cls, path: Path, reason: str) -> None:
+        current = Path(path.anchor)
+        for component in path.parts[1:]:
+            current = current / component
+            try:
+                mode = os.lstat(current).st_mode
+            except FileNotFoundError:
+                return
+            if stat.S_ISLNK(mode) and current not in _ALLOWED_CREATE_VM_SYMLINK_PREFIXES:
+                cls._raise_invalid_create_vm(reason)
 
     @classmethod
     def _validate_exec_guest_request(

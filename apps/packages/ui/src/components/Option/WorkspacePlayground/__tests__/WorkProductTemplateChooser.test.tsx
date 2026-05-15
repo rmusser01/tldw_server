@@ -57,23 +57,34 @@ describe("WorkProductTemplateChooser", () => {
     expect(executiveBrief).toBeDisabled()
   })
 
-  it("keeps other roadmap templates visible but unavailable in this slice", async () => {
+  it("selects executive brief when it is the actionable work product", async () => {
     const user = userEvent.setup()
     const onSelectTemplate = vi.fn()
-    renderChooser({ selectedSourceCount: 3, onSelectTemplate })
+    renderChooser({ selectedSourceCount: 1, onSelectTemplate })
 
-    for (const name of [
-      /research dossier/i,
-      /competitive market memo/i,
-      /technical project spec/i
-    ]) {
-      const templateButton = screen.getByRole("button", { name })
-      expect(templateButton).toHaveAttribute("aria-disabled", "true")
-      expect(templateButton).toBeDisabled()
-      await user.click(templateButton)
-    }
+    await user.click(screen.getByRole("button", { name: /executive brief/i }))
 
-    expect(onSelectTemplate).not.toHaveBeenCalled()
+    expect(onSelectTemplate).toHaveBeenCalledWith("executive_brief")
+  })
+
+  it("hides planned roadmap templates from the end-user chooser", () => {
+    renderChooser({ selectedSourceCount: 3 })
+
+    expect(
+      screen.queryByRole("button", { name: /research dossier/i })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /competitive market memo/i })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /technical project spec/i })
+    ).not.toBeInTheDocument()
+  })
+
+  it("does not show planned status copy in the default end-user state", () => {
+    renderChooser({ selectedSourceCount: 1 })
+
+    expect(screen.queryByText(/planned/i)).not.toBeInTheDocument()
   })
 
   it("uses native disabled behavior while output generation is in flight", async () => {

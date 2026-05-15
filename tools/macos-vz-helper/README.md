@@ -43,6 +43,7 @@ tools/macos-vz-helper/scripts/vz-helperctl.py status
 tools/macos-vz-helper/scripts/vz-helperctl.py restart-drill
 tools/macos-vz-helper/scripts/vz-helperctl.py stop
 tools/macos-vz-helper/scripts/vz-helperctl.py plist
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd status --dry-run
 ```
 
 The command uses stable user-owned defaults under
@@ -52,6 +53,56 @@ The command uses stable user-owned defaults under
 `plist` prints LaunchAgent scaffolding by default and does not create runtime
 directories unless `--create-dirs` is provided. It does not call `launchctl`,
 install services, or auto-upgrade helpers.
+
+`launchd` provides explicit operator actions for a LaunchAgent-managed helper.
+Use dry-run first to inspect the `launchctl` command, then opt into plist
+creation/loading only when intended:
+
+```bash
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd status --dry-run
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd bootstrap \
+  --write-plist \
+  --create-dirs \
+  --dry-run
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd bootstrap \
+  --write-plist \
+  --create-dirs
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd kickstart
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd bootout
+```
+
+### Launchd Validation Drill
+
+`launchd-drill` validates the launchd-managed helper path without making
+launchd the default smoke lifecycle. Use it when an operator wants proof of
+LaunchAgent bootstrap, kickstart, helper readiness, and bootout on isolated
+runtime paths.
+
+```bash
+runtime_dir="$(mktemp -d "${TMPDIR:-/tmp}/tldw-vz-launchd-drill.XXXXXX")"
+chmod 700 "$runtime_dir"
+label="org.tldw.macos-vz-helper.drill.$$"
+trap 'tools/macos-vz-helper/scripts/vz-helperctl.py launchd bootout --label "$label" --plist-output "$runtime_dir/${label}.plist" >/dev/null 2>&1 || true; rm -rf "$runtime_dir"' EXIT
+
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd-drill \
+  --socket "$runtime_dir/helper.sock" \
+  --log-dir "$runtime_dir/logs" \
+  --plist-output "$runtime_dir/${label}.plist" \
+  --label "$label" \
+  --write-plist \
+  --create-dirs \
+  --skip-smoke
+```
+
+Omit `--skip-smoke` and add `--bundle /path/to/canonical/bundle` to run the
+real `vz_linux` host smoke through the launchd-managed helper. Keep drill labels
+isolated and plist paths private; the drill refuses to take over a service that
+is already loaded before bootstrap because cleanup ownership would be
+ambiguous.
+
+These commands never run automatically from `plist`, `status`, `smoke`, or
+server startup. They are operator-owned scaffolding and do not validate host
+reboot behavior.
 
 `restart-drill` is an operator-managed lifecycle drill for helpers already
 started through `vz-helperctl.py start`. It verifies the current managed helper

@@ -251,14 +251,14 @@ export function useContextWindow(deps: UseContextWindowDeps) {
   )
 
   React.useEffect(() => {
-    setDismissedRecommendationIds((previous) => {
-      if (previous.length === 0) return previous
-      const availableIds = new Set(modelRecommendations.map((r) => r.id))
-      const next = previous.filter((id) => availableIds.has(id))
-      if (next.length === previous.length) return previous
-      return next
-    })
-  }, [modelRecommendations])
+    if (dismissedRecommendationIds.length === 0) return
+
+    const availableIds = new Set(modelRecommendations.map((r) => r.id))
+    const next = dismissedRecommendationIds.filter((id) => availableIds.has(id))
+    if (next.length === dismissedRecommendationIds.length) return
+
+    setDismissedRecommendationIds(next)
+  }, [dismissedRecommendationIds, modelRecommendations])
 
   // --- Context footprint rows ---
   const contextFootprintRows = React.useMemo(

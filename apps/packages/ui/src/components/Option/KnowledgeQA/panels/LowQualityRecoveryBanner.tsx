@@ -1,6 +1,7 @@
 import React from "react"
 import { Globe, Layers, Search, X, type LucideIcon } from "lucide-react"
 import { RecoveryCallout } from "@/components/ui/state"
+import type { KnowledgeSourceStatus } from "../types"
 
 type LowQualityRecoveryBannerProps = {
   onRefine: () => void
@@ -12,6 +13,7 @@ type LowQualityRecoveryBannerProps = {
   refineLabel?: string
   enableWebLabel?: string
   selectSourcesLabel?: string
+  sourceStatus?: Record<string, KnowledgeSourceStatus>
 }
 
 type ActionLabelProps = {
@@ -28,6 +30,23 @@ function ActionLabel({ icon: Icon, children }: ActionLabelProps) {
   )
 }
 
+function formatSourceDiagnosticsSummary(
+  sourceStatus?: Record<string, KnowledgeSourceStatus>
+): string | null {
+  const entries = Object.values(sourceStatus ?? {})
+  if (entries.length === 0) return null
+
+  const searched = entries.filter((entry) => entry.status === "searched").length
+  const empty = entries.filter((entry) => entry.status === "empty").length
+  const unavailable = entries.filter((entry) => entry.status === "unavailable").length
+  const parts = [
+    `${searched} searched`,
+    `${empty} empty`,
+    `${unavailable} unavailable`,
+  ]
+  return `Source diagnostics: ${parts.join(", ")}.`
+}
+
 export function LowQualityRecoveryBanner({
   onRefine,
   onEnableWeb,
@@ -38,12 +57,24 @@ export function LowQualityRecoveryBanner({
   refineLabel = "Use more specific terms",
   enableWebLabel = "Include web sources",
   selectSourcesLabel = "Select different sources",
+  sourceStatus,
 }: LowQualityRecoveryBannerProps) {
+  const sourceDiagnosticsSummary = formatSourceDiagnosticsSummary(sourceStatus)
+
   return (
     <RecoveryCallout
       state="degraded"
       title={title}
-      message={description}
+      message={
+        sourceDiagnosticsSummary ? (
+          <>
+            <p>{description}</p>
+            <p className="mt-1">{sourceDiagnosticsSummary}</p>
+          </>
+        ) : (
+          description
+        )
+      }
       role="status"
       aria-live="polite"
       aria-atomic="true"

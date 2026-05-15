@@ -4,12 +4,15 @@
 
 from __future__ import annotations
 
+import asyncio
+from functools import partial
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    CurrentPrincipal,
     RequirePermission,
     RequireRole,
 )
@@ -23,6 +26,14 @@ from tldw_Server_API.app.api.v1.schemas.moderation_schemas import (
     BlocklistManagedItem,
     BlocklistManagedResponse,
     ModerationBlocklistUpdate,
+    ModerationReviewAuditResponse,
+    ModerationReviewBulkDecisionRequest,
+    ModerationReviewBulkDecisionResponse,
+    ModerationReviewDecisionRequest,
+    ModerationReviewDecisionResponse,
+    ModerationReviewItem,
+    ModerationReviewListResponse,
+    ModerationReviewUndoRequest,
     ModerationSettingsResponse,
     ModerationSettingsUpdate,
     ModerationTestRequest,
@@ -31,19 +42,30 @@ from tldw_Server_API.app.api.v1.schemas.moderation_schemas import (
     ModerationUserOverrideLookupResponse,
     ModerationUserOverridesResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
+from tldw_Server_API.app.core.AuthNZ.permissions import (
+    MODERATION_AUDIT_READ,
+    MODERATION_REVIEW_BULK_DECIDE,
+    MODERATION_REVIEW_DECIDE,
+    MODERATION_REVIEW_READ,
+    SYSTEM_CONFIGURE,
+)
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
+from tldw_Server_API.app.core.Moderation.review_service import get_moderation_review_service
 from tldw_Server_API.app.core.Moderation.supervised_policy import (
     GuardianModerationProxy,
     bootstrap_guardian_moderation_runtime,
 )
 
-router = APIRouter(
+router = APIRouter()
+
+rules_router = APIRouter(
     dependencies=[
         Depends(RequireRole("admin")),
         Depends(RequirePermission(SYSTEM_CONFIGURE)),
     ]
 )
+
+review_router = APIRouter()
 
 
 def _normalize_etag_list(value: str | None) -> list[str]:
@@ -79,14 +101,18 @@ def _normalize_chat_type(value: str | None) -> str:
     return normalized or "regular"
 
 
-@router.get("/moderation/users", response_model=ModerationUserOverridesResponse, summary="List all per-user moderation overrides", tags=["moderation"])
+async def _run_review_store_call(func: Any, /, *args: Any, **kwargs: Any) -> Any:
+    return await asyncio.to_thread(partial(func, *args, **kwargs))
+
+
+@rules_router.get("/moderation/users", response_model=ModerationUserOverridesResponse, summary="List all per-user moderation overrides", tags=["moderation"])
 async def list_user_overrides() -> ModerationUserOverridesResponse:
     """List all per-user moderation override entries."""
     svc = get_moderation_service()
     return {"overrides": svc.list_user_overrides()}
 
 
-@router.get(
+@rules_router.get(
     "/moderation/users/{user_id}",
     response_model=ModerationUserOverrideLookupResponse,
     summary="Get per-user moderation override",
@@ -101,7 +127,7 @@ async def get_user_override(user_id: str) -> ModerationUserOverrideLookupRespons
     return ModerationUserOverrideLookupResponse(exists=True, override=data)
 
 
-@router.put("/moderation/users/{user_id}", response_model=dict, summary="Set per-user moderation override", tags=["moderation"])
+@rules_router.put("/moderation/users/{user_id}", response_model=dict, summary="Set per-user moderation override", tags=["moderation"])
 async def set_user_override(user_id: str, override: ModerationUserOverride) -> dict[str, Any]:
     """Set or replace a per-user moderation override entry."""
     svc = get_moderation_service()
@@ -131,7 +157,7 @@ async def set_user_override(user_id: str, override: ModerationUserOverride) -> d
     return data
 
 
-@router.delete("/moderation/users/{user_id}", summary="Delete per-user moderation override", tags=["moderation"])
+@rules_router.delete("/moderation/users/{user_id}", summary="Delete per-user moderation override", tags=["moderation"])
 async def delete_user_override(user_id: str) -> dict[str, Any]:
     """Delete a per-user moderation override entry."""
     svc = get_moderation_service()
@@ -148,14 +174,14 @@ async def delete_user_override(user_id: str) -> dict[str, Any]:
     return {"status": "deleted", "persisted": bool(status_dict.get("persisted", False))}
 
 
-@router.get("/moderation/blocklist", response_model=list, summary="Get current blocklist lines", tags=["moderation"])
+@rules_router.get("/moderation/blocklist", response_model=list, summary="Get current blocklist lines", tags=["moderation"])
 async def get_blocklist() -> list[str]:
     """Return the current moderation blocklist lines."""
     svc = get_moderation_service()
     return svc.get_blocklist_lines()
 
 
-@router.put("/moderation/blocklist", summary="Replace blocklist with provided lines", tags=["moderation"])
+@rules_router.put("/moderation/blocklist", summary="Replace blocklist with provided lines", tags=["moderation"])
 async def update_blocklist(data: ModerationBlocklistUpdate) -> dict[str, Any]:
     """Replace the entire blocklist with the provided lines."""
     svc = get_moderation_service()
@@ -180,7 +206,7 @@ async def update_blocklist(data: ModerationBlocklistUpdate) -> dict[str, Any]:
     return {"status": "ok", "count": len(lines)}
 
 
-@router.get(
+@rules_router.get(
     "/moderation/policy/effective",
     summary="Inspect effective moderation policy for a user",
     tags=["moderation"],
@@ -200,7 +226,7 @@ async def get_effective_policy(user_id: str | None = Query(None, description="Us
         return snapshot
 
 
-@router.post(
+@rules_router.post(
     "/moderation/reload",
     summary="Reload moderation configuration from disk",
     tags=["moderation"],
@@ -220,7 +246,7 @@ async def reload_moderation() -> dict[str, Any]:
         return {"status": "ok"}
 
 
-@router.get(
+@rules_router.get(
     "/moderation/settings",
     response_model=ModerationSettingsResponse,
     summary="Get runtime moderation settings and effective state",
@@ -241,7 +267,7 @@ async def get_moderation_settings() -> ModerationSettingsResponse:
         return data
 
 
-@router.put(
+@rules_router.put(
     "/moderation/settings",
     response_model=ModerationSettingsResponse,
     summary="Update runtime moderation settings (non-persistent)",
@@ -285,7 +311,7 @@ async def update_moderation_settings(body: ModerationSettingsUpdate) -> Moderati
         return data
 
 
-@router.get(
+@rules_router.get(
     "/moderation/blocklist/managed",
     response_model=BlocklistManagedResponse,
     summary="Managed blocklist listing with version",
@@ -302,7 +328,7 @@ async def get_blocklist_managed(response: Response) -> BlocklistManagedResponse:
     return BlocklistManagedResponse(version=state.get("version", ""), items=items)
 
 
-@router.post(
+@rules_router.post(
     "/moderation/blocklist/append",
     response_model=BlocklistAppendResponse,
     summary="Append a blocklist line (optimistic concurrency)",
@@ -352,7 +378,7 @@ async def append_blocklist_line(
     return BlocklistAppendResponse(version=version, index=index, count=len(items))
 
 
-@router.delete(
+@rules_router.delete(
     "/moderation/blocklist/{item_id}",
     response_model=BlocklistDeleteResponse,
     summary="Delete a blocklist entry by index (optimistic concurrency)",
@@ -390,7 +416,7 @@ async def delete_blocklist_item(
     return BlocklistDeleteResponse(version=version, count=len(items))
 
 
-@router.post(
+@rules_router.post(
     "/moderation/blocklist/lint",
     response_model=BlocklistLintResponse,
     summary="Validate blocklist lines without persisting",
@@ -425,7 +451,7 @@ async def lint_blocklist(
         )
 
 
-@router.post(
+@rules_router.post(
     "/moderation/test",
     response_model=ModerationTestResponse,
     summary="Test moderation against sample text for a user",
@@ -508,3 +534,174 @@ async def test_moderation(payload: ModerationTestRequest) -> ModerationTestRespo
         effective=effective_policy.to_dict(),
         category=category,
     )
+
+
+@review_router.get(
+    "/moderation/review/items",
+    response_model=ModerationReviewListResponse,
+    summary="List sanitized moderation review items",
+    tags=["moderation-review"],
+    dependencies=[Depends(RequirePermission(MODERATION_REVIEW_READ))],
+)
+async def list_review_items(
+    status_filter: str | None = Query(None, alias="status"),
+    category: str | None = Query(None),
+    severity: str | None = Query(None),
+    source_type: str | None = Query(None),
+    source_id: str | None = Query(None),
+    user_id: str | None = Query(None),
+    q: str | None = Query(None),
+    sort: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    cursor: str | None = Query(None),
+) -> ModerationReviewListResponse:
+    """List sanitized moderation review items with optional filters and pagination."""
+    service = get_moderation_review_service()
+    return await _run_review_store_call(
+        service.list_items,
+        status=status_filter,
+        category=category,
+        severity=severity,
+        source_type=source_type,
+        source_id=source_id,
+        user_id=user_id,
+        q=q,
+        sort=sort,
+        limit=limit,
+        cursor=cursor,
+    )
+
+
+@review_router.get(
+    "/moderation/review/items/{item_id}",
+    response_model=ModerationReviewItem,
+    summary="Get sanitized moderation review item detail",
+    tags=["moderation-review"],
+    dependencies=[Depends(RequirePermission(MODERATION_REVIEW_READ))],
+)
+async def get_review_item(item_id: str) -> ModerationReviewItem:
+    """Return a sanitized moderation review item with decision history."""
+    service = get_moderation_review_service()
+    item = await _run_review_store_call(service.get_item, item_id)
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review item not found")
+    return item
+
+
+@review_router.post(
+    "/moderation/review/items/{item_id}/decision",
+    response_model=ModerationReviewDecisionResponse,
+    summary="Record a moderation review decision",
+    tags=["moderation-review"],
+    dependencies=[Depends(RequirePermission(MODERATION_REVIEW_DECIDE))],
+)
+async def decide_review_item(
+    item_id: str,
+    payload: ModerationReviewDecisionRequest,
+    principal: CurrentPrincipal,
+) -> ModerationReviewDecisionResponse:
+    """Record a reviewer decision for a moderation review item."""
+    service = get_moderation_review_service()
+    try:
+        return await _run_review_store_call(
+            service.record_decision,
+            item_id,
+            action=payload.action,
+            actor_id=principal.principal_id,
+            reason=payload.reason,
+            request_actor_id=payload.actor_id,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review item not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@review_router.post(
+    "/moderation/review/items/{item_id}/undo",
+    response_model=ModerationReviewItem,
+    summary="Undo a moderation review decision",
+    tags=["moderation-review"],
+    dependencies=[Depends(RequirePermission(MODERATION_REVIEW_DECIDE))],
+)
+async def undo_review_decision(
+    item_id: str,
+    payload: ModerationReviewUndoRequest,
+    principal: CurrentPrincipal,
+) -> ModerationReviewItem:
+    """Undo a recent reviewer decision when its undo token is still valid."""
+    service = get_moderation_review_service()
+    try:
+        return await _run_review_store_call(
+            service.undo_decision,
+            item_id,
+            undo_token=payload.undo_token,
+            actor_id=principal.principal_id,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Undo token not found") from exc
+    except ValueError as exc:
+        detail = str(exc) or "Undo is no longer available"
+        code = status.HTTP_410_GONE if "expired" in detail.casefold() else status.HTTP_409_CONFLICT
+        raise HTTPException(status_code=code, detail=detail) from exc
+
+
+@review_router.post(
+    "/moderation/review/bulk-decision",
+    response_model=ModerationReviewBulkDecisionResponse,
+    summary="Record a bulk moderation review decision",
+    tags=["moderation-review"],
+    dependencies=[Depends(RequirePermission(MODERATION_REVIEW_BULK_DECIDE))],
+)
+async def bulk_decide_review_items(
+    payload: ModerationReviewBulkDecisionRequest,
+    principal: CurrentPrincipal,
+) -> ModerationReviewBulkDecisionResponse:
+    """Record the same reviewer decision for multiple moderation review items."""
+    service = get_moderation_review_service()
+    try:
+        return await _run_review_store_call(
+            service.bulk_decision,
+            item_ids=payload.item_ids,
+            action=payload.action,
+            actor_id=principal.principal_id,
+            reason=payload.reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@review_router.get(
+    "/moderation/review/audit",
+    response_model=ModerationReviewAuditResponse,
+    summary="List sanitized moderation review audit events",
+    tags=["moderation-review"],
+    dependencies=[Depends(RequirePermission(MODERATION_AUDIT_READ))],
+)
+async def list_review_audit(
+    item_id: str | None = Query(None),
+    decision_id: str | None = Query(None),
+    actor_id: str | None = Query(None, alias="actor"),
+    action: str | None = Query(None),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    cursor: str | None = Query(None),
+) -> ModerationReviewAuditResponse:
+    """List sanitized moderation review audit events."""
+    service = get_moderation_review_service()
+    return await _run_review_store_call(
+        service.list_audit,
+        item_id=item_id,
+        decision_id=decision_id,
+        actor_id=actor_id,
+        action=action,
+        date_from=date_from,
+        date_to=date_to,
+        limit=limit,
+        cursor=cursor,
+    )
+
+
+router.include_router(rules_router)
+router.include_router(review_router)

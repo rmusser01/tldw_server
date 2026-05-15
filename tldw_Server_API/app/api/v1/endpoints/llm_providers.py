@@ -2152,11 +2152,15 @@ async def get_models_metadata(
         result = apply_llm_provider_overrides_to_listing(result)
         flattened: list[dict[str, Any]] = []
         for provider in result.get('providers', []):
+            provider_is_configured = bool(provider.get('is_configured'))
             for mi in provider.get('models_info', []):
                 entry = {
                     'provider': provider.get('name'),
                     **mi,
                 }
+                entry['provider_is_configured'] = provider_is_configured
+                entry['is_configured'] = provider_is_configured
+                entry['catalog_only'] = not provider_is_configured
                 if not _model_matches_filters(
                     entry,
                     type_filters=type_filters,

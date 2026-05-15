@@ -141,6 +141,7 @@ export function SettingsPanel({ open, onClose, className }: SettingsPanelProps) 
       // Close on Escape
       if (e.key === 'Escape') {
         e.preventDefault()
+        e.stopPropagation()
         onClose()
         return
       }
@@ -169,8 +170,8 @@ export function SettingsPanel({ open, onClose, className }: SettingsPanelProps) 
       }
     }
 
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
+    document.addEventListener('keydown', handleKeyDown, true)
+    return () => document.removeEventListener('keydown', handleKeyDown, true)
   }, [open, onClose])
 
   // Restore focus when closing

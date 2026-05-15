@@ -165,6 +165,20 @@ describe("resolvePersonaVisualDiagnostics", () => {
     )
   })
 
+  it("reports unsupported sprite atlas regions as fail-soft warnings", () => {
+    expect(
+      getPrimaryPersonaVisualDiagnostic({
+        pack: buildPack(),
+        renderError: "unsupported_region"
+      })
+    ).toEqual(
+      expect.objectContaining({
+        code: "unsupported_region",
+        severity: "warning"
+      })
+    )
+  })
+
   it("returns no diagnostics for a renderable sprite-frame pack", () => {
     expect(resolvePersonaVisualDiagnostics({ pack: buildPack() })).toEqual([])
   })

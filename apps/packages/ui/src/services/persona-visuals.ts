@@ -28,7 +28,10 @@ import type {
   PersonaVisualPackExportRequest,
   PersonaVisualPackExportResponse,
   PersonaVisualPackListResponse,
-  PersonaVisualPortabilityJobResponse
+  PersonaVisualPortabilityJobResponse,
+  PersonaVisualRendererCapabilitiesResponse,
+  PersonaVisualStarterPackCopyRequest,
+  PersonaVisualStarterPackListResponse
 } from "@/types/persona-visuals"
 
 type PersonaVisualFetchInit = {
@@ -139,6 +142,43 @@ export async function listPersonaVisualPacks(
   return normalizePersonaVisualPackList(payload)
 }
 
+export async function getPersonaVisualRendererCapabilities(): Promise<
+  PersonaVisualRendererCapabilitiesResponse
+> {
+  const payload = await fetchPersonaVisualJson<PersonaVisualRendererCapabilitiesResponse>(
+    "/api/v1/persona/visual-renderers"
+  )
+  return {
+    renderers: Array.isArray(payload?.renderers) ? payload.renderers : []
+  }
+}
+
+export async function listPersonaVisualStarterPacks(): Promise<
+  PersonaVisualStarterPackListResponse
+> {
+  const payload = await fetchPersonaVisualJson<PersonaVisualStarterPackListResponse>(
+    "/api/v1/persona/visual-starter-packs"
+  )
+  return {
+    starter_packs: Array.isArray(payload?.starter_packs)
+      ? payload.starter_packs
+      : []
+  }
+}
+
+export async function copyPersonaVisualStarterPack(
+  starterPackId: string,
+  payload: PersonaVisualStarterPackCopyRequest
+): Promise<PersonaVisualPack> {
+  return fetchPersonaVisualJson<PersonaVisualPack>(
+    `/api/v1/persona/visual-starter-packs/${encodeURIComponent(starterPackId)}/copy`,
+    {
+      method: "POST",
+      body: payload
+    }
+  )
+}
+
 export async function getPersonaVisualPack(
   personaId: string,
   packId: string
@@ -241,7 +281,7 @@ export async function listPersonaVisualDuplicateTargets(): Promise<
   const payload = await fetchPersonaVisualJson<unknown>("/api/v1/persona/catalog")
   if (!Array.isArray(payload)) return []
   return payload
-    .map((item) => {
+    .map((item): PersonaVisualDuplicateTarget | null => {
       if (!item || typeof item !== "object") return null
       const candidate = item as { id?: unknown; name?: unknown }
       const id = String(candidate.id || "").trim()
@@ -428,7 +468,7 @@ export async function createPersonaVisualImportPreview(
   file: File
 ): Promise<PersonaVisualImportPreviewStartResponse> {
   const formData = new FormData()
-  formData.append("file", file)
+  formData.append("archive", file)
   return fetchPersonaVisualJson<PersonaVisualImportPreviewStartResponse>(
     personaVisualPath(personaId, "/visual-packs/import-previews"),
     {

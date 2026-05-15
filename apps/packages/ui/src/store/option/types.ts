@@ -153,7 +153,7 @@ export type State = {
   ) => void
   clearQueuedMessages: () => void
   selectedKnowledge: Knowledge | null
-  setSelectedKnowledge: (selectedKnowledge: Knowledge) => void
+  setSelectedKnowledge: (selectedKnowledge: Knowledge | null) => void
   setSpeechToTextLanguage: (language: string) => void
   speechToTextLanguage: string
   temporaryChat: boolean

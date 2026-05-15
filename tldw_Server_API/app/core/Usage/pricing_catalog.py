@@ -167,15 +167,6 @@ class PricingCatalog:
         self._load_overrides()
 
     def _load_overrides(self) -> None:
-        # Env JSON overrides
-        raw = os.getenv("PRICING_OVERRIDES")
-        if raw:
-            try:
-                data = json.loads(raw)
-                self._merge_overrides(_lower_keys(data))
-            except Exception:
-                logger.warning("Failed to parse PRICING_OVERRIDES")
-
         # File overrides
         try:
             # Resolve to repo_root/tldw_Server_API/Config_Files/model_pricing.json
@@ -188,6 +179,16 @@ class PricingCatalog:
         except Exception:
             logger.warning("Failed to load pricing overrides file")
 
+        # Env JSON overrides intentionally load last so deployment/test env
+        # settings take precedence over checked-in placeholder catalog entries.
+        raw = os.getenv("PRICING_OVERRIDES")
+        if raw:
+            try:
+                data = json.loads(raw)
+                self._merge_overrides(_lower_keys(data))
+            except Exception:
+                logger.warning("Failed to parse PRICING_OVERRIDES")
+
     def _merge_overrides(self, overrides: dict) -> None:
         for provider, models in overrides.items():
             if not isinstance(models, dict):
@@ -197,6 +198,7 @@ class PricingCatalog:
                 if not isinstance(rates, dict):
                     continue
                 placeholder = bool(rates.get("placeholder", False))
+                estimated = bool(rates.get("estimated", False))
                 note = rates.get("note")
                 if placeholder:
                     entry = {"prompt": 0.0, "completion": 0.0, "placeholder": True}
@@ -233,6 +235,8 @@ class PricingCatalog:
                     entry["cache_write"] = cache_write
                 if "placeholder" in rates:
                     entry["placeholder"] = bool(rates.get("placeholder"))
+                if "estimated" in rates:
+                    entry["estimated"] = estimated
                 if note is not None:
                     entry["note"] = str(note)
                 base[model] = entry
@@ -272,7 +276,7 @@ class PricingCatalog:
             details["cache_read"] = float(rates.get("cache_read", 0.0) or 0.0)
         if "cache_write" in rates:
             details["cache_write"] = float(rates.get("cache_write", 0.0) or 0.0)
-        return details, estimated
+        return details, bool(rates.get("estimated", estimated))
 
     def get_rates(self, provider: str, model: str) -> tuple[float, float, bool]:
         """
@@ -339,7 +343,11 @@ def _lookup_model_across_providers(catalog: PricingCatalog, model: str) -> tuple
             r = prov_map[mdl]
             if isinstance(r, dict) and r.get("placeholder"):
                 return 0.0, 0.0, True
-            return float(r.get("prompt", 0.0)), float(r.get("completion", 0.0)), False
+            return (
+                float(r.get("prompt", 0.0)),
+                float(r.get("completion", 0.0)),
+                bool(r.get("estimated", False)),
+            )
 
     # Second pass: partial match across all providers
     for prov_name, prov_map in catalog._catalog.items():

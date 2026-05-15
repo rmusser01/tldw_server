@@ -3,11 +3,18 @@ import type { ReactElement } from "react"
 import { ALL_TARGETS, type PlatformTarget } from "@/config/platform"
 import { createSettingsRoute } from "./settings-route"
 import { Navigate } from "react-router-dom"
+import { RouteAliasNavigate } from "./RouteAliasNavigate"
 import {
   CHAT_WORKSPACE_PATH,
   DOCUMENT_WORKSPACE_PATH,
+  MODERATION_PLAYGROUND_LEGACY_PATH,
+  MODERATION_REVIEW_PATH,
+  MODERATION_RULES_PATH,
   PROTOTYPE_WORKSPACES_PATH,
-  REPO2TXT_PATH
+  RESEARCH_STUDIO_PATH,
+  REPO2TXT_PATH,
+  WORKSPACE_PLAYGROUND_PATH,
+  WORKSPACE_STUDIO_PATH
 } from "@/routes/route-paths"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { isHostedVisibleOptionPath } from "./option-route-visibility"
@@ -130,6 +137,8 @@ const OptionQuiz = lazy(() => import("./option-quiz"))
 const OptionWritingPlayground = lazy(() => import("./option-writing-playground"))
 const OptionDocumentWorkspace = lazy(() => import("./option-document-workspace"))
 const OptionModelPlayground = lazy(() => import("./option-model-playground"))
+const OptionModerationReview = lazy(() => import("./option-moderation-review"))
+const OptionModerationRules = lazy(() => import("./option-moderation-rules"))
 const OptionModerationPlayground = lazy(() => import("./option-moderation-playground"))
 const OptionFamilyGuardrailsWizard = lazy(
   () => import("./option-family-guardrails-wizard")
@@ -464,8 +473,18 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
   },
   {
     kind: "options",
-    path: "/workspace-playground",
+    path: RESEARCH_STUDIO_PATH,
     element: <OptionWorkspacePlayground />,
+  },
+  {
+    kind: "options",
+    path: WORKSPACE_PLAYGROUND_PATH,
+    element: <RouteAliasNavigate to={RESEARCH_STUDIO_PATH} />,
+  },
+  {
+    kind: "options",
+    path: WORKSPACE_STUDIO_PATH,
+    element: <RouteAliasNavigate to={RESEARCH_STUDIO_PATH} />,
   },
   {
     kind: "options",
@@ -484,7 +503,19 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
   },
   {
     kind: "options",
-    path: "/moderation-playground",
+    path: MODERATION_REVIEW_PATH,
+    element: <OptionModerationReview />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: MODERATION_RULES_PATH,
+    element: <OptionModerationRules />,
+    targets: ALL_TARGETS,
+  },
+  {
+    kind: "options",
+    path: MODERATION_PLAYGROUND_LEGACY_PATH,
     element: <OptionModerationPlayground />,
     targets: ALL_TARGETS,
   },

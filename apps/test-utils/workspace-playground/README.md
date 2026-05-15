@@ -1,6 +1,6 @@
-# Workspace Playground Parity Contract
+# Research Studio Parity Contract
 
-Shared deterministic parity contract for `/workspace-playground` across:
+Shared deterministic parity contract for `/research-studio` across:
 
 - WebUI (`apps/tldw-frontend/e2e/workflows/workspace-playground.parity.spec.ts`)
 - Extension (`apps/extension/tests/e2e/workspace-playground.parity.spec.ts`)

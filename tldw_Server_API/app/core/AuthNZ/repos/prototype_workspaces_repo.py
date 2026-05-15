@@ -2,19 +2,63 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.database import (
+    DatabasePool,
+    _convert_question_mark_to_dollar,
+    _flatten_params,
+)
+from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
 
 _VALID_CREATION_SOURCES = {"prompt", "template", "existing_workspace"}
 _VALID_ACTOR_TYPES = {"owner", "internal_collaborator", "external_collaborator"}
 _VALID_PROMOTION_STATUSES = {"pending", "approved", "rejected", "promoted", "stale"}
 _VALID_PREVIEW_SCOPES = {"canonical", "session"}
 _ROW_CONVERSION_EXCEPTIONS = (AttributeError, KeyError, TypeError, ValueError)
+
+
+class InactivePrototypeSharedActorError(ValueError):
+    """Raised when a shared actor is missing, revoked, or outside its allowed scope."""
+
+
+class _TransactionBoundPool:
+    """Small DatabasePool-compatible adapter bound to one transaction connection."""
+
+    def __init__(self, conn: Any, *, is_postgres_backend: bool) -> None:
+        self._conn = conn
+        self.pool = object() if is_postgres_backend else None
+
+    async def execute(self, query: str, *args: Any) -> Any:
+        params = _flatten_params(args)
+        if self.pool is not None:
+            return await self._conn.execute(_convert_question_mark_to_dollar(query, params), *params)
+        return await self._conn.execute(query, params)
+
+    async def fetchone(self, query: str, *args: Any) -> Any:
+        params = _flatten_params(args)
+        if self.pool is not None:
+            return await self._conn.fetchrow(_convert_question_mark_to_dollar(query, params), *params)
+        if hasattr(self._conn, "fetchone"):
+            return await self._conn.fetchone(query, params)
+        cursor = await self._conn.execute(query, params)
+        return await cursor.fetchone()
+
+    async def fetchall(self, query: str, *args: Any) -> list[Any]:
+        params = _flatten_params(args)
+        if self.pool is not None:
+            rows = await self._conn.fetch(_convert_question_mark_to_dollar(query, params), *params)
+            return list(rows)
+        if hasattr(self._conn, "fetchall"):
+            return await self._conn.fetchall(query, params)
+        cursor = await self._conn.execute(query, params)
+        return list(await cursor.fetchall())
 
 
 def _to_bool(value: Any) -> bool:
@@ -54,6 +98,19 @@ def _load_json_list(raw: Any) -> list[Any]:
             return []
         return list(parsed) if isinstance(parsed, list) else []
     return []
+
+
+def _result_row_count(result: Any) -> int:
+    """Extract affected-row counts from SQLite cursors or asyncpg status strings."""
+    rowcount = getattr(result, "rowcount", None)
+    if isinstance(rowcount, int):
+        return max(rowcount, 0)
+    if isinstance(result, str):
+        try:
+            return max(int(result.rsplit(" ", 1)[-1]), 0)
+        except (TypeError, ValueError):
+            return 0
+    return 0
 
 
 def _normalize_creation_source(creation_source: str | None) -> str:
@@ -100,6 +157,35 @@ class PrototypeWorkspacesRepo:
     def _ts(self) -> datetime | str:
         now = datetime.now(timezone.utc)
         return now if self._is_postgres_backend() else now.isoformat()
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[PrototypeWorkspacesRepo]:
+        """Yield a repository bound to one AuthNZ database transaction."""
+        transaction_factory = getattr(self.db_pool, "transaction", None)
+        if transaction_factory is None:
+            raise RuntimeError("Prototype workspace repository requires transaction-capable db_pool")
+        try:
+            async with transaction_factory() as conn:
+                yield PrototypeWorkspacesRepo(
+                    db_pool=_TransactionBoundPool(
+                        conn,
+                        is_postgres_backend=self._is_postgres_backend(),
+                    )
+                )
+        except TransactionError as exc:
+            cause = exc.__cause__
+            if isinstance(cause, (RuntimeError, ValueError)):
+                raise cause from exc
+            raise
+
+    @asynccontextmanager
+    async def _cleanup_transaction(self) -> AsyncIterator[PrototypeWorkspacesRepo]:
+        """Yield the active transaction-bound repo or open a cleanup transaction."""
+        if getattr(self.db_pool, "transaction", None) is None:
+            yield self
+            return
+        async with self.transaction() as repo:
+            yield repo
 
     @staticmethod
     def _row_to_dict(row: Any) -> dict[str, Any]:
@@ -462,6 +548,42 @@ class PrototypeWorkspacesRepo:
         )
         return await self.get_shared_actor(shared_actor_id)
 
+    async def revoke_shared_actor(
+        self,
+        shared_actor_id: str,
+        *,
+        revoked_at: str | datetime | None = None,
+    ) -> dict[str, Any] | None:
+        """Revoke a shared actor without exposing raw table updates to callers."""
+        ts = self._ts()
+        await self.db_pool.execute(
+            """
+            UPDATE prototype_shared_actors
+            SET revoked_at = ?, updated_at = ?
+            WHERE id = ? AND revoked_at IS NULL
+            """,
+            (revoked_at if revoked_at is not None else ts, ts, shared_actor_id),
+        )
+        return await self.get_shared_actor(shared_actor_id)
+
+    async def update_shared_actor_expiry(
+        self,
+        shared_actor_id: str,
+        *,
+        expires_at: str | datetime | None,
+    ) -> dict[str, Any] | None:
+        """Set a shared actor expiry timestamp through the repository boundary."""
+        ts = self._ts()
+        await self.db_pool.execute(
+            """
+            UPDATE prototype_shared_actors
+            SET expires_at = ?, updated_at = ?
+            WHERE id = ? AND revoked_at IS NULL
+            """,
+            (expires_at, ts, shared_actor_id),
+        )
+        return await self.get_shared_actor(shared_actor_id)
+
     async def rotate_shared_actor_binding(
         self,
         shared_actor_id: str,
@@ -542,7 +664,7 @@ class PrototypeWorkspacesRepo:
         if actor_shared_actor_id is not None:
             shared_actor_row = await self.db_pool.fetchone(
                 """
-                SELECT id
+                SELECT id, share_link_id
                 FROM prototype_shared_actors
                 WHERE id = ? AND prototype_workspace_id = ? AND revoked_at IS NULL
                 """,
@@ -552,6 +674,13 @@ class PrototypeWorkspacesRepo:
                 raise ValueError(
                     "actor_shared_actor_id must reference an active shared actor in the same workspace"
                 )
+            if actor_type_value == "external_collaborator":
+                if share_link_id is None:
+                    raise ValueError("external_collaborator requires share_link_id")
+                shared_actor = self._row_to_dict(shared_actor_row)
+                actor_share_link_id = int(shared_actor["share_link_id"])
+                if actor_share_link_id != int(share_link_id):
+                    raise ValueError("share_link_id must match actor_shared_actor_id")
 
         if actor_type_value == "owner" and int(actor_user_id) != int(workspace["owner_user_id"]):
             raise ValueError("owner actor must match workspace owner")
@@ -600,6 +729,24 @@ class PrototypeWorkspacesRepo:
         )
         return self._normalize_session_row(self._row_to_dict(row) if row else None)
 
+    async def update_session_expiry(
+        self,
+        prototype_session_id: str,
+        *,
+        expires_at: str | datetime | None,
+    ) -> dict[str, Any] | None:
+        """Set a prototype session expiry timestamp through the repository boundary."""
+        ts = self._ts()
+        await self.db_pool.execute(
+            """
+            UPDATE prototype_sessions
+            SET expires_at = ?, updated_at = ?
+            WHERE id = ? AND revoked_at IS NULL
+            """,
+            (expires_at, ts, prototype_session_id),
+        )
+        return await self.get_session(prototype_session_id)
+
     async def list_sessions_for_workspace(
         self,
         prototype_workspace_id: str,
@@ -644,9 +791,11 @@ class PrototypeWorkspacesRepo:
         actor_type: str,
         actor_user_id: int | None = None,
         actor_shared_actor_id: str | None = None,
+        share_link_id: int | None = None,
     ) -> dict[str, Any] | None:
         actor_type_value = _normalize_actor_type(actor_type)
         actor_user_param = int(actor_user_id) if actor_user_id is not None else None
+        share_link_param = int(share_link_id) if share_link_id is not None else None
         row = await self.db_pool.fetchone(
             """
             SELECT id, prototype_workspace_id, base_snapshot_id, actor_user_id,
@@ -660,6 +809,7 @@ class PrototypeWorkspacesRepo:
               AND actor_type = ?
               AND (? IS NULL OR actor_user_id = ?)
               AND (? IS NULL OR actor_shared_actor_id = ?)
+              AND (? IS NULL OR share_link_id = ?)
               AND revoked_at IS NULL
               AND (runtime_status IS NULL OR LOWER(runtime_status) NOT IN ('failed', 'revoked', 'closed'))
               AND (expires_at IS NULL OR expires_at > ?)
@@ -674,6 +824,8 @@ class PrototypeWorkspacesRepo:
                 actor_user_param,
                 actor_shared_actor_id,
                 actor_shared_actor_id,
+                share_link_param,
+                share_link_param,
                 self._ts(),
             ),
         )
@@ -921,7 +1073,7 @@ class PrototypeWorkspacesRepo:
                 (requested_by_shared_actor_id, prototype_workspace_id),
             )
             if not shared_actor_row:
-                raise ValueError(
+                raise InactivePrototypeSharedActorError(
                     "requested_by_shared_actor_id must reference an active shared actor in the same workspace"
                 )
 
@@ -999,3 +1151,116 @@ class PrototypeWorkspacesRepo:
             ),
         )
         return await self.get_promotion_request(promotion_request_id)
+
+    async def cleanup_retained_state(
+        self,
+        *,
+        now: str | datetime | None = None,
+        expired_before: str | datetime | None = None,
+        stale_promotion_before: str | datetime | None = None,
+        inactive_preview_before: str | datetime | None = None,
+        archived_workspace_before: str | datetime | None = None,
+    ) -> dict[str, int]:
+        """Apply prototype workspace cleanup and retention rules atomically."""
+        ts = now if now is not None else self._ts()
+        counts = {
+            "expired_shared_actors_revoked": 0,
+            "expired_sessions_revoked": 0,
+            "preview_handles_revoked": 0,
+            "stale_promotion_requests_marked": 0,
+            "inactive_preview_handles_deleted": 0,
+            "archived_workspaces_deleted": 0,
+        }
+
+        async with self._cleanup_transaction() as repo:
+            if expired_before is not None:
+                counts["expired_shared_actors_revoked"] = _result_row_count(
+                    await repo.db_pool.execute(
+                        """
+                        UPDATE prototype_shared_actors
+                        SET revoked_at = ?, updated_at = ?
+                        WHERE expires_at IS NOT NULL
+                          AND expires_at <= ?
+                          AND revoked_at IS NULL
+                        """,
+                        (ts, ts, expired_before),
+                    )
+                )
+                counts["expired_sessions_revoked"] = _result_row_count(
+                    await repo.db_pool.execute(
+                        """
+                        UPDATE prototype_sessions
+                        SET revoked_at = ?,
+                            runtime_status = ?,
+                            preview_status = ?,
+                            updated_at = ?
+                        WHERE expires_at IS NOT NULL
+                          AND expires_at <= ?
+                          AND revoked_at IS NULL
+                        """,
+                        (ts, "revoked", "revoked", ts, expired_before),
+                    )
+                )
+                counts["preview_handles_revoked"] = _result_row_count(
+                    await repo.db_pool.execute(
+                        """
+                        UPDATE prototype_preview_handles
+                        SET is_active = ?, revoked_at = ?
+                        WHERE is_active = ?
+                          AND (
+                            prototype_workspace_id IN (
+                                SELECT id
+                                FROM prototype_workspaces
+                                WHERE archived_at IS NOT NULL
+                            )
+                            OR prototype_session_id IN (
+                                SELECT id
+                                FROM prototype_sessions
+                                WHERE revoked_at IS NOT NULL
+                                   OR (expires_at IS NOT NULL AND expires_at <= ?)
+                            )
+                          )
+                        """,
+                        (False, ts, True, expired_before),
+                    )
+                )
+
+            if stale_promotion_before is not None:
+                counts["stale_promotion_requests_marked"] = _result_row_count(
+                    await repo.db_pool.execute(
+                        """
+                        UPDATE prototype_promotion_requests
+                        SET status = ?, updated_at = ?
+                        WHERE status = ?
+                          AND updated_at <= ?
+                        """,
+                        ("stale", ts, "pending", stale_promotion_before),
+                    )
+                )
+
+            if inactive_preview_before is not None:
+                counts["inactive_preview_handles_deleted"] = _result_row_count(
+                    await repo.db_pool.execute(
+                        """
+                        DELETE FROM prototype_preview_handles
+                        WHERE is_active = ?
+                          AND revoked_at IS NOT NULL
+                          AND revoked_at <= ?
+                        """,
+                        (False, inactive_preview_before),
+                    )
+                )
+
+            if archived_workspace_before is not None:
+                counts["archived_workspaces_deleted"] = _result_row_count(
+                    await repo.db_pool.execute(
+                        """
+                        DELETE FROM prototype_workspaces
+                        WHERE archived_at IS NOT NULL
+                          AND archived_at <= ?
+                        """,
+                        (archived_workspace_before,),
+                    )
+                )
+
+        return counts

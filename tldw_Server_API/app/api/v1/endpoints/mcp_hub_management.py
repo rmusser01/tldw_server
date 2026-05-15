@@ -7,7 +7,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
@@ -31,6 +31,8 @@ from tldw_Server_API.app.api.v1.schemas.mcp_hub_schemas import (
     EffectiveExternalAccessResponse,
     ExternalSecretSetRequest,
     ExternalSecretSetResponse,
+    ExternalServerDiscoveryRefreshRequest,
+    ExternalServerDiscoveryRefreshResponse,
     ExternalServerAuthTemplateResponse,
     ExternalServerAuthTemplateUpdateRequest,
     ExternalServerCredentialSlotCreateRequest,
@@ -96,6 +98,7 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
 from tldw_Server_API.app.core.config import config
 from tldw_Server_API.app.core.exceptions import BadRequestError, ResourceNotFoundError
+from tldw_Server_API.app.core.MCP_unified.server import get_mcp_server
 from tldw_Server_API.app.services.mcp_hub_external_legacy_inventory import (
     McpHubExternalLegacyInventoryService,
 )
@@ -279,6 +282,105 @@ def _require_mutation_permission(principal: AuthPrincipal) -> None:
     if _is_mutation_allowed(principal):
         return
     raise HTTPException(status_code=403, detail=f"{SYSTEM_CONFIGURE} permission required")
+
+
+def _runtime_unavailable(message: str) -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail={
+            "ok": False,
+            "message": message,
+            "requires_restart": True,
+        },
+    )
+
+
+def _normalize_refresh_server_id(server_id: str | None) -> str | None:
+    if server_id is None:
+        return None
+    normalized = server_id.strip()
+    if not normalized:
+        raise HTTPException(status_code=422, detail="server_id must be a non-empty string")
+    return normalized
+
+
+async def _resolve_external_federation_runtime() -> tuple[Any, Any, str]:
+    """Resolve the live MCP external federation module and its registry."""
+
+    try:
+        server = get_mcp_server()
+        if not getattr(server, "initialized", False):
+            await server.initialize()
+    except Exception as exc:
+        logger.warning("MCP runtime unavailable for external discovery refresh: {}", type(exc).__name__)
+        raise _runtime_unavailable("MCP runtime is unavailable; restart or retry after startup completes") from exc
+
+    registry = getattr(server, "module_registry", None)
+    if registry is None:
+        raise _runtime_unavailable("MCP module registry is unavailable")
+
+    try:
+        module = await registry.get_module("external_federation")
+        if module is not None:
+            return module, registry, "external_federation"
+
+        modules = await registry.get_all_modules()
+        for module_id, candidate in modules.items():
+            if candidate.__class__.__name__ == "ExternalFederationModule":
+                return candidate, registry, str(module_id)
+    except Exception as exc:
+        logger.warning("MCP external federation module lookup failed: {}", type(exc).__name__)
+        raise _runtime_unavailable("External federation module is unavailable") from exc
+
+    raise _runtime_unavailable("External federation module is unavailable")
+
+
+async def _refresh_external_server_discovery_runtime(
+    *,
+    server_id: str | None,
+) -> ExternalServerDiscoveryRefreshResponse:
+    module, registry, module_id = await _resolve_external_federation_runtime()
+    manager = getattr(module, "_manager", None)
+    if manager is None or not hasattr(manager, "reconcile_servers"):
+        raise _runtime_unavailable("External federation manager is unavailable")
+
+    try:
+        result = await manager.reconcile_servers(server_id=server_id)
+    except Exception as exc:
+        logger.warning("External server discovery reconciliation failed: {}", type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "ok": False,
+                "server_id": server_id,
+                "message": "External server discovery reconciliation failed",
+                "requires_restart": False,
+            },
+        ) from exc
+
+    errors = dict(result.get("errors") or {})
+    if hasattr(module, "invalidate_capability_caches"):
+        module.invalidate_capability_caches()
+    refresh_registries = getattr(registry, "refresh_module_registries", None)
+    if callable(refresh_registries):
+        try:
+            registry_refreshed = await refresh_registries(module_id)
+        except Exception as exc:
+            logger.warning("MCP external federation registry refresh failed: {}", type(exc).__name__)
+            registry_refreshed = False
+        if registry_refreshed is False:
+            errors["module_registry"] = "module_registry_refresh_failed"
+    return ExternalServerDiscoveryRefreshResponse(
+        ok=not errors,
+        server_id=result.get("server_id") or server_id,
+        reconciled_servers=int(result.get("reconciled_servers") or 0),
+        refreshed_servers=int(result.get("refreshed_servers") or 0),
+        total_servers=int(result.get("total_servers") or 0),
+        virtual_tools=int(result.get("virtual_tools") or 0),
+        errors=errors,
+        requires_restart=False,
+        message="Discovery refreshed" if not errors else "Discovery refreshed with errors",
+    )
 
 
 def _normalize_event_type_filter(event_type: list[str] | None) -> set[str] | None:
@@ -3486,6 +3588,28 @@ async def create_external_server(
     except McpHubConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _external_row_to_response(row)
+
+
+@router.post(
+    "/external-servers/refresh-discovery",
+    response_model=ExternalServerDiscoveryRefreshResponse,
+)
+async def refresh_external_server_discovery(
+    payload: ExternalServerDiscoveryRefreshRequest | None = Body(default=None),
+    server_id: str | None = Query(default=None),
+    principal: AuthPrincipal = Depends(get_auth_principal),
+) -> ExternalServerDiscoveryRefreshResponse:
+    """Reconcile live MCP external federation discovery with managed storage."""
+    _require_mutation_permission(principal)
+    body_server_id = _normalize_refresh_server_id(payload.server_id if payload is not None else None)
+    query_server_id = _normalize_refresh_server_id(server_id)
+    if body_server_id is not None and query_server_id is not None and body_server_id != query_server_id:
+        raise HTTPException(
+            status_code=422,
+            detail="server_id query parameter conflicts with request body server_id",
+        )
+    effective_server_id = query_server_id if query_server_id is not None else body_server_id
+    return await _refresh_external_server_discovery_runtime(server_id=effective_server_id)
 
 
 @router.post("/external-servers/{server_id}/import", response_model=ExternalServerResponse, status_code=201)

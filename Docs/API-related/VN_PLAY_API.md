@@ -2,7 +2,9 @@
 
 VN Play provides durable visual-novel runtime sessions backed by approved VN asset packs. V1 supports Freeform and Story/CYOA modes, ordered event history, server-authoritative scene state, turn idempotency, checkpoints, branch navigation, and guarded branch restore.
 
-Base path: `/api/v1/vn-play`
+Canonical base path: `/api/v1/vn/vn-play`
+
+The previous top-level `/api/v1/vn-play` path is legacy compatibility and is not the VN platform API contract.
 
 ## Authentication And Ownership
 
@@ -42,7 +44,7 @@ Linked chat is read-only in V1. `linked_chat_id` may be stored as session contex
 Example:
 
 ```bash
-curl "http://127.0.0.1:8000/api/v1/vn-play/setup-options?mode=story&selected_character_id=42&content_rating=general" \
+curl "http://127.0.0.1:8000/api/v1/vn/vn-play/setup-options?mode=story&selected_character_id=42&content_rating=general" \
   -H "X-API-KEY: $SINGLE_USER_API_KEY"
 ```
 
@@ -70,7 +72,7 @@ High-risk warning summaries require frontend acknowledgement before submit, but 
 Freeform session:
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/vn-play/sessions" \
+curl -X POST "http://127.0.0.1:8000/api/v1/vn/vn-play/sessions" \
   -H "X-API-KEY: $SINGLE_USER_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -88,7 +90,7 @@ curl -X POST "http://127.0.0.1:8000/api/v1/vn-play/sessions" \
 Story/CYOA session:
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/vn-play/sessions" \
+curl -X POST "http://127.0.0.1:8000/api/v1/vn/vn-play/sessions" \
   -H "X-API-KEY: $SINGLE_USER_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -162,7 +164,7 @@ Story mode is backend-authoritative. A `choice_id` is accepted only when it matc
 Freeform turn:
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/vn-play/sessions/1/turn" \
+curl -X POST "http://127.0.0.1:8000/api/v1/vn/vn-play/sessions/1/turn" \
   -H "X-API-KEY: $SINGLE_USER_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -175,7 +177,7 @@ curl -X POST "http://127.0.0.1:8000/api/v1/vn-play/sessions/1/turn" \
 Story choice:
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/vn-play/sessions/1/turn" \
+curl -X POST "http://127.0.0.1:8000/api/v1/vn/vn-play/sessions/1/turn" \
   -H "X-API-KEY: $SINGLE_USER_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -258,7 +260,7 @@ Optional branch filter query parameters:
 Example:
 
 ```bash
-curl "http://127.0.0.1:8000/api/v1/vn-play/sessions/1/events?branch_id=12&include_descendants=true&limit=100" \
+curl "http://127.0.0.1:8000/api/v1/vn/vn-play/sessions/1/events?branch_id=12&include_descendants=true&limit=100" \
   -H "X-API-KEY: $SINGLE_USER_API_KEY"
 ```
 
@@ -315,7 +317,7 @@ Custom frontends should prefer `scene_state.background`, `scene_state.depth`, an
 Example:
 
 ```bash
-curl "http://127.0.0.1:8000/api/v1/vn-play/sessions/1/branch-navigation" \
+curl "http://127.0.0.1:8000/api/v1/vn/vn-play/sessions/1/branch-navigation" \
   -H "X-API-KEY: $SINGLE_USER_API_KEY"
 ```
 
@@ -432,7 +434,7 @@ A retry after a completed turn returns `400 retry_last_turn_not_failed`. A retry
 Create a checkpoint:
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/vn-play/sessions/1/checkpoint" \
+curl -X POST "http://127.0.0.1:8000/api/v1/vn/vn-play/sessions/1/checkpoint" \
   -H "X-API-KEY: $SINGLE_USER_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "label": "Before opening the door" }'
@@ -441,16 +443,17 @@ curl -X POST "http://127.0.0.1:8000/api/v1/vn-play/sessions/1/checkpoint" \
 Restore a checkpoint:
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/vn-play/sessions/1/restore" \
+curl -X POST "http://127.0.0.1:8000/api/v1/vn/vn-play/sessions/1/restore" \
   -H "X-API-KEY: $SINGLE_USER_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
+    "client_scene_version": 6,
     "checkpoint_id": 3,
     "idempotency_key": "restore-3"
   }'
 ```
 
-Checkpoint restore appends a `session_restored` event, advances the visible `scene_version`, and returns the updated session. The `idempotency_key` is enforced through the session action table: a duplicate request with the same key and payload replays the stored response, while reusing the key for a different restore payload returns `409 idempotency_key_conflict`.
+Checkpoint restore requires the current `client_scene_version`, appends a `session_restored` event, advances the visible `scene_version`, and returns the updated session. The `idempotency_key` is enforced through the session action table: a duplicate request with the same key and payload replays the stored response, while reusing the key for a different restore payload returns `409 idempotency_key_conflict`.
 
 ## Branch Restore
 
@@ -464,7 +467,7 @@ Targets:
 Example:
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/vn-play/sessions/1/branches/12/restore" \
+curl -X POST "http://127.0.0.1:8000/api/v1/vn/vn-play/sessions/1/branches/12/restore" \
   -H "X-API-KEY: $SINGLE_USER_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -518,3 +521,5 @@ Recognized metadata fields include `safety_metadata.age_status`, `safety_metadat
 ## Frontend Workspace
 
 The Next.js workspace is available at `/vn-play`. It can create Freeform and Story sessions, list sessions, submit Freeform turns, submit Story choices, render returned dialogue/events, and show current scene metadata.
+
+For Story/CYOA sessions, the workspace uses `GET /api/v1/vn/vn-play/sessions/{session_id}/branch-navigation` for the player-facing branch timeline and `POST /api/v1/vn/vn-play/sessions/{session_id}/branches/{branch_id}/restore` for guarded branch resume/restore controls. Frontends should treat branch labels, active-path state, warnings, and restore target availability as backend-owned data instead of reconstructing branch state from raw events.

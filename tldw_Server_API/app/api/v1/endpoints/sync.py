@@ -5,6 +5,7 @@
 import asyncio
 import json
 import sqlite3
+from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -14,6 +15,8 @@ from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Query,
+    Request,
     status,
 )
 from loguru import logger
@@ -29,6 +32,28 @@ from tldw_Server_API.app.api.v1.schemas.sync_server_models import (
     ServerChangesResponse,
     SyncLogEntry,
 )
+from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
+    ConflictStatus,
+    SyncCapabilitiesResponse,
+    SyncConflictRecord,
+    SyncConflictResolveRequest,
+    SyncDatasetEnrollRequest,
+    SyncDatasetEnrollResponse,
+    SyncDeviceRegisterRequest,
+    SyncDeviceRegisterResponse,
+    SyncDomain,
+    SyncKeyRecoveryBundleListResponse,
+    SyncKeyRecoveryBundleRequest,
+    SyncKeyRecoveryBundleRecord,
+    SyncPullResponse,
+    SyncPushAcceptedEnvelope,
+    SyncPushConflictEnvelope,
+    SyncPushRejectedEnvelope,
+    SyncPushRequest,
+    SyncPushResponse,
+    SyncRestoreManifestResponse,
+    SyncV2Envelope,
+)
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 
@@ -40,6 +65,17 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     InputError,
 )
 from tldw_Server_API.app.core.Sync.Sync_Client import SYNC_BATCH_SIZE
+from tldw_Server_API.app.core.Sync.v2.errors import (
+    SyncIdempotencyConflictError,
+    SyncInvalidDomainError,
+    SyncStoreError,
+)
+from tldw_Server_API.app.core.Sync.v2.factory import (
+    default_sync_v2_registry,
+    sync_v2_service_for_user,
+)
+from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelopeCreate
+from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
 #
@@ -126,6 +162,503 @@ def _is_client_validation_error(errors: list[str]) -> bool:
         return False
 
     return saw_validation_error
+
+
+def _sync_user_id(user: User) -> str:
+    user_id = getattr(user, "id_str", "") or str(getattr(user, "id", "") or "")
+    return user_id or user.username
+
+
+_default_sync_v2_registry = default_sync_v2_registry
+
+
+def get_sync_v2_service(
+    user: User = Depends(get_request_user),
+) -> SyncV2Service:
+    """Build the per-user Sync v2 service dependency."""
+
+    return sync_v2_service_for_user(_sync_user_id(user))
+
+
+def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException:
+    safe_context = {
+        key: value
+        for key, value in context.items()
+        if value not in (None, "")
+    }
+    logger.bind(error_type=type(exc).__name__, **safe_context).warning(
+        "Sync v2 request failed"
+    )
+    if isinstance(exc, SyncIdempotencyConflictError):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error_code": "sync_idempotency_conflict",
+                "message": "Sync idempotency key was reused with different content.",
+            },
+        )
+    if isinstance(exc, SyncInvalidDomainError):
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error_code": "sync_invalid_domain",
+                "message": "Sync domain is not valid for the requested dataset.",
+            },
+        )
+    if isinstance(exc, SyncStoreError):
+        lowered = str(exc).lower()
+        if (
+            "invalid sync cursor" in lowered
+            or "page_size" in lowered
+            or "resolution envelope" in lowered
+            or "payload exceeds" in lowered
+        ):
+            return HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "sync_validation_failed",
+                    "message": "Sync request parameters are invalid.",
+                },
+            )
+        if "already belongs" in lowered:
+            return HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error_code": "sync_resource_conflict",
+                    "message": "Sync resource conflicts with an existing registration.",
+                },
+            )
+        not_found_markers = (
+            "not found or is not accessible",
+            "not found:",
+            "was not found",
+            "not accessible",
+        )
+        if any(marker in lowered for marker in not_found_markers):
+            return HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "error_code": "sync_resource_not_found",
+                    "message": "Requested sync resource was not found or is not accessible.",
+                },
+            )
+        return HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error_code": "sync_store_error",
+                "message": "Internal sync storage error while processing request.",
+            },
+        )
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail={
+            "error_code": "sync_internal_error",
+            "message": "Internal server error while processing sync request.",
+        },
+    )
+
+
+def _core_envelope_from_api(envelope: SyncV2Envelope) -> SyncEnvelopeCreate:
+    payload = model_dump_compat(
+        envelope,
+        exclude={"server_sequence", "server_timestamp", "encryption_policy"},
+    )
+    return SyncEnvelopeCreate(**payload)
+
+
+def _api_envelope_from_core(
+    envelope: Any,
+    *,
+    encryption_policy: str = "client_private_v1",
+) -> SyncV2Envelope:
+    payload = asdict(envelope)
+    payload["encryption_policy"] = encryption_policy
+    return SyncV2Envelope(**payload)
+
+
+def _api_conflict_from_core(conflict: Any) -> SyncConflictRecord:
+    return SyncConflictRecord(**asdict(conflict))
+
+
+def _api_capabilities_from_core(capabilities: Any) -> SyncCapabilitiesResponse:
+    return SyncCapabilitiesResponse(**asdict(capabilities))
+
+
+def _api_key_record_metadata(record: Any) -> dict[str, Any]:
+    return {
+        "key_record_id": record.key_record_id,
+        "dataset_id": record.dataset_id,
+        "device_id": record.device_id,
+        "key_purpose": record.key_purpose,
+        "recovery_hint": record.recovery_hint,
+        "rotation_of_key_record_id": record.rotation_of_key_record_id,
+        "created_at": record.created_at,
+    }
+
+
+def _api_key_record_export(record: Any) -> SyncKeyRecoveryBundleRecord:
+    return SyncKeyRecoveryBundleRecord(
+        key_record_id=record.key_record_id,
+        dataset_id=record.dataset_id,
+        device_id=record.device_id,
+        key_purpose=record.key_purpose,
+        wrapped_key_blob=record.wrapped_key_blob,
+        kdf_metadata=record.kdf_metadata,
+        recovery_hint=record.recovery_hint,
+        rotation_of_key_record_id=record.rotation_of_key_record_id,
+        created_at=record.created_at,
+        revoked_at=record.revoked_at,
+    )
+
+
+@router.get(
+    "/capabilities",
+    response_model=SyncCapabilitiesResponse,
+    summary="Return Sync v2 protocol capabilities",
+)
+def get_sync_v2_capabilities(
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    return _api_capabilities_from_core(service.capabilities())
+
+
+@router.post(
+    "/devices/register",
+    response_model=SyncDeviceRegisterResponse,
+    summary="Register or refresh a Sync v2 device",
+)
+def register_sync_v2_device(
+    request: SyncDeviceRegisterRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        registration = service.register_device(
+            user_id=_sync_user_id(user),
+            device_id=request.device_id,
+            display_name=request.display_name,
+            client_type=request.client_type,
+            client_version=request.client_version,
+            capabilities=request.capabilities,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            device_id=request.device_id,
+        ) from exc
+    return SyncDeviceRegisterResponse(
+        device_id=registration.device.device_id,
+        server_capabilities=_api_capabilities_from_core(registration.server_capabilities),
+        required_actions=registration.required_actions,
+        registered_at=registration.device.registered_at,
+        last_seen_at=registration.device.last_seen_at,
+    )
+
+
+@router.post(
+    "/datasets/enroll",
+    response_model=SyncDatasetEnrollResponse,
+    summary="Create or join a Sync v2 dataset",
+)
+def enroll_sync_v2_dataset(
+    request: SyncDatasetEnrollRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        enrollment = service.enroll_dataset(
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            scope_type=request.scope_type,
+            domains=request.domains,
+            encryption_policy=request.encryption_policy,
+            workspace_id=request.workspace_id,
+            metadata=request.metadata,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            workspace_id=request.workspace_id,
+        ) from exc
+    dataset = enrollment.dataset
+    return SyncDatasetEnrollResponse(
+        dataset_id=dataset.dataset_id,
+        scope_type=dataset.scope_type,
+        encryption_policy=dataset.encryption_policy,
+        domains=dataset.domains,
+        workspace_id=dataset.workspace_id,
+        cursors=enrollment.cursors,
+        key_setup_required=enrollment.key_setup_required,
+        created_at=dataset.created_at,
+        updated_at=dataset.updated_at,
+        metadata=dataset.metadata,
+    )
+
+
+@router.get(
+    "/restore-manifest",
+    response_model=SyncRestoreManifestResponse,
+    summary="Return Sync v2 restore inventory metadata",
+)
+def get_sync_v2_restore_manifest(
+    dataset_ids: list[str] | None = Query(None, alias="dataset_id"),
+    domains: list[SyncDomain] | None = Query(None, alias="domain"),
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        manifest = service.restore_manifest(
+            user_id=_sync_user_id(user),
+            dataset_ids=dataset_ids,
+            domains=domains,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_ids=dataset_ids,
+            domains=domains,
+        ) from exc
+    return SyncRestoreManifestResponse(
+        datasets=[asdict(dataset) for dataset in manifest.datasets],
+        devices=[asdict(device) for device in manifest.devices],
+        generated_at=manifest.generated_at,
+        filters_applied=manifest.filters_applied,
+    )
+
+
+@router.post(
+    "/push",
+    response_model=SyncPushResponse,
+    summary="Push Sync v2 envelopes",
+)
+def push_sync_v2_envelopes(
+    request: SyncPushRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        result = service.push(
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+            envelopes=[_core_envelope_from_api(envelope) for envelope in request.envelopes],
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+            envelope_count=len(request.envelopes),
+        ) from exc
+    return SyncPushResponse(
+        dataset_id=result.dataset_id,
+        accepted=[SyncPushAcceptedEnvelope(**asdict(item)) for item in result.accepted],
+        rejected=[SyncPushRejectedEnvelope(**asdict(item)) for item in result.rejected],
+        conflicts=[SyncPushConflictEnvelope(**asdict(item)) for item in result.conflicts],
+        next_cursor=result.next_cursor,
+    )
+
+
+@router.get(
+    "/pull",
+    response_model=SyncPullResponse,
+    summary="Pull Sync v2 envelopes",
+)
+def pull_sync_v2_envelopes(
+    dataset_id: str,
+    device_id: str,
+    cursor: str | None = None,
+    domains: list[SyncDomain] | None = Query(None, alias="domain"),
+    page_size: int | None = Query(None, ge=1),
+    include_own_changes: bool = False,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        result = service.pull(
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            device_id=device_id,
+            cursor=cursor,
+            domains=domains,
+            page_size=page_size,
+            include_own_changes=include_own_changes,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            device_id=device_id,
+            cursor=cursor,
+        ) from exc
+    return SyncPullResponse(
+        dataset_id=result.dataset_id,
+        envelopes=[
+            _api_envelope_from_core(
+                envelope,
+                encryption_policy=result.encryption_policy,
+            )
+            for envelope in result.envelopes
+        ],
+        next_cursor=result.next_cursor,
+        has_more=result.has_more,
+    )
+
+
+@router.get(
+    "/conflicts",
+    response_model=list[SyncConflictRecord],
+    summary="List Sync v2 conflicts",
+)
+def list_sync_v2_conflicts(
+    dataset_id: str,
+    conflict_status: ConflictStatus | None = Query(None, alias="status"),
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        conflicts = service.list_conflicts(
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            status=conflict_status,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            conflict_status=conflict_status,
+        ) from exc
+    return [_api_conflict_from_core(conflict) for conflict in conflicts]
+
+
+@router.post(
+    "/conflicts/{conflict_id}/resolve",
+    response_model=SyncConflictRecord,
+    summary="Resolve a Sync v2 conflict",
+)
+def resolve_sync_v2_conflict(
+    conflict_id: str,
+    request: SyncConflictResolveRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        conflict = service.resolve_conflict(
+            user_id=_sync_user_id(user),
+            conflict_id=conflict_id,
+            action=request.action,
+            resolution_envelope=(
+                _core_envelope_from_api(request.resolution_envelope)
+                if request.resolution_envelope is not None
+                else None
+            ),
+            resolved_by_envelope_id=(
+                request.resolution_envelope.client_envelope_id
+                if request.resolution_envelope is not None
+                else None
+            ),
+            resolved_by_device_id=request.resolved_by_device_id,
+            notes=request.notes,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            conflict_id=conflict_id,
+            resolved_by_device_id=request.resolved_by_device_id,
+        ) from exc
+    return _api_conflict_from_core(conflict)
+
+
+@router.get(
+    "/keys/recovery-bundle",
+    response_model=SyncKeyRecoveryBundleListResponse,
+    summary="List Sync v2 encrypted key recovery material",
+)
+def list_sync_v2_key_recovery_bundles(
+    dataset_id: str = Query(...),
+    device_id: str | None = Query(None),
+    key_purpose: str | None = Query("dataset_recovery"),
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        records = service.list_key_recovery_bundles(
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            device_id=device_id,
+            key_purpose=key_purpose,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=dataset_id,
+            device_id=device_id,
+            key_purpose=key_purpose,
+        ) from exc
+    return SyncKeyRecoveryBundleListResponse(
+        dataset_id=dataset_id,
+        key_records=[_api_key_record_export(record) for record in records],
+    )
+
+
+@router.post(
+    "/attachments",
+    status_code=status.HTTP_501_NOT_IMPLEMENTED,
+    summary="Feature-detect Sync v2 attachment upload support",
+)
+def upload_sync_v2_attachment(
+    _request: Request,
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    supports_attachments = service.capabilities().supports_attachments
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail={
+            "error_code": "sync_attachments_not_enabled",
+            "message": "Sync v2 attachment persistence is not enabled on this server.",
+            "supports_attachments": supports_attachments,
+        },
+    )
+
+
+@router.post(
+    "/keys/recovery-bundle",
+    summary="Store Sync v2 encrypted key recovery material",
+)
+def store_sync_v2_key_recovery_bundle(
+    request: SyncKeyRecoveryBundleRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        record = service.store_key_recovery_bundle(
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+            key_purpose=request.key_purpose,
+            wrapped_key_blob=request.wrapped_key_blob,
+            kdf_metadata=request.kdf_metadata,
+            recovery_hint=request.recovery_hint,
+            rotation_of_key_record_id=request.rotation_of_key_record_id,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+            key_purpose=request.key_purpose,
+        ) from exc
+    return _api_key_record_metadata(record)
 
 
 @router.post("/send",

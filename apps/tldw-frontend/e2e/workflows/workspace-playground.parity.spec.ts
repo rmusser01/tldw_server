@@ -9,7 +9,7 @@ const EMPTY_LIST_RESPONSE = {
   body: JSON.stringify({ items: [], total: 0 })
 }
 
-test.describe("Workspace Playground parity (WebUI)", () => {
+test.describe("Research Studio parity (WebUI)", () => {
   test.beforeEach(async ({ authedPage }) => {
     await authedPage.setViewportSize(DESKTOP_VIEWPORT)
 

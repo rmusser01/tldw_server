@@ -163,7 +163,7 @@ Run: `npx playwright test apps/tldw-frontend/e2e/workflows/tier-5-specialized/mo
 
 Expected: `/moderation` loads review state, `/moderation/rules` loads content rules, `/moderation-playground` redirects.
 
-**Status:** Not Started
+**Status:** Complete
 
 ---
 
@@ -239,7 +239,7 @@ Run: `bunx vitest run apps/packages/ui/src/components/Option/ModerationPlaygroun
 
 Expected: all tests pass and no raw replace service call occurs before preview confirmation.
 
-**Status:** Not Started
+**Status:** Complete
 
 ---
 
@@ -260,30 +260,30 @@ Expected: all tests pass and no raw replace service call occurs before preview c
 
 **Implementation Tasks:**
 
-- [ ] Add `aria-label` to icon-only buttons in `ModerationContextBar.tsx`: quick test, reload, and active-user clear.
+- [x] Add `aria-label` to icon-only buttons in `ModerationContextBar.tsx`: quick test, reload, and active-user clear.
 
-- [ ] Replace visual-only labels with programmatic labels. Use stable ids via `React.useId()` and either `htmlFor`/`id` or `aria-labelledby` for every input, textarea, select, AntD Select, and hidden file input trigger.
+- [x] Replace visual-only labels with programmatic labels. Use stable ids via `React.useId()` and either `htmlFor`/`id` or `aria-labelledby` for every input, textarea, select, AntD Select, and hidden file input trigger.
 
-- [ ] Convert phase segmented controls in `TestSandboxPanel.tsx` to `role="radiogroup"` plus `role="radio"`/`aria-checked`, or use native radio semantics.
+- [x] Convert phase segmented controls in `TestSandboxPanel.tsx` to `role="radiogroup"` plus `role="radio"`/`aria-checked`, or use native radio semantics.
 
-- [ ] Add keyboard handling to tab bars if needed: arrow keys move between tabs, Enter/Space activates, focus remains visible.
+- [x] Add keyboard handling to tab bars if needed: arrow keys move between tabs, Enter/Space activates, focus remains visible.
 
-- [ ] Make wide tables scroll inside their containers with `overflow-x-auto`, `min-w-*`, and no page-level horizontal scroll. Verify `ModerationPlaygroundShell` hero, context bar, status badges, tabs, category chips, and modals at 390px.
+- [x] Make wide tables scroll inside their containers with `overflow-x-auto`, `min-w-*`, and no page-level horizontal scroll. Verify `ModerationPlaygroundShell` hero, context bar, status badges, tabs, category chips, and modals at 390px.
 
-- [ ] Add focus management for confirmation modals and undo controls. After a delete/replace modal closes, return focus to the trigger or the next stable action.
+- [x] Add focus management for confirmation modals and undo controls. After a delete/replace modal closes, return focus to the trigger or the next stable action.
 
-- [ ] Ensure inline errors are associated with the related input using `aria-describedby`, and dynamic result/error areas use `aria-live="polite"` where appropriate.
+- [x] Ensure inline errors are associated with the related input using `aria-describedby`, and dynamic result/error areas use `aria-live="polite"` where appropriate.
 
 **Tests:**
 
-- [ ] Add Testing Library assertions for accessible names:
+- [x] Add Testing Library assertions for accessible names:
 
 ```ts
 expect(screen.getByRole("button", { name: /quick test/i })).toBeInTheDocument()
 expect(screen.getByLabelText(/sample text/i)).toBeInTheDocument()
 ```
 
-- [ ] Add Playwright responsive check with CDP/browser viewport sizes 390x844, 768x1024, and 1440x900. Assert no `document.documentElement.scrollWidth > clientWidth` on `/moderation/rules`.
+- [x] Add Playwright responsive check with CDP/browser viewport sizes 390x844, 768x1024, and 1440x900. Assert no `document.documentElement.scrollWidth > clientWidth` on `/moderation/rules`.
 
 Run: `bunx vitest run apps/packages/ui/src/components/Option/ModerationPlayground/__tests__/ModerationPlayground.accessibility.test.tsx`
 
@@ -291,7 +291,14 @@ Run: `npx playwright test apps/tldw-frontend/e2e/workflows/tier-5-specialized/mo
 
 Expected: all tests pass; 390px viewport has no page-level horizontal overflow.
 
-**Status:** Not Started
+**Verification:**
+- `bunx vitest run ../packages/ui/src/components/Option/ModerationPlayground/__tests__ ../packages/ui/src/services/__tests__/moderation.service.contract.test.ts` - passed, 20 files / 217 tests.
+- `bunx playwright test e2e/workflows/tier-5-specialized/moderation-responsive.spec.ts e2e/workflows/tier-5-specialized/moderation-routes.spec.ts --project=tier-5 --reporter=line` - passed, 7 tests.
+- `git diff --check` - passed.
+- `bunx tsc --noEmit --pretty false` - still blocked by pre-existing unrelated errors in `EmbeddingsModelSelectionConfig.tsx`, `persona-visuals.ts`, and `lib/api/vnPlay.ts`.
+- Bandit not run; touched files are TypeScript/TSX, Playwright tests, docs, and Backlog metadata only.
+
+**Status:** Complete
 
 ---
 
@@ -304,12 +311,12 @@ Expected: all tests pass; 390px viewport has no page-level horizontal overflow.
 - Modify: `tldw_Server_API/app/core/AuthNZ/settings.py`
 - Modify: `tldw_Server_API/app/core/AuthNZ/migrations.py`
 - Modify: `tldw_Server_API/app/core/AuthNZ/rbac_seed.py`
-- Modify: `tldw_Server_API/app/core/AuthNZ/pg_migrations_extra.py`
+- Covered by shared Postgres/SQLite RBAC bootstrap: `tldw_Server_API/app/core/AuthNZ/rbac_seed.py`
 - Modify: `tldw_Server_API/app/api/v1/schemas/moderation_schemas.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/moderation.py`
 - Create: `tldw_Server_API/app/core/Moderation/review_store.py`
 - Create: `tldw_Server_API/app/core/Moderation/review_service.py`
-- Modify: `tldw_Server_API/app/core/Moderation/moderation_service.py`
+- Covered by adjacent review-safe projection helper: `tldw_Server_API/app/core/Moderation/review_service.py`
 - Modify: `tldw_Server_API/app/core/Chat/chat_service.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/chat.py`
 - Modify: `apps/packages/ui/src/services/tldw/openapi-guard.ts`
@@ -321,7 +328,7 @@ Expected: all tests pass; 390px viewport has no page-level horizontal overflow.
 
 **Implementation Tasks:**
 
-- [ ] Add permission constants:
+- [x] Add permission constants:
 
 ```py
 MODERATION_REVIEW_READ = "moderation.review.read"
@@ -330,11 +337,11 @@ MODERATION_REVIEW_BULK_DECIDE = "moderation.review.bulk_decide"
 MODERATION_AUDIT_READ = "moderation.audit.read"
 ```
 
-- [ ] Seed permissions in SQLite and Postgres RBAC paths. Grant all to admin, grant `moderation.review.read` and `moderation.review.decide` to reviewer, and add review permissions to `SINGLE_USER_DEFAULT_PERMISSIONS` so local single-user mode remains usable.
+- [x] Seed permissions in SQLite and Postgres RBAC paths. Grant all to admin, grant `moderation.review.read` and `moderation.review.decide` to reviewer, and add review permissions to `SINGLE_USER_DEFAULT_PERMISSIONS` so local single-user mode remains usable.
 
-- [ ] Refactor `tldw_Server_API/app/api/v1/endpoints/moderation.py` so config endpoints keep admin plus `SYSTEM_CONFIGURE`, but review endpoints use review permissions. Use a root `router = APIRouter()` plus `rules_router` and `review_router` if needed; do not leave review endpoints under a global `SYSTEM_CONFIGURE` dependency.
+- [x] Refactor `tldw_Server_API/app/api/v1/endpoints/moderation.py` so config endpoints keep admin plus `SYSTEM_CONFIGURE`, but review endpoints use review permissions. Use a root `router = APIRouter()` plus `rules_router` and `review_router` if needed; do not leave review endpoints under a global `SYSTEM_CONFIGURE` dependency.
 
-- [ ] Add Pydantic schemas to `moderation_schemas.py`:
+- [x] Add Pydantic schemas to `moderation_schemas.py`:
 
 ```py
 ModerationReviewStatus = Literal[
@@ -371,20 +378,20 @@ class ModerationReviewItem(BaseModel):
     recommended_action: ModerationDecisionAction | None = None
 ```
 
-- [ ] Create `review_store.py` using SQLite at `MODERATION_REVIEW_DB_PATH` or default `tldw_Server_API/Databases/moderation_review.db`. Use `configure_sqlite_connection`, `sqlite3.Row`, parameterized queries, and schema creation in `__init__`.
+- [x] Create `review_store.py` using SQLite at `MODERATION_REVIEW_DB_PATH` or default `tldw_Server_API/Databases/moderation_review.db`. Use `configure_sqlite_connection`, `sqlite3.Row`, parameterized queries, and schema creation in `__init__`.
 
-- [ ] Store only sanitized fields by default. Minimum tables:
+- [x] Store only sanitized fields by default. Minimum tables:
   - `moderation_review_items`
   - `moderation_review_decisions`
   - `moderation_review_audit_events`
 
-- [ ] Add unique `idempotency_key` on `moderation_review_items` so repeated checks do not create duplicates.
+- [x] Add unique `idempotency_key` on `moderation_review_items` so repeated checks do not create duplicates.
 
-- [ ] Add retention fields `retention_expires_at` and `content_redacted_at`. Implement `redact_item_content(item_id, actor_id)` even if only used by tests in this stage.
+- [x] Add retention fields `retention_expires_at` and `content_redacted_at`. Implement `redact_item_content(item_id, actor_id)` even if only used by tests in this stage.
 
-- [ ] Create `review_service.py` with list/detail/record/decision/undo/bulk/audit methods. Map actions to resulting statuses: approve -> approved, block -> blocked, redact -> redacted, dismiss -> dismissed, escalate -> escalated.
+- [x] Create `review_service.py` with list/detail/record/decision/undo/bulk/audit methods. Map actions to resulting statuses: approve -> approved, block -> blocked, redact -> redacted, dismiss -> dismissed, escalate -> escalated.
 
-- [ ] Add review endpoints:
+- [x] Add review endpoints:
   - `GET /moderation/review/items`
   - `GET /moderation/review/items/{item_id}`
   - `POST /moderation/review/items/{item_id}/decision`
@@ -392,31 +399,40 @@ class ModerationReviewItem(BaseModel):
   - `POST /moderation/review/bulk-decision`
   - `GET /moderation/review/audit`
 
-- [ ] Add `CurrentPrincipal` dependency to decision endpoints so `decided_by` and audit actor use the authenticated principal id. Never trust actor fields from the request body.
+- [x] Add `CurrentPrincipal` dependency to decision endpoints so `decided_by` and audit actor use the authenticated principal id. Never trust actor fields from the request body.
 
-- [ ] Extend `ModerationEvaluationResult` or add an adjacent helper in `moderation_service.py` to provide review-safe metadata: sanitized excerpt, matched pattern type/category/action, effective policy snapshot, source phase, and recommended action. Keep raw text out of the returned review payload.
+- [x] Extend `ModerationEvaluationResult` or add an adjacent helper in `moderation_service.py` to provide review-safe metadata: sanitized excerpt, matched pattern type/category/action, effective policy snapshot, source phase, and recommended action. Keep raw text out of the returned review payload.
 
-- [ ] Add event producer calls in `tldw_Server_API/app/core/Chat/chat_service.py` where input/output moderation already resolves `block`, `redact`, or `warn`. Create review items after the moderation action is known and before returning or raising, using an idempotency key based on source type, source id, phase, user/principal id, category, action, and sanitized sample hash.
+- [x] Add event producer calls in `tldw_Server_API/app/core/Chat/chat_service.py` where input/output moderation already resolves `block`, `redact`, or `warn`. Create review items after the moderation action is known and before returning or raising, using an idempotency key based on source type, source id, phase, user/principal id, category, action, and sanitized sample hash.
 
-- [ ] Add a narrow endpoint-level hook in `tldw_Server_API/app/api/v1/endpoints/chat.py` only where moderation is handled outside `chat_service.py`. Avoid duplicate events for paths already routed through `moderate_input_messages`.
+- [x] Add a narrow endpoint-level hook in `tldw_Server_API/app/api/v1/endpoints/chat.py` only where moderation is handled outside `chat_service.py`. Avoid duplicate events for paths already routed through `moderate_input_messages`.
 
-- [ ] Add `MODERATION_REVIEW_CAPTURE_ENABLED` config/env gate defaulting off for production capture until Stage 5 UI and retention behavior are verified. Tests can enable it explicitly.
+- [x] Add `MODERATION_REVIEW_CAPTURE_ENABLED` config/env gate defaulting off for production capture until Stage 5 UI and retention behavior are verified. Tests can enable it explicitly.
 
-- [ ] Add review endpoints to `apps/packages/ui/src/services/tldw/openapi-guard.ts`.
+- [x] Add review endpoints to `apps/packages/ui/src/services/tldw/openapi-guard.ts`.
 
 **Tests:**
 
-- [ ] Store tests: schema creation, insert idempotency, sanitized list/detail, filtering, pagination cursor, decision, undo, bulk partial failure, audit order, retention redaction.
+- [x] Store/service tests: schema creation, insert idempotency, sanitized list/detail, filtering, pagination cursor, decision, undo, bulk partial failure, audit order, retention redaction.
 
-- [ ] Auth tests: config endpoints still require admin plus `SYSTEM_CONFIGURE`; review list allows `MODERATION_REVIEW_READ`; decision requires `MODERATION_REVIEW_DECIDE`; bulk requires `MODERATION_REVIEW_BULK_DECIDE`; audit requires `MODERATION_AUDIT_READ`.
+- [x] Auth tests: config endpoints still require admin plus `SYSTEM_CONFIGURE`; review list allows `MODERATION_REVIEW_READ`; decision requires `MODERATION_REVIEW_DECIDE`; bulk requires `MODERATION_REVIEW_BULK_DECIDE`; audit requires `MODERATION_AUDIT_READ`.
 
-- [ ] Event capture tests: chat input block/redact/warn creates one review item with sanitized excerpt and no raw text; repeated call with same idempotency key does not duplicate.
+- [x] Event capture tests: chat input block/redact/warn creates one review item with sanitized excerpt and no raw text; repeated call with same idempotency key does not duplicate.
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/unit/test_moderation_review_store.py tldw_Server_API/tests/unit/test_moderation_review_service.py tldw_Server_API/tests/AuthNZ_Unit/test_moderation_permissions_claims.py tldw_Server_API/tests/unit/test_moderation_event_capture.py -q`
 
 Expected: tests pass with review capture enabled only in tests that opt into it.
 
-**Status:** Not Started
+**Verification:**
+
+- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/unit/test_moderation_review_store.py tldw_Server_API/tests/unit/test_moderation_review_service.py tldw_Server_API/tests/AuthNZ_Unit/test_moderation_permissions_claims.py tldw_Server_API/tests/unit/test_moderation_event_capture.py -q` -> 21 passed, 5 warnings.
+- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat_NEW/integration/test_moderation.py -q` -> 15 passed, 5 warnings.
+- `bun run verify:openapi` from `apps/packages/ui` -> 265 ClientPath entries verified, 49 media add fallback fields verified, 10 existing reviewed exception paths allowed.
+- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m py_compile tldw_Server_API/app/core/Moderation/review_store.py tldw_Server_API/app/core/Moderation/review_service.py tldw_Server_API/app/api/v1/endpoints/moderation.py tldw_Server_API/app/core/Chat/chat_service.py tldw_Server_API/app/api/v1/endpoints/chat.py` -> passed.
+- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/moderation.py tldw_Server_API/app/api/v1/schemas/moderation_schemas.py tldw_Server_API/app/core/Moderation/moderation_service.py tldw_Server_API/app/core/Moderation/review_store.py tldw_Server_API/app/core/Moderation/review_service.py tldw_Server_API/app/core/Chat/chat_service.py tldw_Server_API/app/api/v1/endpoints/chat.py -f json -o /tmp/bandit_moderation_review_stage4.json` -> no findings; intentional `nosec B608` suppressions on whitelisted dynamic SQL fragments.
+- `git diff --check` -> passed.
+
+**Status:** Complete
 
 ---
 
@@ -441,31 +457,31 @@ Expected: tests pass with review capture enabled only in tests that opt into it.
 
 **Implementation Tasks:**
 
-- [ ] Add TypeScript types and service functions for all Stage 4 review endpoints in `apps/packages/ui/src/services/moderation.ts`.
+- [x] Add TypeScript types and service functions for all Stage 4 review endpoints in `apps/packages/ui/src/services/moderation.ts`.
 
-- [ ] Build `useModerationReviewQueue` with state for `status`, `category`, `severity`, `source_type`, `source_id`, `user_id`, `q`, `date_from`, `date_to`, `sort`, `cursor`, `selectedItemId`, `loading`, `error`, `partial`, and `warnings`.
+- [x] Build `useModerationReviewQueue` with state for `status`, `category`, `severity`, `source_type`, `source_id`, `user_id`, `q`, local `sort`, `cursor`, `selectedItemId`, `loading`, `error`, `partial`, and `warnings`. Date filters are deferred until the backend exposes date query parameters.
 
-- [ ] Implement `ReviewQueueToolbar` with status, category/severity, source/user, date sort, search, and refresh. Keep controls dense and label every input.
+- [x] Implement `ReviewQueueToolbar` with status, category/severity, source/user, local sort, search, and refresh. Keep controls dense and label every input.
 
-- [ ] Implement `ReviewQueueList` as a responsive table/list hybrid. Desktop uses dense columns; mobile collapses to stacked rows. Required visible fields: status, severity, category, phase, source, user/session, created time, sanitized excerpt, recommended action.
+- [x] Implement `ReviewQueueList` as a responsive table/list hybrid. Desktop uses dense columns; mobile collapses to stacked rows. Required visible fields: status, severity, category, phase, source, user/session, created time, sanitized excerpt, recommended action.
 
-- [ ] Implement `ReviewItemDetail` with sanitized excerpt/context, provenance, effective policy, matches, prior decision, and warnings when safe fields are unavailable.
+- [x] Implement `ReviewItemDetail` with sanitized excerpt/context, provenance, effective policy, matches, and warnings when safe fields are unavailable. Prior decision history remains Stage 6 audit timeline scope.
 
-- [ ] Implement `DecisionBar` with approve, block, redact, dismiss, and escalate. Require reason for block, redact, and escalate; allow optional reason for approve/dismiss. Confirm destructive actions.
+- [x] Implement `DecisionBar` with approve, block, redact, dismiss, and escalate. Require reason for block, redact, and escalate; allow optional reason for approve/dismiss. Confirm destructive actions.
 
-- [ ] After a successful single-item decision, refresh counts, update selected item, and show an undo affordance when `undo_token` is returned.
+- [x] After a successful single-item decision, refresh counts, update selected item, and show an undo affordance when `undo_token` is returned.
 
-- [ ] Implement empty, loading, error, permission denied, backend unsupported, and partial-data states in `ReviewStatePanels.tsx`.
+- [x] Implement empty, loading, error, permission denied, backend unsupported, and partial-data states in `ReviewStatePanels.tsx`.
 
-- [ ] For extension wrapper, render compact queue controls and selected item summary if full table width is unavailable. Include "Open full review" action; do not redirect to rules.
+- [x] For extension wrapper, render compact queue controls and selected item summary if full table width is unavailable. Include "Open full review" action; do not redirect to rules.
 
 **Tests:**
 
-- [ ] Unit tests for service URL/query building and response typing.
-- [ ] Component tests for empty/loading/error/permission states.
-- [ ] Component tests for filters updating query state and refresh calls.
-- [ ] Component tests for decision reason validation and undo display.
-- [ ] E2E test using mocked review fixture to exercise list -> detail -> decision -> undo.
+- [x] Unit tests for service URL/query building and response typing.
+- [x] Component tests for empty/loading/error/permission states.
+- [x] Component tests for filters updating query state and refresh calls.
+- [x] Component tests for decision reason validation and undo display.
+- [x] E2E test using mocked review fixture to exercise list -> detail -> decision -> undo.
 
 Run: `bunx vitest run apps/packages/ui/src/components/Option/ModerationReview/__tests__/ModerationReviewShell.test.tsx apps/packages/ui/src/components/Option/ModerationReview/__tests__/review-utils.test.ts apps/packages/ui/src/services/__tests__/moderation.service.contract.test.ts`
 
@@ -495,22 +511,22 @@ Expected: `/moderation` is usable with seeded/mocked review items and all requir
 
 **Implementation Tasks:**
 
-- [ ] Add decision history to item detail response. Include only sanitized actor id, action, resulting status, reason, timestamps, undo eligibility, and redaction state.
+- [x] Add decision history to item detail response. Include only sanitized actor id, action, resulting status, reason, timestamps, undo eligibility, and redaction state.
 
-- [ ] Ensure undo tokens are stored hashed, expire, and are single-use. Undo should append an audit event and restore the previous status only when no later decision superseded it.
+- [x] Ensure undo tokens are stored hashed, expire, and are single-use. Undo should append an audit event and restore the previous status only when no later decision superseded it.
 
-- [ ] Add audit list filters by `item_id`, `decision_id`, `actor`, `action`, `date_from`, `date_to`, `cursor`, and `limit`.
+- [x] Add audit list filters by `item_id`, `decision_id`, `actor`, `action`, `date_from`, `date_to`, `cursor`, and `limit`.
 
-- [ ] Add explicit redaction support for review item content when source data deletion or privacy policy requires it. Redacted items should keep metadata/audit records but replace excerpt/context/match samples with safe placeholders.
+- [x] Add explicit redaction support for review item content when source data deletion or privacy policy requires it. Redacted items should keep metadata/audit records but replace excerpt/context/match samples with safe placeholders.
 
-- [ ] Build `AuditTimeline.tsx` and surface it in item detail. Keep raw JSON behind a details element only for debugging-safe payloads.
+- [x] Build `AuditTimeline.tsx` and surface it in item detail. Keep raw JSON behind a details element only for debugging-safe payloads.
 
-- [ ] Add sanitized audit export service only if the backend endpoint is ready; otherwise leave export as a documented Stage 6 follow-up within the task.
+- [x] Add sanitized audit export service only if the backend endpoint is ready; otherwise leave export as a documented Stage 6 follow-up within the task. No export endpoint was added in Stage 6; the supported v1 surface remains filtered audit listing until an export endpoint is explicitly designed.
 
 **Tests:**
 
-- [ ] Backend tests for undo expiration, single-use undo, later-decision conflict, audit list filters, and content redaction.
-- [ ] Frontend tests for audit timeline, redacted content state, and undo disabled/expired states.
+- [x] Backend tests for undo expiration, single-use undo, later-decision conflict, audit list filters, and content redaction.
+- [x] Frontend tests for audit timeline, redacted content state, and undo disabled/expired states.
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/unit/test_moderation_review_audit.py -q`
 
@@ -518,7 +534,7 @@ Run: `bunx vitest run apps/packages/ui/src/components/Option/ModerationReview/__
 
 Expected: decisions are auditable and undo/redaction behavior is explicit in UI and backend.
 
-**Status:** Not Started
+**Status:** Complete
 
 ---
 
@@ -538,23 +554,23 @@ Expected: decisions are auditable and undo/redaction behavior is explicit in UI 
 
 **Implementation Tasks:**
 
-- [ ] Add multi-select to queue rows with a visible selected count and clear selection control.
+- [x] Add multi-select to queue rows with a visible selected count and clear selection control.
 
-- [ ] Add `BulkDecisionBar` for approve, dismiss, block, redact, and escalate. Require confirmation and reason for destructive/high-risk bulk actions.
+- [x] Add `BulkDecisionBar` for approve, dismiss, block, redact, and escalate. Require confirmation and reason for destructive/high-risk bulk actions.
 
-- [ ] Wire `POST /moderation/review/bulk-decision` and render partial failure results inline.
+- [x] Wire `POST /moderation/review/bulk-decision` and render partial failure results inline.
 
-- [ ] Add saved filter presets in local storage for status/category/severity/source/date/sort. Keep the persistence local and reversible.
+- [x] Add saved filter presets in local storage for status/category/severity/source/date/sort. Keep the persistence local and reversible.
 
-- [ ] Add keyboard shortcuts only when focus is inside the review surface: next/previous item, approve, dismiss, focus search, refresh. Show shortcuts in tooltips or a small help popover, not as permanent instructional copy.
+- [x] Add keyboard shortcuts only when focus is inside the review surface: next/previous item, approve, dismiss, focus search, refresh. Show shortcuts in tooltips or a small help popover, not as permanent instructional copy.
 
-- [ ] Add "review complete" completion state when `needs_review` count reaches zero, with secondary links to audit and content rules.
+- [x] Add "review complete" completion state when `needs_review` count reaches zero, with secondary links to audit and content rules.
 
 **Tests:**
 
-- [ ] Unit/component tests for bulk confirmation, required reason validation, partial failure display, saved filter persistence, and keyboard shortcuts.
+- [x] Unit/component tests for bulk confirmation, required reason validation, partial failure display, saved filter persistence, and keyboard shortcuts.
 
-- [ ] E2E test for selecting several rows, bulk dismissing, handling one failed item, and clearing selection.
+- [x] E2E test for selecting several rows, bulk dismissing, handling one failed item, and clearing selection.
 
 Run: `bunx vitest run apps/packages/ui/src/components/Option/ModerationReview/__tests__/BulkDecisionBar.test.tsx apps/packages/ui/src/components/Option/ModerationReview/__tests__/ModerationReviewShell.test.tsx`
 
@@ -562,7 +578,7 @@ Run: `npx playwright test apps/tldw-frontend/e2e/workflows/tier-5-specialized/mo
 
 Expected: repeat-review workflow can be completed without opening every item, while destructive actions remain confirmed and audited.
 
-**Status:** Not Started
+**Status:** Complete
 
 ---
 
@@ -584,69 +600,81 @@ Expected: repeat-review workflow can be completed without opening every item, wh
 
 **Implementation Tasks:**
 
-- [ ] Add E2E fixtures for populated review queue, empty queue, permission denied, backend error, partial data, expired undo, and redacted content states.
+- [x] Add E2E fixtures for populated review queue, empty queue, permission denied, backend error, partial data, expired undo, and redacted content states.
 
-- [ ] Update smoke/page inventory so canonical routes are `/moderation` and `/moderation/rules`; keep `/moderation-playground` only as a legacy redirect case.
+- [x] Update smoke/page inventory so canonical routes are `/moderation` and `/moderation/rules`; keep `/moderation-playground` only as a legacy redirect case.
 
-- [ ] Update `Docs/Code_Documentation/Moderation-Guardrails.md` to distinguish "Moderation Review" from "Content Rules", list review permissions, explain sanitized review data, and document retention/minimization behavior.
+- [x] Update `Docs/Code_Documentation/Moderation-Guardrails.md` to distinguish "Moderation Review" from "Content Rules", list review permissions, explain sanitized review data, and document retention/minimization behavior.
 
-- [ ] Document `MODERATION_REVIEW_CAPTURE_ENABLED` and `MODERATION_REVIEW_DB_PATH`.
+- [x] Document `MODERATION_REVIEW_CAPTURE_ENABLED` and `MODERATION_REVIEW_DB_PATH`.
 
-- [ ] Add a short "known unsupported states" note if any review producers remain unwired after the MVP.
+- [x] Add a short "known unsupported states" note if any review producers remain unwired after the MVP.
 
-- [ ] Run full focused frontend/backend verification and record results in the relevant Backlog tasks.
+- [x] Run full focused frontend/backend verification and record results in the relevant Backlog tasks.
 
 **Verification Commands:**
 
-- [ ] Backend focused:
+- [x] Backend focused:
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/unit/test_moderation_blocklist_parse.py tldw_Server_API/tests/unit/test_moderation_review_store.py tldw_Server_API/tests/unit/test_moderation_review_service.py tldw_Server_API/tests/unit/test_moderation_review_audit.py tldw_Server_API/tests/AuthNZ_Unit/test_moderation_permissions_claims.py tldw_Server_API/tests/unit/test_moderation_event_capture.py -q`
 
 Expected: all focused moderation backend tests pass.
 
-- [ ] Frontend focused:
+Result: 57 passed, 5 warnings.
+
+- [x] Frontend focused:
 
 Run: `bunx vitest run apps/packages/ui/src/components/Option/ModerationPlayground/__tests__ apps/packages/ui/src/components/Option/ModerationReview/__tests__ apps/packages/ui/src/components/Layouts/__tests__/settings-nav.moderation.test.ts apps/packages/ui/src/services/__tests__/moderation.service.contract.test.ts`
 
 Expected: all focused moderation frontend tests pass.
 
-- [ ] Route and responsive E2E:
+Result: 25 focused frontend files passed, 239 tests passed.
+
+- [x] Route and responsive E2E:
 
 Run: `npx playwright test apps/tldw-frontend/e2e/workflows/tier-5-specialized/moderation-routes.spec.ts apps/tldw-frontend/e2e/workflows/tier-5-specialized/moderation-responsive.spec.ts apps/tldw-frontend/e2e/workflows/tier-5-specialized/moderation-review.spec.ts apps/tldw-frontend/e2e/workflows/tier-5-specialized/moderation-review-power-user.spec.ts --project=chromium`
 
 Expected: canonical routes, legacy redirect, responsive behavior, review queue, decision, undo, and bulk flows pass through Playwright/CDP.
 
-- [ ] Design-system/state guard:
+Result: 10 Playwright/CDP tests passed under the tier-5 project.
+
+- [x] Design-system/state guard:
 
 Run: `bun run verify:design-system-state`
 
 Expected: no new design-system state violations.
 
-- [ ] Security scan on touched backend production files:
+Result: command ran and failed on existing repo-wide baseline entries in AgentRegistry/AgentTasks product-state usage and stale baseline entries; no moderation files were implicated.
+
+- [x] Security scan on touched backend production files:
 
 Run: `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/moderation.py tldw_Server_API/app/api/v1/schemas/moderation_schemas.py tldw_Server_API/app/core/Moderation/moderation_service.py tldw_Server_API/app/core/Moderation/review_store.py tldw_Server_API/app/core/Moderation/review_service.py tldw_Server_API/app/core/Chat/chat_service.py tldw_Server_API/app/api/v1/endpoints/chat.py -f json -o /tmp/bandit_moderation_review.json`
 
 Expected: no new findings in touched code.
 
-- [ ] Whitespace/diff hygiene:
+Result: Bandit JSON output contained `"results": []`.
+
+- [x] Whitespace/diff hygiene:
 
 Run: `git diff --check`
 
 Expected: no whitespace errors.
 
-**Status:** Not Started
+Result: no whitespace errors.
+
+**Status:** Complete
 
 ---
 
 ## Implementation Risk Checks
 
-- [ ] Review endpoints must not inherit the existing global `SYSTEM_CONFIGURE` dependency, or reviewer role support will be fake.
-- [ ] The review UI must treat backend `safe_fields` as authoritative and avoid rendering absent raw fields.
-- [ ] Event capture must be idempotent and gated until the UI/retention path is verified.
-- [ ] Extension route parity must be explicit; `/moderation` must not silently point to rules.
-- [ ] Raw blocklist replace/upload must not bypass lint and preview.
-- [ ] Power-user shortcuts must not fire while typing in inputs/textareas.
-- [ ] E2E fixtures must cover populated and missing-data states; an empty-only queue is not enough.
+- [x] Review endpoints must not inherit the existing global `SYSTEM_CONFIGURE` dependency, or reviewer role support will be fake.
+- [x] The review UI must treat backend `safe_fields` as authoritative and avoid rendering absent raw fields.
+- [x] Event capture must be idempotent and gated until the UI/retention path is verified.
+- [x] Extension route parity must be explicit; `/moderation` must not silently point to rules.
+- [x] Raw blocklist replace/upload must not bypass lint and preview.
+- [x] Power-user shortcuts must not fire while typing in inputs/textareas.
+- [x] E2E fixtures must cover populated and missing-data states; an empty-only queue is not enough.
 
 ## Plan Review Notes
 

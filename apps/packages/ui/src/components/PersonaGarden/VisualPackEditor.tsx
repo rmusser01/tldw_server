@@ -23,6 +23,7 @@ import {
   createPersonaVisualGenerationJob,
   createPersonaVisualImportPreview,
   createPersonaVisualPack,
+  copyPersonaVisualStarterPack,
   deletePersonaVisualLibraryItem,
   deactivatePersonaVisualPack,
   downloadPersonaVisualPackExportArchive,
@@ -31,6 +32,7 @@ import {
   getPersonaVisualImportCommitStatus,
   getPersonaVisualImportPreview,
   getPersonaVisualPackExportJob,
+  listPersonaVisualStarterPacks,
   listPersonaVisualLibraryItems,
   listPersonaVisualCandidates,
   listPersonaVisualDuplicateTargets,
@@ -45,11 +47,13 @@ import {
   uploadPersonaVisualAsset,
   usePersonaVisualLibraryItem
 } from "@/services/persona-visuals"
+import { PERSONA_VISUAL_PACK_ACTIVATED_EVENT } from "@/types/persona-visuals"
 import type {
   PersonaVisualAnimation,
   PersonaVisualAsset,
   PersonaVisualAssetRole,
   PersonaVisualAuthoredTrigger,
+  PersonaVisualBuiltinStateId,
   PersonaVisualCandidate,
   PersonaVisualDuplicateTarget,
   PersonaVisualLibraryItem,
@@ -65,7 +69,13 @@ import type {
   PersonaVisualPack,
   PersonaVisualPackExportResponse,
   PersonaVisualPortabilityJobResponse,
+  PersonaVisualRendererImportPreview,
+  PersonaVisualStarterPackSummary,
   PersonaVisualStateId
+} from "@/types/persona-visuals"
+import {
+  asPersonaVisualCustomStateId,
+  asPersonaVisualStateId
 } from "@/types/persona-visuals"
 import { getDesignSystemState } from "@/design-system"
 import {
@@ -100,9 +110,14 @@ type LibraryEditDraft = {
   tags: string
 }
 
+type VisualPackTranslate = (
+  key: string,
+  options?: { defaultValue?: string; [key: string]: unknown }
+) => string
+
 const getGenerationReadinessCopy = (
   view: PersonaVisualGenerationReadinessView,
-  t: (key: string, options?: { defaultValue?: string }) => string
+  t: VisualPackTranslate
 ): { title: string; message: string; toneClassName: string } => {
   switch (view.status) {
     case "ready":
@@ -210,7 +225,7 @@ const getGenerationReadinessCopy = (
   }
 }
 
-const REQUIRED_VISUAL_STATES: PersonaVisualStateId[] = [
+const REQUIRED_VISUAL_STATES: PersonaVisualBuiltinStateId[] = [
   "idle",
   "listening",
   "thinking",
@@ -218,7 +233,7 @@ const REQUIRED_VISUAL_STATES: PersonaVisualStateId[] = [
   "error"
 ]
 
-const OPTIONAL_VISUAL_STATES: PersonaVisualStateId[] = [
+const OPTIONAL_VISUAL_STATES: PersonaVisualBuiltinStateId[] = [
   "wake_armed",
   "tool_running",
   "approval_needed",
@@ -241,16 +256,168 @@ const ASSET_ROLES: PersonaVisualAssetRole[] = [
 const TRIGGER_SOURCES: PersonaVisualAuthoredTrigger["source"][] = [
   "live_state",
   "tool_category",
+  "tool_name",
   "mcp_runtime"
 ]
 
 const PORTABLE_VISUAL_PACK_EXTENSION = ".tldw-persona-vpack"
+const PORTABLE_VISUAL_PACK_MIME_TYPES = new Set([
+  "application/octet-stream",
+  "application/vnd.tldw.persona.visual-pack+zip",
+  "application/x-zip-compressed",
+  "application/zip"
+])
 const IMPORT_COMMIT_TERMINAL_STATUSES = new Set([
   "completed",
   "failed",
   "cancelled",
   "quarantined"
 ])
+const IMPORT_PREVIEW_TERMINAL_STATUSES = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+  "blocked",
+  "deleted",
+  "quarantined"
+])
+
+const hasPortableVisualPackExtension = (file: File | null): boolean =>
+  !file || file.name.toLowerCase().endsWith(PORTABLE_VISUAL_PACK_EXTENSION)
+
+const hasSupportedPortableVisualPackMediaType = (file: File | null): boolean => {
+  if (!file) return true
+  const mediaType = file.type.trim().toLowerCase()
+  return !mediaType || PORTABLE_VISUAL_PACK_MIME_TYPES.has(mediaType)
+}
+
+const isPortableVisualPackFile = (file: File | null): boolean =>
+  hasPortableVisualPackExtension(file) && hasSupportedPortableVisualPackMediaType(file)
+
+const getImportPreviewFileError = (
+  file: File | null,
+  t: VisualPackTranslate
+): string | null => {
+  if (isPortableVisualPackFile(file)) return null
+  if (!hasPortableVisualPackExtension(file)) {
+    return t("sidepanel:personaGarden.visuals.importPreviewUnsupportedExtension", {
+      extension: PORTABLE_VISUAL_PACK_EXTENSION,
+      defaultValue: `Choose a ${PORTABLE_VISUAL_PACK_EXTENSION} archive exported from Persona Visual Packs.`
+    })
+  }
+  return t("sidepanel:personaGarden.visuals.importPreviewUnsupportedMimeType", {
+    defaultValue:
+      "Choose a Persona Visual pack archive with a supported zip media type."
+  })
+}
+
+type ImportPreviewStatus =
+  | PersonaVisualImportPreviewStartResponse
+  | PersonaVisualImportPreviewResponse
+  | null
+
+const getImportPreviewJobCopy = (
+  preview: ImportPreviewStatus,
+  t: VisualPackTranslate
+): string | null => {
+  if (!preview) return null
+  const statusValue = String(preview.status || "").trim()
+  const stageValue = String(preview.stage || "").trim()
+  const errorMessage =
+    "error_message" in preview && typeof preview.error_message === "string"
+      ? preview.error_message.trim()
+      : ""
+  if (
+    IMPORT_PREVIEW_TERMINAL_STATUSES.has(statusValue) &&
+    !["blocked", "completed"].includes(statusValue)
+  ) {
+    return (
+      errorMessage ||
+      t("sidepanel:personaGarden.visuals.importPreviewTerminalStatus", {
+        stage: stageValue || "validation",
+        status: statusValue,
+        defaultValue: `Import preview ${statusValue} during ${stageValue || "validation"}.`
+      })
+    )
+  }
+  if (statusValue === "blocked") {
+    return t("sidepanel:personaGarden.visuals.importPreviewBlocked", {
+      defaultValue:
+        "Import preview completed with blockers. Review diagnostics before committing."
+    })
+  }
+  if (statusValue === "completed") {
+    return t("sidepanel:personaGarden.visuals.importPreviewCompleted", {
+      defaultValue: "Import preview completed. Review the draft plan before committing."
+    })
+  }
+  if (statusValue === "queued") {
+    return t("sidepanel:personaGarden.visuals.importPreviewQueued", {
+      defaultValue: "Import preview queued. Refresh to check validation status."
+    })
+  }
+  if (statusValue === "processing") {
+    return t("sidepanel:personaGarden.visuals.importPreviewProcessing", {
+      stage: stageValue,
+      stageSuffix: stageValue ? `: ${stageValue}` : ".",
+      defaultValue: `Import preview is processing${stageValue ? `: ${stageValue}` : "."}`
+    })
+  }
+  return stageValue
+    ? t("sidepanel:personaGarden.visuals.importPreviewStatus", {
+        stage: stageValue,
+        status: statusValue,
+        defaultValue: `Import preview ${statusValue}: ${stageValue}`
+      })
+    : null
+}
+
+const getImportCommitJobCopy = (
+  job: PersonaVisualImportCommitStartResponse | PersonaVisualPortabilityJobResponse | null,
+  t: VisualPackTranslate
+): string | null => {
+  if (!job) return null
+  const statusValue = String(job.status || "").trim()
+  const stageValue = String(job.stage || "").trim()
+  const errorMessage =
+    "error_message" in job && typeof job.error_message === "string"
+      ? job.error_message.trim()
+      : ""
+  if (["failed", "cancelled", "quarantined"].includes(statusValue)) {
+    return (
+      errorMessage ||
+      t("sidepanel:personaGarden.visuals.importCommitTerminalStatus", {
+        stage: stageValue || "commit",
+        status: statusValue,
+        defaultValue: `Import commit ${statusValue} during ${stageValue || "commit"}.`
+      })
+    )
+  }
+  if (statusValue === "completed") {
+    return t("sidepanel:personaGarden.visuals.importCommitCompleted", {
+      defaultValue: "Import commit completed. Review and activate the new draft when ready."
+    })
+  }
+  if (statusValue === "queued") {
+    return t("sidepanel:personaGarden.visuals.importCommitQueued", {
+      defaultValue: "Import commit queued. Refresh to check draft creation status."
+    })
+  }
+  if (statusValue === "processing") {
+    return t("sidepanel:personaGarden.visuals.importCommitProcessing", {
+      stage: stageValue,
+      stageSuffix: stageValue ? `: ${stageValue}` : ".",
+      defaultValue: `Import commit is processing${stageValue ? `: ${stageValue}` : "."}`
+    })
+  }
+  return stageValue
+    ? t("sidepanel:personaGarden.visuals.importCommitStatus", {
+        stage: stageValue,
+        status: statusValue,
+        defaultValue: `Import commit ${statusValue}: ${stageValue}`
+      })
+    : null
+}
 
 const DEFAULT_MANIFEST: PersonaVisualManifest = {
   manifest_version: 1,
@@ -258,6 +425,7 @@ const DEFAULT_MANIFEST: PersonaVisualManifest = {
   states: {},
   animations: {},
   fallbacks: {},
+  state_catalog: {},
   authored_triggers: []
 }
 
@@ -290,6 +458,9 @@ const normalizeManifest = (
     fallbacks: {
       ...(source.fallbacks || {})
     },
+    state_catalog: {
+      ...(source.state_catalog || {})
+    },
     authored_triggers: Array.isArray(source.authored_triggers)
       ? source.authored_triggers
       : []
@@ -311,6 +482,16 @@ const normalizeFrames = (
 const formatStateLabel = (state: PersonaVisualStateId): string =>
   state.replace(/_/g, " ")
 
+const resolveGenerationTargetState = (
+  current: PersonaVisualStateId,
+  availableStates: PersonaVisualStateId[]
+): PersonaVisualStateId => {
+  if (availableStates.includes(current)) return current
+  return availableStates.includes("thinking")
+    ? "thinking"
+    : availableStates[0] ?? "thinking"
+}
+
 const stringifyPreviewValue = (value: unknown): string => {
   if (value == null) return ""
   if (typeof value === "string") return value
@@ -327,6 +508,101 @@ const formatPreviewList = (items: unknown[] | null | undefined): string =>
     .map(stringifyPreviewValue)
     .filter(Boolean)
     .join(" ")
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value && typeof value === "object" && !Array.isArray(value))
+
+const previewString = (value: unknown): string | null => {
+  if (typeof value !== "string") return null
+  const trimmed = value.trim()
+  return trimmed || null
+}
+
+const previewNumber = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) ? value : null
+
+const previewBoolean = (value: unknown): boolean | null =>
+  typeof value === "boolean" ? value : null
+
+const previewStringList = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value
+        .map(previewString)
+        .filter((item): item is string => Boolean(item))
+    : []
+
+const previewRoleCategories = (
+  value: unknown
+): Record<string, string[]> | undefined => {
+  if (!isRecord(value)) return undefined
+  const categories = Object.entries(value).reduce<Record<string, string[]>>(
+    (nextCategories, [category, sourceAssetIds]) => {
+      const normalizedCategory = previewString(category)
+      const normalizedIds = previewStringList(sourceAssetIds)
+      if (normalizedCategory && normalizedIds.length) {
+        nextCategories[normalizedCategory] = normalizedIds
+      }
+      return nextCategories
+    },
+    {}
+  )
+  return Object.keys(categories).length ? categories : undefined
+}
+
+const getRendererImportPreview = (
+  preview: PersonaVisualImportPreviewResponse | null
+): PersonaVisualRendererImportPreview | null => {
+  const rawPreview = preview?.proposed_plan?.renderer_import_preview
+  if (!isRecord(rawPreview)) return null
+  return {
+    status: previewString(rawPreview.status),
+    renderer_type: previewString(rawPreview.renderer_type),
+    manifest_version: previewNumber(rawPreview.manifest_version),
+    renderer_contract_version: previewNumber(rawPreview.renderer_contract_version),
+    can_commit: previewBoolean(rawPreview.can_commit),
+    activation_eligible: previewBoolean(rawPreview.activation_eligible),
+    blockers: previewStringList(rawPreview.blockers),
+    warnings: previewStringList(rawPreview.warnings),
+    normalized_role_categories: previewRoleCategories(
+      rawPreview.normalized_role_categories
+    ),
+    setup_status: previewString(rawPreview.setup_status),
+    setup_blockers: previewStringList(rawPreview.setup_blockers),
+    disabled_reason: previewString(rawPreview.disabled_reason)
+  }
+}
+
+const getRendererImportPreviewRoleSummary = (
+  rendererPreview: PersonaVisualRendererImportPreview | null
+): string => {
+  const categories = rendererPreview?.normalized_role_categories || {}
+  return Object.entries(categories)
+    .map(([category, sourceAssetIds]) => `${category}: ${sourceAssetIds.join(", ")}`)
+    .join(" ")
+}
+
+const getImportCommitBlockers = (
+  preview: PersonaVisualImportPreviewResponse | null,
+  rendererPreview: PersonaVisualRendererImportPreview | null
+): string[] => {
+  const planBlockers = previewStringList(preview?.proposed_plan?.commit_blockers)
+  const rendererBlockers = [
+    ...(rendererPreview?.blockers || []),
+    ...(rendererPreview?.setup_blockers || []),
+    rendererPreview?.disabled_reason || null
+  ].filter((item): item is string => Boolean(item))
+  return Array.from(new Set([...planBlockers, ...rendererBlockers]))
+}
+
+const isImportPreviewCommitEligible = (
+  preview: PersonaVisualImportPreviewResponse | null,
+  rendererPreview: PersonaVisualRendererImportPreview | null
+): boolean => {
+  if (!preview || preview.status !== "completed") return false
+  if (preview.proposed_plan?.commit_eligible === false) return false
+  if (rendererPreview?.can_commit === false) return false
+  return true
+}
 
 const isFullImportPreview = (
   preview: PersonaVisualImportPreviewStartResponse | PersonaVisualImportPreviewResponse | null
@@ -494,6 +770,7 @@ const sourceBadgeClass =
   "inline-flex min-h-[22px] items-center rounded border px-1.5 py-0.5 text-xs font-medium"
 const sourceAvailableBadgeClass = `${sourceBadgeClass} border-state-ready/30 bg-state-ready/10 text-state-ready`
 const sourceUnavailableBadgeClass = `${sourceBadgeClass} border-state-unavailable/30 bg-state-unavailable/10 text-state-unavailable`
+const LOADING_STATE_LABEL = getDesignSystemState("loading").label
 
 export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   selectedPersonaId,
@@ -502,10 +779,14 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   onOpenPersonaVisuals
 }) => {
   const { t } = useTranslation(["sidepanel", "common"])
-  const loadingLabel = t("common:loading", getDesignSystemState("loading").label)
+  const loadingLabel = t("common:loading.title", {
+    defaultValue: LOADING_STATE_LABEL
+  })
   const refreshLabel = t("common:refresh", "Refresh")
+  const unknownLabel = t("common:unknown", { defaultValue: "unknown" })
   const [packs, setPacks] = React.useState<PersonaVisualPack[]>([])
   const [selectedPackId, setSelectedPackId] = React.useState("")
+  const selectedPackIdRef = React.useRef("")
   const [draftTitle, setDraftTitle] = React.useState("")
   const [draftManifest, setDraftManifest] =
     React.useState<PersonaVisualManifest>(DEFAULT_MANIFEST)
@@ -527,6 +808,8 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   >(null)
   const [importTargetMode, setImportTargetMode] =
     React.useState<PersonaVisualImportTargetMode | "">("create_new")
+  const [importTargetChoicePreviewId, setImportTargetChoicePreviewId] =
+    React.useState("")
   const [importReplacePackId, setImportReplacePackId] = React.useState("")
   const [importDraftTitle, setImportDraftTitle] = React.useState("")
   const [importCommitJob, setImportCommitJob] = React.useState<
@@ -540,6 +823,13 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const [duplicateTitle, setDuplicateTitle] = React.useState("")
   const [duplicatingPack, setDuplicatingPack] = React.useState(false)
   const [lastDuplicatedPersonaId, setLastDuplicatedPersonaId] = React.useState("")
+  const [starterPacks, setStarterPacks] = React.useState<
+    PersonaVisualStarterPackSummary[]
+  >([])
+  const [starterPacksLoading, setStarterPacksLoading] = React.useState(false)
+  const [selectedStarterPackId, setSelectedStarterPackId] = React.useState("")
+  const [starterDraftTitle, setStarterDraftTitle] = React.useState("")
+  const [copyingStarterPack, setCopyingStarterPack] = React.useState(false)
   const [libraryItems, setLibraryItems] = React.useState<PersonaVisualLibraryItem[]>([])
   const [libraryLoading, setLibraryLoading] = React.useState(false)
   const [savingToLibrary, setSavingToLibrary] = React.useState(false)
@@ -588,7 +878,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const libraryPanelRef = React.useRef<HTMLDivElement | null>(null)
   const generationReadinessRequestIdRef = React.useRef(0)
   const duplicateTargetsRequestIdRef = React.useRef(0)
+  const starterPacksRequestIdRef = React.useRef(0)
   const libraryRequestIdRef = React.useRef(0)
+  const importCommitInFlightRef = React.useRef(false)
 
   const selectedPack =
     packs.find((pack) => pack.id === selectedPackId) ?? packs[0] ?? null
@@ -598,6 +890,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   )
   const selectedDuplicateTarget =
     availableDuplicateTargets.find((target) => target.id === duplicateTargetId) ?? null
+  const selectedStarterPack =
+    starterPacks.find((starter) => starter.id === selectedStarterPackId) ??
+    starterPacks[0] ??
+    null
   const selectedPackLibraryItem = React.useMemo(
     () =>
       selectedPack
@@ -618,6 +914,25 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const animationIds = React.useMemo(
     () => getAnimationIds(draftManifest),
     [draftManifest]
+  )
+  const customVisualStates = React.useMemo(
+    () =>
+      Object.keys(draftManifest.state_catalog || {}).sort((a, b) =>
+        a.localeCompare(b)
+      ).map(asPersonaVisualCustomStateId),
+    [draftManifest.state_catalog]
+  )
+  const activeVisualStates: PersonaVisualStateId[] = React.useMemo(
+    () => [...VISUAL_STATES, ...customVisualStates],
+    [customVisualStates]
+  )
+  const editableFallbackStates: PersonaVisualStateId[] = React.useMemo(
+    () => [...OPTIONAL_VISUAL_STATES, ...customVisualStates],
+    [customVisualStates]
+  )
+  const normalizedGenerationTargetState = React.useMemo(
+    () => resolveGenerationTargetState(generationTargetState, activeVisualStates),
+    [activeVisualStates, generationTargetState]
   )
   const selectedAnimation =
     selectedAnimationId && draftManifest.animations[selectedAnimationId]
@@ -657,7 +972,13 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     [generationReadinessView, t]
   )
 
-  const loadPacks = React.useCallback(async (): Promise<boolean> => {
+  React.useEffect(() => {
+    selectedPackIdRef.current = selectedPackId
+  }, [selectedPackId])
+
+  const loadPacks = React.useCallback(async (
+    preferredPackId?: string | null
+  ): Promise<boolean> => {
     if (!isActive || !selectedPersonaId) {
       setPacks([])
       setSelectedPackId("")
@@ -671,9 +992,13 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       const response = await listPersonaVisualPacks(selectedPersonaId)
       const nextPacks = response.packs || []
       setPacks(nextPacks)
+      const explicitPreferredPack = preferredPackId
+        ? nextPacks.find((pack) => pack.id === preferredPackId) ?? null
+        : null
       const preferred =
+        explicitPreferredPack ??
         response.active_pack ??
-        nextPacks.find((pack) => pack.id === selectedPackId) ??
+        nextPacks.find((pack) => pack.id === selectedPackIdRef.current) ??
         nextPacks[0] ??
         null
       setSelectedPackId(preferred?.id || "")
@@ -790,6 +1115,49 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     }
   }, [isActive, selectedPersonaId])
 
+  const loadStarterPacks = React.useCallback(async () => {
+    if (!isActive || !selectedPersonaId) {
+      starterPacksRequestIdRef.current += 1
+      setStarterPacks([])
+      setSelectedStarterPackId("")
+      setStarterDraftTitle("")
+      setStarterPacksLoading(false)
+      return
+    }
+    const requestId = starterPacksRequestIdRef.current + 1
+    starterPacksRequestIdRef.current = requestId
+    const isLatestRequest = () => starterPacksRequestIdRef.current === requestId
+    setStarterPacksLoading(true)
+    try {
+      const response = await listPersonaVisualStarterPacks()
+      if (!isLatestRequest()) return
+      const nextStarterPacks = response.starter_packs || []
+      setStarterPacks(nextStarterPacks)
+      setSelectedStarterPackId((current) => {
+        if (current && nextStarterPacks.some((starter) => starter.id === current)) {
+          return current
+        }
+        return nextStarterPacks[0]?.id ?? ""
+      })
+      setStarterDraftTitle((current) => current || nextStarterPacks[0]?.title || "")
+    } catch (loadError) {
+      if (isLatestRequest()) {
+        setStarterPacks([])
+        setSelectedStarterPackId("")
+        setStarterDraftTitle("")
+        if (!(loadError instanceof PersonaVisualApiError && loadError.status === 404)) {
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Failed to load bundled starter packs."
+          )
+        }
+      }
+    } finally {
+      if (isLatestRequest()) setStarterPacksLoading(false)
+    }
+  }, [isActive, selectedPersonaId])
+
   const loadLibrary = React.useCallback(async () => {
     if (!isActive || !selectedPersonaId) {
       libraryRequestIdRef.current += 1
@@ -836,6 +1204,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   }, [loadDuplicateTargets])
 
   React.useEffect(() => {
+    setStarterDraftTitle("")
+    void loadStarterPacks()
+  }, [loadStarterPacks])
+
+  React.useEffect(() => {
     void loadLibrary()
   }, [loadLibrary])
 
@@ -876,6 +1249,12 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       setSelectedAnimationId(animationIds[0] || "")
     }
   }, [animationIds, selectedAnimationId])
+
+  React.useEffect(() => {
+    if (generationTargetState !== normalizedGenerationTargetState) {
+      setGenerationTargetState(normalizedGenerationTargetState)
+    }
+  }, [generationTargetState, normalizedGenerationTargetState])
 
   React.useEffect(() => {
     setExportJob(null)
@@ -1088,6 +1467,35 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     }
   }
 
+  const handleCopyStarterPack = async () => {
+    if (!selectedPersonaId || !selectedStarterPack) return
+    setCopyingStarterPack(true)
+    setError(null)
+    try {
+      const copied = await copyPersonaVisualStarterPack(selectedStarterPack.id, {
+        target_persona_id: selectedPersonaId,
+        title: starterDraftTitle.trim() || selectedStarterPack.title
+      })
+      await loadPacks(copied.id)
+      setStatusMessage(
+        t("sidepanel:personaGarden.visuals.starterCopiedDraft", {
+          defaultValue:
+            "Starter pack copied as a draft. Review and activate it when ready."
+        })
+      )
+    } catch (copyError) {
+      setError(
+        copyError instanceof Error
+          ? copyError.message
+          : t("sidepanel:personaGarden.visuals.starterCopyError", {
+              defaultValue: "Failed to copy bundled starter pack."
+            })
+      )
+    } finally {
+      setCopyingStarterPack(false)
+    }
+  }
+
   const handleSavePackToLibrary = async () => {
     if (!selectedPersonaId || !selectedPack) return
     setSavingToLibrary(true)
@@ -1211,6 +1619,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
 
   const handleStartImportPreview = async () => {
     if (!selectedPersonaId || !selectedImportPreviewFile) return
+    const fileError = getImportPreviewFileError(selectedImportPreviewFile, t)
+    if (fileError) {
+      setError(fileError)
+      return
+    }
     setPreviewingImport(true)
     setError(null)
     try {
@@ -1221,11 +1634,16 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       setImportPreview(preview)
       setImportCommitJob(null)
       setImportTargetMode("create_new")
+      setImportTargetChoicePreviewId("")
       setImportReplacePackId("")
       setImportDraftTitle("")
       setSelectedImportPreviewFile(null)
       if (importPreviewInputRef.current) importPreviewInputRef.current.value = ""
-      setStatusMessage("Import preview queued.")
+      setStatusMessage(
+        t("sidepanel:personaGarden.visuals.importPreviewQueuedStatus", {
+          defaultValue: "Import preview queued."
+        })
+      )
     } catch (previewError) {
       setError(
         previewError instanceof Error
@@ -1259,9 +1677,12 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   }
 
   const handleStartImportCommit = async () => {
+    if (importCommitInFlightRef.current || committingImport) return
     if (!selectedPersonaId || !fullImportPreview?.preview_id) return
     if (fullImportPreview.status !== "completed") return
-    if (importConflictChoiceRequired && !importTargetMode) return
+    if (!importPreviewCommitEligible) return
+    if (importConflictChoiceRequired && !importConflictChoiceValid) return
+    importCommitInFlightRef.current = true
     setCommittingImport(true)
     setError(null)
     try {
@@ -1280,7 +1701,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       )
       setImportCommitJob(job)
       setStatusMessage(
-        "Import commit queued. Imported packs remain drafts until activated."
+        t("sidepanel:personaGarden.visuals.importCommitQueuedStatus", {
+          defaultValue:
+            "Import commit queued. Imported packs remain drafts until activated."
+        })
       )
     } catch (commitError) {
       setError(
@@ -1289,6 +1713,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           : "Failed to queue visual pack import commit."
       )
     } finally {
+      importCommitInFlightRef.current = false
       setCommittingImport(false)
     }
   }
@@ -1304,10 +1729,13 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       )
       setImportCommitJob(job)
       if (job.status === "completed" && job.pack_id) {
-        const refreshed = await loadPacks()
+        const refreshed = await loadPacks(job.pack_id)
         if (refreshed) {
           setStatusMessage(
-            "Import commit completed. Review and activate the new draft when ready."
+            t("sidepanel:personaGarden.visuals.importCommitCompleted", {
+              defaultValue:
+                "Import commit completed. Review and activate the new draft when ready."
+            })
           )
         } else {
           setStatusMessage(null)
@@ -1383,6 +1811,16 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           defaultValue: "Visual pack activated."
         })
       )
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent(PERSONA_VISUAL_PACK_ACTIVATED_EVENT, {
+            detail: {
+              personaId: selectedPersonaId,
+              packId: active.id
+            }
+          })
+        )
+      }
     } catch (activateError) {
       setError(
         activateError instanceof Error
@@ -1437,12 +1875,19 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     setEnqueueingGeneration(true)
     setError(null)
     try {
+      const targetState = resolveGenerationTargetState(
+        generationTargetState,
+        activeVisualStates
+      )
+      if (targetState !== generationTargetState) {
+        setGenerationTargetState(targetState)
+      }
       const job = await createPersonaVisualGenerationJob(
         selectedPersonaId,
         selectedPack.id,
         {
           prompt: generationPrompt.trim(),
-          target_state: generationTargetState || null,
+          target_state: targetState || null,
           backend: generationBackend.trim() || null
         }
       )
@@ -1532,8 +1977,8 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       const fallbacks = { ...(manifest.fallbacks || {}) }
       const nextValues = value
         .split(",")
-        .map((item) => item.trim() as PersonaVisualStateId)
-        .filter((item) => VISUAL_STATES.includes(item))
+        .map((item) => asPersonaVisualStateId(item.trim()))
+        .filter((item) => activeVisualStates.includes(item))
       if (nextValues.length) {
         fallbacks[state] = nextValues
       } else {
@@ -1839,6 +2284,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       ? exportJob.warnings
       : []
   const fullImportPreview = isFullImportPreview(importPreview) ? importPreview : null
+  const importPreviewFileError = getImportPreviewFileError(selectedImportPreviewFile, t)
+  const importPreviewJobCopy = getImportPreviewJobCopy(importPreview, t)
+  const importCommitJobCopy = getImportCommitJobCopy(importCommitJob, t)
   const importPreviewWarnings = fullImportPreview
     ? [
         ...(fullImportPreview.validation_warnings || []),
@@ -1847,20 +2295,39 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     : []
   const importPreviewConflicts = fullImportPreview?.conflicts || []
   const importPreviewPlan = fullImportPreview?.proposed_plan || null
+  const rendererImportPreview = getRendererImportPreview(fullImportPreview)
+  const rendererImportRoleSummary =
+    getRendererImportPreviewRoleSummary(rendererImportPreview)
+  const importCommitBlockers = getImportCommitBlockers(
+    fullImportPreview,
+    rendererImportPreview
+  )
   const importTargetChoice = getImportTargetChoice(fullImportPreview)
   const importAllowedTargetModes = getAllowedImportTargetModes(importTargetChoice)
   const replaceableImportConflicts = getReplaceableImportConflicts(importPreviewConflicts)
   const importConflictChoiceRequired = Boolean(importTargetChoice)
+  const importConflictChoiceSelected =
+    !importConflictChoiceRequired ||
+    (Boolean(importTargetMode) &&
+      importTargetChoicePreviewId === fullImportPreview?.preview_id)
   const importConflictChoiceValid =
     !importConflictChoiceRequired ||
-    importTargetMode === "create_new" ||
-    Boolean(importReplacePackId)
+    (importConflictChoiceSelected &&
+      importAllowedTargetModes.includes(
+        importTargetMode as PersonaVisualImportTargetMode
+      ) &&
+      (importTargetMode !== "replace_draft" || Boolean(importReplacePackId)))
   const canCommitImportPreview = fullImportPreview?.status === "completed"
+  const importPreviewCommitEligible = isImportPreviewCommitEligible(
+    fullImportPreview,
+    rendererImportPreview
+  )
   const importCommitStatus = importCommitJob?.status || null
   const importCommitIsTerminal = importCommitStatus
     ? IMPORT_COMMIT_TERMINAL_STATUSES.has(importCommitStatus)
     : false
   const canStartImportCommit =
+    importPreviewCommitEligible &&
     importConflictChoiceValid &&
     (!importCommitJob?.job_id || importCommitStatus === "failed")
   const canRefreshImportCommit =
@@ -1869,12 +2336,14 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   React.useEffect(() => {
     if (!fullImportPreview) {
       setImportTargetMode("create_new")
+      setImportTargetChoicePreviewId("")
       setImportReplacePackId("")
       setImportDraftTitle("")
       return
     }
     const choice = getImportTargetChoice(fullImportPreview)
     setImportTargetMode(choice ? "" : "create_new")
+    setImportTargetChoicePreviewId(choice ? "" : fullImportPreview.preview_id)
     setImportReplacePackId("")
     setImportDraftTitle(getDefaultImportDraftTitle(fullImportPreview))
   }, [fullImportPreview?.preview_id])
@@ -1894,8 +2363,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
             </div>
           </div>
           <Button
+            data-testid="persona-visual-pack-refresh-button"
             size="small"
-            onClick={() => void loadPacks()}
+            onClick={() => void loadPacks(selectedPack?.id)}
             disabled={loading}
           >
             {loading ? loadingLabel : refreshLabel}
@@ -2027,7 +2497,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       <VisualPackReusePanel
         selectedPersonaName={selectedPersonaName || selectedPersonaId}
         hasSelectedPack={Boolean(selectedPack)}
-        canImport={Boolean(selectedPack)}
+        canImport
         libraryItemCount={libraryItems.length}
         hasDuplicateTargets={availableDuplicateTargets.length > 0}
         duplicateTargetsLoading={duplicateTargetsLoading}
@@ -2036,6 +2506,243 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         onOpenImport={openImportArchivePicker}
         onOpenDuplicate={focusDuplicateControls}
       />
+
+      {starterPacksLoading || starterPacks.length ? (
+        <div
+          data-testid="persona-visual-starter-pack-panel"
+          className="rounded-lg border border-border bg-surface p-3"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+                {t("sidepanel:personaGarden.visuals.starterHeading", {
+                  defaultValue: "Default starter pack"
+                })}
+              </div>
+              <div className="mt-1 text-xs leading-5 text-text-muted">
+                {t("sidepanel:personaGarden.visuals.starterDescription", {
+                  defaultValue:
+                    "Copy a bundled sprite-frame pack as a draft, then review and activate it."
+                })}
+              </div>
+            </div>
+            <Tag>sprite_frames</Tag>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_auto]">
+            <label className="text-xs text-text-muted">
+              <span className="mb-1 block">
+                {t("sidepanel:personaGarden.visuals.starterSelectLabel", {
+                  defaultValue: "Starter"
+                })}
+              </span>
+              <select
+                data-testid="persona-visual-starter-pack-select"
+                className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                value={selectedStarterPack?.id || ""}
+                disabled={starterPacksLoading || !starterPacks.length}
+                onChange={(event) => {
+                  const nextId = event.target.value
+                  const nextStarter = starterPacks.find(
+                    (starter) => starter.id === nextId
+                  )
+                  setSelectedStarterPackId(nextId)
+                  setStarterDraftTitle(nextStarter?.title || "")
+                }}
+              >
+                {starterPacks.map((starter) => (
+                  <option key={starter.id} value={starter.id}>
+                    {starter.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs text-text-muted">
+              <span className="mb-1 block">
+                {t("sidepanel:personaGarden.visuals.starterDraftTitleLabel", {
+                  defaultValue: "Draft title"
+                })}
+              </span>
+              <input
+                data-testid="persona-visual-starter-title-input"
+                className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                value={starterDraftTitle}
+                disabled={!selectedStarterPack}
+                onChange={(event) => setStarterDraftTitle(event.target.value)}
+              />
+            </label>
+            <Button
+              data-testid="persona-visual-starter-copy-button"
+              className="self-end"
+              size="small"
+              icon={<Copy className="h-3.5 w-3.5" />}
+              loading={copyingStarterPack}
+              disabled={!selectedStarterPack || copyingStarterPack}
+              onClick={() => void handleCopyStarterPack()}
+            >
+              {t("sidepanel:personaGarden.visuals.starterCopyAsDraft", {
+                defaultValue: "Copy as draft"
+              })}
+            </Button>
+          </div>
+          {selectedStarterPack ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-muted">
+              <span>
+                {selectedStarterPack.asset_count}{" "}
+                {t("sidepanel:personaGarden.visuals.starterAssetUnit", {
+                  defaultValue: "assets"
+                })}
+              </span>
+              <span>
+                {selectedStarterPack.total_bytes}{" "}
+                {t("sidepanel:personaGarden.visuals.starterBytesUnit", {
+                  defaultValue: "bytes"
+                })}
+              </span>
+              <span>{selectedStarterPack.states_offered.join(", ")}</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {!selectedPack ? (
+        <div className="rounded-lg border border-border bg-surface p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+            Portability
+          </div>
+          <div
+            data-testid="persona-visual-portability-copy"
+            className="mt-2 rounded-md border border-border bg-bg px-3 py-2 text-xs leading-5 text-text-muted"
+          >
+            <div>
+              {t("sidepanel:personaGarden.visuals.importPreviewHelp", {
+                defaultValue:
+                  "Import preview validates a portable pack archive before it changes this persona."
+              })}
+            </div>
+            <div>
+              {t("sidepanel:personaGarden.visuals.importCommitHelp", {
+                defaultValue:
+                  "Commit import creates a reviewed draft pack for this persona."
+              })}
+            </div>
+          </div>
+          <div className="mt-3 rounded border border-border bg-bg p-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Typography.Text strong>Import preview</Typography.Text>
+              <Tag>review only</Tag>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <input
+                ref={importPreviewInputRef}
+                data-testid="persona-visual-import-preview-input"
+                type="file"
+                accept={`${PORTABLE_VISUAL_PACK_EXTENSION},application/zip,application/octet-stream`}
+                className="text-xs text-text"
+                onChange={(event) =>
+                  setSelectedImportPreviewFile(event.target.files?.[0] ?? null)
+                }
+              />
+              <Button
+                data-testid="persona-visual-import-preview-button"
+                size="small"
+                icon={<FileSearch className="h-3.5 w-3.5" />}
+                loading={previewingImport}
+                disabled={!selectedImportPreviewFile || Boolean(importPreviewFileError)}
+                onClick={() => void handleStartImportPreview()}
+              >
+                Preview
+              </Button>
+              <Button
+                data-testid="persona-visual-import-preview-refresh-button"
+                size="small"
+                icon={<RefreshCw className="h-3.5 w-3.5" />}
+                loading={refreshingImportPreview}
+                disabled={!importPreview?.preview_id}
+                onClick={() => void handleRefreshImportPreview()}
+              >
+                Refresh
+              </Button>
+            </div>
+            {importPreviewFileError ? (
+              <div
+                data-testid="persona-visual-import-preview-file-error"
+                className="mt-2 text-xs text-state-error"
+              >
+                {importPreviewFileError}
+              </div>
+            ) : null}
+            {importPreview ? (
+              <div className="mt-2 space-y-2 text-xs text-text-muted">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Tag data-testid="persona-visual-import-preview-status">
+                    {importPreview.status}
+                  </Tag>
+                  <span>{importPreview.stage}</span>
+                  <span>{importPreview.preview_id}</span>
+                </div>
+                <div data-testid="persona-visual-import-preview-summary">
+                  {formatImportPreviewSummary(importPreview)}
+                </div>
+                {canCommitImportPreview ? (
+                  <div className="border-t border-border pt-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="font-medium text-text">
+                        Commit reviewed import
+                      </div>
+                      <Tag>creates draft</Tag>
+                    </div>
+                    {!importPreviewCommitEligible ? (
+                      <div
+                        data-testid="persona-visual-import-commit-blocked"
+                        className="mt-2 rounded border border-border bg-bg p-2 text-text-muted"
+                      >
+                        {t(
+                          "sidepanel:personaGarden.visuals.importCommitBlocked",
+                          {
+                            defaultValue:
+                              "Commit unavailable until preview blockers are resolved"
+                          }
+                        )}
+                      </div>
+                    ) : null}
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <Button
+                        data-testid="persona-visual-import-commit-button"
+                        size="small"
+                        icon={<CheckCircle2 className="h-3.5 w-3.5" />}
+                        loading={committingImport}
+                        disabled={!canStartImportCommit}
+                        onClick={() => void handleStartImportCommit()}
+                      >
+                        Commit import
+                      </Button>
+                      <Button
+                        data-testid="persona-visual-import-commit-refresh-button"
+                        size="small"
+                        icon={<RefreshCw className="h-3.5 w-3.5" />}
+                        loading={refreshingImportCommit}
+                        disabled={!importCommitJob?.job_id}
+                        onClick={() => void handleRefreshImportCommit()}
+                      >
+                        Refresh commit
+                      </Button>
+                    </div>
+                    {importCommitJob ? (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <Tag data-testid="persona-visual-import-commit-status">
+                          {importCommitJob.status}
+                        </Tag>
+                        <span>{importCommitJob.stage}</span>
+                        <span>{importCommitJob.job_id}</span>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {error ? (
         <div className="rounded-md border border-danger/30 bg-danger/10 p-2 text-xs text-danger">
@@ -2314,7 +3021,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                     size="small"
                     icon={<FileSearch className="h-3.5 w-3.5" />}
                     loading={previewingImport}
-                    disabled={!selectedImportPreviewFile}
+                    disabled={!selectedImportPreviewFile || Boolean(importPreviewFileError)}
                     onClick={() => void handleStartImportPreview()}
                   >
                     Preview
@@ -2330,6 +3037,14 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                     Refresh
                   </Button>
                 </div>
+                {importPreviewFileError ? (
+                  <div
+                    data-testid="persona-visual-import-preview-file-error"
+                    className="mt-2 text-xs text-state-error"
+                  >
+                    {importPreviewFileError}
+                  </div>
+                ) : null}
                 {importPreview ? (
                   <div className="mt-2 space-y-1 text-xs text-text-muted">
                     <div className="flex flex-wrap items-center gap-2">
@@ -2342,6 +3057,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                     <div data-testid="persona-visual-import-preview-summary">
                       {formatImportPreviewSummary(importPreview)}
                     </div>
+                    {importPreviewJobCopy ? (
+                      <div data-testid="persona-visual-import-preview-job-copy">
+                        {importPreviewJobCopy}
+                      </div>
+                    ) : null}
                     {importPreviewWarnings.length ? (
                       <div data-testid="persona-visual-import-preview-warnings">
                         {formatPreviewList(importPreviewWarnings)}
@@ -2357,6 +3077,75 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                         {stringifyPreviewValue(importPreviewPlan)}
                       </div>
                     ) : null}
+                    {rendererImportPreview ? (
+                      <div
+                        data-testid="persona-visual-import-renderer-diagnostics"
+                        className="rounded border border-border bg-bg p-2"
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium text-text">
+                            {t(
+                              "sidepanel:personaGarden.visuals.rendererDiagnosticsTitle",
+                              { defaultValue: "Renderer diagnostics" }
+                            )}
+                          </span>
+                          <Tag>
+                            {rendererImportPreview.renderer_type || unknownLabel}
+                          </Tag>
+                          <Tag>{rendererImportPreview.status || unknownLabel}</Tag>
+                          {rendererImportPreview.setup_status ? (
+                            <Tag>{rendererImportPreview.setup_status}</Tag>
+                          ) : null}
+                        </div>
+                        <div className="mt-1">
+                          {t("sidepanel:personaGarden.visuals.manifestVersion", {
+                            defaultValue: "Manifest v"
+                          })}
+                          {rendererImportPreview.manifest_version ?? unknownLabel}
+                          {" / "}
+                          {t("sidepanel:personaGarden.visuals.contractVersion", {
+                            defaultValue: "Contract v"
+                          })}
+                          {rendererImportPreview.renderer_contract_version ??
+                            unknownLabel}
+                        </div>
+                        <div className="mt-1">
+                          {rendererImportPreview.activation_eligible
+                            ? t(
+                                "sidepanel:personaGarden.visuals.activationEligible",
+                                { defaultValue: "Activation eligible" }
+                              )
+                            : t(
+                                "sidepanel:personaGarden.visuals.activationUnavailable",
+                                { defaultValue: "Activation unavailable" }
+                              )}
+                        </div>
+                        {importCommitBlockers.length ? (
+                          <div className="mt-1">
+                            {t("sidepanel:personaGarden.visuals.commitBlockers", {
+                              defaultValue: "Commit blockers"
+                            })}
+                            : {formatPreviewList(importCommitBlockers)}
+                          </div>
+                        ) : null}
+                        {rendererImportPreview.warnings?.length ? (
+                          <div className="mt-1">
+                            {t("sidepanel:personaGarden.visuals.rendererWarnings", {
+                              defaultValue: "Warnings"
+                            })}
+                            : {formatPreviewList(rendererImportPreview.warnings)}
+                          </div>
+                        ) : null}
+                        {rendererImportRoleSummary ? (
+                          <div className="mt-1">
+                            {t("sidepanel:personaGarden.visuals.assetRoles", {
+                              defaultValue: "Asset roles"
+                            })}
+                            : {rendererImportRoleSummary}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     {canCommitImportPreview ? (
                       <div className="mt-2 border-t border-border pt-2">
                         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2368,6 +3157,23 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                         <div className="mt-1 text-text-muted">
                           Commit creates a new draft pack. Activation remains separate.
                         </div>
+                        {!importPreviewCommitEligible ? (
+                          <div
+                            data-testid="persona-visual-import-commit-blocked"
+                            className="mt-2 rounded border border-border bg-bg p-2 text-text-muted"
+                          >
+                            {t(
+                              "sidepanel:personaGarden.visuals.importCommitBlocked",
+                              {
+                                defaultValue:
+                                  "Commit unavailable until preview blockers are resolved"
+                              }
+                            )}
+                            {importCommitBlockers.length
+                              ? `: ${formatPreviewList(importCommitBlockers)}`
+                              : "."}
+                          </div>
+                        ) : null}
                         {importConflictChoiceRequired ? (
                           <div
                             data-testid="persona-visual-import-conflict-choice"
@@ -2383,6 +3189,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                                   const nextMode = event.target
                                     .value as PersonaVisualImportTargetMode | ""
                                   setImportTargetMode(nextMode)
+                                  setImportTargetChoicePreviewId(
+                                    nextMode ? fullImportPreview?.preview_id || "" : ""
+                                  )
                                   if (nextMode !== "replace_draft") {
                                     setImportReplacePackId("")
                                   } else if (!importReplacePackId) {
@@ -2461,16 +3270,23 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                           </Button>
                         </div>
                         {importCommitJob ? (
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-text-muted">
-                            <Tag data-testid="persona-visual-import-commit-status">
-                              {importCommitJob.status}
-                            </Tag>
-                            <span data-testid="persona-visual-import-commit-stage">
-                              {importCommitJob.stage}
-                            </span>
-                            <span data-testid="persona-visual-import-commit-job-id">
-                              {importCommitJob.job_id}
-                            </span>
+                          <div className="mt-2 space-y-1 text-text-muted">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Tag data-testid="persona-visual-import-commit-status">
+                                {importCommitJob.status}
+                              </Tag>
+                              <span data-testid="persona-visual-import-commit-stage">
+                                {importCommitJob.stage}
+                              </span>
+                              <span data-testid="persona-visual-import-commit-job-id">
+                                {importCommitJob.job_id}
+                              </span>
+                            </div>
+                            {importCommitJobCopy ? (
+                              <div data-testid="persona-visual-import-commit-job-copy">
+                                {importCommitJobCopy}
+                              </div>
+                            ) : null}
                           </div>
                         ) : (
                           <div className="mt-2 text-text-muted">
@@ -2513,8 +3329,37 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 </label>
               ))}
             </div>
+            {customVisualStates.length ? (
+              <>
+                <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+                  Custom States
+                </div>
+                <div className="mt-2 grid gap-2 md:grid-cols-2">
+                  {customVisualStates.map((state) => (
+                    <label key={state} className="text-xs text-text-muted">
+                      <span className="mb-1 flex items-center gap-1">
+                        <span>{formatStateLabel(state)}</span>
+                        <Tag color="blue">
+                          {draftManifest.state_catalog?.[state]?.kind || "custom"}
+                        </Tag>
+                      </span>
+                      <select
+                        data-testid={`persona-visual-state-${state}-select`}
+                        className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                        value={draftManifest.states?.[state]?.animation_id || ""}
+                        onChange={(event) =>
+                          handleStateMappingChange(state, event.target.value)
+                        }
+                      >
+                        {renderAnimationOptions()}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+              </>
+            ) : null}
             <div className="mt-3 grid gap-2 md:grid-cols-2">
-              {OPTIONAL_VISUAL_STATES.map((state) => (
+              {editableFallbackStates.map((state) => (
                 <label key={state} className="text-xs text-text-muted">
                   <span className="mb-1 block">{`${formatStateLabel(state)} fallbacks`}</span>
                   <input
@@ -2799,11 +3644,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 onChange={(event) =>
                   setTriggerDraft((current) => ({
                     ...current,
-                    state: event.target.value as PersonaVisualStateId
+                    state: asPersonaVisualStateId(event.target.value)
                   }))
                 }
               >
-                {VISUAL_STATES.map((state) => (
+                {activeVisualStates.map((state) => (
                   <option key={state} value={state}>
                     {state}
                   </option>
@@ -2911,7 +3756,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
               <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
                 Generated Candidates
               </div>
-              <Button size="small" onClick={() => void loadCandidates()}>
+              <Button
+                data-testid="persona-visual-candidates-refresh-button"
+                size="small"
+                onClick={() => void loadCandidates()}
+              >
                 {candidatesLoading ? loadingLabel : refreshLabel}
               </Button>
             </div>
@@ -2939,12 +3788,12 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 <select
                   data-testid="persona-visual-generation-target-state-select"
                   className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
-                  value={generationTargetState}
+                  value={normalizedGenerationTargetState}
                   onChange={(event) =>
-                    setGenerationTargetState(event.target.value as PersonaVisualStateId)
+                    setGenerationTargetState(asPersonaVisualStateId(event.target.value))
                   }
                 >
-                  {VISUAL_STATES.map((state) => (
+                  {activeVisualStates.map((state) => (
                     <option key={state} value={state}>
                       {state}
                     </option>

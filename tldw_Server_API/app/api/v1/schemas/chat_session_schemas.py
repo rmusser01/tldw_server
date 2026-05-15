@@ -447,6 +447,93 @@ class CharacterChatCompletionPrepResponse(BaseModel):
     usage_instructions: str = "Use these messages with POST /api/v1/chat/completions"
 
 
+class PromptPreviewSection(BaseModel):
+    """Supplemental prompt section included in prompt-preview diagnostics."""
+
+    name: str = Field(..., description="Stable section identifier")
+    content: str = Field(..., description="Truncated preview content for this section")
+    tokens_estimated: int = Field(..., ge=0, description="Estimated tokens before truncation")
+    tokens_effective: int = Field(..., ge=0, description="Estimated tokens after truncation")
+    budget: int = Field(..., ge=0, description="Section token budget")
+    truncated: bool = Field(..., description="Whether the section was truncated")
+    diagnostics: list[dict[str, Any]] | None = Field(
+        None,
+        description="Optional section-specific diagnostics such as lorebook matches.",
+    )
+
+
+class PromptPreviewConflict(BaseModel):
+    """Conflict diagnostic surfaced by prompt-preview."""
+
+    type: str = Field(..., description="Conflict category")
+    message: str = Field(..., description="Human-readable conflict explanation")
+
+
+class PromptPreviewExemplarDecision(BaseModel):
+    """Bounded persona exemplar selection or rejection decision."""
+
+    id: str = Field(..., description="Bounded exemplar identifier")
+    reason: str = Field(..., description="Bounded selection or rejection reason")
+
+
+class PromptPreviewCurrentTurn(BaseModel):
+    """Current user turn used for persona-context preview decisions."""
+
+    source: str = Field(..., description="Source of the current turn text")
+    has_text: bool = Field(..., description="Whether current turn text is available")
+    preview: str = Field(..., description="Bounded preview of the current turn text")
+
+
+class PromptPreviewPersonaContext(BaseModel):
+    """Persona-specific effective-context diagnostics for prompt-preview."""
+
+    active: bool = Field(..., description="Whether persona context diagnostics apply")
+    reason: str = Field(..., description="Top-level persona context status reason")
+    assistant_kind: Literal["persona"] | None = Field(None, description="Assistant identity kind")
+    assistant_id: str | None = Field(None, description="Bounded assistant identity")
+    persona_memory_mode: str | None = Field(None, description="Bounded persona memory mode")
+    applied: bool | None = Field(None, description="Whether persona guidance sections were applied")
+    section_names: list[str] = Field(default_factory=list, description="Applied persona section names")
+    selected_exemplar_ids: list[str] = Field(
+        default_factory=list,
+        description="Backward-compatible selected exemplar ID list",
+    )
+    selected_exemplars: list[PromptPreviewExemplarDecision] = Field(
+        default_factory=list,
+        description="Selected persona exemplars with bounded reasons",
+    )
+    rejected_exemplars: list[PromptPreviewExemplarDecision] = Field(
+        default_factory=list,
+        description="Rejected persona exemplars with bounded reasons",
+    )
+    current_turn: PromptPreviewCurrentTurn | None = Field(
+        None,
+        description="Current turn used for persona exemplar selection",
+    )
+
+
+class PromptPreviewResponse(BaseModel):
+    """Response schema for chat prompt-preview diagnostics."""
+
+    chat_id: str
+    character_id: int | None = None
+    character_name: str | None = None
+    sections: list[PromptPreviewSection]
+    total_supplemental_tokens: int = Field(..., ge=0)
+    total_supplemental_effective_tokens: int = Field(..., ge=0)
+    supplemental_budget: int = Field(..., ge=0)
+    budget_status: Literal["ok", "caution", "error"]
+    message_tokens_estimated: int = Field(..., ge=0)
+    message_count: int = Field(..., ge=0)
+    warnings: list[str] | None = None
+    conflicts: list[PromptPreviewConflict] | None = None
+    examples: list[str] = Field(
+        default_factory=list,
+        description="Human-readable examples explaining prompt-preview conflict semantics",
+    )
+    persona_context: PromptPreviewPersonaContext | None = None
+
+
 class CharacterChatCompletionV2Request(BaseModel):
     """Character Chat completion (v2) - builds context and calls a provider.
 

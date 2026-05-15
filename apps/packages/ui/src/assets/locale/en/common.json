@@ -516,6 +516,9 @@
     "noServerChats": "No server chats yet",
     "foldersRequireConnection": "Folders require a server connection"
   },
+  "knowledgeSidebar": {
+    "title": "Knowledge history"
+  },
   "extName": "tldw Assistant",
   "extDescription": "Browser extension for tldw_server - your unified AI assistant with RAG, media processing, and more.",
   "openSidePanelToChat": "Open Sidebar to chat",

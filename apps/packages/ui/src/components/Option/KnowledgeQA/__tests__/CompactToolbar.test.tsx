@@ -29,12 +29,14 @@ const defaultProps = {
   webEnabled: false,
   onToggleWeb: vi.fn(),
   onOpenSourceSelector: vi.fn(),
+  onAddSources: vi.fn(),
   onOpenSettings: vi.fn(),
   generationProvider: null as string | null,
   generationModel: null as string | null,
   onGenerationProviderChange: vi.fn(),
   onGenerationModelChange: vi.fn(),
   contextChangedSinceLastRun: false,
+  showAddSources: false,
 }
 
 function renderToolbar(overrides: Partial<typeof defaultProps> = {}) {
@@ -66,9 +68,24 @@ describe("CompactToolbar", () => {
     expect(screen.getByText(/Sources:.*4 selected/)).toBeDefined()
   })
 
-  it('renders "All sources" for 5+ sources', () => {
+  it('renders "All sources" only when every canonical source is selected', () => {
     renderToolbar({
       sources: ["media_db", "notes", "characters", "chats", "kanban"],
+    })
+    expect(screen.getByText(/Sources:.*5 selected/)).toBeDefined()
+
+    cleanup()
+    renderToolbar({
+      sources: [
+        "media_db",
+        "notes",
+        "chats",
+        "characters",
+        "kanban",
+        "prompts",
+        "world_books",
+        "dictionaries",
+      ] as RagSource[],
     })
     expect(screen.getByText(/Sources:.*All sources/)).toBeDefined()
   })
@@ -92,6 +109,16 @@ describe("CompactToolbar", () => {
     expect(onOpenSourceSelector).toHaveBeenCalledOnce()
   })
 
+  it("shows a labeled Add sources action when requested for compact mobile use", async () => {
+    const onAddSources = vi.fn()
+    renderToolbar({ showAddSources: true, onAddSources })
+
+    const button = screen.getByRole("button", { name: "Add sources" })
+    await userEvent.click(button)
+
+    expect(onAddSources).toHaveBeenCalledOnce()
+  })
+
   it("calls onToggleWeb when web pill is clicked", async () => {
     const onToggleWeb = vi.fn()
     renderToolbar({ onToggleWeb })
@@ -103,7 +130,8 @@ describe("CompactToolbar", () => {
   it("calls onOpenSettings when settings gear is clicked", async () => {
     const onOpenSettings = vi.fn()
     renderToolbar({ onOpenSettings })
-    const btn = screen.getByLabelText("Open settings")
+    const btn = screen.getByLabelText("Open Knowledge QA settings")
+    expect(btn).toHaveAttribute("title", "Open Knowledge QA settings")
     await userEvent.click(btn)
     expect(onOpenSettings).toHaveBeenCalledOnce()
   })

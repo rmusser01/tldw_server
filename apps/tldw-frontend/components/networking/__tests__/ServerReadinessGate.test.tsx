@@ -19,6 +19,7 @@ describe("ServerReadinessGate", () => {
     vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
+      status: 200,
       json: async () => ({ status: "healthy" })
     } as Response)
     const { ServerReadinessGate } = await import("../ServerReadinessGate")
@@ -37,6 +38,124 @@ describe("ServerReadinessGate", () => {
       "http://127.0.0.1:8000/api/v1/health",
       expect.objectContaining({ method: "GET" })
     )
+  })
+
+  it("accepts degraded health as enterable for partial-content responses when allowed", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 206,
+      json: async () => ({ status: "degraded" })
+    } as Response)
+    const { ServerReadinessGate } = await import("../ServerReadinessGate")
+
+    render(
+      <ServerReadinessGate allowDegraded>
+        <div>App ready</div>
+      </ServerReadinessGate>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText("App ready")).toBeInTheDocument()
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("accepts ok and allowed degraded status envelopes from normal successful responses", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ status: "ok" })
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ status: "degraded" })
+      } as Response)
+    const { ServerReadinessGate } = await import("../ServerReadinessGate")
+
+    const { unmount } = render(
+      <ServerReadinessGate>
+        <div>Ok ready</div>
+      </ServerReadinessGate>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText("Ok ready")).toBeInTheDocument()
+    })
+    unmount()
+
+    render(
+      <ServerReadinessGate allowDegraded>
+        <div>Degraded ready</div>
+      </ServerReadinessGate>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText("Degraded ready")).toBeInTheDocument()
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps retrying instead of entering the app for explicitly unhealthy responses", async () => {
+    vi.useFakeTimers()
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: "unhealthy" })
+    } as Response)
+
+    const { ServerReadinessGate } = await import("../ServerReadinessGate")
+
+    render(
+      <ServerReadinessGate>
+        <div>App ready</div>
+      </ServerReadinessGate>
+    )
+
+    expectReadinessStatus()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000)
+    })
+
+    expect(screen.queryByText("App ready")).toBeNull()
+    expectReadinessStatus()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps malformed health responses behind the readiness screen", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new Error("invalid json")
+      }
+    } as Response)
+    const { ServerReadinessGate } = await import("../ServerReadinessGate")
+
+    render(
+      <ServerReadinessGate>
+        <div>App ready</div>
+      </ServerReadinessGate>
+    )
+
+    await waitFor(() => {
+      expectReadinessStatus()
+    })
+    expect(screen.queryByText("App ready")).toBeNull()
   })
 
   it("restarts readiness checks when leaving a bypass route after timing out", async () => {

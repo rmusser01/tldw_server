@@ -6,7 +6,7 @@ Feature: User-owned animated 2D visual packs for Persona Buddy and Persona Live
 Location: WebUI Persona Garden and shared Persona Buddy shell
 Status: Draft product record
 Owner: Product / WebUI / Persona
-Last Updated: 2026-05-10
+Last Updated: 2026-05-13
 
 ---
 
@@ -41,11 +41,14 @@ leaving the Persona workflow.
 
 The implementation now covers the core data model, renderer, API, editor, Jobs
 flow, MCP module, E2E runtime behavior, Buddy entry point, diagnostics, setup
-states, ownership/help copy, duplicate-to-persona drafts, and a reference-backed
+states, ownership/help copy, duplicate-to-persona drafts, a reference-backed
 personal pack library, import conflict choices, and reusable Persona Garden
-affordances. The remaining product gap is optional Phase 3 externalization:
-external visual providers, shared/cross-device libraries, and future renderer
-adapters.
+affordances. PR #1608 also added the renderer capability contract and Buddy
+renderer registry while keeping `sprite_frames` as the only enabled V1 runtime
+renderer. The optional Phase 3 externalization track now has contracts for
+non-sprite Manifest V2 and external MCP-compatible pack providers; remaining
+work is implementation of those contracts, shared/cross-device libraries, and
+future renderer adapters.
 
 ---
 
@@ -66,6 +69,9 @@ adapters.
 7. Allow MCP to control transient runtime states and create draft/review changes
    without silently replacing the active pack.
 8. Ensure broken or missing visual assets never block Persona Live controls.
+9. Let external MCP-compatible providers propose visual-pack content through a
+   review-first handoff that reuses import preview, generated-candidate review,
+   or inactive draft creation.
 
 ---
 
@@ -80,12 +86,14 @@ adapters.
 6. Do not let MCP tools silently activate generated or imported packs.
 7. Do not require microphone, TTS provider, or external image generation
    availability for baseline runtime tests.
+8. Do not treat external MCP pack providers as runtime renderer plugins,
+   trusted asset stores, marketplaces, or shared-library publishers.
 
 ---
 
 ## 5. Current Implementation Snapshot
 
-As of 2026-05-10:
+As of 2026-05-13:
 
 1. The durable implementation from PR #1393 is merged into `dev`.
 2. The closeout documentation and E2E verification from PR #1400 is merged into
@@ -95,8 +103,10 @@ As of 2026-05-10:
 4. PR #1447 is merged and closes the ordered Product Hardening tracker from
    #1428: reliability diagnostics (#1430), generation/setup UX (#1431), and
    ownership/help copy (#1429).
+5. PR #1608 is merged and adds the Persona visual renderer capability registry,
+   authenticated renderer capability API, and local Buddy renderer registry.
 
-Implemented foundations include:
+Implemented and documented foundations include:
 
 1. Backend visual-pack persistence in the persona/ChaChaNotes data layer.
 2. `PersonaVisualService` for upload validation, asset storage, activation, and
@@ -141,6 +151,16 @@ Implemented foundations include:
     draft, personal library, import archive preview, and duplicate-to-persona
     actions into the existing controls while preserving draft/review-before-
     activation semantics.
+19. Renderer capability reporting through
+    `GET /api/v1/persona/visual-renderers`, with only `sprite_frames` enabled
+    for V1 validation, activation, import/export, and Buddy runtime rendering.
+20. Buddy rendering and diagnostics route through the local renderer registry
+    instead of separate hardcoded renderer checks.
+21. External MCP-compatible pack-provider contract documentation defines
+    provider discovery, result envelopes, diagnostics, provenance, safety rules,
+    and review-first handoff through existing Persona Visual flows. No external
+    provider execution, runtime renderer activation, or marketplace behavior is
+    implemented by that contract.
 
 ---
 
@@ -310,8 +330,9 @@ by PR #1135 asset-pack portability:
 
 Users SHOULD be able to save an existing same-user visual pack into a personal
 library as metadata, not as an immediate asset copy. V1 library entries are
-user-scoped references to a source persona and source pack with display
-snapshots so stale entries can still be shown and removed.
+user-scoped references to a source persona and source pack. V1 intentionally
+does not store display snapshots; listing derives source display names from live
+source rows when those rows still resolve.
 
 Saving the same source pack SHOULD be idempotent. Using a library item SHOULD
 duplicate the referenced source pack to the chosen target persona as a draft and
@@ -333,6 +354,17 @@ duration-limited, and auditable.
 
 MCP durable actions MUST create drafts, manifest updates, generation jobs, or
 review items. They MUST NOT silently activate packs.
+
+### FR-14: External MCP Pack Provider Contract
+
+External MCP-compatible visual providers MAY propose portable archives,
+generated candidates, manifest patches, or inactive draft-pack requests. tldw
+MUST treat provider output as untrusted review input, resolve renderer support
+through the server capability registry, and route durable results through
+import preview, generated-candidate review, or inactive draft creation. Provider
+output MUST NOT activate packs, mutate active packs, write assets directly,
+submit runtime code, bypass Persona Garden review, or introduce personal-library
+display snapshots.
 
 ---
 
@@ -431,6 +463,7 @@ Current persona-scoped API routes include:
 19. `PATCH /api/v1/persona/visual-library/{item_id}`
 20. `DELETE /api/v1/persona/visual-library/{item_id}`
 21. `POST /api/v1/persona/visual-library/{item_id}/use`
+22. `GET /api/v1/persona/visual-renderers`
 
 ---
 
@@ -460,6 +493,12 @@ Rules:
 6. Personal-library MCP tools are user-scoped and reference-backed. Listing
    derives source display names from live rows, and using a library item creates
    an inactive target-persona draft through duplicate semantics.
+
+External MCP-compatible pack providers are separate from the internal
+`persona_visuals` module. The provider contract is documented in
+`Docs/Design/2026-05-13-persona-visual-external-mcp-provider-contract.md`.
+Providers advertise candidate content and diagnostics; tldw owns validation,
+storage, review, commit, and activation decisions.
 
 ---
 
@@ -495,8 +534,12 @@ Current and future portability/library work:
    (#1496).
 6. Future shared user libraries should be layered on top of the manifest-backed
    pack format rather than replacing it.
-7. Future cross-device sync, signed community packs, and external
-   MCP-compatible pack providers remain out of scope for V1.
+7. Future cross-device sync and signed community packs remain out of scope for
+   V1.
+8. External MCP-compatible pack providers have a contract-level design in
+   `Docs/Design/2026-05-13-persona-visual-external-mcp-provider-contract.md`.
+   Future implementation must route provider output through import preview,
+   generated-candidate review, or inactive draft creation.
 
 ---
 
@@ -568,9 +611,29 @@ baseline. The first reference-backed V1 slices are now covered:
 5. MCP reusable-pack semantics: complete for listing reference-backed personal
    library entries and creating inactive target-persona drafts (#1496).
 6. Shared/cross-device libraries remain future work.
-7. External MCP-compatible visual providers remain future work.
-8. Live2D or other renderer adapter remains future work after the sprite/frame
-   path is stable.
+7. External MCP-compatible visual provider implementation remains future work.
+   The contract is defined by #1682 and
+   `Docs/Design/2026-05-13-persona-visual-external-mcp-provider-contract.md`;
+   providers are review-input sources, not runtime plugins or trusted asset
+   stores.
+8. Renderer/provider adapter evaluation for Live2D and other future paths is
+   tracked by #1497 and the 2026-05-10 design evaluation.
+9. Renderer capability registry/API and Buddy renderer registry are complete in
+   PR #1608, with `sprite_frames` still the only enabled V1 runtime renderer.
+10. Sprite atlas V1.1 remains inside `sprite_frames`: atlas assets use
+    `asset_role: "sprite_sheet"` and frame-level `region` rectangles, not a
+    separate `sprite_sheet` renderer or manifest version bump.
+11. The Manifest V2 design slice is tracked by #1623 and
+    `Docs/Design/2026-05-13-persona-visual-manifest-v2-contract.md`.
+12. The Manifest V2 capability foundation is tracked by #1628. It exposes
+    additive renderer metadata such as contract versions, asset roles,
+    role-category mapping, setup status/blockers, limits, and fallback/license
+    requirements from the existing renderer capability endpoint.
+13. Live2D or other renderer adapter implementation remains future work after
+    import-preview validation hooks, dependency gates, licensing review, fallback
+    requirements, and runtime adapter tests are separately scoped. Capability
+    entries for these renderers must be treated as disabled/future state unless
+    `can_validate`, `can_activate`, and `buddy_runtime_supported` are all true.
 
 ---
 
@@ -588,7 +651,9 @@ baseline. The first reference-backed V1 slices are now covered:
      loading.
 
 4. Risk: Future renderer types force a schema rewrite.
-   - Mitigation: Keep manifest versioned and renderer typed.
+   - Mitigation: Keep manifests versioned and route renderer support through
+     the capability registry before activation/import/runtime support is
+     exposed.
 
 5. Risk: Cross-persona asset leakage.
    - Mitigation: Enforce user/persona/pack ownership checks at API, service, and
@@ -597,6 +662,12 @@ baseline. The first reference-backed V1 slices are now covered:
 6. Risk: The editor becomes a full image editor.
    - Mitigation: Keep V1 focused on upload, preview, state mapping, timing,
      review, activation, and portability.
+
+7. Risk: External MCP providers are treated as trusted asset stores or runtime
+   plugins.
+   - Mitigation: Keep providers as review-input sources. Route provider output
+     through import preview, generated-candidate review, or inactive draft
+     creation, and keep activation as a separate user action.
 
 ---
 
@@ -646,8 +717,8 @@ E2E:
 5. Should users be able to mark packs as reusable templates before shared
    libraries exist, or does the personal reference-backed library cover that
    near-term need?
-6. Which visual state names should become externally documented for future MCP
-   providers?
+6. Which provider intake surface should ship first: portable archive import,
+   generated-candidate intake, or read-only provider offer listing?
 
 ---
 
@@ -668,3 +739,14 @@ E2E:
 10. Issue #1450: Same-user Persona Visual pack duplicate-to-persona draft flow.
 11. Issue #1468: Personal Persona Visual pack library foundation.
 12. Issue #1490: Persona visual-pack import conflict choices.
+13. Issue #1493: Persona Garden reusable affordances.
+14. Issue #1496: MCP reusable-pack semantics for reference-backed personal
+    library entries.
+15. Issue #1497: Persona visual-pack renderer/provider adapter evaluation.
+16. Renderer/provider adapter evaluation:
+    `Docs/Design/2026-05-10-persona-visual-renderer-provider-adapter-evaluation.md`
+17. PR #1608: Persona Buddy renderer capability registry.
+18. Issue #1609: Renderer capability docs and tracker refresh after PR #1608.
+19. Issue #1682: Persona Visual external MCP pack-provider contract.
+20. External MCP provider contract:
+    `Docs/Design/2026-05-13-persona-visual-external-mcp-provider-contract.md`

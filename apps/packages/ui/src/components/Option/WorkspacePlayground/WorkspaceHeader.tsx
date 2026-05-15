@@ -33,7 +33,9 @@ import {
   Settings,
   Star,
   Share2,
-  CircleHelp
+  CircleHelp,
+  Bot,
+  History
 } from "lucide-react"
 import type {
   SavedWorkspace,
@@ -42,6 +44,7 @@ import type {
 } from "@/types/workspace"
 import { useWorkspaceStore } from "@/store/workspace"
 import { useConnectionStore } from "@/store/connection"
+import { DESIGN_SYSTEM_STATES, getDesignSystemState } from "@/design-system"
 import { deriveConnectionUxState } from "@/types/connection"
 import {
   buildWorkspacePlaygroundConfusionDashboardSnapshot,
@@ -87,6 +90,8 @@ import {
   normalizeRolloutPercentage
 } from "@/utils/feature-rollout"
 import { WorkspaceShortcutsModal } from "./WorkspaceShortcutsModal"
+import { WorkspaceAgentTaskHandoffModal } from "./WorkspaceAgentTaskHandoffModal"
+import { WorkspaceACPHistoryModal } from "./WorkspaceACPHistoryModal"
 
 interface WorkspaceHeaderProps {
   leftPaneOpen: boolean
@@ -113,6 +118,11 @@ interface WorkspaceHeaderProps {
   /** Rollout gate for status/guardrails surfaces (connectivity/quota/conflict state). */
   statusGuardrailsEnabled?: boolean
 }
+
+type WorkspaceHeaderConnectionTelemetryStatus =
+  | "connected"
+  | "degraded"
+  | "disconnected"
 
 const TELEMETRY_EVENT_ORDER: WorkspacePlaygroundTelemetryEventType[] = [
   "status_viewed",
@@ -165,6 +175,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   const [editName, setEditName] = React.useState("")
   const [workspaceBrowserOpen, setWorkspaceBrowserOpen] = React.useState(false)
   const [shortcutsModalOpen, setShortcutsModalOpen] = React.useState(false)
+  const [agentTaskModalOpen, setAgentTaskModalOpen] = React.useState(false)
+  const [acpHistoryModalOpen, setAcpHistoryModalOpen] = React.useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = React.useState(false)
   const [deleteConfirmInput, setDeleteConfirmInput] = React.useState("")
   const [deleteTargetWorkspace, setDeleteTargetWorkspace] = React.useState<{
@@ -372,6 +384,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
 
     if (uxState === "connected_ok") {
       return {
+        telemetryStatus:
+          "connected" satisfies WorkspaceHeaderConnectionTelemetryStatus,
         label: t("playground:workspace.connectionConnected", "Connected"),
         detail: t(
           "playground:workspace.connectionConnectedDetail",
@@ -387,8 +401,13 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       uxState === "connected_degraded" ||
       uxState === "demo_mode"
     ) {
+      const degradedState = getDesignSystemState("degraded") as
+        | ReturnType<typeof getDesignSystemState>
+        | undefined
       return {
-        label: t("playground:workspace.connectionDegraded", "Degraded"),
+        telemetryStatus:
+          "degraded" satisfies WorkspaceHeaderConnectionTelemetryStatus,
+        label: degradedState?.label ?? DESIGN_SYSTEM_STATES.degraded.label,
         detail: t(
           "playground:workspace.connectionDegradedDetail",
           "Connection degraded or still checking"
@@ -399,6 +418,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     }
 
     return {
+      telemetryStatus:
+        "disconnected" satisfies WorkspaceHeaderConnectionTelemetryStatus,
       label: t("playground:workspace.connectionDisconnected", "Disconnected"),
       detail: t(
         "playground:workspace.connectionDisconnectedDetail",
@@ -458,7 +479,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       lastConnectivityStatusRef.current = null
       return
     }
-    const nextStatus = connectionIndicator.label.toLowerCase()
+    const nextStatus = connectionIndicator.telemetryStatus
     const previousStatus = lastConnectivityStatusRef.current
     if (previousStatus === nextStatus) return
 
@@ -470,7 +491,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     })
 
     lastConnectivityStatusRef.current = nextStatus
-  }, [connectionIndicator.label, statusGuardrailsEnabled, workspaceId])
+  }, [connectionIndicator.telemetryStatus, statusGuardrailsEnabled, workspaceId])
 
   const handleStartEdit = () => {
     setEditName(workspaceName || "New Research")
@@ -501,6 +522,34 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     // Save current workspace before navigating
     saveCurrentWorkspace()
     navigate("/")
+  }
+
+  const handleOpenAgentTaskModal = () => {
+    setAgentTaskModalOpen(true)
+  }
+
+  const handleCloseAgentTaskModal = () => {
+    setAgentTaskModalOpen(false)
+  }
+
+  const handleOpenAcpHistoryModal = () => {
+    setAcpHistoryModalOpen(true)
+  }
+
+  const handleCloseAcpHistoryModal = () => {
+    setAcpHistoryModalOpen(false)
+  }
+
+  const handleOpenAgentTasksPage = () => {
+    setAgentTaskModalOpen(false)
+    setAcpHistoryModalOpen(false)
+    const canonicalWorkspaceId = workspaceId?.trim()
+    if (!canonicalWorkspaceId) {
+      navigate("/agent-tasks")
+      return
+    }
+    const params = new URLSearchParams({ workspace: canonicalWorkspaceId })
+    navigate(`/agent-tasks?${params.toString()}`)
   }
 
   const handleCreateNewWorkspace = () => {
@@ -1428,6 +1477,24 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     ...(workspaceId
       ? [
           {
+            key: "create-agent-task",
+            icon: <Bot className="h-4 w-4" />,
+            label: t(
+              "playground:workspace.createAgentTask",
+              "Create agent task"
+            ),
+            onClick: handleOpenAgentTaskModal
+          },
+          {
+            key: "acp-run-history",
+            icon: <History className="h-4 w-4" />,
+            label: t(
+              "playground:workspace.acpRunHistory",
+              "ACP run history"
+            ),
+            onClick: handleOpenAcpHistoryModal
+          },
+          {
             key: "duplicate-current",
             icon: <Copy className="h-4 w-4" />,
             label: t(
@@ -1714,6 +1781,24 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           </Tooltip>
         </Dropdown>
       </div>
+
+      <WorkspaceAgentTaskHandoffModal
+        open={agentTaskModalOpen}
+        workspaceId={workspaceId}
+        workspaceName={workspaceName}
+        workspaceTag={workspaceTag}
+        onBeforeSubmit={saveCurrentWorkspace}
+        onCancel={handleCloseAgentTaskModal}
+        onOpenAgentTasks={handleOpenAgentTasksPage}
+      />
+
+      <WorkspaceACPHistoryModal
+        open={acpHistoryModalOpen}
+        workspaceId={workspaceId}
+        workspaceName={workspaceName}
+        onCancel={handleCloseAcpHistoryModal}
+        onOpenAgentTasks={handleOpenAgentTasksPage}
+      />
 
       <input
         ref={importFileInputRef}
@@ -2441,7 +2526,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         }}
         centered
         maskClosable={false}
-        destroyOnClose
+        destroyOnHidden
       >
         {deleteTargetWorkspace && (
           <div className="space-y-3">

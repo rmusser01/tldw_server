@@ -8,12 +8,11 @@ import type {
   PersonaVisualStateId
 } from "@/types/persona-visuals"
 
-import { normalizeFrames } from "./personaVisualDiagnostics"
-
-export type PersonaVisualRenderError =
-  | "missing_animation"
-  | "missing_asset"
-  | "unsupported_region"
+import { normalizeFrames } from "./personaVisualAssets"
+import type {
+  PersonaVisualRenderError,
+  PersonaVisualRenderErrorHandler
+} from "./personaVisualTypes"
 
 export type SpriteFrameRendererProps = {
   manifest: PersonaVisualManifest
@@ -21,7 +20,7 @@ export type SpriteFrameRendererProps = {
   state: PersonaVisualStateId
   fallbackLabel: string
   className?: string
-  onRenderError?: (error: PersonaVisualRenderError | null) => void
+  onRenderError?: PersonaVisualRenderErrorHandler
 }
 
 type ResolvedAnimation = {
@@ -102,6 +101,8 @@ const renderFrame = ({
   }
   if (frame.region) {
     const region = frame.region
+    const offsetX = region.x === 0 ? 0 : -region.x
+    const offsetY = region.y === 0 ? 0 : -region.y
     return (
       <div
         {...sharedProps}
@@ -111,7 +112,7 @@ const renderFrame = ({
           width: `${region.width}px`,
           height: `${region.height}px`,
           backgroundImage: `url(${asset.url})`,
-          backgroundPosition: `-${region.x}px -${region.y}px`,
+          backgroundPosition: `${offsetX}px ${offsetY}px`,
           backgroundSize:
             asset.width && asset.height
               ? `${asset.width}px ${asset.height}px`

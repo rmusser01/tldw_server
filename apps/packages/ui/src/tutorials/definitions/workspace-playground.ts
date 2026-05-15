@@ -1,5 +1,5 @@
 /**
- * Workspace Playground Tutorial Definitions
+ * Research Studio Tutorial Definitions
  */
 
 import { FlaskConical } from "lucide-react"
@@ -7,7 +7,7 @@ import type { TutorialDefinition } from "../registry"
 
 const workspacePlaygroundBasics: TutorialDefinition = {
   id: "workspace-playground-basics",
-  routePattern: "/workspace-playground",
+  routePattern: "/research-studio",
   labelKey: "tutorials:workspacePlayground.basics.label",
   labelFallback: "Research Studio Basics",
   descriptionKey: "tutorials:workspacePlayground.basics.description",

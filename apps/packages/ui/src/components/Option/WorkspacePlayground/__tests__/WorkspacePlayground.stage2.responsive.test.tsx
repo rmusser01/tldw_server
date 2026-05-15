@@ -1,18 +1,37 @@
-import { render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { RESEARCH_STUDIO_LAST_MOBILE_TAB_STORAGE_KEY } from "../research-studio-route-state"
 import { WorkspacePlayground } from "../index"
 
 const ONBOARDING_KEY = "tldw:workspace-playground:onboarding-dismissed:v1"
 const {
   onboardingStorageState,
   mockWorkspaceStorageGetItem,
-  mockWorkspaceStorageSetItem
+  mockWorkspaceStorageSetItem,
+  mockGetResearchStudioCapabilities,
+  mockChatPaneProps,
+  mockStudioPaneProps
 } = vi.hoisted(() => ({
   onboardingStorageState: {
     value: undefined as string | undefined
   },
   mockWorkspaceStorageGetItem: vi.fn(async (_key: string) => null as string | null),
-  mockWorkspaceStorageSetItem: vi.fn(async (_key: string, _value: string) => undefined)
+  mockWorkspaceStorageSetItem: vi.fn(async (_key: string, _value: string) => undefined),
+  mockGetResearchStudioCapabilities: vi.fn(async () => ({
+    status: "degraded",
+    ttl_seconds: 30,
+    timestamp: "2026-05-13T00:00:00.000Z",
+    capabilities: {
+      chat: {
+        status: "degraded",
+        mode: "warn",
+        dependencies: ["llm"],
+        reason_code: "llm_health_degraded"
+      }
+    }
+  })),
+  mockChatPaneProps: [] as any[],
+  mockStudioPaneProps: [] as any[]
 }))
 
 const mockMessageApi = {
@@ -104,7 +123,8 @@ vi.mock("@/store/workspace", () => ({
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
-    getMediaDetails: vi.fn().mockResolvedValue({})
+    getMediaDetails: vi.fn().mockResolvedValue({}),
+    getResearchStudioCapabilities: mockGetResearchStudioCapabilities
   }
 }))
 
@@ -122,11 +142,24 @@ vi.mock("../SourcesPane", () => ({
 }))
 
 vi.mock("../ChatPane", () => ({
-  ChatPane: () => <div data-testid="workspace-chat-pane">Chat</div>
+  ChatPane: (props: any) => {
+    mockChatPaneProps.push(props)
+    return <div data-testid="workspace-chat-pane">Chat</div>
+  }
 }))
 
 vi.mock("../StudioPane", () => ({
-  StudioPane: () => <div data-testid="workspace-studio-pane">Studio</div>
+  StudioPane: (props: { onRequestSources?: () => void }) => {
+    mockStudioPaneProps.push(props)
+    return (
+      <div data-testid="workspace-studio-pane">
+        Studio
+        <button type="button" onClick={props.onRequestSources}>
+          Open Sources tab
+        </button>
+      </div>
+    )
+  }
 }))
 
 vi.mock("../WorkspaceStatusBar", () => ({
@@ -143,15 +176,29 @@ vi.mock("antd", () => ({
       {children}
     </div>
   ),
-  Tabs: ({ items }: any) => (
-    <div>
+  Tabs: ({ activeKey, items, onChange }: any) => (
+    <div data-testid="workspace-mobile-tabs" data-active-key={String(activeKey)}>
       {Array.isArray(items)
         ? items.map((item: any) => (
-            <div key={item.key} data-testid={`tab-${item.key}`}>
-              <div data-testid={`tab-label-${item.key}`}>{item.label}</div>
-              {item.children}
+            <div key={item.key} data-testid={`tab-label-wrapper-${item.key}`}>
+              <button
+                type="button"
+                data-testid={`tab-label-${item.key}`}
+                onClick={() => onChange?.(item.key)}
+              >
+                {item.label}
+              </button>
             </div>
           ))
+        : null}
+      {Array.isArray(items)
+        ? items
+            .filter((item: any) => item.key === activeKey)
+            .map((item: any) => (
+              <div key={item.key} data-testid={`tab-${item.key}`}>
+                {item.children}
+              </div>
+            ))
         : null}
     </div>
   ),
@@ -180,10 +227,17 @@ describe("WorkspacePlayground Stage 2 drawer responsiveness", () => {
     testState.leftPaneCollapsed = false
     testState.rightPaneCollapsed = false
     testState.workspaceTag = ""
+    testState.selectedSourceIds = []
+    testState.generatedArtifacts = []
     testState.setSourceStatusByMediaId = vi.fn()
     testState.createNewWorkspace = vi.fn()
     testState.clearCurrentNote = vi.fn()
     testState.loadNote = vi.fn()
+    mockGetResearchStudioCapabilities.mockClear()
+    mockChatPaneProps.length = 0
+    mockStudioPaneProps.length = 0
+    window.localStorage.removeItem(RESEARCH_STUDIO_LAST_MOBILE_TAB_STORAGE_KEY)
+    window.history.replaceState(null, "", "/research-studio")
   })
 
   it("uses non-masked tablet drawers so chat remains visible", () => {
@@ -197,6 +251,31 @@ describe("WorkspacePlayground Stage 2 drawer responsiveness", () => {
       "data-mask",
       "false"
     )
+  })
+
+  it("loads capability health and passes it to Chat and Studio panes", async () => {
+    render(<WorkspacePlayground />)
+
+    await waitFor(() => {
+      expect(mockGetResearchStudioCapabilities).toHaveBeenCalledTimes(1)
+      expect(
+        mockChatPaneProps.at(-1)?.researchStudioCapabilities?.capabilities.chat
+      ).toMatchObject({
+        status: "degraded",
+        mode: "warn",
+        reason_code: "llm_health_degraded"
+      })
+      expect(
+        mockStudioPaneProps.at(-1)?.researchStudioCapabilities?.capabilities.chat
+      ).toMatchObject({
+        status: "degraded",
+        mode: "warn",
+        reason_code: "llm_health_degraded"
+      })
+      expect(
+        typeof mockStudioPaneProps.at(-1)?.onRefreshResearchStudioCapabilities
+      ).toBe("function")
+    })
   })
 
   it("renders mobile tab count badges with AA-safe token classes", () => {
@@ -223,5 +302,169 @@ describe("WorkspacePlayground Stage 2 drawer responsiveness", () => {
     expect(studioLabel).toContainElement(studioCountBadge)
     expect(sourceCountBadge).toHaveClass("bg-surface2", "text-text")
     expect(studioCountBadge).toHaveClass("bg-surface2", "text-text")
+  })
+
+  it("opens Studio from the mobile ?tab=studio route state", () => {
+    testState.isMobile = true
+    window.history.replaceState(null, "", "/research-studio?tab=studio")
+
+    render(<WorkspacePlayground />)
+
+    expect(screen.getByTestId("workspace-mobile-tabs")).toHaveAttribute(
+      "data-active-key",
+      "studio"
+    )
+    expect(screen.getByTestId("workspace-studio-pane")).toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-chat-pane")).not.toBeInTheDocument()
+  })
+
+  it("falls back to Chat for invalid mobile tab route state", () => {
+    testState.isMobile = true
+    window.history.replaceState(null, "", "/research-studio?tab=banana")
+
+    render(<WorkspacePlayground />)
+
+    expect(screen.getByTestId("workspace-mobile-tabs")).toHaveAttribute(
+      "data-active-key",
+      "chat"
+    )
+    expect(screen.getByTestId("workspace-chat-pane")).toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-studio-pane")).not.toBeInTheDocument()
+  })
+
+  it("opens the persisted mobile tab when no URL tab is present", () => {
+    testState.isMobile = true
+    window.localStorage.setItem(
+      RESEARCH_STUDIO_LAST_MOBILE_TAB_STORAGE_KEY,
+      "studio"
+    )
+
+    render(<WorkspacePlayground />)
+
+    expect(screen.getByTestId("workspace-mobile-tabs")).toHaveAttribute(
+      "data-active-key",
+      "studio"
+    )
+    expect(screen.getByTestId("workspace-studio-pane")).toBeInTheDocument()
+  })
+
+  it("lets URL tab state override the persisted mobile tab", () => {
+    testState.isMobile = true
+    window.localStorage.setItem(
+      RESEARCH_STUDIO_LAST_MOBILE_TAB_STORAGE_KEY,
+      "sources"
+    )
+    window.history.replaceState(null, "", "/research-studio?tab=studio")
+
+    render(<WorkspacePlayground />)
+
+    expect(screen.getByTestId("workspace-mobile-tabs")).toHaveAttribute(
+      "data-active-key",
+      "studio"
+    )
+    expect(screen.getByTestId("workspace-studio-pane")).toBeInTheDocument()
+  })
+
+  it("falls back to Chat when persisted mobile tab state is invalid", () => {
+    testState.isMobile = true
+    window.localStorage.setItem(
+      RESEARCH_STUDIO_LAST_MOBILE_TAB_STORAGE_KEY,
+      "banana"
+    )
+
+    render(<WorkspacePlayground />)
+
+    expect(screen.getByTestId("workspace-mobile-tabs")).toHaveAttribute(
+      "data-active-key",
+      "chat"
+    )
+    expect(screen.getByTestId("workspace-chat-pane")).toBeInTheDocument()
+  })
+
+  it("persists mobile tab changes", () => {
+    testState.isMobile = true
+
+    render(<WorkspacePlayground />)
+
+    fireEvent.click(screen.getByTestId("tab-label-studio"))
+
+    expect(screen.getByTestId("workspace-mobile-tabs")).toHaveAttribute(
+      "data-active-key",
+      "studio"
+    )
+    expect(window.localStorage.getItem(RESEARCH_STUDIO_LAST_MOBILE_TAB_STORAGE_KEY))
+      .toBe("studio")
+  })
+
+  it("persists later mobile tab changes after initial URL tab state", () => {
+    testState.isMobile = true
+    window.localStorage.setItem(
+      RESEARCH_STUDIO_LAST_MOBILE_TAB_STORAGE_KEY,
+      "sources"
+    )
+    window.history.replaceState(null, "", "/research-studio?tab=chat")
+
+    render(<WorkspacePlayground />)
+
+    fireEvent.click(screen.getByTestId("tab-label-studio"))
+
+    expect(screen.getByTestId("workspace-mobile-tabs")).toHaveAttribute(
+      "data-active-key",
+      "studio"
+    )
+    expect(window.localStorage.getItem(RESEARCH_STUDIO_LAST_MOBILE_TAB_STORAGE_KEY))
+      .toBe("studio")
+  })
+
+  it("keeps shared params while opening the requested mobile tab", () => {
+    testState.isMobile = true
+    window.history.replaceState(
+      null,
+      "",
+      "/research-studio?shared=abc&tab=studio"
+    )
+
+    render(<WorkspacePlayground />)
+
+    expect(window.location.search).toBe("?shared=abc&tab=studio")
+    expect(screen.getByTestId("workspace-mobile-tabs")).toHaveAttribute(
+      "data-active-key",
+      "studio"
+    )
+  })
+
+  it("opens Sources from the mobile Studio source-readiness CTA", async () => {
+    testState.isMobile = true
+    window.history.replaceState(null, "", "/research-studio?tab=studio")
+
+    render(<WorkspacePlayground />)
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /open sources tab/i })
+    )
+
+    expect(screen.getByTestId("workspace-mobile-tabs")).toHaveAttribute(
+      "data-active-key",
+      "sources"
+    )
+    expect(screen.getByTestId("workspace-sources-pane")).toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-studio-pane")).not.toBeInTheDocument()
+  })
+
+  it("focuses the requested Studio pane on desktop without switching layouts", async () => {
+    window.history.replaceState(null, "", "/research-studio?tab=studio")
+
+    render(<WorkspacePlayground />)
+
+    await waitFor(() => {
+      expect(testState.setRightPaneCollapsed).toHaveBeenCalledWith(false)
+    })
+    expect(screen.getByRole("main")).toHaveAttribute(
+      "id",
+      "workspace-main-content"
+    )
+    expect(
+      screen.getByRole("complementary", { name: "Studio panel" })
+    ).toBeInTheDocument()
   })
 })

@@ -27,6 +27,7 @@ import {
   Popconfirm,
   Modal
 } from "antd"
+import { getDesignSystemState } from "@/design-system"
 import { useWorkspaceStore } from "@/store/workspace"
 import type { WorkspaceSourceType } from "@/types/workspace"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -141,6 +142,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   onResetAdvancedSourceFilters
 }) => {
   const { t } = useTranslation(["playground", "common"])
+  const readyState = getDesignSystemState("ready")
   const [messageApi, messageContextHolder] = message.useMessage()
   const patchSourceListViewState = React.useCallback(
     (patch: Partial<SourceListViewState>) => {
@@ -1065,7 +1067,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
       ? t("playground:sources.statusProcessing", "Processing")
       : isError
         ? t("playground:sources.statusErrorShort", "Error")
-        : t("playground:sources.statusReady", "Ready")
+        : readyState.label
     const sourceStatusClass = isProcessing
       ? "border-primary/30 bg-primary/10 text-primary"
       : isError

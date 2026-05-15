@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { Alert, Button, Card, Descriptions, Divider, Empty, Input, List, Modal, Radio, Space, Tag, Typography } from "antd"
+import { BLOCKED_STATE_LABEL } from "@/design-system"
 
 import {
   checkGovernancePackUpdates,
@@ -916,7 +917,7 @@ export const GovernancePacksTab = () => {
               <Descriptions.Item label="Pack">{report.manifest.title}</Descriptions.Item>
               <Descriptions.Item label="Verdict">
                 <Tag color={getVerdictColor(report.verdict)}>
-                  {report.verdict === "importable" ? "Importable" : "Blocked"}
+                  {report.verdict === "importable" ? "Importable" : BLOCKED_STATE_LABEL}
                 </Tag>
               </Descriptions.Item>
               <Descriptions.Item label="Resolved capabilities">
@@ -959,7 +960,7 @@ export const GovernancePacksTab = () => {
               </Descriptions.Item>
               <Descriptions.Item label="Upgradeable">
                 <Tag color={upgradePlan.upgradeable ? "green" : "red"}>
-                  {upgradePlan.upgradeable ? "Ready to execute" : "Blocked"}
+                  {upgradePlan.upgradeable ? "Ready to execute" : BLOCKED_STATE_LABEL}
                 </Tag>
               </Descriptions.Item>
               {upgradeCandidate ? (

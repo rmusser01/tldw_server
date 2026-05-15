@@ -104,8 +104,8 @@ Expected JSON shape:
     "title": "Guide title",
     "question": "User-style question",
     "answer": "Curated answer",
-    "route": "/workspace-playground",
-    "routeLabel": "Workspace Playground",
+    "route": "/research-studio",
+    "routeLabel": "Research Studio",
     "tags": ["workflow", "discovery"]
   }
 ]
@@ -113,7 +113,7 @@ Expected JSON shape:
 
 Notes:
 
-- `route` can be written as `workspace-playground` or `/workspace-playground`; it is normalized to start with `/`.
+- `route` can be written as `research-studio` or `/research-studio`; it is normalized to start with `/`.
 - Invalid or incomplete cards are ignored during validation.
 - `Reset to built-in defaults` restores the shipped guide set.
 - This setting only changes workflow cards; it does not change per-page Tutorials.

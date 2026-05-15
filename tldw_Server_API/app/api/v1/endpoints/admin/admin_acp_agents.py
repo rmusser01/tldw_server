@@ -5,7 +5,7 @@ configurations, and tool permission policy management.
 """
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
@@ -16,10 +16,17 @@ from tldw_Server_API.app.api.v1.schemas.agent_client_protocol import (
     ACPAgentConfigCreate,
     ACPAgentConfigListResponse,
     ACPAgentConfigResponse,
+    ACPAgentInfo,
     ACPAgentMetrics,
     ACPAgentMetricsListResponse,
     ACPAgentUsageItem,
     ACPAgentUsageResponse,
+    ACPExecutionHealthFailureBuckets,
+    ACPExecutionHealthRedactionSummary,
+    ACPExecutionHealthRetentionSummary,
+    ACPExecutionHealthSessionSummary,
+    ACPExecutionHealthSetupSummary,
+    ACPExecutionHealthSummaryResponse,
     ACPPermissionPolicyCreate,
     ACPPermissionPolicyListResponse,
     ACPPermissionPolicyResponse,
@@ -29,6 +36,9 @@ from tldw_Server_API.app.api.v1.schemas.agent_client_protocol import (
     ACPSessionListResponse,
     ACPSessionUsageResponse,
     ACPTokenUsage,
+)
+from tldw_Server_API.app.core.Agent_Client_Protocol.execution_health import (
+    summarize_execution_health,
 )
 from tldw_Server_API.app.core.Usage.pricing_catalog import compute_token_cost
 from tldw_Server_API.app.services.admin_acp_sessions_service import get_acp_session_store
@@ -45,6 +55,38 @@ _NONCRITICAL = (
     TypeError,
     ValueError,
 )
+
+
+async def _get_available_agents() -> tuple[list[ACPAgentInfo], str | None]:
+    """Return configured ACP agents through the public ACP endpoint helper."""
+    from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import (
+        _get_available_agents as _acp_get_available_agents,
+    )
+
+    return await _acp_get_available_agents()
+
+
+def _now_iso() -> str:
+    """Return the current UTC time in ISO 8601 format."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _retention_summary() -> ACPExecutionHealthRetentionSummary:
+    """Return the configured ACP retention posture, falling back to defaults."""
+    try:
+        from tldw_Server_API.app.core.Agent_Client_Protocol.config import load_acp_sandbox_config
+
+        config = load_acp_sandbox_config()
+        return ACPExecutionHealthRetentionSummary(
+            session_retention_days=int(getattr(config, "session_retention_days", 30)),
+            audit_retention_days=int(getattr(config, "audit_retention_days", 30)),
+        )
+    except _NONCRITICAL as exc:
+        logger.warning(
+            "Unable to load ACP retention config for execution-health summary; using defaults: {}",
+            type(exc).__name__,
+        )
+        return ACPExecutionHealthRetentionSummary()
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +255,41 @@ async def get_acp_agent_metrics() -> ACPAgentMetricsListResponse:
     metrics = await store.get_agent_metrics()
     return ACPAgentMetricsListResponse(
         items=[ACPAgentMetrics(**m) for m in metrics],
+    )
+
+
+@router.get("/acp/execution-health/summary", response_model=ACPExecutionHealthSummaryResponse)
+async def get_acp_execution_health_summary(
+    range_days: int = Query(30, ge=1, le=180),
+    _: object = Depends(get_auth_principal),
+    __: None = Depends(check_rate_limit),
+) -> ACPExecutionHealthSummaryResponse:
+    """Return a compact ACP execution-health rollup for admin reporting."""
+    store = await get_acp_session_store()
+    since = datetime.now(timezone.utc) - timedelta(days=range_days)
+    sessions = await store.list_sessions_with_messages_since(since=since, page_size=1000)
+
+    try:
+        agents, _default_agent = await _get_available_agents()
+    except _NONCRITICAL as exc:
+        logger.warning(
+            "Unable to include ACP agent compatibility in execution-health summary: {}",
+            exc,
+        )
+        agents = []
+
+    summary = summarize_execution_health(sessions=sessions, agents=agents)
+
+    return ACPExecutionHealthSummaryResponse(
+        timestamp=_now_iso(),
+        range_days=range_days,
+        sessions=ACPExecutionHealthSessionSummary(**summary["sessions"]),
+        failure_buckets=ACPExecutionHealthFailureBuckets(**summary["failure_buckets"]),
+        setup_health=ACPExecutionHealthSetupSummary(**summary["setup_health"]),
+        agents=summary["agents"],
+        compatibility=summary["compatibility"],
+        retention=_retention_summary(),
+        redaction=ACPExecutionHealthRedactionSummary(),
     )
 
 

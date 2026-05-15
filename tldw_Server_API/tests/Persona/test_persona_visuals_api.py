@@ -12,6 +12,9 @@ from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Persona.visual_library_service import PersonaVisualLibraryServiceError
+from tldw_Server_API.app.core.Persona.visual_starter_fixtures import (
+    DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -117,6 +120,80 @@ def _create_visual_pack(client: TestClient, persona_id: str, *, title: str = "Pa
     )
     assert response.status_code == 201, response.text
     return response.json()
+
+
+def test_list_persona_visual_renderer_capabilities(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(1, persona_db) as client:
+        response = client.get("/api/v1/persona/visual-renderers")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [renderer["renderer_type"] for renderer in payload["renderers"]] == [
+        "sprite_frames",
+        "live2d",
+    ]
+
+    sprite_frames = payload["renderers"][0]
+    expected_existing_fields = {
+        "renderer_type": "sprite_frames",
+        "display_name": "Sprite frames",
+        "manifest_versions": [1],
+        "can_validate": True,
+        "can_activate": True,
+        "buddy_runtime_supported": True,
+        "import_supported": True,
+        "export_supported": True,
+        "disabled_reason": None,
+    }
+    for key, value in expected_existing_fields.items():
+        assert sprite_frames[key] == value
+    assert sprite_frames["renderer_contract_versions"] == [1]
+    assert "sprite_sheet" in sprite_frames["supported_asset_roles"]
+    assert sprite_frames["setup_status"] == "supported"
+    assert sprite_frames["setup_blockers"] == []
+
+    live2d = payload["renderers"][1]
+    assert live2d["renderer_type"] == "live2d"
+    assert live2d["manifest_versions"] == [2]
+    assert live2d["renderer_contract_versions"] == [1]
+    assert live2d["required_role_categories"] == ["fallback_preview", "source_manifest"]
+    assert live2d["role_category_map"]["source_manifest"] == ["live2d_model_manifest"]
+    assert live2d["can_validate"] is False
+    assert live2d["can_activate"] is False
+    assert live2d["buddy_runtime_supported"] is False
+    assert live2d["import_supported"] is False
+    assert live2d["export_supported"] is False
+    assert live2d["requires_static_fallback"] is True
+    assert live2d["setup_status"] == "unsupported_renderer"
+    assert "runtime_adapter_not_implemented" in live2d["setup_blockers"]
+    assert live2d["disabled_reason"] == "runtime_adapter_not_implemented"
+
+
+def test_persona_visual_renderer_capabilities_respect_persona_feature_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    persona_db: CharactersRAGDB,
+) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
+
+    monkeypatch.setattr(persona_ep, "is_persona_enabled", lambda: False)
+    with _client_for_user(1, persona_db) as client:
+        response = client.get("/api/v1/persona/visual-renderers")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Persona disabled"}
+
+
+def test_get_persona_visual_starter_pack_detail(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(1, persona_db) as client:
+        response = client.get(
+            f"/api/v1/persona/visual-starter-packs/{DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID}"
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID
+    assert payload["manifest"]["renderer_type"] == "sprite_frames"
+    assert payload["assets"][0]["mime_type"] == "image/png"
 
 
 def _upload_png(client: TestClient, persona_id: str, pack_id: str) -> dict:
@@ -271,6 +348,79 @@ def test_duplicate_visual_pack_rejects_other_user_target(persona_db: CharactersR
     assert response.json()["detail"]["code"] == "target_persona_not_found"
 
 
+def test_list_persona_visual_starter_packs(persona_db: CharactersRAGDB) -> None:
+    with _client_for_user(1, persona_db) as client:
+        response = client.get("/api/v1/persona/visual-starter-packs")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert [item["id"] for item in payload["starter_packs"]] == [
+        DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID
+    ]
+    starter = payload["starter_packs"][0]
+    assert starter["title"] == "Research Buddy Starter"
+    assert starter["renderer_type"] == "sprite_frames"
+    assert starter["asset_count"] == 1
+    assert {"idle", "listening", "thinking", "speaking", "error"}.issubset(
+        set(starter["states_offered"])
+    )
+
+
+def test_copy_visual_starter_pack_creates_draft_without_activation(
+    persona_db: CharactersRAGDB,
+) -> None:
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Starter Target")
+        active_pack = _create_visual_pack(client, persona_id, title="Existing active visual")
+        active_asset = _upload_png(client, persona_id, active_pack["id"])
+        manifest_response = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{active_pack['id']}/manifest",
+            json={"manifest": _valid_manifest(active_asset["id"]), "expected_version": active_pack["version"]},
+        )
+        assert manifest_response.status_code == 200, manifest_response.text
+        active_pack = manifest_response.json()
+        activated = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{active_pack['id']}/activate"
+        )
+        assert activated.status_code == 200, activated.text
+
+        response = client.post(
+            f"/api/v1/persona/visual-starter-packs/{DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID}/copy",
+            json={"target_persona_id": persona_id},
+        )
+
+        assert response.status_code == 201, response.text
+        payload = response.json()
+        assert payload["title"] == "Research Buddy Starter"
+        assert payload["persona_id"] == persona_id
+        assert payload["status"] == "draft"
+        assert payload["provenance"] == "imported"
+        assert payload["parent_pack_id"] is None
+        assert payload["active_at"] is None
+        assert len(payload["assets"]) == 1
+        assert payload["assets"][0]["provenance"] == "imported"
+        assert "starter_idle" not in str(payload["manifest"])
+        assert persona_db.get_active_persona_visual_pack(
+            persona_id=persona_id,
+            user_id="1",
+        )["id"] == active_pack["id"]
+
+
+def test_copy_visual_starter_pack_rejects_unknown_starter(
+    persona_db: CharactersRAGDB,
+) -> None:
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Starter Target")
+
+        response = client.post(
+            "/api/v1/persona/visual-starter-packs/missing-starter/copy",
+            json={"target_persona_id": persona_id},
+        )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "starter_pack_not_found"
+
+
 def test_visual_library_save_list_update_and_delete(persona_db: CharactersRAGDB) -> None:
     with _client_for_user(1, persona_db) as client:
         persona_id = _create_persona(client, name="Library Source Persona")
@@ -383,6 +533,22 @@ def test_visual_library_use_creates_target_draft_without_activation(persona_db: 
             persona_id=target_persona_id,
             user_id="1",
         )["id"] == target_pack["id"]
+
+
+def test_copy_persona_visual_starter_pack_rejects_other_user_target(
+    persona_db: CharactersRAGDB,
+) -> None:
+    with _client_for_user(2, persona_db) as other_client:
+        other_persona_id = _create_persona(other_client, name="Other Starter Target")
+
+    with _client_for_user(1, persona_db) as client:
+        response = client.post(
+            f"/api/v1/persona/visual-starter-packs/{DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID}/copy",
+            json={"target_persona_id": other_persona_id},
+        )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "target_persona_not_found"
 
 
 def test_visual_library_stale_source_returns_409_but_delete_succeeds(
@@ -536,6 +702,37 @@ def test_activation_rejects_manifest_without_required_states(persona_db: Charact
 
         assert response.status_code == 400
         assert response.json()["detail"]["code"] == "invalid_manifest"
+
+
+def test_draft_manifest_update_accepts_future_renderer_but_activation_rejects_it(
+    persona_db: CharactersRAGDB,
+) -> None:
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Renderer Boundary Persona")
+        pack = _create_visual_pack(client, persona_id)
+
+        draft_response = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/manifest",
+            json={
+                "manifest": {
+                    "manifest_version": 1,
+                    "renderer_type": "live2d",
+                    "states": {},
+                    "animations": {},
+                },
+                "expected_version": pack["version"],
+            },
+        )
+        assert draft_response.status_code == 200, draft_response.text
+        assert draft_response.json()["manifest"]["renderer_type"] == "live2d"
+
+        activate_response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/activate"
+        )
+
+        assert activate_response.status_code == 400
+        assert activate_response.json()["detail"]["code"] == "invalid_manifest"
+        assert "unsupported renderer_type" in activate_response.json()["detail"]["message"]
 
 
 def test_other_user_cannot_access_pack(persona_db: CharactersRAGDB) -> None:
@@ -1259,6 +1456,88 @@ def test_start_import_commit_creates_jobs_backed_portability_row(
     assert row["persona_id"] == persona_id
 
 
+def test_start_import_commit_normalizes_completed_preview_status(
+    persona_db: CharactersRAGDB,
+    tmp_path: Path,
+) -> None:
+    """Accept completed previews even when stored status has surrounding whitespace."""
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Whitespace Status Import Persona")
+        archive_path = tmp_path / "commit-status-spaces.tldw-persona-vpack"
+        archive_path.write_bytes(b"portable visual archive")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="preview-job-spaced-status",
+            status=" completed ",
+            stage="completed",
+            archive_path=str(archive_path),
+            archive_sha256="a" * 64,
+            canonical_payload_fingerprint="b" * 64,
+            schema_version="tldw.persona_visual_pack.v1",
+            target_persona_id=persona_id,
+            proposed_plan={"target_mode": "create_new"},
+        )
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}/commit",
+            json={"trust_mode": "untrusted_import", "target_mode": "create_new"},
+        )
+
+    assert response.status_code == 202, response.text
+    assert manager.created
+
+
+def test_start_import_commit_rejects_commit_ineligible_preview(
+    persona_db: CharactersRAGDB,
+    tmp_path: Path,
+) -> None:
+    """Ensure stored renderer preview blockers prevent commit job enqueue."""
+
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Commit Ineligible Persona")
+        archive_path = tmp_path / "commit-ineligible.tldw-persona-vpack"
+        archive_path.write_bytes(b"portable visual archive")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="preview-job-ineligible",
+            status="completed",
+            stage="completed",
+            archive_path=str(archive_path),
+            archive_sha256="a" * 64,
+            canonical_payload_fingerprint="b" * 64,
+            schema_version="tldw.persona_visual_pack.v1",
+            target_persona_id=persona_id,
+            proposed_plan={
+                "renderer_import_preview": {"status": "unsupported_renderer"},
+                "commit_eligible": False,
+                "commit_blockers": ["runtime_adapter_not_implemented"],
+            },
+        )
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}/commit",
+            json={"trust_mode": "untrusted_import", "target_mode": "create_new"},
+        )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "import_preview_not_commit_eligible"
+    assert manager.created == []
+
+
 def test_start_import_commit_requires_explicit_target_mode_for_conflicts(
     persona_db: CharactersRAGDB,
     tmp_path: Path,
@@ -1455,6 +1734,138 @@ def test_start_import_commit_rejects_incomplete_preview(
         )
 
     assert response.status_code == 409
+    assert manager.created == []
+
+
+def test_start_import_commit_rejects_ineligible_completed_preview(
+    persona_db: CharactersRAGDB,
+    tmp_path: Path,
+) -> None:
+    """Reject completed previews whose stored plan is explicitly not commit eligible."""
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Ineligible Import Commit Persona")
+        archive_path = tmp_path / "commit-ineligible.tldw-persona-vpack"
+        archive_path.write_bytes(b"portable visual archive")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="preview-job-ineligible",
+            status="completed",
+            stage="completed",
+            archive_path=str(archive_path),
+            archive_sha256="a" * 64,
+            canonical_payload_fingerprint="b" * 64,
+            schema_version="tldw.persona_visual_pack.v1",
+            target_persona_id=persona_id,
+            proposed_plan={
+                "target_mode": "create_new",
+                "commit_eligible": False,
+                "commit_blockers": ["unsupported_renderer"],
+            },
+        )
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}/commit",
+            json={"trust_mode": "untrusted_import", "target_mode": "create_new"},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "import_preview_not_commit_eligible"
+    assert manager.created == []
+
+
+def test_start_import_commit_reports_blocked_preview_as_not_commit_eligible(
+    persona_db: CharactersRAGDB,
+    tmp_path: Path,
+) -> None:
+    """Return the commit-eligibility error for blocked import previews."""
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Blocked Import Commit Persona")
+        archive_path = tmp_path / "commit-blocked.tldw-persona-vpack"
+        archive_path.write_bytes(b"portable visual archive")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="preview-job-blocked",
+            status="blocked",
+            stage="completed",
+            archive_path=str(archive_path),
+            archive_sha256="a" * 64,
+            canonical_payload_fingerprint="b" * 64,
+            schema_version="tldw.persona_visual_pack.v1",
+            target_persona_id=persona_id,
+            proposed_plan={
+                "target_mode": "create_new",
+                "commit_eligible": False,
+                "commit_blockers": ["unsupported_renderer"],
+            },
+        )
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}/commit",
+            json={"trust_mode": "untrusted_import", "target_mode": "create_new"},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "import_preview_not_commit_eligible"
+    assert manager.created == []
+
+
+@pytest.mark.parametrize("stored_plan_json", ["{not-json", "[]"])
+def test_start_import_commit_rejects_invalid_stored_preview_plan(
+    persona_db: CharactersRAGDB,
+    tmp_path: Path,
+    stored_plan_json: str,
+) -> None:
+    """Reject commit requests when the persisted proposed plan is malformed."""
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Invalid Plan Import Commit Persona")
+        archive_path = tmp_path / "commit-invalid-plan.tldw-persona-vpack"
+        archive_path.write_bytes(b"portable visual archive")
+        repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+        preview = repo.create_import_preview(
+            owner_user_id="1",
+            job_id="preview-job-invalid-plan",
+            status="completed",
+            stage="completed",
+            archive_path=str(archive_path),
+            archive_sha256="a" * 64,
+            canonical_payload_fingerprint="b" * 64,
+            schema_version="tldw.persona_visual_pack.v1",
+            target_persona_id=persona_id,
+            proposed_plan={"target_mode": "create_new"},
+        )
+        repo.replace_import_preview_proposed_plan_json(
+            str(preview["id"]),
+            stored_plan_json,
+            owner_user_id="1",
+        )
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews/{preview['id']}/commit",
+            json={"trust_mode": "untrusted_import", "target_mode": "create_new"},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "import_preview_not_commit_eligible"
     assert manager.created == []
 
 
