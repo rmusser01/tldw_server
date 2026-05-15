@@ -1,10 +1,10 @@
 ---
 id: TASK-295
 title: Complete main /chat cockpit functionality in PR 1582
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-14 19:23'
+updated_date: '2026-05-15 01:07'
 labels:
   - webui
   - chat
@@ -33,11 +33,11 @@ Finish the remaining main WebUI /chat cockpit work on the existing draft PR #158
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All merge-critical real-server proof uses the running server with no mocked payloads and no page route interception
-- [ ] #2 PR #1582 remains draft and is not marked ready or merged until P0 P1 and P2 are all complete and explicitly approved by the human maintainer
-- [ ] #3 P0 workflows from issue #1646 are implemented verified and approved including character persona prompts model chat MCP and real-server state-changing proof
-- [ ] #4 P1 workflows from issue #1646 are implemented verified and approved including context session run controls keyboard focus and mobile workflows
-- [ ] #5 P2 polish from issue #1646 is completed verified and approved including IA copy degraded states duplication decisions visual QA screenshots and final PR closeout notes
+- [x] #1 All merge-critical real-server proof uses the running server with no mocked payloads and no page route interception
+- [x] #2 PR #1582 remains draft and is not marked ready or merged until P0 P1 and P2 are all complete and explicitly approved by the human maintainer
+- [x] #3 P0 workflows from issue #1646 are implemented verified and approved including character persona prompts model chat MCP and real-server state-changing proof
+- [x] #4 P1 workflows from issue #1646 are implemented verified and approved including context session run controls keyboard focus and mobile workflows
+- [x] #5 P2 polish from issue #1646 is completed verified and approved including IA copy degraded states duplication decisions visual QA screenshots and final PR closeout notes
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -160,14 +160,24 @@ Task 9 P2 polish follow-up completed. TldwChatService now logs recoverable strea
 Verification: focused Vitest from apps/tldw-frontend passed 11 files / 90 tests covering cockpit summaries controls runtime inspector context rail a11y shell status strip locale mirror MCP control scoped settings and TldwChat stream sanitization. Real-server Playwright passed 4 tests against http://127.0.0.1:8000 and http://localhost:8080 with no route interception including desktop cockpit/focus mobile cockpit/focus and real disposable character select/send/clear/delete. Real screenshot evidence remains saved at /private/tmp/chat-cockpit-p2-desktop-cockpit.png /private/tmp/chat-cockpit-p2-desktop-focus.png /private/tmp/chat-cockpit-p2-mobile-cockpit.png and /private/tmp/chat-cockpit-p2-mobile-focus.png from a real server run returning chat completion status 200. git diff --check passed. Bandit not applicable because this follow-up touched frontend TypeScript test/service code only. PR #1582 remains draft pending maintainer P2 approval.
 
 Task 9 plan/status synchronization: updated the implementation plan Task 9 checklist to match the already-committed P2 evidence. Refreshed live PR state: PR 1582 remains open and draft on codex/chat-degraded-health; GraphQL review threads are resolved; CI checks from the latest push are still pending. Fresh local verification after plan sync: focused Vitest passed 11 files and 90 tests from apps/tldw-frontend; real-server Playwright passed 4 tests against http://localhost:8080 and http://127.0.0.1:8000 with no route interception; git diff --check passed. Bandit not applicable because this sync touched Markdown/task tracking only.
+
+Corrected P2 visual proof after the earlier screenshot was invalid. Root cause was the proof backend running from the worktree without Config_Files/.env so OpenAI credentials were not loaded. Re-ran with an env-backed real backend via TLDW_ENV_FILE real /chat WebUI no mocked payloads no route interception and no Computer Use. Screenshot path /private/tmp/chat-cockpit-openai-working-20260514.png. Observed POST /api/v1/chat/completions status 200 with api_provider openai model gpt-4o-mini and rendered assistant text cockpit proof ok. Temporary proof processes were shut down afterward.
+
+Live PR state refresh after corrected proof: gh pr view 1582 reports state MERGED and isDraft false for codex/chat-degraded-health into dev. gh pr checks shows required frontend backend e2e security build lint gates passing. Broad Full Suite matrix jobs remain failed or cancelled due the previously noted one-hour broad-suite behavior while required aggregate gates are green.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed main /chat cockpit P-series work in PR #1582. P0 P1 and P2 cockpit rail workflows were implemented and verified with focused Vitest suites plus real-server Playwright proof using live backend/frontend and no mocked payloads or route interception. Corrected final visual proof uses the configured env-backed backend and shows a real OpenAI-backed /chat conversation rendering successfully. PR #1582 is now merged into dev. Remaining broad Full Suite matrix failures are the known non-merge-blocking broad-suite timeout/cancellation pattern while required gates are green.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
