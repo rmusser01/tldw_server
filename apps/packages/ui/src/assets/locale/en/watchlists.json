@@ -1210,15 +1210,16 @@
     }
   },
   "items": {
-    "description": "Browse scraped feed items and open the selected source content.",
+    "description": "Review collected updates, alert matches, and briefing candidates from this Watchlist.",
     "sourcesError": "Failed to load sources",
-    "fetchError": "Failed to load feed items",
+    "fetchError": "Failed to load updates",
     "smartFeeds": "Smart Feeds",
     "feeds": "Feeds",
     "unreadToday": "Unread today",
     "today": "Today",
     "unread": "All Unread",
     "reviewedOnly": "Reviewed",
+    "alertMatches": "Alert matches",
     "queuedForBriefing": "Queued for briefing",
     "unreadCount": "{{count}} unread",
     "sourceSearchPlaceholder": "Search feeds...",
@@ -1228,7 +1229,7 @@
     "allFeedsHint": "Browse items from every source",
     "noFeeds": "No feeds found",
     "sourceWindowHint": "Showing {{visible}} of {{total}} feeds. Scroll to load more.",
-    "searchPlaceholder": "Search feed items...",
+    "searchPlaceholder": "Search updates...",
     "filters": {
       "all": "All",
       "ingested": "Ingested",
@@ -1243,7 +1244,7 @@
         "reviewedFirst": "Reviewed first"
       }
     },
-    "empty": "No feed items found",
+    "empty": "No updates found",
     "unknownSource": "Unknown source",
     "untitled": "Untitled item",
     "noSummary": "No summary available",
@@ -1293,25 +1294,25 @@
       "selectedCount": "{{count}} selected",
       "markSelected": "Mark selected as reviewed",
       "markPage": "Mark page as reviewed",
-      "markAllFiltered": "Mark all filtered as reviewed",
+      "markAllFiltered": "Mark all filtered updates",
       "scopeSummary": "Selected: {{selected}} unread • This page: {{page}} unread • All filtered: {{allFiltered}} unread.",
       "scope": {
         "selected": "selected item{{plural}}",
-        "page": "items on this page",
-        "allFiltered": "all filtered items"
+        "page": "updates on this page",
+        "allFiltered": "all filtered updates"
       },
       "noSelected": "Select one or more items to review.",
-      "noPage": "All items on this page are already reviewed.",
-      "noFiltered": "No matching unread items to review.",
-      "confirmSelectedTitle": "Mark selected items as reviewed?",
-      "confirmPageTitle": "Mark this page as reviewed?",
-      "confirmAllFilteredTitle": "Mark all filtered items as reviewed?",
-      "confirmDescriptionScoped": "Scope: {{scope}}. This will mark {{count}} item{{plural}} as reviewed.",
-      "confirmDescription": "This will mark {{count}} item{{plural}} as reviewed.",
+      "noPage": "All updates on this page are already reviewed.",
+      "noFiltered": "No matching unread updates to review.",
+      "confirmSelectedTitle": "Mark selected updates as reviewed?",
+      "confirmPageTitle": "Mark this page of updates as reviewed?",
+      "confirmAllFilteredTitle": "Mark all filtered updates as reviewed?",
+      "confirmDescriptionScoped": "Scope: {{scope}}. This will mark {{count}} update{{plural}} as reviewed.",
+      "confirmDescription": "This will mark {{count}} update{{plural}} as reviewed.",
       "completedScoped": "Marked {{count}} {{scope}} as reviewed.",
       "partialScoped": "Marked {{success}} {{scope}} as reviewed; {{failed}} failed.",
       "failedScoped": "Failed to mark {{scope}} as reviewed.",
-      "collectingAllFiltered": "Collecting unread items that match current filters...",
+      "collectingAllFiltered": "Preparing unread updates that match current filters...",
       "progressLabel": "Batch review progress",
       "progressRunning": "Processing {{processed}} of {{total}} items ({{succeeded}} succeeded, {{failed}} failed).",
       "progressComplete": "Batch review complete: {{succeeded}} succeeded, {{failed}} failed.",
@@ -1321,7 +1322,7 @@
       "dismissProgress": "Dismiss",
       "completed": "Marked {{count}} item{{plural}} as reviewed.",
       "partial": "Marked {{success}} item{{successPlural}} as reviewed; {{failed}} failed.",
-      "failed": "Failed to mark items as reviewed.",
+      "failed": "Failed to mark updates as reviewed.",
       "progress": {
         "label": "Batch progress",
         "count": "{{processed}} / {{total}}",
@@ -1345,6 +1346,12 @@
       "created": "Saved view created.",
       "updated": "Saved view updated.",
       "deleted": "Saved view deleted.",
+      "loadError": "Failed to load saved views.",
+      "createError": "Failed to create saved view.",
+      "updateError": "Failed to update saved view.",
+      "importLocal": "Import local views",
+      "imported": "Imported {{count}} saved view{{plural}}.",
+      "importError": "Failed to import saved views.",
       "deleteTitle": "Delete saved view?",
       "deleteDescription": "Delete saved view \"{{name}}\"?",
       "defaults": {
@@ -1357,20 +1364,24 @@
       "button": "Shortcuts",
       "title": "Keyboard shortcuts",
       "helpHint": "Keyboard shortcuts (?)",
-      "hintStrip": "Shortcuts: j/k navigate, space toggles reviewed, o opens original, ? shows help.",
+      "hintStrip": "Shortcuts: j/k navigate, space toggles reviewed, o opens original update, ? shows help.",
       "openPanel": "View all",
       "dismissHint": "Dismiss",
       "restoreHint": "Show shortcut hints",
-      "nextPrevious": "Move to next or previous article in the list.",
-      "toggleReviewed": "Toggle reviewed state for the selected article.",
-      "openOriginal": "Open the selected article in a new tab.",
-      "refresh": "Refresh feeds, article list, and smart counts.",
+      "nextPrevious": "Move to next or previous update in the list.",
+      "toggleReviewed": "Toggle reviewed state for the selected update.",
+      "openOriginal": "Open the selected update in a new tab.",
+      "refresh": "Refresh feeds, updates, and smart counts.",
       "newFlow": "Start a new feed flow by opening Add Source.",
       "help": "Open this shortcuts help panel."
     },
     "live": {
       "selectionChanged": "Selected {{title}} from {{source}} ({{state}}).",
-      "selectionCleared": "No article selected."
+      "selectionCleared": "No update selected."
+    },
+    "alertSummary": {
+      "total": "{{count}} match{{plural}}",
+      "openAlerts": "Open Alerts"
     }
   },
   "outputs": {

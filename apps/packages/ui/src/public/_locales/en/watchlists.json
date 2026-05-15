@@ -990,7 +990,7 @@
     "message": "Error"
   },
   "items_description": {
-    "message": "Browse scraped feed items and open the selected source content."
+    "message": "Review collected updates, alert matches, and briefing candidates from this Watchlist."
   },
   "items_smartFeeds": {
     "message": "Smart Feeds"
@@ -1014,7 +1014,7 @@
     "message": "Failed to load sources"
   },
   "items_fetchError": {
-    "message": "Failed to load feed items"
+    "message": "Failed to load updates"
   },
   "items_sourceSearchPlaceholder": {
     "message": "Search feeds..."
@@ -1029,7 +1029,7 @@
     "message": "No feeds found"
   },
   "items_searchPlaceholder": {
-    "message": "Search feed items..."
+    "message": "Search updates..."
   },
   "items_filters_all": {
     "message": "All"
@@ -1041,7 +1041,7 @@
     "message": "Filtered"
   },
   "items_empty": {
-    "message": "No feed items found"
+    "message": "No updates found"
   },
   "items_unknownSource": {
     "message": "Unknown source"
@@ -1104,28 +1104,28 @@
     "message": "Mark page as reviewed"
   },
   "items_batch_markAllFiltered": {
-    "message": "Mark all filtered as reviewed"
+    "message": "Mark all filtered updates"
   },
   "items_batch_noSelected": {
     "message": "Select one or more items to review."
   },
   "items_batch_noPage": {
-    "message": "All items on this page are already reviewed."
+    "message": "All updates on this page are already reviewed."
   },
   "items_batch_noFiltered": {
-    "message": "No matching unread items to review."
+    "message": "No matching unread updates to review."
   },
   "items_batch_confirmSelectedTitle": {
-    "message": "Mark selected items as reviewed?"
+    "message": "Mark selected updates as reviewed?"
   },
   "items_batch_confirmPageTitle": {
-    "message": "Mark this page as reviewed?"
+    "message": "Mark this page of updates as reviewed?"
   },
   "items_batch_confirmAllFilteredTitle": {
-    "message": "Mark all filtered items as reviewed?"
+    "message": "Mark all filtered updates as reviewed?"
   },
   "items_batch_confirmDescription": {
-    "message": "This will mark {{count}} item{{plural}} as reviewed."
+    "message": "This will mark {{count}} update{{plural}} as reviewed."
   },
   "items_batch_completed": {
     "message": "Marked {{count}} item{{plural}} as reviewed."
@@ -1134,7 +1134,7 @@
     "message": "Marked {{success}} item{{successPlural}} as reviewed; {{failed}} failed."
   },
   "items_batch_failed": {
-    "message": "Failed to mark items as reviewed."
+    "message": "Failed to mark updates as reviewed."
   },
   "items_savedViews_label": {
     "message": "Saved views"
@@ -1191,16 +1191,16 @@
     "message": "Keyboard shortcuts (?)"
   },
   "items_shortcuts_nextPrevious": {
-    "message": "Move to next or previous article in the list."
+    "message": "Move to next or previous update in the list."
   },
   "items_shortcuts_toggleReviewed": {
-    "message": "Toggle reviewed state for the selected article."
+    "message": "Toggle reviewed state for the selected update."
   },
   "items_shortcuts_openOriginal": {
-    "message": "Open the selected article in a new tab."
+    "message": "Open the selected update in a new tab."
   },
   "items_shortcuts_refresh": {
-    "message": "Refresh feeds, article list, and smart counts."
+    "message": "Refresh feeds, updates, and smart counts."
   },
   "items_shortcuts_newFlow": {
     "message": "Start a new feed flow by opening Add Source."
@@ -3042,13 +3042,13 @@
     "message": "selected item{{plural}}"
   },
   "items_batch_scope_page": {
-    "message": "items on this page"
+    "message": "updates on this page"
   },
   "items_batch_scope_allFiltered": {
-    "message": "all filtered items"
+    "message": "all filtered updates"
   },
   "items_batch_confirmDescriptionScoped": {
-    "message": "Scope: {{scope}}. This will mark {{count}} item{{plural}} as reviewed."
+    "message": "Scope: {{scope}}. This will mark {{count}} update{{plural}} as reviewed."
   },
   "items_batch_completedScoped": {
     "message": "Marked {{count}} {{scope}} as reviewed."
@@ -3087,7 +3087,7 @@
     "message": "Needs review"
   },
   "items_shortcuts_hintStrip": {
-    "message": "Shortcuts: j/k navigate, space toggles reviewed, o opens original, ? shows help."
+    "message": "Shortcuts: j/k navigate, space toggles reviewed, o opens original update, ? shows help."
   },
   "items_shortcuts_openPanel": {
     "message": "View all"
@@ -3102,7 +3102,7 @@
     "message": "Selected {{title}} from {{source}} ({{state}})."
   },
   "items_live_selectionCleared": {
-    "message": "No article selected."
+    "message": "No update selected."
   },
   "outputs_filterByRun": {
     "message": "Filter by run ID"
@@ -3235,5 +3235,35 @@
   },
   "settings_clusters_toggleAria": {
     "message": "Toggle subscription for {{cluster}}"
+  },
+  "items_alertMatches": {
+    "message": "Alert matches"
+  },
+  "items_batch_collectingAllFiltered": {
+    "message": "Preparing unread updates that match current filters..."
+  },
+  "items_savedViews_loadError": {
+    "message": "Failed to load saved views."
+  },
+  "items_savedViews_createError": {
+    "message": "Failed to create saved view."
+  },
+  "items_savedViews_updateError": {
+    "message": "Failed to update saved view."
+  },
+  "items_savedViews_importLocal": {
+    "message": "Import local views"
+  },
+  "items_savedViews_imported": {
+    "message": "Imported {{count}} saved view{{plural}}."
+  },
+  "items_savedViews_importError": {
+    "message": "Failed to import saved views."
+  },
+  "items_alertSummary_total": {
+    "message": "{{count}} match{{plural}}"
+  },
+  "items_alertSummary_openAlerts": {
+    "message": "Open Alerts"
   }
 }

@@ -259,8 +259,12 @@ export const buildServerItemViewCreatePayload = (
   if (preset.sourceId != null) {
     filters.source_id = preset.sourceId
   }
-  if (preset.smartFilter && preset.smartFilter !== "all") {
-    filters.smart_filter = preset.smartFilter as WatchlistItemSavedViewFilters["smart_filter"]
+  if (preset.smartFilter === "alertMatches") {
+    filters.has_alert = true
+  } else if (preset.smartFilter && preset.smartFilter !== "all") {
+    filters.smart_filter = (
+      preset.smartFilter === "todayUnread" ? "today_unread" : preset.smartFilter
+    ) as WatchlistItemSavedViewFilters["smart_filter"]
   }
   if (preset.statusFilter && preset.statusFilter !== "all") {
     filters.status = preset.statusFilter
