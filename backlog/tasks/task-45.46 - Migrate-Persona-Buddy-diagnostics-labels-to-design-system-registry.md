@@ -4,7 +4,7 @@ title: Migrate Persona Buddy diagnostics labels to design-system registry
 status: Done
 assignee: []
 created_date: '2026-05-15 06:41'
-updated_date: '2026-05-15 07:01'
+updated_date: '2026-05-15 19:14'
 labels:
   - design-system
   - webui
@@ -38,7 +38,7 @@ Continue the tldw_server WebUI design-system migration by routing the remaining 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Implementation completed in /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/design-system-next-slice-6 on branch codex/design-system-next-slice-6.
+Implementation completed on branch codex/design-system-next-slice-6 in the dedicated design-system worktree.
 
 Persona Buddy diagnostics now consume READY_STATE_LABEL and LOADING_STATE_LABEL from the design-system registry exports, preserving the existing diagnostic ordering and state logic.
 
