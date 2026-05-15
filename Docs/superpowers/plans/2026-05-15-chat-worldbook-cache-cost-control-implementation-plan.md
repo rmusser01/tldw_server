@@ -327,24 +327,26 @@ feat(chat): add prompt cost guardrails
 - Modify `tldw_Server_API/app/core/Chat/chat_service.py` only to pass explicit intent metadata, not provider-specific payload details.
 
 **Implementation Steps:**
-- [ ] Verify current official provider documentation on the implementation date before changing adapter payloads. Record the checked URLs and date in the Backlog task or PR notes.
-- [ ] Write failing tests for provider-neutral `BillingPromptCacheIntent`.
-- [ ] Write failing adapter tests for outbound request shapes:
+- [x] Verify current official provider documentation on the implementation date before changing adapter payloads. Record the checked URLs and date in the Backlog task or PR notes.
+- [x] Write failing tests for provider-neutral `BillingPromptCacheIntent`.
+- [x] Write failing adapter tests for outbound request shapes:
   - OpenAI cache-capable prompt sections when supported;
   - Anthropic cache-control blocks at approved message/content boundaries;
   - Gemini cached-content references only when explicitly provided;
   - OpenRouter provider routing/metadata only through allowed keys.
-- [ ] Implement provider-neutral cache intent types:
+- [x] Implement provider-neutral cache intent types:
   - `enabled`
   - `scope`
   - `ttl_seconds`
   - `static_segment_fingerprint`
   - `provider_hint`
   - `fail_open`
-- [ ] Add provider support declarations so unsupported providers ignore cache intent with a diagnostic warning.
-- [ ] Ensure `extra_body` remains a caller escape hatch but is not treated as confirmed cache activation unless the adapter reports it.
-- [ ] Add accounting metadata for "cache intent requested" versus "provider usage proved cache hit/read/write".
-- [ ] Run focused LLM adapter tests.
+- [x] Add provider support declarations so unsupported providers ignore cache intent with a diagnostic warning.
+- [x] Ensure `extra_body` remains a caller escape hatch but is not treated as confirmed cache activation unless the adapter reports it.
+- [x] Add accounting metadata for "cache intent requested" versus "provider usage proved cache hit/read/write".
+- [x] Run focused LLM adapter tests.
+
+**Status:** Complete. The full `tests/LLM_Adapters/unit` directory was attempted on 2026-05-15 but hit an unrelated baseline `CustomOpenAIAdapter2` explicit-base-URL failure and later the repo-level 300s app-fixture timeout. Focused changed-provider and registry coverage passed.
 
 **Tests:**
 ```bash

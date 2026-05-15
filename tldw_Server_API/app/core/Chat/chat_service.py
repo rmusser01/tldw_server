@@ -2042,6 +2042,9 @@ def build_call_params_from_request(
         grammar_record=grammar_record,
         runtime_caps=resolve_llamacpp_runtime_caps(app_config=app_config),
     )["extra_body"]
+    billing_prompt_cache_intent = getattr(request_data, "billing_prompt_cache_intent", None)
+    if billing_prompt_cache_intent is not None:
+        call_params["billing_prompt_cache_intent"] = billing_prompt_cache_intent
 
     call_params.update(
         {

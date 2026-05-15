@@ -84,6 +84,11 @@ Key fields:
     - `assistant_prefill` is context-only and is not saved as a separate message turn.
 
 Provider-specific extensions:
+- Paid-provider prompt cache intent:
+  - `billing_prompt_cache_intent` is ignored unless `{ "enabled": true }` is provided.
+  - Supported first-class translations are limited to documented OpenAI, Anthropic, Gemini, and OpenRouter prompt-cache controls.
+  - `extra_body` remains an escape hatch for provider-specific fields, but cache usage is considered proven only by provider usage metadata such as cached/read/write token fields.
+  - Local providers such as vLLM and llama.cpp should treat this as non-billing diagnostic context; runtime prefix-cache diagnostics are tracked separately.
 - Bedrock guardrails:
   - `extra_headers`: include Bedrock guardrail headers like `X-Amzn-Bedrock-GuardrailIdentifier`, `X-Amzn-Bedrock-GuardrailVersion`, optional `X-Amzn-Bedrock-Trace`.
   - `extra_body`: include `amazon-bedrock-guardrailConfig` object when needed.

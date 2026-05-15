@@ -5009,6 +5009,7 @@ async def character_chat_completion(
                     max_tokens=body.max_tokens,
                     tools=body.tools,
                     tool_choice=body.tool_choice,
+                    billing_prompt_cache_intent=body.billing_prompt_cache_intent,
                     streaming=bool(body.stream),
                     user_identifier=str(current_user.id),
                     app_config=byok_resolution.app_config,

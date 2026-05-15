@@ -525,6 +525,13 @@ class CharacterChatCompletionV2Request(BaseModel):
     max_tokens: Optional[int] = Field(None, description="Max tokens in the completion")
     tools: Optional[list[dict[str, Any]]] = Field(None, description="Tool definitions")
     tool_choice: Optional[dict[str, Any]] = Field(None, description="Tool choice specification")
+    billing_prompt_cache_intent: Optional[dict[str, Any]] = Field(
+        None,
+        description=(
+            "Explicit billing prompt-cache intent for paid providers. Disabled unless enabled=true; "
+            "cache usage is still proven only by provider usage metadata."
+        ),
+    )
     stream: Optional[bool] = Field(False, description="If true, stream the assistant response (SSE)")
 
     @model_validator(mode="after")
