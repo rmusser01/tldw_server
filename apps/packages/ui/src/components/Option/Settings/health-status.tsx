@@ -109,9 +109,9 @@ const makeChecks = (t: TFunction): Check[] => {
   ]
 }
 
-const READY_STATE_LABEL = getDesignSystemState("ready").label
-const DEGRADED_STATE_LABEL = getDesignSystemState("degraded").label
-const LOADING_STATE_LABEL = getDesignSystemState("loading").label
+const READY_STATE_LABEL = getDesignSystemState("ready")?.label
+const DEGRADED_STATE_LABEL = getDesignSystemState("degraded")?.label
+const LOADING_STATE_LABEL = getDesignSystemState("loading")?.label
 
 type Result = { status: 'unknown'|'healthy'|'unhealthy', detail?: any, statusCode?: number, durationMs?: number }
 
