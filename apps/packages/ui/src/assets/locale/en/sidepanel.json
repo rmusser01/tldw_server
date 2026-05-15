@@ -585,6 +585,9 @@
     "unsavedStateDiscardPromptSessionSwitch": "You have unsaved state-doc changes. Switch session and discard local drafts?",
     "unsavedStateDiscardPromptRestoreState": "You have unsaved state-doc changes. Restore this state version and discard local drafts?",
     "unsavedStateDiscardPromptRouteTransition": "You have unsaved state-doc changes. Leave this page and discard local drafts?",
-    "unsavedStateBeforeUnloadPrompt": "You have unsaved state-doc changes. Leave this page without saving?"
+    "unsavedStateBeforeUnloadPrompt": "You have unsaved state-doc changes. Leave this page without saving?",
+    "setupLiveDetourNotice": "Finish this live test, then return to setup.",
+    "setupVisualDetourNotice": "Review visual setup, then return to assistant setup.",
+    "returnToSetup": "Return to setup"
   }
 }

@@ -4,7 +4,7 @@ title: Implement first-run Persona Visual Buddy setup choices
 status: Done
 assignee: []
 created_date: '2026-05-15 03:44'
-updated_date: '2026-05-15 19:29'
+updated_date: '2026-05-15 19:40'
 labels:
   - persona
   - buddy
@@ -69,6 +69,10 @@ PR #1725 review-fix pass started. Verified live review surface: Qodo reported lo
 PR #1725 review-fix pass completed. Fixed verified Qodo bugs by clearing pack loading/error state on inactive/persona invalidation and changing the refresh handler to call loadPacks with the expected options object. Addressed Gemini comments by memoizing visible/selected pack derivations, adding request IDs to draft create, asset upload, and manifest save mutation handlers with persona/pack invalidation, moving VisualBuddySetupChoiceCard copy through sidepanel i18n defaults plus English locale keys, and extracting the import preview/commit panel into a single shared JSX block for first-run and selected-pack flows. Also aliased the visual-library copy service import to avoid hook-rule false positives in direct package lint.
 
 Review-fix verification: focused Vitest suite passed with 5 files and 154 tests; bun run verify:design-system-state passed with existing baseline exceptions only; git diff --check passed; direct ESLint on touched package files completed with zero errors and existing warnings only. Bandit remains not applicable because the review-fix touched frontend TypeScript/TSX, English locale JSON, and Backlog Markdown only.
+
+Second PR #1725 review pass started after push. CodeRabbit added two still-valid sidepanel-persona detour findings: localize the visual-detour notice/button copy and derive one effective active tab so detour selection and rendered content cannot diverge. The repeated loadPacks string finding is already fixed in commit 7eb498dc2 and will be treated as stale after verification.
+
+Second PR #1725 review pass completed. Fixed the still-valid sidepanel detour comments by routing visual/live detour notice and return-label copy through sidepanel locale keys and by deriving effectiveActiveTab so setup visual detour selection and lazy-rendered tab content stay aligned. Verified the repeated loadPacks(selectedPack?.id) thread is stale: current VisualPackEditor refresh uses loadPacks({ preferredPackId: selectedPack?.id }).
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -77,6 +81,8 @@ Review-fix verification: focused Vitest suite passed with 5 files and 154 tests;
 Implemented first-run Persona Visual Buddy setup choices for issue #1695. The shared setup card supports full Visuals-tab actions and compact wizard routing. VisualPackEditor shows first-run setup choices only when no active visual exists, preserves advanced library/reuse affordances, copies bundled defaults into inactive drafts, focuses existing import controls, and routes blank setup to existing draft controls without auto-activation. Assistant setup now has an optional visual detour so users blocked by setup gating can open only the Visuals tab and return without changing setup completion state. Verification after rebasing onto latest dev: focused UI/service Vitest suite passed with 153 tests, design-system state verification passed with existing baseline exceptions only, git diff --check passed, and Bandit is not applicable for the frontend-only touched scope.
 
 Review fixes for PR #1725 addressed the loadPacks invalidation/loading bug, corrected the refresh call contract, localized the setup card copy, memoized pack derivations, added request-id guards to the older mutation handlers, and shared the import preview panel between first-run and selected-pack paths. Validation passed with the focused 154-test Vitest suite, design-system state guard, git diff check, and touched-file ESLint with warnings only.
+
+Second PR review pass: localized sidepanel setup detour copy, reused the return-to-setup locale key for live and visual detours, and made PersonaGardenTabs plus lazy tab rendering share effectiveActiveTab during setup visual detours. Validation: focused Vitest suite passed with 5 files and 154 tests; git diff --check passed; touched-file ESLint had zero errors and existing warnings only; design-system state guard passed with existing baseline exceptions only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

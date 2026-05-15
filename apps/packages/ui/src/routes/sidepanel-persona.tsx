@@ -901,6 +901,9 @@ const SidepanelPersona = ({
     ),
     [renderSetupHandoffCard]
   )
+  const effectiveActiveTab: PersonaGardenTabKey = setupOrch.setupVisualDetour
+    ? "visuals"
+    : activeTab
 
   const renderLazyPersonaTab = React.useCallback(
     (
@@ -910,7 +913,7 @@ const SidepanelPersona = ({
         includeSetupHandoff?: boolean
       }
     ) => {
-      if (activeTab !== tab) {
+      if (effectiveActiveTab !== tab) {
         return null
       }
 
@@ -926,7 +929,7 @@ const SidepanelPersona = ({
 
       return withSetupHandoff(tab, tabContent)
     },
-    [activeTab, withSetupHandoff]
+    [effectiveActiveTab, withSetupHandoff]
   )
 
   // ── Persona unsupported check ──
@@ -1419,13 +1422,18 @@ const SidepanelPersona = ({
     <>
       {setupOrch.setupLiveDetour ? (
         <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-sky-100">
-          <div>Finish this live test, then return to setup.</div>
+          <div>
+            {t(
+              "sidepanel:persona.setupLiveDetourNotice",
+              "Finish this live test, then return to setup."
+            )}
+          </div>
           <button
             type="button"
             className="mt-2 rounded-md border border-sky-500/40 px-3 py-2 text-sm font-medium text-sky-100"
             onClick={setupOrch.handleReturnToSetupFromLiveDetour}
           >
-            Return to setup
+            {t("sidepanel:persona.returnToSetup", "Return to setup")}
           </button>
         </div>
       ) : null}
@@ -1439,13 +1447,18 @@ const SidepanelPersona = ({
 
   const setupVisualDetourReturnPanel = setupOrch.setupVisualDetour ? (
     <div className="mb-3 rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-sky-100">
-      <div>Review visual setup, then return to assistant setup.</div>
+      <div>
+        {t(
+          "sidepanel:persona.setupVisualDetourNotice",
+          "Review visual setup, then return to assistant setup."
+        )}
+      </div>
       <button
         type="button"
         className="mt-2 rounded-md border border-sky-500/40 px-3 py-2 text-sm font-medium text-sky-100"
         onClick={setupOrch.handleReturnToSetupFromVisualDetour}
       >
-        Return to setup
+        {t("sidepanel:persona.returnToSetup", "Return to setup")}
       </button>
     </div>
   ) : null
@@ -2308,7 +2321,7 @@ const SidepanelPersona = ({
             <>
               {setupVisualDetourReturnPanel}
               <PersonaGardenTabs
-                activeKey={setupOrch.setupVisualDetour ? "visuals" : activeTab}
+                activeKey={effectiveActiveTab}
                 onChange={handlePersonaTabChange}
                 items={visibleTabItems}
               />
