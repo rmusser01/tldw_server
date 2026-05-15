@@ -1206,6 +1206,71 @@ def test_launchd_drill_preserves_primary_failure_when_bootout_fails(
     CASE.assertFalse((socket_path.parent / "helper.pid").exists())
 
 
+def test_launchd_drill_cli_dry_run_skip_smoke_uses_isolated_label(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    helperctl = load_helperctl()
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    code = helperctl.main(["launchd-drill", "--dry-run", "--skip-smoke"])
+
+    output = capsys.readouterr().out
+    CASE.assertEqual(code, 0)
+    CASE.assertIn("org.tldw.macos-vz-helper.drill.", output)
+    CASE.assertIn("launchd_preflight", output)
+
+
+def test_launchd_drill_cli_json_outputs_deterministic_steps(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    helperctl = load_helperctl()
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    def fake_run_launchd_drill(**kwargs: Any) -> list[tuple[str, helperctl.CheckResult]]:
+        return [
+            ("launchd_preflight", helperctl.CheckResult(ok=True, reason="launchd_service_absent")),
+            ("launchd_bootstrap", helperctl.CheckResult(ok=True)),
+            ("launchd_bootout", helperctl.CheckResult(ok=True)),
+        ]
+
+    monkeypatch.setattr(helperctl, "run_launchd_drill", fake_run_launchd_drill)
+
+    code = helperctl.main(["launchd-drill", "--dry-run", "--skip-smoke", "--json"])
+
+    output = json.loads(capsys.readouterr().out)
+    CASE.assertEqual(code, 0)
+    CASE.assertEqual(
+        [step["name"] for step in output],
+        ["launchd_preflight", "launchd_bootstrap", "launchd_bootout"],
+    )
+    CASE.assertEqual(output[0]["reason"], "launchd_service_absent")
+
+
+def test_launchd_drill_cli_bundle_with_skip_smoke_passes_no_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    bundle = tmp_path / "bundle"
+    captured: dict[str, Any] = {}
+
+    def fake_run_launchd_drill(**kwargs: Any) -> list[tuple[str, helperctl.CheckResult]]:
+        captured.update(kwargs)
+        return [("launchd_preflight", helperctl.CheckResult(ok=True))]
+
+    monkeypatch.setattr(helperctl, "run_launchd_drill", fake_run_launchd_drill)
+
+    code = helperctl.main(["launchd-drill", "--bundle", str(bundle), "--skip-smoke"])
+
+    CASE.assertEqual(code, 0)
+    CASE.assertIsNone(captured["bundle_path"])
+
+
 def test_launchd_bootstrap_requires_existing_plist_without_write(tmp_path: Path) -> None:
     helperctl = load_helperctl()
     commands: list[list[str]] = []

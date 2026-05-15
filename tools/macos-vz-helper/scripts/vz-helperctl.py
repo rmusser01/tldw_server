@@ -1849,6 +1849,34 @@ def _launchd_command(args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
+def _launchd_drill_command(args: argparse.Namespace) -> int:
+    paths = default_paths()
+    label = args.label or default_launchd_drill_label()
+    plist_path = (
+        Path(args.plist_output)
+        if args.plist_output
+        else default_launchd_drill_plist_path(paths, label)
+    )
+    bundle_path = None
+    if not args.skip_smoke and args.bundle:
+        bundle_path = Path(args.bundle)
+    results = run_launchd_drill(
+        helper_path=Path(args.helper_path) if args.helper_path else DEFAULT_HELPER,
+        socket_path=Path(args.socket_path) if args.socket_path else paths.socket_path,
+        log_dir=Path(args.log_dir) if args.log_dir else paths.log_dir,
+        plist_path=plist_path,
+        label=label,
+        uid=args.uid,
+        write_plist=args.write_plist,
+        create_dirs=args.create_dirs,
+        dry_run=args.dry_run,
+        bundle_path=bundle_path,
+        python_path=Path(args.python) if args.python else None,
+    )
+    _print_results(results, as_json=args.json)
+    return 0 if all(result.ok for _, result in results) else 1
+
+
 def _start_command(args: argparse.Namespace) -> int:
     paths = default_paths()
     result = start_helper(
@@ -1966,6 +1994,25 @@ def build_parser() -> argparse.ArgumentParser:
     launchd.add_argument("--dry-run", action="store_true")
     launchd.add_argument("--json", action="store_true")
     launchd.set_defaults(func=_launchd_command)
+
+    launchd_drill = subparsers.add_parser(
+        "launchd-drill",
+        help="validate launchd-managed helper lifecycle",
+    )
+    launchd_drill.add_argument("--bundle")
+    launchd_drill.add_argument("--helper", "--helper-path", dest="helper_path")
+    launchd_drill.add_argument("--socket", "--socket-path", dest="socket_path")
+    launchd_drill.add_argument("--log-dir")
+    launchd_drill.add_argument("--plist-output")
+    launchd_drill.add_argument("--label")
+    launchd_drill.add_argument("--uid", type=int)
+    launchd_drill.add_argument("--python")
+    launchd_drill.add_argument("--write-plist", action="store_true")
+    launchd_drill.add_argument("--create-dirs", action="store_true")
+    launchd_drill.add_argument("--skip-smoke", action="store_true")
+    launchd_drill.add_argument("--dry-run", action="store_true")
+    launchd_drill.add_argument("--json", action="store_true")
+    launchd_drill.set_defaults(func=_launchd_drill_command)
 
     start = subparsers.add_parser("start", help="start the helper")
     start.add_argument("--helper", "--helper-path", dest="helper_path")
