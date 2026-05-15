@@ -20,6 +20,7 @@ import type {
   PersonaBuddyRenderContext,
   PersonaBuddySummary
 } from "@/types/persona-buddy"
+import { PERSONA_VISUAL_PACK_ACTIVATED_EVENT } from "@/types/persona-visuals"
 import type { PersonaVisualPack } from "@/types/persona-visuals"
 
 import { useBuddyShellRenderContext } from "./BuddyShellRenderContext"
@@ -295,6 +296,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     React.useState<PersonaVisualPackLoadStatus>("idle")
   const [visualPackLoadError, setVisualPackLoadError] =
     React.useState<unknown>(null)
+  const [visualPackRefreshNonce, setVisualPackRefreshNonce] = React.useState(0)
   const [visualRenderError, setVisualRenderError] =
     React.useState<PersonaVisualRenderErrorState | null>(null)
   const runtimeOverride = usePersonaVisualRuntimeStore((state) => state.override)
@@ -317,6 +319,25 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     const timer = window.setInterval(() => clearExpiredVisualOverride(), 1000)
     return () => window.clearInterval(timer)
   }, [clearExpiredVisualOverride])
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return undefined
+    const handlePackActivated = (event: Event) => {
+      const detail = (event as CustomEvent<{ personaId?: unknown }>).detail
+      const eventPersonaId = String(detail?.personaId ?? "").trim()
+      const activePersonaId = String(resolvedPersona.activePersonaId ?? "").trim()
+      if (eventPersonaId && eventPersonaId === activePersonaId) {
+        setVisualPackRefreshNonce((current) => current + 1)
+      }
+    }
+    window.addEventListener(PERSONA_VISUAL_PACK_ACTIVATED_EVENT, handlePackActivated)
+    return () => {
+      window.removeEventListener(
+        PERSONA_VISUAL_PACK_ACTIVATED_EVENT,
+        handlePackActivated
+      )
+    }
+  }, [resolvedPersona.activePersonaId])
 
   React.useEffect(() => {
     const activePersonaId = String(resolvedPersona.activePersonaId || "").trim()
@@ -357,7 +378,11 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     return () => {
       cancelled = true
     }
-  }, [resolvedPersona.activePersonaId, resolvedPersona.hasTargetPersona])
+  }, [
+    resolvedPersona.activePersonaId,
+    resolvedPersona.hasTargetPersona,
+    visualPackRefreshNonce
+  ])
 
   const buddySummary = resolvedPersona.buddySummary
   const isDormant = resolvedPersona.hasTargetPersona && !buddySummary?.has_buddy

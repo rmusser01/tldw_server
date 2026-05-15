@@ -188,7 +188,7 @@ describe("VisualPackEditor", () => {
               defaultValue?: string
             }
       ) => {
-        if (key === "common:loading") return "Localized loading"
+        if (key === "common:loading.title") return "Localized loading"
         if (key === "common:refresh") return "Localized refresh"
         if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
         if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
@@ -474,6 +474,110 @@ describe("VisualPackEditor", () => {
     expect(screen.getByTestId("persona-visual-generation-review-copy")).toHaveTextContent(
       "Generated candidates stay in review until accepted"
     )
+  })
+
+  it("copies a bundled starter pack as an inactive draft before activation", async () => {
+    const calls: string[] = []
+    const copiedPack = {
+      id: "starter-copy-1",
+      persona_id: "persona-1",
+      title: "Research Buddy Starter",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 1
+    }
+    let starterCopied = false
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse(starterCopied ? [copiedPack] : [])
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse({
+          starter_packs: [
+            {
+              id: "research-buddy-starter",
+              title: "Research Buddy Starter",
+              description: "A deterministic sprite-frame starter.",
+              renderer_type: "sprite_frames",
+              manifest_version: 1,
+              states_offered: ["idle", "listening", "thinking", "speaking", "error"],
+              asset_count: 1,
+              total_bytes: 92,
+              tags: ["starter", "sprite_frames"],
+              license_label: "bundled"
+            }
+          ]
+        })
+      }
+      if (
+        path === "/api/v1/persona/visual-starter-packs/research-buddy-starter/copy" &&
+        method === "POST"
+      ) {
+        starterCopied = true
+        expect(parseJsonBody(init?.body)).toMatchObject({
+          target_persona_id: "persona-1"
+        })
+        return okResponse(copiedPack)
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/starter-copy-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/starter-copy-1/generation-readiness" &&
+        method === "GET"
+      ) {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-empty")).toHaveTextContent(
+        "does not have a visual pack yet"
+      )
+    )
+    expect(await screen.findByTestId("persona-visual-starter-pack-select")).toHaveValue(
+      "research-buddy-starter"
+    )
+
+    fireEvent.click(screen.getByTestId("persona-visual-starter-copy-button"))
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue(
+        "starter-copy-1"
+      )
+    )
+    expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent("draft")
+    expect(
+      calls.some((call) => call.includes("/starter-copy-1/activate"))
+    ).toBe(false)
   })
 
   it("surfaces reusable visual-pack routes through existing editor controls", async () => {

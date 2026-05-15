@@ -17,6 +17,10 @@ declare const personaVisualCustomStateIdBrand: unique symbol
 export type PersonaVisualCustomStateId = string & {
   readonly [personaVisualCustomStateIdBrand]: "PersonaVisualCustomStateId"
 }
+
+export const PERSONA_VISUAL_PACK_ACTIVATED_EVENT =
+  "tldw:persona-visual-pack-activated"
+
 export type PersonaVisualStateId =
   | PersonaVisualBuiltinStateId
   | PersonaVisualCustomStateId
@@ -77,6 +81,28 @@ export interface PersonaVisualRendererCapability {
 
 export interface PersonaVisualRendererCapabilitiesResponse {
   renderers: PersonaVisualRendererCapability[]
+}
+
+export interface PersonaVisualStarterPackSummary {
+  id: string
+  title: string
+  description?: string | null
+  renderer_type: PersonaVisualRendererType | string
+  manifest_version: number
+  states_offered: string[]
+  asset_count: number
+  total_bytes: number
+  tags: string[]
+  license_label?: string | null
+}
+
+export interface PersonaVisualStarterPackListResponse {
+  starter_packs: PersonaVisualStarterPackSummary[]
+}
+
+export interface PersonaVisualStarterPackCopyRequest {
+  target_persona_id: string
+  title?: string | null
 }
 
 export type PersonaVisualPackStatus =

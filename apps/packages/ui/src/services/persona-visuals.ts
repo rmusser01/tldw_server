@@ -29,7 +29,9 @@ import type {
   PersonaVisualPackExportResponse,
   PersonaVisualPackListResponse,
   PersonaVisualPortabilityJobResponse,
-  PersonaVisualRendererCapabilitiesResponse
+  PersonaVisualRendererCapabilitiesResponse,
+  PersonaVisualStarterPackCopyRequest,
+  PersonaVisualStarterPackListResponse
 } from "@/types/persona-visuals"
 
 type PersonaVisualFetchInit = {
@@ -149,6 +151,32 @@ export async function getPersonaVisualRendererCapabilities(): Promise<
   return {
     renderers: Array.isArray(payload?.renderers) ? payload.renderers : []
   }
+}
+
+export async function listPersonaVisualStarterPacks(): Promise<
+  PersonaVisualStarterPackListResponse
+> {
+  const payload = await fetchPersonaVisualJson<PersonaVisualStarterPackListResponse>(
+    "/api/v1/persona/visual-starter-packs"
+  )
+  return {
+    starter_packs: Array.isArray(payload?.starter_packs)
+      ? payload.starter_packs
+      : []
+  }
+}
+
+export async function copyPersonaVisualStarterPack(
+  starterPackId: string,
+  payload: PersonaVisualStarterPackCopyRequest
+): Promise<PersonaVisualPack> {
+  return fetchPersonaVisualJson<PersonaVisualPack>(
+    `/api/v1/persona/visual-starter-packs/${encodeURIComponent(starterPackId)}/copy`,
+    {
+      method: "POST",
+      body: payload
+    }
+  )
 }
 
 export async function getPersonaVisualPack(

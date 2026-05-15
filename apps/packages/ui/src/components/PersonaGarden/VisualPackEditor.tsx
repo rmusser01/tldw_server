@@ -23,6 +23,7 @@ import {
   createPersonaVisualGenerationJob,
   createPersonaVisualImportPreview,
   createPersonaVisualPack,
+  copyPersonaVisualStarterPack,
   deletePersonaVisualLibraryItem,
   deactivatePersonaVisualPack,
   downloadPersonaVisualPackExportArchive,
@@ -31,6 +32,7 @@ import {
   getPersonaVisualImportCommitStatus,
   getPersonaVisualImportPreview,
   getPersonaVisualPackExportJob,
+  listPersonaVisualStarterPacks,
   listPersonaVisualLibraryItems,
   listPersonaVisualCandidates,
   listPersonaVisualDuplicateTargets,
@@ -45,6 +47,7 @@ import {
   uploadPersonaVisualAsset,
   usePersonaVisualLibraryItem
 } from "@/services/persona-visuals"
+import { PERSONA_VISUAL_PACK_ACTIVATED_EVENT } from "@/types/persona-visuals"
 import type {
   PersonaVisualAnimation,
   PersonaVisualAsset,
@@ -67,6 +70,7 @@ import type {
   PersonaVisualPackExportResponse,
   PersonaVisualPortabilityJobResponse,
   PersonaVisualRendererImportPreview,
+  PersonaVisualStarterPackSummary,
   PersonaVisualStateId
 } from "@/types/persona-visuals"
 import {
@@ -774,7 +778,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   onOpenPersonaVisuals
 }) => {
   const { t } = useTranslation(["sidepanel", "common"])
-  const loadingLabel = t("common:loading", getDesignSystemState("loading").label)
+  const loadingLabel = t("common:loading.title", {
+    defaultValue: getDesignSystemState("loading").label
+  })
   const refreshLabel = t("common:refresh", "Refresh")
   const unknownLabel = t("common:unknown", { defaultValue: "unknown" })
   const [packs, setPacks] = React.useState<PersonaVisualPack[]>([])
@@ -816,6 +822,13 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const [duplicateTitle, setDuplicateTitle] = React.useState("")
   const [duplicatingPack, setDuplicatingPack] = React.useState(false)
   const [lastDuplicatedPersonaId, setLastDuplicatedPersonaId] = React.useState("")
+  const [starterPacks, setStarterPacks] = React.useState<
+    PersonaVisualStarterPackSummary[]
+  >([])
+  const [starterPacksLoading, setStarterPacksLoading] = React.useState(false)
+  const [selectedStarterPackId, setSelectedStarterPackId] = React.useState("")
+  const [starterDraftTitle, setStarterDraftTitle] = React.useState("")
+  const [copyingStarterPack, setCopyingStarterPack] = React.useState(false)
   const [libraryItems, setLibraryItems] = React.useState<PersonaVisualLibraryItem[]>([])
   const [libraryLoading, setLibraryLoading] = React.useState(false)
   const [savingToLibrary, setSavingToLibrary] = React.useState(false)
@@ -875,6 +888,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   )
   const selectedDuplicateTarget =
     availableDuplicateTargets.find((target) => target.id === duplicateTargetId) ?? null
+  const selectedStarterPack =
+    starterPacks.find((starter) => starter.id === selectedStarterPackId) ??
+    starterPacks[0] ??
+    null
   const selectedPackLibraryItem = React.useMemo(
     () =>
       selectedPack
@@ -1096,6 +1113,42 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     }
   }, [isActive, selectedPersonaId])
 
+  const loadStarterPacks = React.useCallback(async () => {
+    if (!isActive || !selectedPersonaId) {
+      setStarterPacks([])
+      setSelectedStarterPackId("")
+      setStarterDraftTitle("")
+      setStarterPacksLoading(false)
+      return
+    }
+    setStarterPacksLoading(true)
+    try {
+      const response = await listPersonaVisualStarterPacks()
+      const nextStarterPacks = response.starter_packs || []
+      setStarterPacks(nextStarterPacks)
+      setSelectedStarterPackId((current) => {
+        if (current && nextStarterPacks.some((starter) => starter.id === current)) {
+          return current
+        }
+        return nextStarterPacks[0]?.id ?? ""
+      })
+      setStarterDraftTitle((current) => current || nextStarterPacks[0]?.title || "")
+    } catch (loadError) {
+      setStarterPacks([])
+      setSelectedStarterPackId("")
+      setStarterDraftTitle("")
+      if (!(loadError instanceof PersonaVisualApiError && loadError.status === 404)) {
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Failed to load bundled starter packs."
+        )
+      }
+    } finally {
+      setStarterPacksLoading(false)
+    }
+  }, [isActive, selectedPersonaId])
+
   const loadLibrary = React.useCallback(async () => {
     if (!isActive || !selectedPersonaId) {
       libraryRequestIdRef.current += 1
@@ -1140,6 +1193,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   React.useEffect(() => {
     void loadDuplicateTargets()
   }, [loadDuplicateTargets])
+
+  React.useEffect(() => {
+    void loadStarterPacks()
+  }, [loadStarterPacks])
 
   React.useEffect(() => {
     void loadLibrary()
@@ -1397,6 +1454,35 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       )
     } finally {
       setDuplicatingPack(false)
+    }
+  }
+
+  const handleCopyStarterPack = async () => {
+    if (!selectedPersonaId || !selectedStarterPack) return
+    setCopyingStarterPack(true)
+    setError(null)
+    try {
+      const copied = await copyPersonaVisualStarterPack(selectedStarterPack.id, {
+        target_persona_id: selectedPersonaId,
+        title: starterDraftTitle.trim() || selectedStarterPack.title
+      })
+      await loadPacks(copied.id)
+      setStatusMessage(
+        t("sidepanel:personaGarden.visuals.starterCopiedDraft", {
+          defaultValue:
+            "Starter pack copied as a draft. Review and activate it when ready."
+        })
+      )
+    } catch (copyError) {
+      setError(
+        copyError instanceof Error
+          ? copyError.message
+          : t("sidepanel:personaGarden.visuals.starterCopyError", {
+              defaultValue: "Failed to copy bundled starter pack."
+            })
+      )
+    } finally {
+      setCopyingStarterPack(false)
     }
   }
 
@@ -1715,6 +1801,16 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           defaultValue: "Visual pack activated."
         })
       )
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent(PERSONA_VISUAL_PACK_ACTIVATED_EVENT, {
+            detail: {
+              personaId: selectedPersonaId,
+              packId: active.id
+            }
+          })
+        )
+      }
     } catch (activateError) {
       setError(
         activateError instanceof Error
@@ -2400,6 +2496,83 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         onOpenImport={openImportArchivePicker}
         onOpenDuplicate={focusDuplicateControls}
       />
+
+      {starterPacksLoading || starterPacks.length ? (
+        <div
+          data-testid="persona-visual-starter-pack-panel"
+          className="rounded-lg border border-border bg-surface p-3"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+                {t("sidepanel:personaGarden.visuals.starterHeading", {
+                  defaultValue: "Default starter pack"
+                })}
+              </div>
+              <div className="mt-1 text-xs leading-5 text-text-muted">
+                {t("sidepanel:personaGarden.visuals.starterDescription", {
+                  defaultValue:
+                    "Copy a bundled sprite-frame pack as a draft, then review and activate it."
+                })}
+              </div>
+            </div>
+            <Tag>sprite_frames</Tag>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_auto]">
+            <label className="text-xs text-text-muted">
+              <span className="mb-1 block">Starter</span>
+              <select
+                data-testid="persona-visual-starter-pack-select"
+                className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                value={selectedStarterPack?.id || ""}
+                disabled={starterPacksLoading || !starterPacks.length}
+                onChange={(event) => {
+                  const nextId = event.target.value
+                  const nextStarter = starterPacks.find(
+                    (starter) => starter.id === nextId
+                  )
+                  setSelectedStarterPackId(nextId)
+                  setStarterDraftTitle(nextStarter?.title || "")
+                }}
+              >
+                {starterPacks.map((starter) => (
+                  <option key={starter.id} value={starter.id}>
+                    {starter.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs text-text-muted">
+              <span className="mb-1 block">Draft title</span>
+              <input
+                data-testid="persona-visual-starter-title-input"
+                className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                value={starterDraftTitle}
+                disabled={!selectedStarterPack}
+                onChange={(event) => setStarterDraftTitle(event.target.value)}
+              />
+            </label>
+            <Button
+              data-testid="persona-visual-starter-copy-button"
+              className="self-end"
+              size="small"
+              icon={<Copy className="h-3.5 w-3.5" />}
+              loading={copyingStarterPack}
+              disabled={!selectedStarterPack || copyingStarterPack}
+              onClick={() => void handleCopyStarterPack()}
+            >
+              Copy as draft
+            </Button>
+          </div>
+          {selectedStarterPack ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-muted">
+              <span>{selectedStarterPack.asset_count} asset</span>
+              <span>{selectedStarterPack.total_bytes} bytes</span>
+              <span>{selectedStarterPack.states_offered.join(", ")}</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {error ? (
         <div className="rounded-md border border-danger/30 bg-danger/10 p-2 text-xs text-danger">

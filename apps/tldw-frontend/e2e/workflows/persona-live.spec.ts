@@ -11,6 +11,13 @@ import {
   skipIfServerUnavailable
 } from "../utils/fixtures"
 import { TEST_CONFIG, fetchWithApiKey, seedAuth } from "../utils/helpers"
+import {
+  buildPersonaVisualPackFixture,
+  buildPortablePersonaVisualPackUpload,
+  PERSONA_VISUAL_E2E_PERSONA_ID,
+  PERSONA_VISUAL_E2E_SESSION_ID,
+  PERSONA_VISUAL_E2E_STARTER_PACK
+} from "../fixtures/persona-visual-packs"
 
 type DocsInfoPayload = {
   capabilities?: Record<string, unknown> | null
@@ -26,10 +33,8 @@ type PersonaProfilePayload = {
 }
 
 const DEFAULT_PERSONA_ID = "research_assistant"
-const VISUAL_PERSONA_ID = "visual_persona_e2e"
-const VISUAL_SESSION_ID = "sess-visual-e2e-001"
-const VISUAL_FRAME_DATA_URI =
-  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+const VISUAL_PERSONA_ID = PERSONA_VISUAL_E2E_PERSONA_ID
+const VISUAL_SESSION_ID = PERSONA_VISUAL_E2E_SESSION_ID
 const COMPLETED_SETUP_STEPS = [
   "persona",
   "voice",
@@ -57,7 +62,7 @@ const VISUAL_BUDDY_SUMMARY = {
   }
 }
 
-type PersonaVisualMockMode = "active-pack" | "broken-pack"
+type PersonaVisualMockMode = "active-pack" | "broken-pack" | "empty-pack"
 
 type PersonaMockWindow = Window & {
   __personaWsMock?: {
@@ -85,103 +90,17 @@ const extractProfilePersonaId = (route: Route): string => {
   return decodeURIComponent(parts[profileIndex + 1] || VISUAL_PERSONA_ID)
 }
 
-const buildPersonaVisualPack = (personaId: string) => {
-  const assetIds = {
-    idle: "frame-idle",
-    speaking: "frame-speaking",
-    tool: "frame-tool",
-    error: "frame-error"
-  }
-  const buildAsset = (id: string) => ({
-    id,
-    pack_id: "visual-pack-e2e",
-    persona_id: personaId,
-    asset_role: "frame",
-    storage_key: `persona-visuals/${personaId}/${id}.png`,
-    url: VISUAL_FRAME_DATA_URI,
-    original_filename: `${id}.png`,
-    mime_type: "image/png",
-    byte_size: 96,
-    checksum_sha256: `${id}-checksum`,
-    width: 1,
-    height: 1,
-    provenance: "e2e_fixture",
-    created_at: "2026-05-08T00:00:00.000Z",
-    last_modified: "2026-05-08T00:00:00.000Z",
-    version: 1
-  })
-  const assetsById = {
-    [assetIds.idle]: buildAsset(assetIds.idle),
-    [assetIds.speaking]: buildAsset(assetIds.speaking),
-    [assetIds.tool]: buildAsset(assetIds.tool),
-    [assetIds.error]: buildAsset(assetIds.error)
-  }
-
-  return {
-    id: "visual-pack-e2e",
-    persona_id: personaId,
-    user_id: "e2e-user",
-    title: "Visual Runtime Pack",
-    renderer_type: "sprite_frames",
-    status: "active",
-    manifest_version: 1,
-    manifest: {
-      manifest_version: 1,
-      renderer_type: "sprite_frames",
-      states: {
-        idle: { animation_id: "idle-loop" },
-        speaking: { animation_id: "speaking-loop" },
-        tool_running: { animation_id: "tool-loop" },
-        error: { animation_id: "error-loop" }
-      },
-      animations: {
-        "idle-loop": {
-          frames: [{ asset_id: assetIds.idle, duration_ms: 250 }],
-          loop: true
-        },
-        "speaking-loop": {
-          frames: [{ asset_id: assetIds.speaking, duration_ms: 250 }],
-          loop: true
-        },
-        "tool-loop": {
-          frames: [{ asset_id: assetIds.tool, duration_ms: 250 }],
-          loop: true
-        },
-        "error-loop": {
-          frames: [{ asset_id: assetIds.error, duration_ms: 250 }],
-          loop: false
-        }
-      },
-      fallbacks: {
-        speaking: ["idle"],
-        tool_running: ["idle"],
-        error: ["idle"]
-      },
-      authored_triggers: [
-        {
-          id: "mcp-runtime-override",
-          source: "mcp_runtime",
-          match: "persona_visuals.trigger_state",
-          state: "speaking",
-          duration_ms: 5000,
-          priority: 10
-        }
-      ]
-    },
-    active_at: "2026-05-08T00:00:00.000Z",
-    assets: Object.values(assetsById),
-    assets_by_id: assetsById,
-    created_at: "2026-05-08T00:00:00.000Z",
-    last_modified: "2026-05-08T00:00:00.000Z",
-    version: 1
-  }
-}
-
 const installPersonaVisualApiMocks = async (
   page: Page,
   options: { visualPackMode?: PersonaVisualMockMode } = {}
 ): Promise<void> => {
   const visualPackMode = options.visualPackMode ?? "active-pack"
+  let packs =
+    visualPackMode === "empty-pack" || visualPackMode === "broken-pack"
+      ? []
+      : [buildPersonaVisualPackFixture(VISUAL_PERSONA_ID)]
+  let previewCompleted = false
+  let importCommitted = false
 
   await page.route(/\/api\/v1\/health(?:\/live)?(?:\?.*)?$/, async (route) => {
     await fulfillJson(route, 200, {
@@ -256,6 +175,133 @@ const installPersonaVisualApiMocks = async (
     ])
   })
 
+  await page.route(/\/api\/v1\/persona\/visual-starter-packs(?:\?.*)?$/, async (route) => {
+    await fulfillJson(route, 200, {
+      starter_packs: [PERSONA_VISUAL_E2E_STARTER_PACK]
+    })
+  })
+
+  await page.route(/\/api\/v1\/persona\/visual-starter-packs\/[^/]+\/copy(?:\?.*)?$/, async (route) => {
+    const personaId = VISUAL_PERSONA_ID
+    const pack = buildPersonaVisualPackFixture(personaId, {
+      packId: "starter-copy-e2e",
+      title: "Research Buddy Starter",
+      status: "draft",
+      provenance: "imported"
+    })
+    packs = [pack]
+    await fulfillJson(route, 201, pack)
+  })
+
+  await page.route(/\/api\/v1\/persona\/profiles\/[^/]+\/visual-packs\/[^/]+\/activate(?:\?.*)?$/, async (route) => {
+    const url = new URL(route.request().url())
+    const parts = url.pathname.split("/").filter(Boolean)
+    const packId = decodeURIComponent(parts[parts.findIndex((part) => part === "visual-packs") + 1] || "")
+    packs = packs.map((pack) => ({
+      ...pack,
+      status: pack.id === packId ? "active" : "draft",
+      active_at:
+        pack.id === packId ? "2026-05-08T00:00:00.000Z" : null
+    }))
+    await fulfillJson(
+      route,
+      200,
+      packs.find((pack) => pack.id === packId) ?? packs[0]
+    )
+  })
+
+  await page.route(/\/api\/v1\/persona\/profiles\/[^/]+\/visual-packs\/import-previews(?:\?.*)?$/, async (route) => {
+    await fulfillJson(route, 200, {
+      preview_id: "preview-upload-e2e",
+      job_id: "preview-upload-job-e2e",
+      portability_job_id: "portability-preview-upload-e2e",
+      operation: "import_preview",
+      target_persona_id: VISUAL_PERSONA_ID,
+      status: "queued",
+      stage: "queued"
+    })
+  })
+
+  await page.route(/\/api\/v1\/persona\/profiles\/[^/]+\/visual-packs\/import-previews\/preview-upload-e2e(?:\?.*)?$/, async (route) => {
+    previewCompleted = true
+    await fulfillJson(route, 200, {
+      preview_id: "preview-upload-e2e",
+      job_id: "preview-upload-job-e2e",
+      portability_job_id: "portability-preview-upload-e2e",
+      operation: "import_preview",
+      target_persona_id: VISUAL_PERSONA_ID,
+      status: "completed",
+      visual_status: "completed",
+      stage: "completed",
+      archive_sha256: "sha-uploaded-e2e",
+      canonical_payload_fingerprint: "fingerprint-uploaded-e2e",
+      schema_version: "tldw.persona_visual_pack.v1",
+      bundle_summary: {
+        pack_title: "Uploaded Visual Pack",
+        asset_count: 1,
+        assets_with_bytes: 1
+      },
+      validation_warnings: [],
+      conflicts: [],
+      proposed_plan: {
+        target_mode: "create_new",
+        commit_eligible: true,
+        activation_eligible: true,
+        renderer_import_preview: {
+          status: "supported",
+          renderer_type: "sprite_frames",
+          manifest_version: 1,
+          renderer_contract_version: 1,
+          can_commit: true,
+          activation_eligible: true,
+          blockers: [],
+          warnings: [],
+          normalized_role_categories: { frame: ["portable-upload-pack-frame-idle"] },
+          setup_status: "supported",
+          setup_blockers: []
+        }
+      },
+      quota_estimate: { asset_bytes: 96 },
+      required_choices: [],
+      target_warnings: []
+    })
+  })
+
+  await page.route(/\/api\/v1\/persona\/profiles\/[^/]+\/visual-packs\/import-previews\/preview-upload-e2e\/commit(?:\?.*)?$/, async (route) => {
+    const pack = buildPersonaVisualPackFixture(VISUAL_PERSONA_ID, {
+      packId: "uploaded-pack-e2e",
+      title: "Uploaded Visual Pack",
+      status: "draft",
+      provenance: "imported"
+    })
+    importCommitted = true
+    packs = [pack]
+    await fulfillJson(route, 200, {
+      job_id: "import-upload-job-e2e",
+      portability_job_id: "portability-import-upload-e2e",
+      operation: "import_commit",
+      preview_id: "preview-upload-e2e",
+      target_persona_id: VISUAL_PERSONA_ID,
+      status: "queued",
+      stage: "queued"
+    })
+  })
+
+  await page.route(/\/api\/v1\/persona\/profiles\/[^/]+\/visual-packs\/imports\/import-upload-job-e2e(?:\?.*)?$/, async (route) => {
+    await fulfillJson(route, 200, {
+      job_id: "import-upload-job-e2e",
+      portability_job_id: "portability-import-upload-e2e",
+      operation: "import_commit",
+      persona_id: VISUAL_PERSONA_ID,
+      pack_id: "uploaded-pack-e2e",
+      status: importCommitted && previewCompleted ? "completed" : "processing",
+      visual_status: importCommitted && previewCompleted ? "completed" : "processing",
+      stage: importCommitted && previewCompleted ? "completed" : "commit",
+      progress: { asset_count: 1 },
+      warnings: []
+    })
+  })
+
   await page.route(/\/api\/v1\/persona\/profiles\/[^/]+\/visual-packs(?:\?.*)?$/, async (route) => {
     if (visualPackMode === "broken-pack") {
       await fulfillJson(route, 500, {
@@ -264,10 +310,10 @@ const installPersonaVisualApiMocks = async (
       return
     }
 
-    const pack = buildPersonaVisualPack(extractProfilePersonaId(route))
+    const activePack = packs.find((pack) => pack.status === "active") ?? null
     await fulfillJson(route, 200, {
-      packs: [pack],
-      active_pack: pack
+      packs,
+      active_pack: activePack
     })
   })
 
@@ -453,6 +499,17 @@ const emitPersonaVisualStateOverride = async (
   )
 }
 
+const openPersonaVisualsTab = async (page: Page): Promise<void> => {
+  const currentUrl = new URL(page.url())
+  currentUrl.searchParams.set("tab", "visuals")
+  await page.goto(`${currentUrl.pathname}${currentUrl.search}`, {
+    waitUntil: "domcontentloaded"
+  })
+  await expect(page.getByTestId("persona-visual-pack-editor")).toBeVisible({
+    timeout: 15_000
+  })
+}
+
 const parseBooleanish = (value: unknown): boolean | null => {
   if (typeof value === "boolean") return value
   if (typeof value === "number") return value !== 0
@@ -620,6 +677,123 @@ test.describe("Persona Live Workflow", () => {
         timeout: 10_000
       })
     }
+
+    expect(diagnostics.pageErrors).toHaveLength(0)
+  })
+
+  test("default starter setup path activates a draft and renders BuddyShell visual", async ({
+    authedPage,
+    diagnostics
+  }) => {
+    await installPersonaVisualApiMocks(authedPage, {
+      visualPackMode: "empty-pack"
+    })
+    await installMockPersonaWebSocket(authedPage)
+
+    await authedPage.goto(
+      `/persona?persona_id=${encodeURIComponent(VISUAL_PERSONA_ID)}`,
+      { waitUntil: "domcontentloaded" }
+    )
+
+    await expect(authedPage.getByTestId("assistant-setup-overlay")).toBeHidden({
+      timeout: 15_000
+    })
+    await expect(authedPage.getByTestId("persona-buddy-dock")).toContainText(
+      "Visual Persona",
+      { timeout: 15_000 }
+    )
+    await openPersonaVisualsTab(authedPage)
+
+    await expect(
+      authedPage.getByTestId("persona-visual-starter-pack-select")
+    ).toHaveValue(PERSONA_VISUAL_E2E_STARTER_PACK.id)
+
+    await authedPage.getByTestId("persona-visual-starter-copy-button").click()
+    await expect(authedPage.getByTestId("persona-visual-pack-select")).toHaveValue(
+      "starter-copy-e2e",
+      { timeout: 15_000 }
+    )
+    await expect(authedPage.getByTestId("persona-visual-pack-status")).toHaveText(
+      "draft"
+    )
+
+    await authedPage.getByTestId("persona-visual-activate-button").click()
+    await expect(authedPage.getByTestId("persona-visual-pack-status")).toHaveText(
+      "active",
+      { timeout: 15_000 }
+    )
+    await expect(authedPage.getByTestId("persona-visual-frame").first())
+      .toHaveAttribute("data-visual-state", "idle", { timeout: 15_000 })
+
+    expect(diagnostics.pageErrors).toHaveLength(0)
+  })
+
+  test("uploaded pack setup path imports, activates, and renders BuddyShell visual", async ({
+    authedPage,
+    diagnostics
+  }) => {
+    await installPersonaVisualApiMocks(authedPage, {
+      visualPackMode: "empty-pack"
+    })
+    await installMockPersonaWebSocket(authedPage)
+
+    await authedPage.goto(
+      `/persona?persona_id=${encodeURIComponent(VISUAL_PERSONA_ID)}`,
+      { waitUntil: "domcontentloaded" }
+    )
+
+    await expect(authedPage.getByTestId("assistant-setup-overlay")).toBeHidden({
+      timeout: 15_000
+    })
+    await openPersonaVisualsTab(authedPage)
+
+    await authedPage.getByTestId("persona-visual-starter-copy-button").click()
+    await expect(authedPage.getByTestId("persona-visual-pack-select")).toHaveValue(
+      "starter-copy-e2e",
+      { timeout: 15_000 }
+    )
+
+    const portableUpload = await buildPortablePersonaVisualPackUpload()
+    await authedPage
+      .getByTestId("persona-visual-import-preview-input")
+      .setInputFiles(portableUpload)
+    await authedPage.getByTestId("persona-visual-import-preview-button").click()
+    await expect(
+      authedPage.getByTestId("persona-visual-import-preview-status")
+    ).toHaveText("queued")
+
+    await authedPage
+      .getByTestId("persona-visual-import-preview-refresh-button")
+      .click()
+    await expect(
+      authedPage.getByTestId("persona-visual-import-preview-status")
+    ).toHaveText("completed", { timeout: 15_000 })
+    await expect(
+      authedPage.getByTestId("persona-visual-import-preview-summary")
+    ).toContainText("Uploaded Visual Pack")
+
+    await authedPage.getByTestId("persona-visual-import-commit-button").click()
+    await expect(
+      authedPage.getByTestId("persona-visual-import-commit-status")
+    ).toHaveText("queued")
+    await authedPage
+      .getByTestId("persona-visual-import-commit-refresh-button")
+      .click()
+    await expect(
+      authedPage.getByTestId("persona-visual-import-commit-status")
+    ).toHaveText("completed", { timeout: 15_000 })
+    await expect(authedPage.getByTestId("persona-visual-pack-select")).toHaveValue(
+      "uploaded-pack-e2e",
+      { timeout: 15_000 }
+    )
+
+    await authedPage.getByTestId("persona-visual-activate-button").click()
+    await expect(authedPage.getByTestId("persona-visual-pack-status")).toHaveText(
+      "active",
+      { timeout: 15_000 }
+    )
+    await expect(authedPage.getByTestId("persona-visual-frame").first())
+      .toHaveAttribute("data-visual-state", "idle", { timeout: 15_000 })
 
     expect(diagnostics.pageErrors).toHaveLength(0)
   })

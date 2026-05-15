@@ -530,7 +530,11 @@
       "importCommitQueued": "Import commit queued. Refresh to check draft creation status.",
       "importCommitProcessing": "Import commit is processing{{stageSuffix}}",
       "importCommitStatus": "Import commit {{status}}: {{stage}}",
-      "importCommitQueuedStatus": "Import commit queued. Imported packs remain drafts until activated."
+      "importCommitQueuedStatus": "Import commit queued. Imported packs remain drafts until activated.",
+      "starterHeading": "Default starter pack",
+      "starterDescription": "Copy a bundled sprite-frame pack as a draft, then review and activate it.",
+      "starterCopiedDraft": "Starter pack copied as a draft. Review and activate it when ready.",
+      "starterCopyError": "Failed to copy bundled starter pack."
     }
   },
   "persona": {
