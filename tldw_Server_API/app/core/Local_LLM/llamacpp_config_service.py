@@ -26,6 +26,7 @@ LLAMACPP_ENV_OVERRIDES = {
     "port_autoselect": "LLAMACPP_PORT_AUTOSELECT",
     "port_probe_max": "LLAMACPP_PORT_PROBE_MAX",
     "allowed_paths": "LLAMACPP_ALLOWED_PATHS",
+    "registered_model_paths": "LLAMACPP_REGISTERED_MODEL_PATHS",
     "log_output_file": "LLAMACPP_LOG_OUTPUT_FILE",
 }
 

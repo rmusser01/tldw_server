@@ -91,3 +91,40 @@ class LlamaCppValidationResponse(BaseModel):
     version_output: str | None = None
     help_output: str | None = None
     warnings: list[str] = Field(default_factory=list)
+
+
+class LlamaCppModelMetadata(BaseModel):
+    quantization: str | None = None
+    parameter_hint: str | None = None
+    context_hint: int | None = None
+
+
+class LlamaCppInventoryItem(BaseModel):
+    model_id: str
+    display_name: str
+    basename: str
+    source: str
+    path: str
+    size_bytes: int | None = None
+    modified_at: str | None = None
+    metadata: LlamaCppModelMetadata = Field(default_factory=LlamaCppModelMetadata)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class LlamaCppInventoryResponse(BaseModel):
+    models: list[LlamaCppInventoryItem]
+    warnings: list[str] = Field(default_factory=list)
+    scan_limited: bool = False
+
+
+class LlamaCppRegisterModelPathRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(..., min_length=1)
+
+
+class LlamaCppStartByModelRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model_id: str = Field(..., min_length=1)
+    server_args: dict[str, object] = Field(default_factory=dict)

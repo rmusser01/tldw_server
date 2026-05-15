@@ -297,6 +297,71 @@ async def test_llamacpp_start_server_invalid_arg(monkeypatch, tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_llamacpp_start_server_by_path_accepts_allowed_registered_path(monkeypatch, tmp_path: Path):
+    exe = tmp_path / "llama_server"
+    exe.write_text("#!/bin/sh\n")
+    model_dir = tmp_path / "models"
+    model_dir.mkdir()
+    registered_dir = tmp_path / "registered"
+    registered_dir.mkdir()
+    registered_model = registered_dir / "registered.gguf"
+    registered_model.write_text("fake")
+
+    cfg = LlamaCppConfig(executable_path=exe, models_dir=model_dir, allowed_paths=[registered_dir], default_port=8199)
+    handler = LlamaCppHandler(cfg, global_app_config={})
+
+    async def _fake_cpe(*a, **k):
+        return DummyProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_cpe)
+    import tldw_Server_API.app.core.Local_LLM.LlamaCpp_Handler as llama_mod
+
+    monkeypatch.setattr(llama_mod, "wait_for_http_ready", lambda *a, **k: asyncio.sleep(0, result=True))
+
+    res = await handler.start_server_by_path(
+        registered_model,
+        model_label="registered.gguf",
+        server_args={"port": 8199},
+    )
+    assert res["status"] == "started"
+    assert res["model"] == "registered.gguf"
+
+
+@pytest.mark.asyncio
+async def test_llamacpp_start_server_by_path_rejects_non_gguf(tmp_path: Path):
+    exe = tmp_path / "llama_server"
+    exe.write_text("#!/bin/sh\n")
+    model_dir = tmp_path / "models"
+    model_dir.mkdir()
+    text_model = model_dir / "not-model.txt"
+    text_model.write_text("fake")
+
+    cfg = LlamaCppConfig(executable_path=exe, models_dir=model_dir)
+    handler = LlamaCppHandler(cfg, global_app_config={})
+
+    with pytest.raises(ServerError, match="GGUF"):
+        await handler.start_server_by_path(text_model)
+
+
+@pytest.mark.asyncio
+async def test_llamacpp_start_server_by_path_rejects_outside_allowlist(tmp_path: Path):
+    exe = tmp_path / "llama_server"
+    exe.write_text("#!/bin/sh\n")
+    model_dir = tmp_path / "models"
+    model_dir.mkdir()
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    outside_model = outside_dir / "outside.gguf"
+    outside_model.write_text("fake")
+
+    cfg = LlamaCppConfig(executable_path=exe, models_dir=model_dir)
+    handler = LlamaCppHandler(cfg, global_app_config={})
+
+    with pytest.raises(ServerError, match="allowed"):
+        await handler.start_server_by_path(outside_model)
+
+
+@pytest.mark.asyncio
 async def test_llamacpp_inference_http_5xx(monkeypatch, tmp_path: Path):
     # Setup handler and running process state
     exe = tmp_path / "llama_server"

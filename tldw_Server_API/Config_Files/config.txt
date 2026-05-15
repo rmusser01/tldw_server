@@ -1125,6 +1125,8 @@ port_autoselect = true
 port_probe_max = 10
 # Comma-separated list of additional directories where models/logs may reside
 allowed_paths =
+# Comma-separated list of explicit local GGUF model files registered for inventory display
+registered_model_paths =
 # Optional path to a log file for llama.cpp server stdout/stderr
 log_output_file =
 

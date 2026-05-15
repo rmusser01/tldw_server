@@ -3,6 +3,7 @@
 #
 # Imports
 import inspect
+from pathlib import Path
 from typing import Any, Optional
 
 #
@@ -13,6 +14,10 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_
 from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
     LlamaCppConfigResponse,
     LlamaCppConfigUpdateRequest,
+    LlamaCppInventoryItem,
+    LlamaCppInventoryResponse,
+    LlamaCppRegisterModelPathRequest,
+    LlamaCppStartByModelRequest,
     LlamaCppValidationRequest,
     LlamaCppValidationResponse,
 )
@@ -23,7 +28,7 @@ from tldw_Server_API.app.core.Local_LLM.LlamaCpp_Handler import LlamaCppHandler
 # Local Imports
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import InferenceError, ModelNotFoundError, ServerError
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Manager import LLMInferenceManager
-from tldw_Server_API.app.core.Local_LLM import llamacpp_config_service
+from tldw_Server_API.app.core.Local_LLM import llamacpp_config_service, llamacpp_inventory_service
 
 #
 ########################################################################################################################
@@ -140,6 +145,67 @@ async def validate_llamacpp_binary_endpoint(
         llm_manager=llm_manager,
         run_probe=payload.run_probe,
     )
+
+
+@router.get(
+    "/llamacpp/inventory",
+    summary="List llama.cpp Model Inventory",
+    response_model=LlamaCppInventoryResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def get_llamacpp_inventory_endpoint(llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager)):
+    config_state = llamacpp_config_service.get_config_state(llm_manager)
+    return llamacpp_inventory_service.scan_inventory(config_state)
+
+
+@router.post(
+    "/llamacpp/models/register-path",
+    summary="Register a llama.cpp Model Path",
+    response_model=LlamaCppInventoryItem,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def register_llamacpp_model_path_endpoint(
+    payload: LlamaCppRegisterModelPathRequest,
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+):
+    _ = llm_manager
+    try:
+        return llamacpp_inventory_service.register_model_path(Path(payload.path))
+    except ServerError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post(
+    "/llamacpp/start-by-model",
+    summary="Start llama.cpp Server by Inventory Model ID",
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def start_llamacpp_by_model_endpoint(
+    payload: LlamaCppStartByModelRequest,
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+):
+    try:
+        target = _resolve_llamacpp_target(llm_manager, ("start_server_by_path",))
+        model_path = llamacpp_inventory_service.resolve_model_id(payload.model_id)
+        result = await target.start_server_by_path(
+            model_path,
+            model_label=model_path.name,
+            server_args=payload.server_args,
+        )
+        if isinstance(result, dict):
+            result.setdefault("status", "started")
+            result["backend"] = "llamacpp"
+            result["model_id"] = payload.model_id
+        return result
+    except HTTPException:
+        raise
+    except InferenceError as e:
+        raise _llamacpp_unavailable(str(e)) from e
+    except (ModelNotFoundError, ServerError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        _log_sanitized_manager_error(llm_manager, "Unexpected error starting Llama.cpp server by model ID")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred.") from e
 
 
 @router.post(
