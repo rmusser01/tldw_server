@@ -1,10 +1,10 @@
 ---
 id: TASK-362.1
 title: Implement first-run Persona Visual Buddy setup choices
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-15 03:44'
-updated_date: '2026-05-15 07:19'
+updated_date: '2026-05-15 15:11'
 labels:
   - persona
   - buddy
@@ -31,12 +31,12 @@ Implement the approved first-run Visual Buddy setup choices for Persona Garden. 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Reusable setup-choice card renders Use default, Import pack, and Start blank in Visuals, with compact optional wizard mode.
-- [ ] #2 VisualPackEditor shows setup choices only when the selected persona has no active visual pack and preserves the existing advanced reuse panel.
-- [ ] #3 Use default lists/copies bundled starter packs through existing frontend service patterns, creates an inactive draft, selects the returned draft, and never activates automatically.
-- [ ] #4 Import pack and Start blank route or focus existing editor controls without duplicating import or draft behavior in the setup card.
-- [ ] #5 AssistantSetupWizard can open Visuals through a route-level visual setup detour while setup is required, and returning clears the detour without changing setup completion state.
-- [ ] #6 Focused UI/service tests cover card rendering, no-active-pack behavior, starter copy selection, import/blank routing, compact wizard detour, and route-gating behavior.
+- [x] #1 Reusable setup-choice card renders Use default, Import pack, and Start blank in Visuals, with compact optional wizard mode.
+- [x] #2 VisualPackEditor shows setup choices only when the selected persona has no active visual pack and preserves the existing advanced reuse panel.
+- [x] #3 Use default lists/copies bundled starter packs through existing frontend service patterns, creates an inactive draft, selects the returned draft, and never activates automatically.
+- [x] #4 Import pack and Start blank route or focus existing editor controls without duplicating import or draft behavior in the setup card.
+- [x] #5 AssistantSetupWizard can open Visuals through a route-level visual setup detour while setup is required, and returning clears the detour without changing setup completion state.
+- [x] #6 Focused UI/service tests cover card rendering, no-active-pack behavior, starter copy selection, import/blank routing, compact wizard detour, and route-gating behavior.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -57,14 +57,22 @@ Task 3 VisualPackEditor setup flow integration completed and approved by code-qu
 Task 3 verification passed: focused stale accepted candidate review test, focused stale-regression VisualPackEditor pattern run, service card editor Vitest suite with 60 tests, git diff --check, and bun run verify:design-system-state with existing baseline exceptions only.
 
 Bandit not run for Task 3 because the slice changed only frontend TypeScript and TSX files.
+
+Final wizard-detour closeout: AssistantSetupWizard now accepts optional compact visual setup content, the setup orchestrator tracks a route-level visual setup detour, sidepanel-persona can hide the wizard and show only the Visuals tab during the detour, and the detour return restores the setup overlay without marking setup complete. Focused validation passed: bunx vitest run ../packages/ui/src/components/PersonaGarden/__tests__/VisualBuddySetupChoiceCard.test.tsx ../packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx ../packages/ui/src/components/PersonaGarden/__tests__/AssistantSetupWizard.test.tsx ../packages/ui/src/routes/__tests__/sidepanel-persona.test.tsx ../packages/ui/src/services/__tests__/persona-visuals.test.ts --testTimeout=30000 -> 5 files passed, 152 tests passed. git diff --check passed. Bandit remains not applicable because this task touched frontend TypeScript/TSX and Backlog Markdown only.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented first-run Persona Visual Buddy setup choices for issue #1695. The shared setup card supports full Visuals-tab actions and compact wizard routing. VisualPackEditor shows first-run setup choices only when no active visual exists, preserves advanced library/reuse affordances, copies bundled defaults into inactive drafts, focuses existing import controls, and routes blank setup to existing draft controls without auto-activation. Assistant setup now has an optional visual detour so users blocked by setup gating can open Visuals and return without changing setup completion state. Verification: focused UI/service Vitest suite passed with 152 tests, git diff --check passed, and Bandit is not applicable for the frontend-only touched scope.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

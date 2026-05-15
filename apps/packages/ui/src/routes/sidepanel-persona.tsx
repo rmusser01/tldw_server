@@ -26,6 +26,7 @@ import {
 } from "@/components/PersonaGarden/PersonaSetupHandoffCard"
 import { AssistantSetupWizard } from "@/components/PersonaGarden/AssistantSetupWizard"
 import { PersonaGardenTabs } from "@/components/PersonaGarden/PersonaGardenTabs"
+import { VisualBuddySetupChoiceCard } from "@/components/PersonaGarden/VisualBuddySetupChoiceCard"
 import {
   SetupSafetyConnectionsStep,
 } from "@/components/PersonaGarden/SetupSafetyConnectionsStep"
@@ -1436,6 +1437,18 @@ const SidepanelPersona = ({
     </>
   )
 
+  const setupVisualDetourReturnPanel = setupOrch.setupVisualDetour ? (
+    <div className="mb-3 rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-sky-100">
+      <div>Review visual setup, then return to assistant setup.</div>
+      <button
+        type="button"
+        className="mt-2 rounded-md border border-sky-500/40 px-3 py-2 text-sm font-medium text-sky-100"
+        onClick={setupOrch.handleReturnToSetupFromVisualDetour}
+      >
+        Return to setup
+      </button>
+    </div>
+  ) : null
   const pendingPlanCard = pendingPlan ? (
     <div className="rounded-lg border border-border bg-surface p-3">
       <Typography.Text strong>
@@ -2026,6 +2039,9 @@ const SidepanelPersona = ({
       )
     }
   ]
+  const visibleTabItems = setupOrch.setupVisualDetour
+    ? tabItems.filter((item) => item.key === "visuals")
+    : tabItems
 
   // ── Early-return gates ──
   if (uxState === "error_auth" || uxState === "configuring_auth") {
@@ -2178,7 +2194,7 @@ const SidepanelPersona = ({
         </div>
       ) : (
         <div className="flex flex-1 flex-col p-3">
-          {setupOrch.personaSetupWizard.isSetupRequired && !setupOrch.setupCommandDetour && !setupOrch.setupLiveDetour ? (
+          {setupOrch.personaSetupWizard.isSetupRequired && !setupOrch.setupCommandDetour && !setupOrch.setupLiveDetour && !setupOrch.setupVisualDetour ? (
             <AssistantSetupWizard
               catalog={catalog.map((persona) => ({
                 id: String(persona.id || ""),
@@ -2189,6 +2205,16 @@ const SidepanelPersona = ({
               postSetupTargetTab={setupOrch.setupIntentTargetTab || activeTab}
               progressItems={setupOrch.assistantSetupProgressItems}
               onResetSetup={setupOrch.handleResetSetup}
+              visualSetupContent={
+                <VisualBuddySetupChoiceCard
+                  selectedPersonaId={selectedPersonaId}
+                  selectedPersonaName={selectedPersonaName}
+                  hasActiveVisual={false}
+                  packCount={0}
+                  compact
+                  onOpenVisuals={setupOrch.handleOpenVisualSetupDetour}
+                />
+              }
               voiceStepContent={
                 setupOrch.personaSetupWizard.currentStep === "voice" ? (
                   <AssistantDefaultsPanel
@@ -2279,11 +2305,14 @@ const SidepanelPersona = ({
               onCreatePersona={setupOrch.handleCreatePersonaForSetup}
             />
           ) : (
-            <PersonaGardenTabs
-              activeKey={activeTab}
-              onChange={handlePersonaTabChange}
-              items={tabItems}
-            />
+            <>
+              {setupVisualDetourReturnPanel}
+              <PersonaGardenTabs
+                activeKey={setupOrch.setupVisualDetour ? "visuals" : activeTab}
+                onChange={handlePersonaTabChange}
+                items={visibleTabItems}
+              />
+            </>
           )}
         </div>
       )}
