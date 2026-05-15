@@ -74,9 +74,9 @@
 
 **Tests:** `python -m pytest tldw_Server_API/tests/PrototypeWorkspaces -q`; focused migration/repo tests as added; Bandit on touched backend files.
 
-**Status:** In Progress
+**Status:** Complete
 
 - [x] Run the focused prototype workspace suite.
 - [x] Run Bandit on touched backend paths.
-- [ ] Update TASK-363 acceptance criteria and final summary.
-- [ ] Prepare a PR summary that explains what changed and why, leaving the required human `Change summary` for merge readiness.
+- [x] Update TASK-363 acceptance criteria and final summary.
+- [x] Prepare a PR summary that explains what changed and why, leaving the required human `Change summary` for merge readiness.
