@@ -1290,6 +1290,29 @@ class WatchlistsDatabase:
             out.append(SourceRow(tags=tags, **row))  # type: ignore[arg-type]
         return out, total
 
+    def list_source_watchlist_ids(self, source_id: int, *, include_deleted: bool = False) -> list[int]:
+        self.get_source(source_id)
+        where = ["ws.source_id = ?", "w.user_id = ?"]
+        params: list[Any] = [source_id, self.user_id]
+        if not include_deleted:
+            where.append("w.deleted_at IS NULL")
+        rows = self.backend.execute(
+            f"""
+            SELECT ws.watchlist_id
+            FROM watchlist_sources ws
+            JOIN watchlists w ON w.id = ws.watchlist_id
+            WHERE {' AND '.join(where)}
+            ORDER BY ws.created_at ASC, ws.watchlist_id ASC
+            """,  # nosec B608
+            tuple(params),
+        ).rows
+        out: list[int] = []
+        for row in rows:
+            value = row.get("watchlist_id")
+            if value is not None:
+                out.append(int(value))
+        return out
+
     def ensure_default_watchlist(self) -> WatchlistRow:
         row = self.backend.execute(
             """
@@ -1314,7 +1337,7 @@ class WatchlistsDatabase:
                 priority="medium",
                 tags=[],
             )
-        self.backfill_default_watchlist_scope(int(watchlist.id))
+            self.backfill_default_watchlist_scope(int(watchlist.id))
         return watchlist
 
     def backfill_default_watchlist_scope(self, watchlist_id: int | None = None) -> None:

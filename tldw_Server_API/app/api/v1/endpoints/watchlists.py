@@ -171,6 +171,9 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
     SourceUpdateRequest,
     Tag,
     TagsListResponse,
+    WatchlistContainer,
+    WatchlistCreateRequest,
+    WatchlistDeleteResponse,
     WatchlistFilter,
     WatchlistFiltersPayload,
     WatchlistOnboardingTelemetryIngestRequest,
@@ -184,6 +187,8 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
     WatchlistOutput,
     WatchlistOutputCreateRequest,
     WatchlistOutputsListResponse,
+    WatchlistsListResponse,
+    WatchlistUpdateRequest,
     WatchlistTemplateCreateRequest,
     WatchlistTemplateDetail,
     WatchlistTemplateListResponse,
@@ -476,6 +481,47 @@ def _get_group_ids(db, source_id: int) -> list[int]:
         return []
 
 
+def _watchlist_response_from_row(row: Any) -> WatchlistContainer:
+    tags: list[str] = []
+    try:
+        parsed = json.loads(row.tags_json or "[]") if getattr(row, "tags_json", None) else []
+        if isinstance(parsed, list):
+            tags = [str(tag) for tag in parsed if isinstance(tag, str)]
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        tags = []
+    return WatchlistContainer(
+        id=int(row.id),
+        name=row.name,
+        description=getattr(row, "description", None),
+        objective=getattr(row, "objective", None),
+        domain=getattr(row, "domain", "general"),
+        status=getattr(row, "status", "active"),
+        priority=getattr(row, "priority", "medium"),
+        tags=tags,
+        archived_at=getattr(row, "archived_at", None),
+        deleted_at=getattr(row, "deleted_at", None),
+        restore_expires_at=getattr(row, "restore_expires_at", None),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _get_source_watchlist_ids(db: WatchlistsDatabase, source_id: int) -> list[int]:
+    try:
+        return db.list_source_watchlist_ids(source_id)
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        return []
+
+
+def _ensure_watchlist_exists(db: WatchlistsDatabase, watchlist_id: int | None) -> None:
+    if watchlist_id is None:
+        return
+    try:
+        db.get_watchlist(int(watchlist_id))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="watchlist_not_found") from None
+
+
 def _source_response_from_row(db: WatchlistsDatabase, row: Any) -> Source:
     settings = None
     try:
@@ -490,12 +536,69 @@ def _source_response_from_row(db: WatchlistsDatabase, row: Any) -> Source:
         active=bool(row.active),
         tags=list(getattr(row, "tags", []) or []),
         group_ids=_get_group_ids(db, row.id),
+        watchlist_ids=_get_source_watchlist_ids(db, row.id),
         settings=settings,
         last_scraped_at=row.last_scraped_at,
         status=row.status,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
+
+
+@router.get("", response_model=WatchlistsListResponse, summary="List Watchlists")
+async def list_watchlists(
+    status_filter: str | None = Query(None, alias="status"),
+    include_deleted: bool = Query(False),
+    page: int = Query(1, ge=1),
+    size: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(get_request_user),
+    db = Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        db.ensure_default_watchlist()
+        limit = size
+        offset = (page - 1) * limit
+        rows, total = db.list_watchlists(
+            status=status_filter,
+            include_deleted=include_deleted,
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return WatchlistsListResponse(
+        items=[_watchlist_response_from_row(row) for row in rows],
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(rows),
+        ),
+    )
+
+
+@router.post("", response_model=WatchlistContainer, status_code=status.HTTP_201_CREATED, summary="Create Watchlist")
+async def create_watchlist(
+    payload: WatchlistCreateRequest = Body(...),
+    current_user: User = Depends(get_request_user),
+    db = Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        row = db.create_watchlist(
+            name=payload.name,
+            description=payload.description,
+            objective=payload.objective,
+            domain=payload.domain,
+            status=payload.status,
+            priority=payload.priority,
+            tags=payload.tags,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _watchlist_response_from_row(row)
 
 
 def _watchlists_event_timestamp() -> str:
@@ -1042,6 +1145,7 @@ def _job_payload(job_row: Any) -> dict[str, Any]:
         "id": job_row.id,
         "name": job_row.name,
         "description": getattr(job_row, "description", None),
+        "watchlist_id": getattr(job_row, "watchlist_id", None),
         "scope": scope,
         "schedule_expr": getattr(job_row, "schedule_expr", None),
         "schedule_timezone": getattr(job_row, "schedule_timezone", None),
@@ -1457,6 +1561,7 @@ async def create_source(
         group_ids: list[int] | None = payload.group_ids
         if group_ids is not None:
             group_ids = _validate_group_ids(db, group_ids)
+        _ensure_watchlist_exists(db, payload.watchlist_id)
         # Backend normalization/validation for YouTube-as-RSS
         url_str = str(payload.url)
         orig_url_for_log = url_str
@@ -1482,6 +1587,7 @@ async def create_source(
             settings_json=(json.dumps(payload.settings) if payload.settings else None),
             tags=payload.tags or [],
             group_ids=group_ids or [],
+            watchlist_id=payload.watchlist_id,
         )
         # Ensure tags reflect payload even when source pre-exists (idempotent create)
         if payload.tags is not None:
@@ -1509,6 +1615,7 @@ async def list_sources(
     q: str | None = Query(None),
     tags: list[str] | None = Query(None, description="Filter by tag names (AND semantics)"),
     groups: list[int] | None = Query(None, description="Filter by group IDs (OR semantics)"),
+    watchlist_id: int | None = Query(None, ge=1),
     target_user_id: int | None = Query(
         None,
         ge=1,
@@ -1526,7 +1633,15 @@ async def list_sources(
     )
     limit = size
     offset = (page - 1) * limit
-    rows, total = target_db.list_sources(q=q, tag_names=tags, limit=limit, offset=offset, group_ids=groups)
+    _ensure_watchlist_exists(target_db, watchlist_id)
+    rows, total = target_db.list_sources(
+        q=q,
+        tag_names=tags,
+        limit=limit,
+        offset=offset,
+        group_ids=groups,
+        watchlist_id=watchlist_id,
+    )
     # Batch-fetch group IDs to avoid N+1
     source_ids = [int(r.id) for r in rows]
     try:
@@ -1544,6 +1659,7 @@ async def list_sources(
                 active=bool(r.active),
                 tags=r.tags,
                 group_ids=groups_map.get(int(r.id), []),
+                watchlist_ids=_get_source_watchlist_ids(target_db, int(r.id)),
                 settings=(json.loads(r.settings_json) if r.settings_json else None),
                 last_scraped_at=r.last_scraped_at,
                 status=r.status,
@@ -1628,6 +1744,7 @@ async def import_sources_opml(
     active: bool = Form(True),
     tags: list[str] | None = Form(None),
     group_id: int | None = Form(None),
+    watchlist_id: int | None = Form(None),
     current_user: User = Depends(get_request_user),
     db = Depends(get_watchlists_db_for_user),
     response: Response = None,  # type: ignore[assignment]
@@ -1636,6 +1753,7 @@ async def import_sources_opml(
     entries = parse_opml(content)
     if group_id is not None:
         _validate_group_ids(db, [group_id])
+    _ensure_watchlist_exists(db, watchlist_id)
     items: list[SourcesImportItem] = []
     companion_events: list[dict[str, Any]] = []
     created = skipped = errors = 0
@@ -1661,6 +1779,8 @@ async def import_sources_opml(
             except (*_WATCHLISTS_NONCRITICAL_EXCEPTIONS, _DatabaseError):
                 existing = None
             if existing is not None:
+                if watchlist_id is not None:
+                    db.add_source_to_watchlist(int(watchlist_id), int(existing.id))
                 items.append(
                     SourcesImportItem(url=url_str, name=existing.name, id=existing.id, status="skipped", error="duplicate_source")
                 )
@@ -1674,6 +1794,7 @@ async def import_sources_opml(
                 settings_json=None,
                 tags=default_tags,
                 group_ids=([group_id] if group_id else []),
+                watchlist_id=watchlist_id,
             )
             companion_events.append(
                 build_watchlist_source_bulk_import_activity(
@@ -1872,20 +1993,7 @@ async def get_source(
         r = target_db.get_source(source_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="source_not_found") from None
-    return Source(
-        id=r.id,
-        name=r.name,
-        url=r.url,
-        source_type=r.source_type,  # type: ignore[assignment]
-        active=bool(r.active),
-        tags=r.tags,
-        group_ids=_get_group_ids(target_db, r.id),
-        settings=(json.loads(r.settings_json) if r.settings_json else None),
-        last_scraped_at=r.last_scraped_at,
-        status=r.status,
-        created_at=r.created_at,
-        updated_at=r.updated_at,
-    )
+    return _source_response_from_row(target_db, r)
 
 
 @router.get(
@@ -2378,6 +2486,7 @@ async def bulk_create_sources(
         try:
             if s.group_ids is not None:
                 _validate_group_ids(db, s.group_ids)
+            _ensure_watchlist_exists(db, s.watchlist_id)
         except HTTPException as ve:
             items.append(
                 SourcesBulkCreateItem(
@@ -2413,6 +2522,7 @@ async def bulk_create_sources(
                 settings_json=(json.dumps(s.settings) if s.settings else None),
                 tags=s.tags or [],
                 group_ids=s.group_ids or [],
+                watchlist_id=s.watchlist_id,
             )
             if getattr(row, "was_created", False):
                 companion_events.append(
@@ -2793,6 +2903,7 @@ async def create_job(
         timezone=payload.timezone,
         output_prefs=output_prefs,
     )
+    _ensure_watchlist_exists(db, payload.watchlist_id)
     try:
         jf_json = None
         try:
@@ -2812,6 +2923,7 @@ async def create_job(
             retry_policy_json=json.dumps(payload.retry_policy or {}),
             output_prefs_json=json.dumps(output_prefs),
             job_filters_json=jf_json,
+            watchlist_id=payload.watchlist_id,
         )
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"create_job failed: {e}")
@@ -2882,6 +2994,7 @@ async def create_job(
         id=row.id,
         name=row.name,
         description=row.description,
+        watchlist_id=getattr(row, "watchlist_id", None),
         scope=(json.loads(row.scope_json or "{}")),
         schedule_expr=row.schedule_expr,
         timezone=row.schedule_timezone,
@@ -3102,6 +3215,7 @@ async def preview_job(
 @router.get("/jobs", response_model=JobsListResponse, summary="List jobs")
 async def list_jobs(
     q: str | None = Query(None),
+    watchlist_id: int | None = Query(None, ge=1),
     target_user_id: int | None = Query(
         None,
         ge=1,
@@ -3119,7 +3233,8 @@ async def list_jobs(
     )
     limit = size
     offset = (page - 1) * limit
-    rows, total = target_db.list_jobs(q=q, limit=limit, offset=offset)
+    _ensure_watchlist_exists(target_db, watchlist_id)
+    rows, total = target_db.list_jobs(q=q, limit=limit, offset=offset, watchlist_id=watchlist_id)
     items: list[Job] = []
     for r in rows:
         output_prefs = _normalize_output_prefs(getattr(r, "output_prefs_json", None))
@@ -3129,6 +3244,7 @@ async def list_jobs(
                 id=r.id,
                 name=r.name,
                 description=r.description,
+                watchlist_id=getattr(r, "watchlist_id", None),
                 scope=(json.loads(r.scope_json or "{}")),
                 schedule_expr=r.schedule_expr,
                 timezone=r.schedule_timezone,
@@ -3185,6 +3301,7 @@ async def get_job(
         id=r.id,
         name=r.name,
         description=r.description,
+        watchlist_id=getattr(r, "watchlist_id", None),
         scope=(json.loads(r.scope_json or "{}")),
         schedule_expr=r.schedule_expr,
         timezone=r.schedule_timezone,
@@ -3225,6 +3342,7 @@ async def update_job(
         patch["retry_policy_json"] = json.dumps(patch.pop("retry_policy") or {})
     if "job_filters" in patch:
         patch["job_filters_json"] = json.dumps(patch.pop("job_filters") or {})
+    _ensure_watchlist_exists(db, patch.get("watchlist_id"))
     current_output_prefs = _normalize_output_prefs(getattr(current, "output_prefs_json", None))
     if ingest_prefs is not None:
         if output_prefs is None:
@@ -3345,6 +3463,7 @@ async def update_job(
         id=r.id,
         name=r.name,
         description=r.description,
+        watchlist_id=getattr(r, "watchlist_id", None),
         scope=(json.loads(r.scope_json or "{}")),
         schedule_expr=r.schedule_expr,
         timezone=r.schedule_timezone,
@@ -3523,6 +3642,7 @@ async def restore_job(
         id=row.id,
         name=row.name,
         description=row.description,
+        watchlist_id=getattr(row, "watchlist_id", None),
         scope=(json.loads(row.scope_json or "{}")),
         schedule_expr=row.schedule_expr,
         timezone=row.schedule_timezone,
@@ -3670,6 +3790,7 @@ async def list_runs_for_job(
 @router.get("/runs", response_model=RunsListResponse, summary="List runs across all jobs")
 async def list_runs_global(
     q: str | None = Query(None, description="Filter by job name/description, run status, or run id (text)"),
+    watchlist_id: int | None = Query(None, ge=1),
     target_user_id: int | None = Query(
         None,
         ge=1,
@@ -3688,7 +3809,8 @@ async def list_runs_global(
     )
     limit = size
     offset = (page - 1) * limit
-    rows, total = target_db.list_runs(q=q, limit=limit, offset=offset)
+    _ensure_watchlist_exists(target_db, watchlist_id)
+    rows, total = target_db.list_runs(q=q, limit=limit, offset=offset, watchlist_id=watchlist_id)
     items = [
         Run(
             id=r.id,
@@ -4533,6 +4655,7 @@ async def get_scraped_item_smart_counts(
     run_id: int | None = Query(None),
     job_id: int | None = Query(None),
     source_id: int | None = Query(None),
+    watchlist_id: int | None = Query(None, ge=1),
     status: str | None = Query(None),
     target_user_id: int | None = Query(
         None,
@@ -4551,12 +4674,14 @@ async def get_scraped_item_smart_counts(
         current_db=db,
         target_user_id=target_user_id,
     )
+    _ensure_watchlist_exists(target_db, watchlist_id)
     today_since = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     return ScrapedItemSmartCountsResponse(
         **target_db.get_item_smart_counts(
             run_id=run_id,
             job_id=job_id,
             source_id=source_id,
+            watchlist_id=watchlist_id,
             status=status,
             search=q,
             since=since,
@@ -4572,6 +4697,7 @@ async def list_scraped_items(
     run_id: int | None = Query(None),
     job_id: int | None = Query(None),
     source_id: int | None = Query(None),
+    watchlist_id: int | None = Query(None, ge=1),
     status: str | None = Query(None),
     reviewed: bool | None = Query(None),
     queued_for_briefing: bool | None = Query(None),
@@ -4595,10 +4721,12 @@ async def list_scraped_items(
     )
     limit = size
     offset = (page - 1) * limit
+    _ensure_watchlist_exists(target_db, watchlist_id)
     rows, total = target_db.list_items(
         run_id=run_id,
         job_id=job_id,
         source_id=source_id,
+        watchlist_id=watchlist_id,
         status=status,
         reviewed=reviewed,
         queued_for_briefing=queued_for_briefing,
@@ -6037,3 +6165,72 @@ async def delete_template(
     except template_store.TemplateNotFoundError:
         raise HTTPException(status_code=404, detail="template_not_found") from None
     return {"deleted": True}
+
+
+@router.get("/{watchlist_id}", response_model=WatchlistContainer, summary="Get Watchlist")
+async def get_watchlist(
+    watchlist_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db = Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        row = db.get_watchlist(watchlist_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="watchlist_not_found") from None
+    return _watchlist_response_from_row(row)
+
+
+@router.patch("/{watchlist_id}", response_model=WatchlistContainer, summary="Update Watchlist")
+async def update_watchlist(
+    watchlist_id: int = Path(..., ge=1),
+    payload: WatchlistUpdateRequest = Body(...),
+    current_user: User = Depends(get_request_user),
+    db = Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        row = db.update_watchlist(watchlist_id, payload.model_dump(exclude_unset=True))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="watchlist_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _watchlist_response_from_row(row)
+
+
+@router.delete("/{watchlist_id}", response_model=WatchlistDeleteResponse, summary="Delete Watchlist")
+async def delete_watchlist(
+    watchlist_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db = Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    ok, restore_expires_at = db.delete_watchlist(
+        watchlist_id,
+        restore_window_seconds=WATCHLISTS_DELETE_RESTORE_WINDOW_SECONDS,
+    )
+    if not ok or not restore_expires_at:
+        raise HTTPException(status_code=404, detail="watchlist_not_found")
+    return WatchlistDeleteResponse(
+        success=True,
+        watchlist_id=int(watchlist_id),
+        restore_window_seconds=WATCHLISTS_DELETE_RESTORE_WINDOW_SECONDS,
+        restore_expires_at=restore_expires_at,
+    )
+
+
+@router.post("/{watchlist_id}/restore", response_model=WatchlistContainer, summary="Restore deleted Watchlist")
+async def restore_watchlist(
+    watchlist_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db = Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        row = db.restore_watchlist(watchlist_id)
+    except KeyError as exc:
+        code = str(exc.args[0]) if exc.args else "watchlist_not_found"
+        if code == "watchlist_restore_expired":
+            raise HTTPException(status_code=410, detail=code) from None
+        raise HTTPException(status_code=404, detail=code) from None
+    return _watchlist_response_from_row(row)

@@ -7,6 +7,9 @@ from pydantic import AnyUrl, BaseModel, Field, field_validator, model_validator
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 SourceType = Literal["rss", "site", "forum"]  # forums are feature-flagged for Phase 3
+WatchlistDomain = Literal["cti_osint", "news", "general"]
+WatchlistStatus = Literal["active", "paused", "archived"]
+WatchlistPriority = Literal["low", "medium", "high", "critical"]
 
 
 def _default_offset_pagination_aliases(response):
@@ -53,6 +56,54 @@ class WatchlistIngestPrefs(BaseModel):
     )
 
 
+class WatchlistCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    description: str | None = None
+    objective: str | None = None
+    domain: WatchlistDomain = "general"
+    status: WatchlistStatus = "active"
+    priority: WatchlistPriority = "medium"
+    tags: list[str] = Field(default_factory=list)
+
+
+class WatchlistUpdateRequest(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=200)
+    description: str | None = None
+    objective: str | None = None
+    domain: WatchlistDomain | None = None
+    status: WatchlistStatus | None = None
+    priority: WatchlistPriority | None = None
+    tags: list[str] | None = None
+
+
+class WatchlistContainer(BaseModel):
+    id: int
+    name: str
+    description: str | None = None
+    objective: str | None = None
+    domain: WatchlistDomain
+    status: WatchlistStatus
+    priority: WatchlistPriority
+    tags: list[str] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+    archived_at: str | None = None
+    deleted_at: str | None = None
+    restore_expires_at: str | None = None
+
+
+class WatchlistsListResponse(BaseModel):
+    items: list[WatchlistContainer]
+    total: int
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
+
+
 class SourceCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     url: AnyUrl
@@ -61,6 +112,7 @@ class SourceCreateRequest(BaseModel):
     settings: dict[str, Any] | None = None
     tags: list[str] | None = Field(default=None, description="Tag names; server normalizes and resolves to IDs")
     group_ids: list[int] | None = None
+    watchlist_id: int | None = Field(default=None, ge=1)
 
 
 class SourceUpdateRequest(BaseModel):
@@ -85,8 +137,9 @@ class Source(BaseModel):
     url: str
     source_type: SourceType
     active: bool
-    tags: list[str] = []
-    group_ids: list[int] = []
+    tags: list[str] = Field(default_factory=list)
+    group_ids: list[int] = Field(default_factory=list)
+    watchlist_ids: list[int] = Field(default_factory=list)
     settings: dict[str, Any] | None = None
     last_scraped_at: str | None = None
     status: str | None = None
@@ -114,6 +167,10 @@ class ReversibleDeleteResponse(BaseModel):
 
 class SourceDeleteResponse(ReversibleDeleteResponse):
     source_id: int
+
+
+class WatchlistDeleteResponse(ReversibleDeleteResponse):
+    watchlist_id: int
 
 
 class SourceSeenStats(BaseModel):
@@ -247,6 +304,7 @@ class JobCreateRequest(BaseModel):
         default=None,
         description="Optional job-level filters payload (bridge from SUBS Import Rules)",
     )
+    watchlist_id: int | None = Field(default=None, ge=1)
 
 
 class JobUpdateRequest(BaseModel):
@@ -268,12 +326,14 @@ class JobUpdateRequest(BaseModel):
         default=None,
         description="Optional job-level filters payload (replace)",
     )
+    watchlist_id: int | None = Field(default=None, ge=1)
 
 
 class Job(BaseModel):
     id: int
     name: str
     description: str | None = None
+    watchlist_id: int | None = None
     scope: dict[str, Any]
     schedule_expr: str | None
     timezone: str | None
