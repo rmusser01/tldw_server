@@ -175,6 +175,21 @@ separate follow-ups.
 5. Verification: add contract tests, source-lineage fixtures, UI regression
    coverage, and redaction/retention checks.
 
+### Current Storage/API Foundation
+
+Issue #1703 implements the first backend foundation on the existing
+`workspace_artifacts` surface rather than introducing an ACP-only artifact
+store. The API and database now preserve traceable contract fields for content
+envelope, owner scope, source lineage, ACP producer metadata, review metadata,
+version metadata, export references, redaction posture, schema version, stable
+root artifact ID, artifact version ID, and previous-version links. Artifact
+creation writes the initial version record; artifact updates create a new
+version record and carry the previous version ID forward.
+
+This does not complete the full product contract. Workspace artifact detail UI,
+ACP deliverable promotion flows, accepted-version export adapters, and broader
+redaction/retention verification remain separate follow-up slices.
+
 ## Release Caveats
 
 - Do not claim every generated output is traceable until it is represented by
