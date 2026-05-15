@@ -337,7 +337,7 @@ export const CurrentChatModelSettings = ({
   const { data: composerModels = [], isLoading: modelsLoading } = useQuery<
     ChatModel[]
   >({
-    queryKey: ["playground:chatModels", open],
+    queryKey: ["playground:chatModels"],
     queryFn: async () => {
       try {
         return await fetchChatModels({ returnEmpty: true })
@@ -396,7 +396,10 @@ export const CurrentChatModelSettings = ({
       return getCanonicalModelKey(modelIdMatch)
     }
 
-    return getCanonicalModelKey(selectedProviderHint || "custom", selectedModelId)
+    return getCanonicalModelKey({
+      provider: selectedProviderHint || "custom",
+      model: selectedModelId
+    })
   }, [apiProvider, composerModels, selectedModel])
 
   const saveSettings = useCallback(
@@ -408,8 +411,8 @@ export const CurrentChatModelSettings = ({
           : null
       const targetSettingsScope =
         explicitSettingsScope ||
-        latestSettingsState.activeSettingsScope ||
-        selectedModelSettingsScope
+        selectedModelSettingsScope ||
+        latestSettingsState.activeSettingsScope
 
       if (targetSettingsScope) {
         setActiveSettingsScope(targetSettingsScope)

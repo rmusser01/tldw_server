@@ -1,10 +1,10 @@
 ---
 id: TASK-369
 title: Recertify issue 1646 main chat cockpit strict gaps
-status: Done
+status: In Progress
 assignee: []
 created_date: '2026-05-15 03:23'
-updated_date: '2026-05-15 06:52'
+updated_date: '2026-05-15 08:02'
 labels:
   - webui
   - chat
@@ -54,6 +54,8 @@ Verification recorded:
 - Bandit not applicable: no backend/Python files touched.
 - Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1721
 - Issue #1646 was updated checkbox-by-checkbox and closed with recertification evidence.
+- PR review reopened the tracker from Done to In Progress; final Done waits for maintainer sign-off and PR #1721 closeout.
+- PR review fixes verified locally: focused Vitest review slice passed, design-system state verifier passed with existing allowed baseline exceptions, `git diff --check` passed, and the trailing-whitespace pre-commit hook passed for touched files.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

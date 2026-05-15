@@ -114,6 +114,9 @@ import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return";
 const toText = (value: unknown): string =>
   typeof value === "string" ? value : String(value);
 
+const UNAVAILABLE_DESIGN_STATE_LABEL =
+  getDesignSystemState("unavailable").label;
+
 const LazyArtifactsPanel = React.lazy(() =>
   import("@/components/Sidepanel/Chat/ArtifactsPanel").then((module) => ({
     default: module.ArtifactsPanel,
@@ -2246,7 +2249,7 @@ export const Playground = () => {
           unavailableToolsLabel: toText(
             t(
               "playground:cockpit.mcpUnavailableToolsLabel",
-              getDesignSystemState("unavailable").label,
+              UNAVAILABLE_DESIGN_STATE_LABEL,
             ),
           ),
           userDisabledLabel: toText(

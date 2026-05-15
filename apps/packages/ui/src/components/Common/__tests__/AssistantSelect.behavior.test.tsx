@@ -433,9 +433,11 @@ describe("AssistantSelect behavior", () => {
     )
 
     await user.click(await screen.findByRole("tab", { name: targetTab }))
+    mocks.setSelectedAssistant.mockClear()
     await user.click(await screen.findByRole("button", { name: targetName }))
 
-    expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(
+    expect(mocks.setSelectedAssistant).toHaveBeenCalledTimes(1)
+    expect(mocks.setSelectedAssistant).toHaveBeenLastCalledWith(
       expect.objectContaining(expected)
     )
   })
