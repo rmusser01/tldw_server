@@ -54,24 +54,24 @@ Each slice should have its own Backlog task before edits begin. `TASK-378` only 
 - Modify `tldw_Server_API/app/core/Chat/chat_service.py` only enough to expose a safe hook point if tests need it.
 
 **Implementation Steps:**
-- [ ] Write failing unit tests for message canonicalization:
+- [x] Write failing unit tests for message canonicalization:
   - same logical prompt produces same fingerprint despite dict key order;
   - changed message order changes the aggregate fingerprint;
   - large text is hashed rather than copied into diagnostics;
   - unsupported message parts are represented by bounded type markers.
-- [ ] Write failing unit tests for segment accounting:
+- [x] Write failing unit tests for segment accounting:
   - static/system messages are counted separately from user/history;
   - world-book and retrieval segments can be passed explicitly;
   - token estimates are present and never negative;
   - fingerprint version is included in every envelope.
-- [ ] Implement `PromptSegment`, `PromptCostEnvelope`, and helpers:
+- [x] Implement `PromptSegment`, `PromptCostEnvelope`, and helpers:
   - `canonicalize_messages(messages: Sequence[Mapping[str, Any]]) -> str`
   - `fingerprint_text(text: str, *, version: str = "prompt-v1") -> str`
   - `estimate_segment_tokens(text: str) -> int`
   - `build_prompt_cost_envelope(...) -> PromptCostEnvelope`
-- [ ] Keep the token estimator conservative and local. Reuse existing chat token-estimate helpers if available; do not add a tokenizer dependency in this slice.
-- [ ] Add redaction limits for diagnostic payloads: IDs, counts, hashes, and bounded numeric estimates only.
-- [ ] Run focused tests.
+- [x] Keep the token estimator conservative and local. Reuse existing chat token-estimate helpers if available; do not add a tokenizer dependency in this slice.
+- [x] Add redaction limits for diagnostic payloads: IDs, counts, hashes, and bounded numeric estimates only.
+- [x] Run focused tests.
 
 **Tests:**
 ```bash
