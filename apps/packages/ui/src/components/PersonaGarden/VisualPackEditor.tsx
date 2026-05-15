@@ -101,9 +101,14 @@ type LibraryEditDraft = {
   tags: string
 }
 
+type VisualPackTranslate = (
+  key: string,
+  options?: { defaultValue?: string; [key: string]: unknown }
+) => string
+
 const getGenerationReadinessCopy = (
   view: PersonaVisualGenerationReadinessView,
-  t: (key: string, options?: { defaultValue?: string }) => string
+  t: VisualPackTranslate
 ): { title: string; message: string; toneClassName: string } => {
   switch (view.status) {
     case "ready":
@@ -246,12 +251,163 @@ const TRIGGER_SOURCES: PersonaVisualAuthoredTrigger["source"][] = [
 ]
 
 const PORTABLE_VISUAL_PACK_EXTENSION = ".tldw-persona-vpack"
+const PORTABLE_VISUAL_PACK_MIME_TYPES = new Set([
+  "application/octet-stream",
+  "application/vnd.tldw.persona.visual-pack+zip",
+  "application/x-zip-compressed",
+  "application/zip"
+])
 const IMPORT_COMMIT_TERMINAL_STATUSES = new Set([
   "completed",
   "failed",
   "cancelled",
   "quarantined"
 ])
+const IMPORT_PREVIEW_TERMINAL_STATUSES = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+  "blocked",
+  "deleted",
+  "quarantined"
+])
+
+const hasPortableVisualPackExtension = (file: File | null): boolean =>
+  !file || file.name.toLowerCase().endsWith(PORTABLE_VISUAL_PACK_EXTENSION)
+
+const hasSupportedPortableVisualPackMediaType = (file: File | null): boolean => {
+  if (!file) return true
+  const mediaType = file.type.trim().toLowerCase()
+  return !mediaType || PORTABLE_VISUAL_PACK_MIME_TYPES.has(mediaType)
+}
+
+const isPortableVisualPackFile = (file: File | null): boolean =>
+  hasPortableVisualPackExtension(file) && hasSupportedPortableVisualPackMediaType(file)
+
+const getImportPreviewFileError = (
+  file: File | null,
+  t: VisualPackTranslate
+): string | null => {
+  if (isPortableVisualPackFile(file)) return null
+  if (!hasPortableVisualPackExtension(file)) {
+    return t("sidepanel:personaGarden.visuals.importPreviewUnsupportedExtension", {
+      extension: PORTABLE_VISUAL_PACK_EXTENSION,
+      defaultValue: `Choose a ${PORTABLE_VISUAL_PACK_EXTENSION} archive exported from Persona Visual Packs.`
+    })
+  }
+  return t("sidepanel:personaGarden.visuals.importPreviewUnsupportedMimeType", {
+    defaultValue:
+      "Choose a Persona Visual pack archive with a supported zip media type."
+  })
+}
+
+type ImportPreviewStatus =
+  | PersonaVisualImportPreviewStartResponse
+  | PersonaVisualImportPreviewResponse
+  | null
+
+const getImportPreviewJobCopy = (
+  preview: ImportPreviewStatus,
+  t: VisualPackTranslate
+): string | null => {
+  if (!preview) return null
+  const statusValue = String(preview.status || "").trim()
+  const stageValue = String(preview.stage || "").trim()
+  const errorMessage =
+    "error_message" in preview && typeof preview.error_message === "string"
+      ? preview.error_message.trim()
+      : ""
+  if (
+    IMPORT_PREVIEW_TERMINAL_STATUSES.has(statusValue) &&
+    !["blocked", "completed"].includes(statusValue)
+  ) {
+    return (
+      errorMessage ||
+      t("sidepanel:personaGarden.visuals.importPreviewTerminalStatus", {
+        stage: stageValue || "validation",
+        status: statusValue,
+        defaultValue: `Import preview ${statusValue} during ${stageValue || "validation"}.`
+      })
+    )
+  }
+  if (statusValue === "blocked") {
+    return t("sidepanel:personaGarden.visuals.importPreviewBlocked", {
+      defaultValue:
+        "Import preview completed with blockers. Review diagnostics before committing."
+    })
+  }
+  if (statusValue === "completed") {
+    return t("sidepanel:personaGarden.visuals.importPreviewCompleted", {
+      defaultValue: "Import preview completed. Review the draft plan before committing."
+    })
+  }
+  if (statusValue === "queued") {
+    return t("sidepanel:personaGarden.visuals.importPreviewQueued", {
+      defaultValue: "Import preview queued. Refresh to check validation status."
+    })
+  }
+  if (statusValue === "processing") {
+    return t("sidepanel:personaGarden.visuals.importPreviewProcessing", {
+      stage: stageValue,
+      stageSuffix: stageValue ? `: ${stageValue}` : ".",
+      defaultValue: `Import preview is processing${stageValue ? `: ${stageValue}` : "."}`
+    })
+  }
+  return stageValue
+    ? t("sidepanel:personaGarden.visuals.importPreviewStatus", {
+        stage: stageValue,
+        status: statusValue,
+        defaultValue: `Import preview ${statusValue}: ${stageValue}`
+      })
+    : null
+}
+
+const getImportCommitJobCopy = (
+  job: PersonaVisualImportCommitStartResponse | PersonaVisualPortabilityJobResponse | null,
+  t: VisualPackTranslate
+): string | null => {
+  if (!job) return null
+  const statusValue = String(job.status || "").trim()
+  const stageValue = String(job.stage || "").trim()
+  const errorMessage =
+    "error_message" in job && typeof job.error_message === "string"
+      ? job.error_message.trim()
+      : ""
+  if (["failed", "cancelled", "quarantined"].includes(statusValue)) {
+    return (
+      errorMessage ||
+      t("sidepanel:personaGarden.visuals.importCommitTerminalStatus", {
+        stage: stageValue || "commit",
+        status: statusValue,
+        defaultValue: `Import commit ${statusValue} during ${stageValue || "commit"}.`
+      })
+    )
+  }
+  if (statusValue === "completed") {
+    return t("sidepanel:personaGarden.visuals.importCommitCompleted", {
+      defaultValue: "Import commit completed. Review and activate the new draft when ready."
+    })
+  }
+  if (statusValue === "queued") {
+    return t("sidepanel:personaGarden.visuals.importCommitQueued", {
+      defaultValue: "Import commit queued. Refresh to check draft creation status."
+    })
+  }
+  if (statusValue === "processing") {
+    return t("sidepanel:personaGarden.visuals.importCommitProcessing", {
+      stage: stageValue,
+      stageSuffix: stageValue ? `: ${stageValue}` : ".",
+      defaultValue: `Import commit is processing${stageValue ? `: ${stageValue}` : "."}`
+    })
+  }
+  return stageValue
+    ? t("sidepanel:personaGarden.visuals.importCommitStatus", {
+        stage: stageValue,
+        status: statusValue,
+        defaultValue: `Import commit ${statusValue}: ${stageValue}`
+      })
+    : null
+}
 
 const DEFAULT_MANIFEST: PersonaVisualManifest = {
   manifest_version: 1,
@@ -603,6 +759,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const unknownLabel = t("common:unknown", { defaultValue: "unknown" })
   const [packs, setPacks] = React.useState<PersonaVisualPack[]>([])
   const [selectedPackId, setSelectedPackId] = React.useState("")
+  const selectedPackIdRef = React.useRef("")
   const [draftTitle, setDraftTitle] = React.useState("")
   const [draftManifest, setDraftManifest] =
     React.useState<PersonaVisualManifest>(DEFAULT_MANIFEST)
@@ -755,7 +912,13 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     [generationReadinessView, t]
   )
 
-  const loadPacks = React.useCallback(async (): Promise<boolean> => {
+  React.useEffect(() => {
+    selectedPackIdRef.current = selectedPackId
+  }, [selectedPackId])
+
+  const loadPacks = React.useCallback(async (
+    preferredPackId?: string | null
+  ): Promise<boolean> => {
     if (!isActive || !selectedPersonaId) {
       setPacks([])
       setSelectedPackId("")
@@ -769,9 +932,13 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       const response = await listPersonaVisualPacks(selectedPersonaId)
       const nextPacks = response.packs || []
       setPacks(nextPacks)
+      const explicitPreferredPack = preferredPackId
+        ? nextPacks.find((pack) => pack.id === preferredPackId) ?? null
+        : null
       const preferred =
+        explicitPreferredPack ??
         response.active_pack ??
-        nextPacks.find((pack) => pack.id === selectedPackId) ??
+        nextPacks.find((pack) => pack.id === selectedPackIdRef.current) ??
         nextPacks[0] ??
         null
       setSelectedPackId(preferred?.id || "")
@@ -1309,6 +1476,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
 
   const handleStartImportPreview = async () => {
     if (!selectedPersonaId || !selectedImportPreviewFile) return
+    const fileError = getImportPreviewFileError(selectedImportPreviewFile, t)
+    if (fileError) {
+      setError(fileError)
+      return
+    }
     setPreviewingImport(true)
     setError(null)
     try {
@@ -1323,7 +1495,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       setImportDraftTitle("")
       setSelectedImportPreviewFile(null)
       if (importPreviewInputRef.current) importPreviewInputRef.current.value = ""
-      setStatusMessage("Import preview queued.")
+      setStatusMessage(
+        t("sidepanel:personaGarden.visuals.importPreviewQueuedStatus", {
+          defaultValue: "Import preview queued."
+        })
+      )
     } catch (previewError) {
       setError(
         previewError instanceof Error
@@ -1381,7 +1557,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       )
       setImportCommitJob(job)
       setStatusMessage(
-        "Import commit queued. Imported packs remain drafts until activated."
+        t("sidepanel:personaGarden.visuals.importCommitQueuedStatus", {
+          defaultValue:
+            "Import commit queued. Imported packs remain drafts until activated."
+        })
       )
     } catch (commitError) {
       setError(
@@ -1406,10 +1585,13 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       )
       setImportCommitJob(job)
       if (job.status === "completed" && job.pack_id) {
-        const refreshed = await loadPacks()
+        const refreshed = await loadPacks(job.pack_id)
         if (refreshed) {
           setStatusMessage(
-            "Import commit completed. Review and activate the new draft when ready."
+            t("sidepanel:personaGarden.visuals.importCommitCompleted", {
+              defaultValue:
+                "Import commit completed. Review and activate the new draft when ready."
+            })
           )
         } else {
           setStatusMessage(null)
@@ -1941,6 +2123,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       ? exportJob.warnings
       : []
   const fullImportPreview = isFullImportPreview(importPreview) ? importPreview : null
+  const importPreviewFileError = getImportPreviewFileError(selectedImportPreviewFile, t)
+  const importPreviewJobCopy = getImportPreviewJobCopy(importPreview, t)
+  const importCommitJobCopy = getImportCommitJobCopy(importCommitJob, t)
   const importPreviewWarnings = fullImportPreview
     ? [
         ...(fullImportPreview.validation_warnings || []),
@@ -2008,8 +2193,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
             </div>
           </div>
           <Button
+            data-testid="persona-visual-pack-refresh-button"
             size="small"
-            onClick={() => void loadPacks()}
+            onClick={() => void loadPacks(selectedPack?.id)}
             disabled={loading}
           >
             {loading ? loadingLabel : refreshLabel}
@@ -2428,7 +2614,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                     size="small"
                     icon={<FileSearch className="h-3.5 w-3.5" />}
                     loading={previewingImport}
-                    disabled={!selectedImportPreviewFile}
+                    disabled={!selectedImportPreviewFile || Boolean(importPreviewFileError)}
                     onClick={() => void handleStartImportPreview()}
                   >
                     Preview
@@ -2444,6 +2630,14 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                     Refresh
                   </Button>
                 </div>
+                {importPreviewFileError ? (
+                  <div
+                    data-testid="persona-visual-import-preview-file-error"
+                    className="mt-2 text-xs text-state-error"
+                  >
+                    {importPreviewFileError}
+                  </div>
+                ) : null}
                 {importPreview ? (
                   <div className="mt-2 space-y-1 text-xs text-text-muted">
                     <div className="flex flex-wrap items-center gap-2">
@@ -2456,6 +2650,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                     <div data-testid="persona-visual-import-preview-summary">
                       {formatImportPreviewSummary(importPreview)}
                     </div>
+                    {importPreviewJobCopy ? (
+                      <div data-testid="persona-visual-import-preview-job-copy">
+                        {importPreviewJobCopy}
+                      </div>
+                    ) : null}
                     {importPreviewWarnings.length ? (
                       <div data-testid="persona-visual-import-preview-warnings">
                         {formatPreviewList(importPreviewWarnings)}
@@ -2661,16 +2860,23 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                           </Button>
                         </div>
                         {importCommitJob ? (
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-text-muted">
-                            <Tag data-testid="persona-visual-import-commit-status">
-                              {importCommitJob.status}
-                            </Tag>
-                            <span data-testid="persona-visual-import-commit-stage">
-                              {importCommitJob.stage}
-                            </span>
-                            <span data-testid="persona-visual-import-commit-job-id">
-                              {importCommitJob.job_id}
-                            </span>
+                          <div className="mt-2 space-y-1 text-text-muted">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Tag data-testid="persona-visual-import-commit-status">
+                                {importCommitJob.status}
+                              </Tag>
+                              <span data-testid="persona-visual-import-commit-stage">
+                                {importCommitJob.stage}
+                              </span>
+                              <span data-testid="persona-visual-import-commit-job-id">
+                                {importCommitJob.job_id}
+                              </span>
+                            </div>
+                            {importCommitJobCopy ? (
+                              <div data-testid="persona-visual-import-commit-job-copy">
+                                {importCommitJobCopy}
+                              </div>
+                            ) : null}
                           </div>
                         ) : (
                           <div className="mt-2 text-text-muted">
@@ -3111,7 +3317,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
               <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
                 Generated Candidates
               </div>
-              <Button size="small" onClick={() => void loadCandidates()}>
+              <Button
+                data-testid="persona-visual-candidates-refresh-button"
+                size="small"
+                onClick={() => void loadCandidates()}
+              >
                 {candidatesLoading ? loadingLabel : refreshLabel}
               </Button>
             </div>
