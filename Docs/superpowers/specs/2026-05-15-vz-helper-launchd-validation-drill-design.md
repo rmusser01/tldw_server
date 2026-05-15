@@ -95,12 +95,15 @@ two equivalent surfaces, but the preferred user-facing shape is a helperctl
 subcommand:
 
 ```bash
+label="org.tldw.macos-vz-helper.drill.$$"
+
 tools/macos-vz-helper/scripts/vz-helperctl.py launchd-drill \
   --bundle /path/to/canonical/bundle \
   --helper tools/macos-vz-helper/.build/debug/macos-vz-helper \
   --socket "$runtime_dir/helper.sock" \
   --log-dir "$runtime_dir/logs" \
-  --plist-output "$runtime_dir/org.tldw.macos-vz-helper.plist" \
+  --plist-output "$runtime_dir/${label}.plist" \
+  --label "$label" \
   --write-plist \
   --create-dirs
 ```
@@ -109,6 +112,14 @@ The command should support `--dry-run` and `--json`. Real `launchctl` mutation
 must require a prepared macOS host and explicit non-dry-run execution. The drill
 may optionally expose `--skip-smoke` for launchd-only validation when an operator
 wants to prove process supervision without booting a VM.
+
+The drill should use an isolated validation label by default, for example
+`org.tldw.macos-vz-helper.drill.<pid>`, and a private runtime plist path unless
+the operator explicitly supplies `--label` and `--plist-output`. This avoids
+accidentally booting out a real user LaunchAgent that happens to use the
+production default label. If the selected launchd target is already loaded
+before bootstrap, the drill should fail closed unless a future explicit
+replace-existing option is designed.
 
 Do not add launchd as the default path inside `run-host-e2e-smoke.sh`. If shell
 integration is useful later, add an opt-in wrapper flag such as `--use-launchd`
@@ -127,18 +138,45 @@ The drill should run this sequence:
    path-safety helpers.
 3. Validate helper binary and entitlements state using the existing lifecycle
    checks.
-4. Render or validate the launchd plist only when explicitly requested.
-5. Run `launchd bootstrap`.
-6. Run `launchd status` and record the launchctl target.
-7. Run `launchd kickstart -k`.
-8. Wait for helper socket readiness and protocol-compatible ping through the
+4. Verify the selected launchd service target is not already loaded.
+5. Render or validate the launchd plist only when explicitly requested.
+6. Run `launchd bootstrap`.
+7. Run `launchd status` and record the launchctl target.
+8. Run `launchd kickstart -k`.
+9. Wait for helper socket readiness and protocol-compatible ping through the
    existing helper status path.
-9. If bundle smoke is enabled, run the existing host-gated pytest smoke contract
-   against the launchd-managed socket without starting a second helper.
-10. Run `launchd bootout`.
-11. Verify launchd no longer reports a loaded service, helper ping fails or
-   helper is absent, and only safe stale sockets are removed.
-12. Preserve stdout, stderr, serial logs, plist, and JSON/human drill output.
+10. If bundle smoke is enabled, run the existing host-gated pytest smoke
+    contract against the launchd-managed socket without starting a second
+    helper.
+11. Run `launchd bootout`.
+12. Verify launchd no longer reports a loaded service, helper ping fails or
+    helper is absent, and only safe stale sockets are removed.
+13. Preserve stdout, stderr, serial logs, plist, and JSON/human drill output.
+
+The smoke step should use the same environment contract as the existing
+host-gated tests rather than invoking `run-host-e2e-smoke.sh` unchanged:
+
+```bash
+TEST_MODE=0 \
+TLDW_SANDBOX_VZ_LINUX_E2E=1 \
+TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE="$bundle" \
+TLDW_SANDBOX_MACOS_HELPER_SOCKET="$socket" \
+SANDBOX_ENABLE_EXECUTION=1 \
+SANDBOX_BACKGROUND_EXECUTION=0 \
+python -m pytest \
+  tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py \
+  -m vz_linux_host_smoke -q -rs
+```
+
+The helper daemon smoke currently starts or validates the helper binary through
+its own test contract. The launchd drill should either skip that helper-daemon
+smoke or add a separate external-helper mode before reusing it, so the drill
+does not start a second helper on the same socket.
+
+The drill should not silently build or sign the helper. It may fail with clear
+preflight reasons, or a future implementation may add explicit `--build` and
+`--sign` flags that delegate to the existing helperctl `build` and `sign`
+subcommands before launchd mutation.
 
 `bootout` should be attempted during cleanup after any failure that happens
 after bootstrap succeeds. Cleanup must not hide the primary failure, but a
@@ -157,10 +195,20 @@ The drill should inherit existing helperctl safety behavior:
 - refuse creating missing directories unless `--create-dirs` is present
 - keep `status` and dry-run checks read-only
 - use the explicit launchd label and GUI domain when reporting service targets
+- only bootout the service target that this drill bootstrapped, unless a future
+  explicit replace-existing mode is designed
+- avoid `~/Library/LaunchAgents` as the default drill plist location; use a
+  private runtime path unless the operator deliberately points elsewhere
 
 The launchd path is a process-supervision drill only. It must not imply VM reuse
 or session repair. Python should continue to trust helper protocol and live VM
 truth, not launchd state, when deciding whether a session VM can be reused.
+
+Launchd-managed helpers will not necessarily have a `vz-helperctl.py start`
+pid file. The drill should treat a missing helperctl pid file as expected for
+launchd mode and use launchd status plus helper socket/ping/protocol readiness
+as the proof of usable helper state. A missing pid file should not make the
+drill fail when the helper is otherwise reachable and protocol-compatible.
 
 ## Output And Diagnostics
 
@@ -169,7 +217,7 @@ Human output should be step-oriented and terse:
 ```text
 launchd_plist: ok launchd_plist_written
 launchd_bootstrap: ok
-launchd_status: ok gui/501/org.tldw.macos-vz-helper
+launchd_status: ok gui/501/org.tldw.macos-vz-helper.drill.12345
 launchd_kickstart: ok
 helper_status: ok protocol_version=1 helper_version=...
 vz_linux_smoke: ok
@@ -198,6 +246,8 @@ Do not include secrets or raw guest command output in drill metadata.
 Expected failure classes:
 
 - `launchd_launchctl_unavailable`: host is not prepared for launchd execution.
+- `launchd_service_already_loaded`: the chosen label was loaded before the
+  drill, so cleanup ownership is ambiguous.
 - `launchd_plist_missing` or `launchd_plist_mismatch`: operator plist setup is
   incomplete or stale.
 - `helper_directory_not_private` or related path failures: runtime paths are not
@@ -211,8 +261,11 @@ Expected failure classes:
   VM execution failed.
 
 If bootstrap succeeds and a later step fails, the drill should still attempt
-bootout. If bootout fails, the final result should clearly say that operator
-cleanup is required and print the exact `launchctl bootout <target>` command.
+bootout for the service target it bootstrapped. If bootout fails because the
+target is already absent, the drill may treat cleanup as effectively complete
+while preserving the bootout reason. If bootout fails for any other reason, the
+final result should clearly say that operator cleanup is required and print the
+exact `launchctl bootout <target>` command.
 
 ## Test Strategy
 
@@ -226,6 +279,11 @@ Portable tests should cover:
 - `--skip-smoke` avoids VM smoke while still validating launchd/helper readiness
 - JSON result shape and step names
 - custom launchd labels and UIDs
+- selected label already loaded before bootstrap fails without bootout
+- missing helperctl pid file is accepted when launchd status and helper ping are
+  healthy
+- launchd drill smoke uses an externally managed helper socket and does not
+  start a second helper
 
 Host-gated/manual validation should cover:
 
@@ -260,6 +318,8 @@ The implementation PR should update:
    validation be the default with `--bundle` enabling VM smoke?
 3. Should real launchd host-gated workflow support land in the same PR as the
    local operator command, or in a follow-up after local validation?
+4. Should helper build/sign remain strict preconditions, or should the drill
+   grow explicit `--build` and `--sign` convenience flags?
 
 Recommended answers for the first implementation:
 
@@ -267,3 +327,5 @@ Recommended answers for the first implementation:
 - make VM smoke optional through `--bundle`
 - defer workflow integration until the local command has portable coverage and
   at least one manual real-host run
+- require prebuilt/signed helper in the first implementation instead of hiding
+  build/sign inside the drill

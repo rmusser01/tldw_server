@@ -46,6 +46,7 @@ Create the design/spec for an explicit operator-owned launchd validation drill f
 <!-- SECTION:NOTES:BEGIN -->
 - Design scope approved by the user before writing the spec.
 - This is a docs-only brainstorming/spec slice. No runtime code changes are included.
+- Design review tightened the spec around launchd label collisions, drill-owned bootout cleanup, helperctl pid-file absence under launchd, and the external-helper smoke seam.
 - Verification: `git diff --check` passed.
 - Bandit: skipped because the slice only adds docs and a Backlog task record.
 <!-- SECTION:NOTES:END -->
@@ -53,5 +54,5 @@ Create the design/spec for an explicit operator-owned launchd validation drill f
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added the approved launchd validation drill design in `Docs/superpowers/specs/2026-05-15-vz-helper-launchd-validation-drill-design.md`. The spec defines an explicit operator-owned drill on top of the existing `vz-helperctl.py launchd` commands, keeps the default direct-helper smoke path unchanged, calls out the existing shell smoke ownership boundary, and captures safety, cleanup, logging, portable tests, and host-gated/manual validation expectations for the future implementation slice.
+Added and reviewed the approved launchd validation drill design in `Docs/superpowers/specs/2026-05-15-vz-helper-launchd-validation-drill-design.md`. The spec defines an explicit operator-owned drill on top of the existing `vz-helperctl.py launchd` commands, keeps the default direct-helper smoke path unchanged, calls out the existing shell smoke ownership boundary, avoids collisions with real LaunchAgent labels, and captures safety, cleanup, logging, portable tests, and host-gated/manual validation expectations for the future implementation slice.
 <!-- SECTION:FINAL_SUMMARY:END -->
