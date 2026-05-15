@@ -1,9 +1,10 @@
 ---
 id: TASK-368.3
 title: Implement llama.cpp provider wiring and diagnostics
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-15 03:43'
+updated_date: '2026-05-15 06:03'
 labels:
   - implementation
   - backend
@@ -31,6 +32,12 @@ Implement the provider diagnostics backend slice from the implementation plan. A
 - [ ] #3 GET /api/v1/llamacpp/hardware returns best-effort RAM/CPU/GPU data with structured warnings and no hard dependency on NVIDIA hardware.
 - [ ] #4 New endpoints retain admin-only permission coverage and focused backend tests pass.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Started subagent-driven implementation for the provider wiring, hardware snapshot, and safe log tail backend slice after TASK-368.2 passed spec and code-quality review. Scope is limited to Task 3 backend files and tests from the implementation plan.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
