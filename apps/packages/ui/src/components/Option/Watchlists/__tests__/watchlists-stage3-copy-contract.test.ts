@@ -7,6 +7,9 @@ describe("Watchlists Stage 3 content alert copy contract", () => {
     const locale = watchlistsLocale as unknown as {
       tabs?: Record<string, string>
       alerts?: Record<string, unknown>
+      overview?: {
+        alertHealth?: Record<string, unknown>
+      }
       orientation?: Record<string, Record<string, string>>
     }
 
@@ -14,6 +17,9 @@ describe("Watchlists Stage 3 content alert copy contract", () => {
     expect(locale.alerts?.rulesTitle).toBe("Content alert rules")
     expect(locale.alerts?.inboxTitle).toBe("Alert inbox")
     expect(locale.alerts?.healthBoundary).toBe(
+      "Run failures and source problems are health issues, not content alerts."
+    )
+    expect(locale.overview?.alertHealth?.healthDescription).toBe(
       "Run failures and source problems are health issues, not content alerts."
     )
   })

@@ -11,6 +11,7 @@ const WATCHLIST_TABS: Set<WatchlistTab> = new Set([
   "jobs",
   "runs",
   "items",
+  "alerts",
   "outputs",
   "templates",
   "settings"

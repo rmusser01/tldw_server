@@ -162,6 +162,20 @@
       "degradedTitle": "System requires attention",
       "degradedDescription": "Some sources or recent runs show failures. Open failed runs to investigate."
     },
+    "alertHealth": {
+      "title": "Alerts and health",
+      "contentTitle": "Content alerts",
+      "unreadAlerts": "Unread content alerts",
+      "noUnreadAlerts": "No unread content alerts",
+      "contentDescription": "New articles matching your Watchlist alert rules.",
+      "reviewAlerts": "Review alerts",
+      "createRule": "Create content alert rule",
+      "healthTitle": "Health issues",
+      "healthIssues": "Health issues",
+      "noHealthIssues": "No health issues",
+      "healthDescription": "Run failures and source problems are health issues, not content alerts.",
+      "openActivity": "Open Activity"
+    },
     "attention": {
       "title": "Attention needed",
       "description": "Open the highest-risk surfaces directly from here.",

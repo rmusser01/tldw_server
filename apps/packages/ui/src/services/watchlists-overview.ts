@@ -1,5 +1,6 @@
 import {
   fetchScrapedItems,
+  fetchWatchlistContentAlerts,
   fetchWatchlistJobs,
   fetchWatchlistOutputs,
   fetchWatchlistRuns,
@@ -84,6 +85,9 @@ export interface WatchlistsOverviewData {
     attention: number
   }
   items: {
+    unread: number
+  }
+  alerts: {
     unread: number
   }
   runs: {
@@ -350,10 +354,14 @@ export const fetchWatchlistsOverviewData = async (
   const scopedParams = params.watchlist_id != null
     ? { watchlist_id: params.watchlist_id }
     : {}
+  const unreadAlertsRequest = params.watchlist_id != null
+    ? fetchWatchlistContentAlerts(params.watchlist_id, { status: "unread", page: 1, size: 1 })
+    : Promise.resolve({ items: [], total: 0 })
   const [
     sourcesResult,
     jobsResult,
     unreadResult,
+    unreadAlertsResult,
     runningResult,
     pendingResult,
     failedResult,
@@ -362,6 +370,7 @@ export const fetchWatchlistsOverviewData = async (
     fetchAllPages((pageParams) => fetchWatchlistSources({ ...scopedParams, ...pageParams })),
     fetchAllPages((pageParams) => fetchWatchlistJobs({ ...scopedParams, ...pageParams })),
     fetchScrapedItems({ ...scopedParams, reviewed: false, page: 1, size: 1 }),
+    unreadAlertsRequest,
     fetchWatchlistRuns({ ...scopedParams, q: "running", page: 1, size: 1 }),
     fetchWatchlistRuns({ ...scopedParams, q: "pending", page: 1, size: 1 }),
     fetchWatchlistRuns({ ...scopedParams, q: "failed", page: 1, size: 5 }),
@@ -397,6 +406,7 @@ export const fetchWatchlistsOverviewData = async (
     }))
 
   const unreadTotal = asFiniteNumber(unreadResult.total, 0)
+  const unreadAlertsTotal = asFiniteNumber(unreadAlertsResult.total, 0)
   const runningTotal = asFiniteNumber(runningResult.total, 0)
   const pendingTotal = asFiniteNumber(pendingResult.total, 0)
   const failedTotal = asFiniteNumber(failedResult.total, recentFailed.length)
@@ -446,6 +456,9 @@ export const fetchWatchlistsOverviewData = async (
     },
     items: {
       unread: unreadTotal
+    },
+    alerts: {
+      unread: unreadAlertsTotal
     },
     runs: {
       running: runningTotal,

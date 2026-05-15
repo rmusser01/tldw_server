@@ -22,6 +22,7 @@ import {
 import type { StepsProps } from "antd"
 import {
   AlertTriangle,
+  BellRing,
   CheckCircle2,
   Newspaper,
   RefreshCw,
@@ -306,6 +307,10 @@ export const OverviewTab: React.FC = () => {
 
   const handleOpenRuns = useCallback(() => {
     setActiveTab("runs")
+  }, [setActiveTab])
+
+  const handleOpenAlerts = useCallback(() => {
+    setActiveTab("alerts")
   }, [setActiveTab])
 
   const handleOpenFailedRuns = useCallback(() => {
@@ -1426,6 +1431,74 @@ export const OverviewTab: React.FC = () => {
                   )
             }
           />
+
+          <Card
+            size="small"
+            title={t("watchlists:overview.alertHealth.title", "Alerts and health")}
+            data-testid="watchlists-overview-alert-health-summary"
+          >
+            <div className="grid gap-3 md:grid-cols-2">
+              <div
+                className="rounded-md border border-border bg-background p-3"
+                data-testid="watchlists-overview-content-alerts"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="inline-flex items-center gap-2 font-medium text-text">
+                    <BellRing className="h-4 w-4" />
+                    {t("watchlists:overview.alertHealth.contentTitle", "Content alerts")}
+                  </div>
+                  <Tag color={(data.alerts?.unread || 0) > 0 ? "orange" : "default"}>
+                    {data.alerts?.unread || 0}
+                  </Tag>
+                </div>
+                <div className="mt-2 text-sm font-medium text-text">
+                  {(data.alerts?.unread || 0) > 0
+                    ? t("watchlists:overview.alertHealth.unreadAlerts", "Unread content alerts")
+                    : t("watchlists:overview.alertHealth.noUnreadAlerts", "No unread content alerts")}
+                </div>
+                <p className="mb-3 mt-1 text-sm text-text-muted">
+                  {t(
+                    "watchlists:overview.alertHealth.contentDescription",
+                    "New articles matching your Watchlist alert rules."
+                  )}
+                </p>
+                <Button size="small" onClick={handleOpenAlerts}>
+                  {(data.alerts?.unread || 0) > 0
+                    ? t("watchlists:overview.alertHealth.reviewAlerts", "Review alerts")
+                    : t("watchlists:overview.alertHealth.createRule", "Create content alert rule")}
+                </Button>
+              </div>
+
+              <div
+                className="rounded-md border border-border bg-background p-3"
+                data-testid="watchlists-overview-health-issues"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="inline-flex items-center gap-2 font-medium text-text">
+                    <AlertTriangle className="h-4 w-4" />
+                    {t("watchlists:overview.alertHealth.healthTitle", "Health issues")}
+                  </div>
+                  <Tag color={data.health.attention.total > 0 ? "red" : "default"}>
+                    {data.health.attention.total}
+                  </Tag>
+                </div>
+                <div className="mt-2 text-sm font-medium text-text">
+                  {data.health.attention.total > 0
+                    ? t("watchlists:overview.alertHealth.healthIssues", "Health issues")
+                    : t("watchlists:overview.alertHealth.noHealthIssues", "No health issues")}
+                </div>
+                <p className="mb-3 mt-1 text-sm text-text-muted">
+                  {t(
+                    "watchlists:overview.alertHealth.healthDescription",
+                    "Run failures and source problems are health issues, not content alerts."
+                  )}
+                </p>
+                <Button size="small" onClick={handleOpenRuns}>
+                  {t("watchlists:overview.alertHealth.openActivity", "Open Activity")}
+                </Button>
+              </div>
+            </div>
+          </Card>
 
           {data.health.attention.total > 0 && (
             <Card

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   fetchScrapedItems: vi.fn(),
+  fetchWatchlistContentAlerts: vi.fn(),
   fetchWatchlistJobs: vi.fn(),
   fetchWatchlistOutputs: vi.fn(),
   fetchWatchlistRuns: vi.fn(),
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/services/watchlists", () => ({
   fetchScrapedItems: (...args: unknown[]) => mocks.fetchScrapedItems(...args),
+  fetchWatchlistContentAlerts: (...args: unknown[]) => mocks.fetchWatchlistContentAlerts(...args),
   fetchWatchlistJobs: (...args: unknown[]) => mocks.fetchWatchlistJobs(...args),
   fetchWatchlistOutputs: (...args: unknown[]) => mocks.fetchWatchlistOutputs(...args),
   fetchWatchlistRuns: (...args: unknown[]) => mocks.fetchWatchlistRuns(...args),
@@ -143,6 +145,10 @@ describe("watchlists overview service", () => {
       items: [],
       total: 42
     })
+    mocks.fetchWatchlistContentAlerts.mockResolvedValueOnce({
+      items: [],
+      total: 3
+    })
     mocks.fetchWatchlistRuns
       .mockResolvedValueOnce({ items: [], total: 1 })
       .mockResolvedValueOnce({ items: [], total: 2 })
@@ -192,7 +198,7 @@ describe("watchlists overview service", () => {
       has_more: false
     })
 
-    const result = await fetchWatchlistsOverviewData()
+    const result = await fetchWatchlistsOverviewData({ watchlist_id: 42 })
 
     expect(result.sources).toEqual({
       total: 2,
@@ -206,6 +212,7 @@ describe("watchlists overview service", () => {
     expect(result.jobs.nextRunAt).toBe("2026-02-20T08:00:00Z")
     expect(result.jobs.attention).toBe(0)
     expect(result.items.unread).toBe(42)
+    expect(result.alerts.unread).toBe(3)
     expect(result.runs.running).toBe(1)
     expect(result.runs.pending).toBe(2)
     expect(result.runs.failed).toBe(1)
@@ -254,6 +261,10 @@ describe("watchlists overview service", () => {
       items: [],
       total: 0
     })
+    mocks.fetchWatchlistContentAlerts.mockResolvedValue({
+      items: [],
+      total: 0
+    })
     mocks.fetchWatchlistRuns.mockResolvedValue({
       items: [],
       total: 0
@@ -279,6 +290,11 @@ describe("watchlists overview service", () => {
     expect(mocks.fetchScrapedItems).toHaveBeenCalledWith({
       watchlist_id: 42,
       reviewed: false,
+      page: 1,
+      size: 1
+    })
+    expect(mocks.fetchWatchlistContentAlerts).toHaveBeenCalledWith(42, {
+      status: "unread",
       page: 1,
       size: 1
     })

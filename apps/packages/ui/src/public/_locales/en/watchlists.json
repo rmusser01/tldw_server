@@ -68,6 +68,42 @@
   "alerts_validation_required": {
     "message": "Name and pattern are required"
   },
+  "overview_alertHealth_title": {
+    "message": "Alerts and health"
+  },
+  "overview_alertHealth_contentTitle": {
+    "message": "Content alerts"
+  },
+  "overview_alertHealth_unreadAlerts": {
+    "message": "Unread content alerts"
+  },
+  "overview_alertHealth_noUnreadAlerts": {
+    "message": "No unread content alerts"
+  },
+  "overview_alertHealth_contentDescription": {
+    "message": "New articles matching your Watchlist alert rules."
+  },
+  "overview_alertHealth_reviewAlerts": {
+    "message": "Review alerts"
+  },
+  "overview_alertHealth_createRule": {
+    "message": "Create content alert rule"
+  },
+  "overview_alertHealth_healthTitle": {
+    "message": "Health issues"
+  },
+  "overview_alertHealth_healthIssues": {
+    "message": "Health issues"
+  },
+  "overview_alertHealth_noHealthIssues": {
+    "message": "No health issues"
+  },
+  "overview_alertHealth_healthDescription": {
+    "message": "Run failures and source problems are health issues, not content alerts."
+  },
+  "overview_alertHealth_openActivity": {
+    "message": "Open Activity"
+  },
   "setupWizard_title": {
     "message": "Create Watchlist"
   },
