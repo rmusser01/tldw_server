@@ -345,7 +345,7 @@ async def tail_llamacpp_logs_endpoint(
     llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
 ):
     try:
-        return llamacpp_provider_service.tail_managed_log(llm_manager, requested_lines=lines)
+        return await llamacpp_provider_service.tail_managed_log(llm_manager, requested_lines=lines)
     except llamacpp_provider_service.ManagedServerNotRunningError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:

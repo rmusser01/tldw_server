@@ -54,6 +54,8 @@ class _Handler:
         host: str = "0.0.0.0",
         port: int = 8080,
         log_output_file: str | None = None,
+        status_log_file: str | None = None,
+        active_log: bool = False,
     ) -> None:
         self.config = _Config(log_output_file)
         self._status = status
@@ -61,6 +63,8 @@ class _Handler:
         self._active_server_host = host
         self._active_server_port = port
         self._active_server_model = "toy.gguf"
+        self._status_log_file = status_log_file
+        self._active_server_log_handle = object() if active_log else None
 
     async def get_server_status(self) -> dict[str, Any]:
         return {
@@ -69,6 +73,7 @@ class _Handler:
             "port": self._active_server_port,
             "model": self._active_server_model,
             "pid": 1234 if self._status == "running" else None,
+            "log_file": self._status_log_file,
         }
 
     async def list_models(self) -> list[str]:
@@ -215,7 +220,15 @@ def test_log_tail_reads_only_configured_log_file_and_redacts(tmp_path: Path):
         encoding="utf-8",
     )
     arbitrary_log.write_text("do-not-read", encoding="utf-8")
-    app = _make_app(_Manager(_Handler(log_output_file=str(configured_log))))
+    app = _make_app(
+        _Manager(
+            _Handler(
+                log_output_file=str(configured_log),
+                status_log_file=str(configured_log),
+                active_log=True,
+            )
+        )
+    )
 
     with TestClient(app) as client:
         response = client.get(f"/api/v1/llamacpp/logs/tail?lines=2&path={arbitrary_log}")
@@ -225,6 +238,95 @@ def test_log_tail_reads_only_configured_log_file_and_redacts(tmp_path: Path):
     assert body["lines"] == ["api_key=[REDACTED] token=[REDACTED] hf_token=[REDACTED]", "last line"]
     assert body["truncated"] is True
     assert "do-not-read" not in response.text
+
+
+@pytest.mark.unit
+def test_log_tail_configured_path_without_active_log_evidence_returns_warning(tmp_path: Path):
+    configured_log = tmp_path / "configured.log"
+    configured_log.write_text("must-not-read", encoding="utf-8")
+    app = _make_app(_Manager(_Handler(log_output_file=str(configured_log))))
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/llamacpp/logs/tail?lines=10")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["lines"] == []
+    assert body["truncated"] is False
+    assert body["warnings"]
+    assert "must-not-read" not in response.text
+
+
+@pytest.mark.unit
+def test_log_tail_status_log_file_must_match_configured_canonical_path(tmp_path: Path):
+    configured_log = tmp_path / "configured.log"
+    other_log = tmp_path / "other.log"
+    status_symlink = tmp_path / "status.log"
+    configured_log.write_text("configured-secret", encoding="utf-8")
+    other_log.write_text("other-secret", encoding="utf-8")
+    status_symlink.symlink_to(other_log)
+    app = _make_app(
+        _Manager(
+            _Handler(
+                log_output_file=str(configured_log),
+                status_log_file=str(status_symlink),
+                active_log=True,
+            )
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/llamacpp/logs/tail?lines=10")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["lines"] == []
+    assert body["truncated"] is False
+    assert body["warnings"]
+    assert "configured-secret" not in response.text
+    assert "other-secret" not in response.text
+
+
+@pytest.mark.unit
+def test_log_tail_redacts_api_exposed_secret_syntaxes(tmp_path: Path):
+    configured_log = tmp_path / "configured.log"
+    configured_log.write_text(
+        "\n".join(
+            [
+                "Authorization: Bearer sk-live-abcdefghijklmnopqrstuvwxyz123456",
+                "api_key: sk-colon-abcdefghijklmnopqrstuvwxyz123456",
+                '{"api_key": "sk-json-abcdefghijklmnopqrstuvwxyz123456"}',
+                "--api-key sk-cli-abcdefghijklmnopqrstuvwxyz123456 --hf-token hf_cli_secret --token plain_cli_secret",
+                "token = spaced-secret-value",
+                "standalone sk-standalone-abcdefghijklmnopqrstuvwxyz123456",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    app = _make_app(
+        _Manager(
+            _Handler(
+                log_output_file=str(configured_log),
+                status_log_file=str(configured_log),
+                active_log=True,
+            )
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/llamacpp/logs/tail?lines=20")
+
+    assert response.status_code == 200, response.text
+    text = response.text
+    assert "Bearer sk-live" not in text
+    assert "sk-colon" not in text
+    assert "sk-json" not in text
+    assert "sk-cli" not in text
+    assert "hf_cli_secret" not in text
+    assert "plain_cli_secret" not in text
+    assert "spaced-secret-value" not in text
+    assert "sk-standalone" not in text
+    assert text.count("[REDACTED") >= 8
 
 
 @pytest.mark.unit

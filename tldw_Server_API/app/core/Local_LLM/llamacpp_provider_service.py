@@ -21,13 +21,7 @@ LLAMA_PROVIDER_ENDPOINT_ENV_KEYS: tuple[str, ...] = ()
 
 _MAX_LOG_LINES = 1000
 _MAX_LOG_BYTES = 256 * 1024
-_SECRET_PATTERNS = (
-    "api_key",
-    "token",
-    "hf_token",
-    "openai_api_key",
-    "anthropic_api_key",
-)
+_REDACTION_FIELD_PATTERN = r"(?:api_key|token|hf_token|openai_api_key|anthropic_api_key)"
 
 
 class ManagedServerNotRunningError(RuntimeError):
@@ -71,7 +65,7 @@ async def use_managed_server_in_chat(llm_manager: Any) -> dict[str, Any]:
     }
 
 
-def tail_managed_log(llm_manager: Any, requested_lines: int) -> dict[str, Any]:
+async def tail_managed_log(llm_manager: Any, requested_lines: int) -> dict[str, Any]:
     """Return a bounded, redacted tail of the active handler's configured log file."""
     handler = _require_handler(llm_manager)
     line_count = max(1, min(int(requested_lines), _MAX_LOG_LINES))
@@ -81,19 +75,30 @@ def tail_managed_log(llm_manager: Any, requested_lines: int) -> dict[str, Any]:
     if not configured_log:
         return {"lines": [], "truncated": False, "warnings": ["No managed llama.cpp log file is configured."]}
 
-    log_path = Path(str(configured_log)).expanduser()
+    status = await _get_status(handler)
+    active_log = status.get("log_file")
+    active_log_handle = getattr(handler, "_active_server_log_handle", None)
+    if status.get("status") != "running" or not active_log or active_log_handle is None:
+        return {"lines": [], "truncated": False, "warnings": ["No active managed llama.cpp log file is available."]}
+
+    configured_log_path = Path(str(configured_log)).expanduser()
+    active_log_path = Path(str(active_log)).expanduser()
     try:
-        resolved_log_path = log_path.resolve(strict=False)
+        resolved_configured_log_path = configured_log_path.resolve(strict=False)
+        resolved_active_log_path = active_log_path.resolve(strict=False)
     except OSError:
         return {"lines": [], "truncated": False, "warnings": ["Managed llama.cpp log file is unavailable."]}
 
-    if not resolved_log_path.is_file():
+    if resolved_configured_log_path != resolved_active_log_path:
+        return {"lines": [], "truncated": False, "warnings": ["Active managed llama.cpp log file does not match configured log file."]}
+
+    if not resolved_active_log_path.is_file():
         return {"lines": [], "truncated": False, "warnings": ["Managed llama.cpp log file is unavailable."]}
 
     try:
-        file_size = resolved_log_path.stat().st_size
+        file_size = resolved_active_log_path.stat().st_size
         read_size = min(file_size, _MAX_LOG_BYTES)
-        with resolved_log_path.open("rb") as handle:
+        with resolved_active_log_path.open("rb") as handle:
             handle.seek(max(0, file_size - read_size))
             raw = handle.read(read_size)
     except OSError:
@@ -157,10 +162,29 @@ def _endpoint_from_status_or_handler(status: dict[str, Any], handler: Any) -> st
 
 def _redact_log_line(line: str) -> str:
     redacted = line
-    for key in _SECRET_PATTERNS:
-        redacted = re.sub(
-            rf"(?i)\b{key}=([^\s]+)",
-            f"{key}=[REDACTED]",
-            redacted,
-        )
+    redacted = re.sub(
+        r"(?i)(Authorization\s*:\s*Bearer\s+)([^\s\"',]+)",
+        r"\1[REDACTED]",
+        redacted,
+    )
+    redacted = re.sub(
+        rf"(?i)(--(?:api-key|hf-token|token)\s+)([^\s\"',]+)",
+        r"\1[REDACTED]",
+        redacted,
+    )
+    redacted = re.sub(
+        rf"(?i)(\b{_REDACTION_FIELD_PATTERN}\b\s*[:=]\s*)([^\s\"',]+)",
+        r"\1[REDACTED]",
+        redacted,
+    )
+    redacted = re.sub(
+        rf"(?i)([\"']\b{_REDACTION_FIELD_PATTERN}\b[\"']\s*:\s*[\"'])([^\"']+)([\"'])",
+        r"\1[REDACTED]\3",
+        redacted,
+    )
+    redacted = re.sub(
+        r"\bsk-[A-Za-z0-9][A-Za-z0-9._-]{15,}\b",
+        "[REDACTED_TOKEN]",
+        redacted,
+    )
     return redacted
