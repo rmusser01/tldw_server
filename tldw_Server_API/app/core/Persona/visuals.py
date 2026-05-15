@@ -360,17 +360,16 @@ def _validate_frame_region(
 
 
 def _validate_state_catalog(state_catalog: dict[str, Any]) -> None:
+    """Validate optional custom visual states declared by a sprite manifest."""
     if len(state_catalog) > MAX_CUSTOM_VISUAL_STATES:
         raise PersonaVisualManifestError(
             f"state_catalog may define at most {MAX_CUSTOM_VISUAL_STATES} custom states"
         )
 
     for state_id, entry in state_catalog.items():
-        if not isinstance(state_id, str) or not _is_safe_custom_state_id(state_id):
-            raise PersonaVisualManifestError(
-                "state_catalog custom state ids must match "
-                f"{CUSTOM_VISUAL_STATE_ID_PATTERN.pattern}"
-            )
+        state_id_error = _custom_state_id_error(state_id)
+        if state_id_error:
+            raise PersonaVisualManifestError(state_id_error)
         if state_id in VISUAL_STATE_IDS:
             raise PersonaVisualManifestError(
                 f"state_catalog custom state {state_id} is reserved"
@@ -416,6 +415,7 @@ def _validate_state_catalog(state_catalog: dict[str, Any]) -> None:
 
 
 def _validate_state_catalog_tags(state_id: str, tags: Any) -> None:
+    """Validate bounded user-facing tags for a custom visual state."""
     if not isinstance(tags, list) or len(tags) > MAX_STATE_CATALOG_TAGS:
         raise PersonaVisualManifestError(
             f"state_catalog[{state_id}].tags must be a list of at most "
@@ -435,20 +435,30 @@ def _validate_state_catalog_tags(state_id: str, tags: Any) -> None:
 
 
 def _allowed_visual_state_ids(manifest: dict[str, Any]) -> set[str]:
+    """Return built-in states plus declared custom state_catalog keys."""
     return VISUAL_STATE_IDS | manifest.get("state_catalog", {}).keys()
 
 
-def _is_safe_custom_state_id(state_id: str) -> bool:
+def _custom_state_id_error(state_id: Any) -> str | None:
+    """Return a specific custom state ID validation error, or None if valid."""
+    if not isinstance(state_id, str):
+        return "state_catalog custom state ids must be strings"
     if not CUSTOM_VISUAL_STATE_ID_PATTERN.fullmatch(state_id):
-        return False
+        return (
+            "state_catalog custom state ids must match "
+            f"{CUSTOM_VISUAL_STATE_ID_PATTERN.pattern}"
+        )
     lowered = state_id.lower()
     if lowered.startswith(UNSAFE_CUSTOM_STATE_PREFIXES):
-        return False
+        return "state_catalog custom state ids must not use unsafe prefixes"
     compact = re.sub(r"[._:-]+", "_", lowered)
-    return not any(marker in compact for marker in UNSAFE_CUSTOM_STATE_MARKERS)
+    if any(marker in compact for marker in UNSAFE_CUSTOM_STATE_MARKERS):
+        return "state_catalog custom state ids must not contain unsafe markers"
+    return None
 
 
 def _contains_control_character(value: str) -> bool:
+    """Return whether user-facing manifest text contains ASCII control codes."""
     return any(ord(character) < 32 or ord(character) == 127 for character in value)
 
 

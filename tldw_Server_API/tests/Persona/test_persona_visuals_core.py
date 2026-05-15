@@ -174,7 +174,10 @@ def test_manifest_accepts_declared_custom_state_catalog_references() -> None:
     )
 
     assert set(result.resolved_required_states) == REQUIRED_VISUAL_STATES
-    assert result.manifest["states"]["tool.notes_search"]["animation_id"] == "tool-notes-search"
+    assert (
+        result.manifest["states"]["tool.notes_search"]["animation_id"]
+        == "tool-notes-search"
+    )
     assert result.manifest["authored_triggers"][0]["source"] == "tool_name"
 
 
@@ -205,7 +208,11 @@ def test_manifest_rejects_builtin_state_catalog_redeclarations() -> None:
     ("state_id", "catalog_entry", "message"),
     [
         ("Tool.Search", {"label": "Bad case", "kind": "tool_variant"}, "state_catalog"),
-        ("tool/search", {"label": "Bad slash", "kind": "tool_variant"}, "state_catalog"),
+        (
+            "tool/search",
+            {"label": "Bad slash", "kind": "tool_variant"},
+            "state_catalog",
+        ),
         ("tool.notes_search", {"label": "No kind"}, "kind"),
         ("tool.notes_search", {"label": "Bad kind", "kind": "unknown"}, "kind"),
         ("tool.notes_search", {"label": "", "kind": "tool_variant"}, "label"),
@@ -218,6 +225,36 @@ def test_manifest_rejects_invalid_state_catalog_entries(
 ) -> None:
     manifest = _activatable_manifest()
     manifest["state_catalog"] = {state_id: catalog_entry}
+
+    with pytest.raises(PersonaVisualManifestError, match=message):
+        validate_visual_manifest(
+            manifest,
+            available_asset_ids={
+                "asset-idle",
+                "asset-listen",
+                "asset-think",
+                "asset-speak",
+                "asset-error",
+            },
+            require_activatable=True,
+        )
+
+
+@pytest.mark.parametrize(
+    ("state_id", "message"),
+    [
+        ("http:avatar", "unsafe prefix"),
+        ("tool.api_key", "unsafe marker"),
+    ],
+)
+def test_manifest_rejects_unsafe_state_catalog_ids_with_specific_messages(
+    state_id: str,
+    message: str,
+) -> None:
+    manifest = _activatable_manifest()
+    manifest["state_catalog"] = {
+        state_id: {"label": "Unsafe identifier", "kind": "tool_variant"}
+    }
 
     with pytest.raises(PersonaVisualManifestError, match=message):
         validate_visual_manifest(
@@ -378,7 +415,10 @@ def test_manifest_rejects_custom_fallback_cycles() -> None:
         )
 
 
-@pytest.mark.parametrize("renderer_type", ["live2d", "static_image", "sprite_sheet", "not_real"])
+@pytest.mark.parametrize(
+    "renderer_type",
+    ["live2d", "static_image", "sprite_sheet", "not_real"],
+)
 def test_manifest_rejects_unsupported_renderer_types(renderer_type: str) -> None:
     manifest = _activatable_manifest()
     manifest["renderer_type"] = renderer_type
