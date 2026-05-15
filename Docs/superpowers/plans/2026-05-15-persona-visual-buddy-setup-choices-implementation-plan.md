@@ -783,7 +783,7 @@ git commit -m "feat: wire visual buddy setup choices"
 - Modify: `apps/packages/ui/src/routes/sidepanel-persona.tsx`
 - Modify: `apps/packages/ui/src/routes/__tests__/sidepanel-persona.test.tsx`
 
-- [ ] **Step 1: Add failing wizard component test**
+- [x] **Step 1: Add failing wizard component test**
 
 In `AssistantSetupWizard.test.tsx`, add:
 
@@ -822,7 +822,7 @@ it("renders optional compact visual setup without adding a required setup step",
 })
 ```
 
-- [ ] **Step 2: Add failing route detour test**
+- [x] **Step 2: Add failing route detour test**
 
 In `sidepanel-persona.test.tsx`, add a focused test that:
 - sets `mocks.location.search = "?persona_id=garden-helper&tab=profiles"`.
@@ -854,7 +854,7 @@ if (path === "/api/v1/persona/catalog") {
 
 Use the existing helper patterns in `sidepanel-persona.test.tsx`; do not add broad mocks that hide real route behavior.
 
-- [ ] **Step 3: Run failing wizard/route tests**
+- [x] **Step 3: Run failing wizard/route tests**
 
 Run:
 
@@ -867,7 +867,7 @@ bunx vitest run \
 
 Expected: FAIL because visual setup content and detour state do not exist.
 
-- [ ] **Step 4: Add wizard extension point**
+- [x] **Step 4: Add wizard extension point**
 
 In `AssistantSetupWizard.tsx`:
 - Add optional prop `visualSetupContent?: React.ReactNode`.
@@ -884,7 +884,7 @@ Minimal render:
 ) : null}
 ```
 
-- [ ] **Step 5: Add visual detour type and orchestrator state**
+- [x] **Step 5: Add visual detour type and orchestrator state**
 
 In `personaTypes.ts`:
 
@@ -919,7 +919,7 @@ const handleReturnToSetupFromVisualDetour = React.useCallback(() => {
 
 If the orchestrator already centralizes analytics for detours, emit a small setup analytics event. Keep analytics optional; do not block the detour on analytics.
 
-- [ ] **Step 6: Wire sidepanel route rendering**
+- [x] **Step 6: Wire sidepanel route rendering**
 
 In `sidepanel-persona.tsx`:
 - Pass `visualSetupContent` to `AssistantSetupWizard`.
@@ -963,7 +963,7 @@ const shouldShowSetupWizard =
 
 Do not make visuals a setup progress step.
 
-- [ ] **Step 7: Run wizard/route tests**
+- [x] **Step 7: Run wizard/route tests**
 
 Run:
 
@@ -976,7 +976,7 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/PersonaGarden/AssistantSetupWizard.tsx apps/packages/ui/src/components/PersonaGarden/__tests__/AssistantSetupWizard.test.tsx apps/packages/ui/src/routes/personaTypes.ts apps/packages/ui/src/routes/hooks/usePersonaSetupOrchestrator.ts apps/packages/ui/src/routes/sidepanel-persona.tsx apps/packages/ui/src/routes/__tests__/sidepanel-persona.test.tsx
@@ -991,7 +991,7 @@ git commit -m "feat: add visual setup detour from assistant setup"
 - Modify: `backlog/tasks/task-362.1 - Implement-first-run-Persona-Visual-Buddy-setup-choices.md`
 - Modify if needed: `Docs/Code_Documentation/Persona_Visual_Packs.md`
 
-- [ ] **Step 1: Run focused UI tests**
+- [x] **Step 1: Run focused UI tests**
 
 Run:
 
@@ -1007,7 +1007,7 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 2: Run design-system state verification**
+- [x] **Step 2: Run design-system state verification**
 
 Run:
 
@@ -1018,7 +1018,7 @@ bun run verify:design-system-state
 
 Expected: PASS. If it fails because new copy introduced unregistered product-state wording, either revise the copy to existing labels or update the registry according to existing design-system instructions.
 
-- [ ] **Step 3: Run diff hygiene**
+- [x] **Step 3: Run diff hygiene**
 
 Run from repo root:
 
@@ -1028,7 +1028,7 @@ git diff --check
 
 Expected: no output.
 
-- [ ] **Step 4: Run Bandit only if backend Python changed**
+- [x] **Step 4: Run Bandit only if backend Python changed**
 
 Expected for this frontend-only plan: no backend Python changes, so record Bandit as not applicable.
 
@@ -1041,7 +1041,7 @@ python -m bandit -r tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_
 
 Expected: no new findings in touched Python files.
 
-- [ ] **Step 5: Update Backlog task**
+- [x] **Step 5: Update Backlog task**
 
 Update `TASK-362.1`:
 - Check acceptance criteria that passed.
@@ -1049,7 +1049,7 @@ Update `TASK-362.1`:
 - Add a final summary only after implementation is complete.
 - Note any skipped checks with reasons.
 
-- [ ] **Step 6: Commit verification/task updates**
+- [x] **Step 6: Commit verification/task updates**
 
 ```bash
 git add backlog/tasks/task-362.1\ -\ Implement-first-run-Persona-Visual-Buddy-setup-choices.md Docs/Code_Documentation/Persona_Visual_Packs.md

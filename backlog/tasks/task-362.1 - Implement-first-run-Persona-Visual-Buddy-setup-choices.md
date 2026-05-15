@@ -4,7 +4,7 @@ title: Implement first-run Persona Visual Buddy setup choices
 status: Done
 assignee: []
 created_date: '2026-05-15 03:44'
-updated_date: '2026-05-15 15:11'
+updated_date: '2026-05-15 15:18'
 labels:
   - persona
   - buddy
@@ -59,6 +59,8 @@ Task 3 verification passed: focused stale accepted candidate review test, focuse
 Bandit not run for Task 3 because the slice changed only frontend TypeScript and TSX files.
 
 Final wizard-detour closeout: AssistantSetupWizard now accepts optional compact visual setup content, the setup orchestrator tracks a route-level visual setup detour, sidepanel-persona can hide the wizard and show only the Visuals tab during the detour, and the detour return restores the setup overlay without marking setup complete. Focused validation passed: bunx vitest run ../packages/ui/src/components/PersonaGarden/__tests__/VisualBuddySetupChoiceCard.test.tsx ../packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx ../packages/ui/src/components/PersonaGarden/__tests__/AssistantSetupWizard.test.tsx ../packages/ui/src/routes/__tests__/sidepanel-persona.test.tsx ../packages/ui/src/services/__tests__/persona-visuals.test.ts --testTimeout=30000 -> 5 files passed, 152 tests passed. git diff --check passed. Bandit remains not applicable because this task touched frontend TypeScript/TSX and Backlog Markdown only.
+
+Quality review found that the first visual detour patch exposed all Persona Garden tabs while setup was still required. Resolved by filtering the detour view to the Visuals tab only and adding route regression assertions that Profiles, Commands, and Live Session are absent during the detour.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
