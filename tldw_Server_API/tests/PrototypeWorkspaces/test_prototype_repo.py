@@ -644,6 +644,19 @@ async def test_cleanup_retained_state_revokes_expired_records_and_stales_pending
 
 
 @pytest.mark.asyncio
+async def test_cleanup_retained_state_runs_inside_existing_transaction(repo) -> None:
+    async with repo.transaction() as tx_repo:
+        result = await tx_repo.cleanup_retained_state(
+            now="2026-02-01T00:00:00+00:00",
+            expired_before="2026-01-15T00:00:00+00:00",
+        )
+
+    assert result["expired_shared_actors_revoked"] == 0
+    assert result["expired_sessions_revoked"] == 0
+    assert result["preview_handles_revoked"] == 0
+
+
+@pytest.mark.asyncio
 async def test_cleanup_retained_state_deletes_archived_workspaces_after_cutoff(repo) -> None:
     workspace = await repo.create_workspace(owner_user_id=1, title="archived", creation_source="prompt")
     snapshot = await repo.create_snapshot(

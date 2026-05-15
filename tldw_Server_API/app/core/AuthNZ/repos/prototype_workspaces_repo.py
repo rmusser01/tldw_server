@@ -176,6 +176,15 @@ class PrototypeWorkspacesRepo:
                 raise cause from exc
             raise
 
+    @asynccontextmanager
+    async def _cleanup_transaction(self):
+        """Yield the active transaction-bound repo or open a cleanup transaction."""
+        if getattr(self.db_pool, "transaction", None) is None:
+            yield self
+            return
+        async with self.transaction() as repo:
+            yield repo
+
     @staticmethod
     def _row_to_dict(row: Any) -> dict[str, Any]:
         if row is None:
@@ -1161,7 +1170,7 @@ class PrototypeWorkspacesRepo:
             "archived_workspaces_deleted": 0,
         }
 
-        async with self.transaction() as repo:
+        async with self._cleanup_transaction() as repo:
             if expired_before is not None:
                 counts["expired_shared_actors_revoked"] = _result_row_count(
                     await repo.db_pool.execute(
