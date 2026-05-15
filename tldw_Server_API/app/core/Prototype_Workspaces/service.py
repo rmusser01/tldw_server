@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo import (
 )
 
 from .models import (
+    PrototypeTerminalRuntimeError,
     PrototypePromotionResult,
     PrototypeRuntimeStatus,
 )
@@ -118,7 +119,7 @@ class PrototypeWorkspaceService:
         if not workspace:
             raise ValueError("prototype workspace not found")
         if workspace.get("is_archived"):
-            raise RuntimeError("archived workspaces cannot create branch sessions")
+            raise PrototypeTerminalRuntimeError("archived workspaces cannot create branch sessions")
 
         resolved_base_snapshot_id = str(
             base_snapshot_id
@@ -207,11 +208,32 @@ class PrototypeWorkspaceService:
             workspace = await repo.get_workspace(str(session["prototype_workspace_id"]))
             if not workspace:
                 raise ValueError("prototype workspace not found")
-            if workspace.get("is_archived"):
-                raise RuntimeError("archived workspaces cannot save snapshots")
-            await self._assert_session_is_active(session, repo=repo)
 
             new_snapshot_id = str(snapshot_id or f"psnap_{uuid.uuid4().hex}")
+            existing_snapshot = await repo.get_snapshot(new_snapshot_id) if snapshot_id else None
+            if existing_snapshot:
+                if (
+                    existing_snapshot.get("prototype_workspace_id") != session.get("prototype_workspace_id")
+                    or existing_snapshot.get("created_from_session_id") != prototype_session_id
+                ):
+                    raise ValueError("snapshot_id already belongs to a different prototype save")
+                if session.get("last_saved_snapshot_id") != existing_snapshot.get("snapshot_id"):
+                    updated_session = await repo.update_session_state(
+                        prototype_session_id,
+                        last_saved_snapshot_id=existing_snapshot["snapshot_id"],
+                        last_activity_at=_utc_now(),
+                    )
+                    if (
+                        not updated_session
+                        or updated_session.get("last_saved_snapshot_id") != existing_snapshot.get("snapshot_id")
+                    ):
+                        raise RuntimeError("failed to persist session snapshot state")
+                return existing_snapshot
+
+            if workspace.get("is_archived"):
+                raise PrototypeTerminalRuntimeError("archived workspaces cannot save snapshots")
+            await self._assert_session_is_active(session, repo=repo)
+
             snapshot = await repo.create_snapshot(
                 prototype_workspace_id=str(session["prototype_workspace_id"]),
                 snapshot_id=new_snapshot_id,
@@ -452,10 +474,10 @@ class PrototypeWorkspaceService:
             return
         actor = await self._repo.get_shared_actor(str(actor_shared_actor_id or ""))
         if not actor or actor.get("is_revoked") or actor.get("revoked_at"):
-            raise RuntimeError("revoked shared actor cannot create or reuse branch sessions")
+            raise PrototypeTerminalRuntimeError("revoked shared actor cannot create or reuse branch sessions")
         expires_at = _normalize_datetime(actor.get("expires_at"))
         if expires_at and expires_at <= datetime.now(timezone.utc):
-            raise RuntimeError("expired shared actor cannot create or reuse branch sessions")
+            raise PrototypeTerminalRuntimeError("expired shared actor cannot create or reuse branch sessions")
 
     async def _assert_session_is_active(
         self,
@@ -464,20 +486,20 @@ class PrototypeWorkspaceService:
         repo: PrototypeWorkspacesRepo | None = None,
     ) -> None:
         if session.get("is_revoked") or session.get("revoked_at"):
-            raise RuntimeError("revoked session cannot save snapshots")
+            raise PrototypeTerminalRuntimeError("revoked session cannot save snapshots")
         expires_at = _normalize_datetime(session.get("expires_at"))
         if expires_at and expires_at <= datetime.now(timezone.utc):
-            raise RuntimeError("expired session cannot save snapshots")
+            raise PrototypeTerminalRuntimeError("expired session cannot save snapshots")
         actor_type = str(session.get("actor_type") or "").strip().lower()
         if actor_type != "external_collaborator":
             return
         actor_repo = repo or self._repo
         actor = await actor_repo.get_shared_actor(str(session.get("actor_shared_actor_id") or ""))
         if not actor or actor.get("is_revoked") or actor.get("revoked_at"):
-            raise RuntimeError("revoked shared actor cannot save snapshots")
+            raise PrototypeTerminalRuntimeError("revoked shared actor cannot save snapshots")
         actor_expires_at = _normalize_datetime(actor.get("expires_at"))
         if actor_expires_at and actor_expires_at <= datetime.now(timezone.utc):
-            raise RuntimeError("expired shared actor cannot save snapshots")
+            raise PrototypeTerminalRuntimeError("expired shared actor cannot save snapshots")
 
 
 class PrototypePromotionService(PrototypeWorkspaceService):

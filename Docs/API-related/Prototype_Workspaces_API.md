@@ -249,6 +249,42 @@ Query/index review:
 | cleanup retention sweep | global archived, revoked, expired, and inactive-preview cutoffs | `idx_prototype_workspaces_archived_at_cleanup`, `idx_prototype_sessions_revoked_at_cleanup`, `idx_prototype_sessions_expires_at_cleanup`, `idx_prototype_shared_actors_expires_revoked_cleanup`, `idx_prototype_preview_handles_inactive_revoked_cleanup` |
 | preview handle lookup | handle id, active scope replacement, workspace/session cleanup scans | primary key plus preview handle workspace/session/scope indexes |
 
+## Risk Gate 3 Runtime Job Contract
+
+Prototype runtime orchestration uses the shared Jobs module with domain `prototype_workspaces` and queue `default`.
+
+Runtime job types:
+
+- `branch_session_bootstrap`
+- `preview_boot`
+- `snapshot_save`
+- `publish_validate_and_promote`
+
+Worker result shape:
+
+- successful job handlers return `status`, `job_type`, and `retryable`
+- terminal publish outcomes also return stable `failure_code` and relevant snapshot ids
+- payload errors use `failure_code = "invalid_job_payload"` and `retryable = false`
+- expected permission failures use `failure_code = "permission_denied"` and `retryable = false`
+- retryable runtime failures use `failure_code = "runtime_retryable"` and `retryable = true`
+- terminal runtime failures such as archived workspaces, revoked actors, expired sessions, and missing resources use `failure_code = "runtime_terminal"` and `retryable = false`
+
+Retry/idempotency guarantees:
+
+- branch bootstrap jobs use workspace, actor, canonical snapshot, and request nonce in the idempotency key; repeated execution reuses an active compatible branch session
+- preview boot jobs use scope, snapshot, runtime profile version, and target fingerprint in the idempotency key; repeated execution for the same active scope/snapshot/target/profile renews the existing handle instead of minting a second handle
+- preview boot replacement with a different target revokes the previous active handle for the scope and rolls back to the previous active handle only when the scope is still unclaimed after persistence failure
+- snapshot-save jobs use session and save request id in the idempotency key; repeated execution with the same explicit snapshot id returns the existing session-owned snapshot and preserves a single saved snapshot row
+- publish validation and promotion jobs use workspace, candidate snapshot, and baseline snapshot in the idempotency key; stale or failed validation returns a terminal result without advancing canonical or last-known-good pointers
+
+Cancellation and timeout boundary:
+
+- queued prototype jobs inherit the shared Jobs cancellation behavior and can be cancelled before acquisition
+- processing cancellation is best-effort at the shared worker boundary; the current Risk Gate 3 handlers are short transactional units and rely on idempotent retry/compensation rather than mid-operation interruption
+- worker shutdown uses `WorkerSDK.stop()` via the injected stop event and does not acquire new prototype jobs after shutdown starts
+- lease expiry and retry are owned by the shared Jobs manager; retry-safe service operations are the prototype-specific protection against duplicate effects after worker restart or completion-ack failure
+- runtime host process termination, long-running sandbox teardown, and operator-facing timeout controls remain later runtime-hosting work; this gate documents that boundary rather than introducing a parallel timeout system
+
 ## Preview Broker Guarantees
 
 Preview access is brokered through `preview_handle` records and signed preview grants.

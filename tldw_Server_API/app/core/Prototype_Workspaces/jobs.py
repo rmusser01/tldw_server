@@ -195,6 +195,11 @@ class PrototypeWorkspaceJobs:
         if not workspace:
             raise ValueError("prototype workspace not found")
 
+        resolved_runtime_profile_version = runtime_profile_version or "v1"
+        runtime_metadata = {
+            **(metadata or {}),
+            "runtime_profile_version": resolved_runtime_profile_version,
+        }
         return self._normalize_job_row(self._jobs_manager.create_job(
             domain=PROTOTYPE_DOMAIN,
             queue=self._queue,
@@ -204,8 +209,8 @@ class PrototypeWorkspaceJobs:
                 "prototype_session_id": prototype_session_id,
                 "snapshot_id": snapshot_id,
                 "runtime_target_url": runtime_target_url,
-                "metadata": metadata or {},
-                "runtime_profile_version": runtime_profile_version or "v1",
+                "metadata": runtime_metadata,
+                "runtime_profile_version": resolved_runtime_profile_version,
             },
             owner_user_id=str(workspace["owner_user_id"]),
             idempotency_key=build_preview_boot_idempotency_key(
@@ -213,7 +218,7 @@ class PrototypeWorkspaceJobs:
                 prototype_session_id=prototype_session_id,
                 snapshot_id=snapshot_id,
                 runtime_target_url=runtime_target_url,
-                runtime_profile_version=runtime_profile_version,
+                runtime_profile_version=resolved_runtime_profile_version,
             ),
         ))
 

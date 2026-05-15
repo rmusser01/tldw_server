@@ -1,6 +1,7 @@
 """Task 4 coverage for prototype runtime job orchestration."""
 from __future__ import annotations
 
+import asyncio
 import importlib
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -31,6 +32,25 @@ class _PromoteService:
     async def promote_candidate(self, **_kwargs: Any) -> dict[str, Any]:
         self.called = True
         return {"status": "promoted"}
+
+
+class _FailedPromotionService:
+    async def promote_candidate(self, **_kwargs: Any) -> dict[str, Any]:
+        return {
+            "status": "failed",
+            "failure_code": "publish_validation_failed",
+            "canonical_snapshot_id": "snap_original",
+            "retryable": True,
+        }
+
+
+class _RetryablePreviewFailureService:
+    async def boot_preview(self, **_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("preview runtime temporarily unavailable")
+
+
+class _NoopService:
+    pass
 
 
 async def _seed_branch_workspace(repo, prototype_db):
@@ -89,7 +109,7 @@ async def test_publish_job_requires_reviewer_user_id_before_service_call() -> No
     )
     service = _PromoteService()
 
-    with pytest.raises(ValueError, match="reviewer_user_id is required"):
+    with pytest.raises(ValueError, match="reviewer_user_id is required") as exc_info:
         await worker_module.handle_prototype_job(
             {
                 "job_type": "publish_validate_and_promote",
@@ -102,6 +122,92 @@ async def test_publish_job_requires_reviewer_user_id_before_service_call() -> No
         )
 
     assert service.called is False
+    assert getattr(exc_info.value, "retryable", True) is False
+    assert getattr(exc_info.value, "failure_code", None) == "invalid_job_payload"
+
+
+@pytest.mark.asyncio
+async def test_preview_boot_transient_runtime_failure_is_retryable_for_worker() -> None:
+    worker_module = importlib.import_module(
+        "tldw_Server_API.app.core.Prototype_Workspaces.jobs_worker"
+    )
+
+    with pytest.raises(RuntimeError, match="temporarily unavailable") as exc_info:
+        await worker_module.handle_prototype_job(
+            {
+                "job_type": "preview_boot",
+                "payload": {
+                    "prototype_workspace_id": "pw_1",
+                    "prototype_session_id": "session_1",
+                    "snapshot_id": "snap_1",
+                    "runtime_target_url": "http://127.0.0.1:9101",
+                },
+            },
+            service=_RetryablePreviewFailureService(),
+        )
+
+    assert getattr(exc_info.value, "retryable", False) is True
+    assert getattr(exc_info.value, "failure_code", None) == "runtime_retryable"
+
+
+@pytest.mark.asyncio
+async def test_publish_validation_failure_returns_terminal_job_result() -> None:
+    worker_module = importlib.import_module(
+        "tldw_Server_API.app.core.Prototype_Workspaces.jobs_worker"
+    )
+
+    result = await worker_module.handle_prototype_job(
+        {
+            "job_type": "publish_validate_and_promote",
+            "payload": {
+                "prototype_workspace_id": "pw_1",
+                "candidate_snapshot_id": "snap_candidate",
+                "reviewer_user_id": 7,
+                "review_baseline_snapshot_id": "snap_original",
+            },
+        },
+        service=_FailedPromotionService(),
+    )
+
+    assert result["status"] == "failed"
+    assert result["failure_code"] == "publish_validation_failed"
+    assert result["canonical_snapshot_id"] == "snap_original"
+    assert result["job_type"] == "publish_validate_and_promote"
+    assert result["retryable"] is False
+
+
+@pytest.mark.asyncio
+async def test_runtime_jobs_worker_stops_when_stop_event_is_set(monkeypatch) -> None:
+    worker_module = importlib.import_module(
+        "tldw_Server_API.app.core.Prototype_Workspaces.jobs_worker"
+    )
+    captured: dict[str, Any] = {}
+
+    class FakeWorkerSDK:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            self.stop_called = False
+            self._stopped = asyncio.Event()
+            captured["sdk"] = self
+
+        def stop(self) -> None:
+            self.stop_called = True
+            self._stopped.set()
+
+        async def run(self, **_kwargs: Any) -> None:
+            await asyncio.wait_for(self._stopped.wait(), timeout=1)
+
+    monkeypatch.setattr(worker_module, "WorkerSDK", FakeWorkerSDK)
+    monkeypatch.setattr(worker_module, "_jobs_manager", lambda: object())
+    stop_event = asyncio.Event()
+    worker_task = asyncio.create_task(
+        worker_module.run_prototype_jobs_worker(service=_NoopService(), stop_event=stop_event)
+    )
+
+    await asyncio.sleep(0)
+    stop_event.set()
+    await asyncio.wait_for(worker_task, timeout=1)
+
+    assert captured["sdk"].stop_called is True
 
 
 @pytest.mark.asyncio
@@ -192,6 +298,41 @@ async def test_preview_boot_idempotency_distinguishes_runtime_target_url(
 
     assert first["id"] != second["id"]
     assert first["idempotency_key"] != second["idempotency_key"]
+    assert first["payload"]["metadata"]["runtime_profile_version"] == "v1"
+
+
+@pytest.mark.asyncio
+async def test_preview_boot_idempotency_distinguishes_runtime_profile_version(
+    repo,
+    prototype_db,
+    prototype_jobs,
+):
+    workspace, canonical = await _seed_branch_workspace(repo, prototype_db)
+    session = await repo.create_session(
+        prototype_workspace_id=workspace["id"],
+        base_snapshot_id=canonical["snapshot_id"],
+        actor_type="internal_collaborator",
+        actor_user_id=2,
+    )
+
+    first = await prototype_jobs.enqueue_preview_boot(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        snapshot_id=canonical["snapshot_id"],
+        runtime_target_url="http://127.0.0.1:9101",
+        runtime_profile_version="v1",
+    )
+    second = await prototype_jobs.enqueue_preview_boot(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        snapshot_id=canonical["snapshot_id"],
+        runtime_target_url="http://127.0.0.1:9101",
+        runtime_profile_version="v2",
+    )
+
+    assert first["id"] != second["id"]
+    assert first["idempotency_key"] != second["idempotency_key"]
+    assert second["payload"]["metadata"]["runtime_profile_version"] == "v2"
 
 
 @pytest.mark.asyncio
@@ -222,13 +363,16 @@ async def test_revoked_external_collaborator_cannot_reuse_branch_session(
     service_cls = _load_attr(service_module, "PrototypeWorkspaceService", "PrototypePromotionService")
     service = service_cls(repo=repo)
 
-    with pytest.raises(RuntimeError, match="revoked"):
+    with pytest.raises(RuntimeError, match="revoked") as exc_info:
         await service.create_or_reuse_branch_session(
             prototype_workspace_id=workspace["id"],
             actor_type="external_collaborator",
             actor_shared_actor_id=actor["id"],
             request_nonce="after-revoke",
         )
+
+    assert getattr(exc_info.value, "retryable", True) is False
+    assert getattr(exc_info.value, "failure_code", None) == "runtime_terminal"
 
 
 @pytest.mark.asyncio
@@ -249,11 +393,54 @@ async def test_expired_session_cannot_save_snapshot(
     service_cls = _load_attr(service_module, "PrototypeWorkspaceService", "PrototypePromotionService")
     service = service_cls(repo=repo)
 
-    with pytest.raises(RuntimeError, match="expired"):
+    with pytest.raises(RuntimeError, match="expired") as exc_info:
         await service.save_session_snapshot(
             prototype_session_id=session["id"],
             snapshot_id="snap_should_not_save",
         )
+
+    assert getattr(exc_info.value, "retryable", True) is False
+    assert getattr(exc_info.value, "failure_code", None) == "runtime_terminal"
+
+
+@pytest.mark.asyncio
+async def test_save_session_snapshot_reuses_existing_snapshot_for_same_snapshot_id(
+    repo,
+    prototype_db,
+):
+    workspace, canonical = await _seed_branch_workspace(repo, prototype_db)
+    session = await repo.create_session(
+        prototype_workspace_id=workspace["id"],
+        base_snapshot_id=canonical["snapshot_id"],
+        actor_type="internal_collaborator",
+        actor_user_id=2,
+    )
+    service_module = importlib.import_module("tldw_Server_API.app.core.Prototype_Workspaces.service")
+    service_cls = _load_attr(service_module, "PrototypeWorkspaceService", "PrototypePromotionService")
+    service = service_cls(repo=repo)
+
+    first = await service.save_session_snapshot(
+        prototype_session_id=session["id"],
+        snapshot_id="snap_retry_safe",
+        storage_ref="prototype://retry-safe",
+        diff_summary={"step": 1},
+    )
+    second = await service.save_session_snapshot(
+        prototype_session_id=session["id"],
+        snapshot_id="snap_retry_safe",
+        storage_ref="prototype://retry-safe",
+        diff_summary={"step": 1},
+    )
+    rows = prototype_db.execute(
+        "SELECT COUNT(*) FROM prototype_snapshots WHERE id = ?",
+        ("snap_retry_safe",),
+    ).fetchone()
+    refreshed_session = await repo.get_session(session["id"])
+
+    assert first["snapshot_id"] == "snap_retry_safe"
+    assert second["snapshot_id"] == "snap_retry_safe"
+    assert rows[0] == 1
+    assert refreshed_session["last_saved_snapshot_id"] == "snap_retry_safe"
 
 
 @pytest.mark.asyncio
