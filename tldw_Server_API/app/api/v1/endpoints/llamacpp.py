@@ -130,8 +130,16 @@ async def update_llamacpp_config_endpoint(
     response_model=LlamaCppValidationResponse,
     dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
 )
-async def validate_llamacpp_binary_endpoint(payload: LlamaCppValidationRequest):
-    return llamacpp_config_service.validate_binary(payload.binary_path, payload.timeout_seconds)
+async def validate_llamacpp_binary_endpoint(
+    payload: LlamaCppValidationRequest,
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+):
+    return llamacpp_config_service.validate_binary(
+        payload.binary_path,
+        payload.timeout_seconds,
+        llm_manager=llm_manager,
+        run_probe=payload.run_probe,
+    )
 
 
 @router.post(

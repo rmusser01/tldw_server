@@ -67,6 +67,7 @@ class LlamaCppValidationRequest(BaseModel):
 
     binary_path: str = Field(..., min_length=1)
     timeout_seconds: float = Field(default=3.0, gt=0, le=15)
+    run_probe: bool = False
 
 
 class LlamaCppValidationResponse(BaseModel):

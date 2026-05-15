@@ -80,10 +80,11 @@ def get_env_overrides() -> dict[str, bool]:
 
 def get_config_state(llm_manager: Any) -> dict[str, Any]:
     """Return saved config, active handler config, restart signals, and warnings."""
-    saved_config = _read_saved_config()
+    parse_warnings: list[str] = []
+    saved_config = _read_saved_config(parse_warnings)
     active_config = _read_active_config(llm_manager)
     restart_reasons = _restart_reasons(saved_config, active_config)
-    warnings = _warnings(saved_config, active_config, restart_reasons)
+    warnings = parse_warnings + _warnings(saved_config, active_config, restart_reasons)
 
     return {
         "saved_config": saved_config,
@@ -112,12 +113,23 @@ def update_config_state(payload: Any, llm_manager: Any) -> dict[str, Any]:
             },
         )
 
-    setup_manager.update_config({"LlamaCpp": updates})
-    refresh_config_cache()
+    try:
+        setup_manager.update_config({"LlamaCpp": updates})
+        refresh_config_cache()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to update llama.cpp configuration.") from exc
     return get_config_state(llm_manager)
 
 
-def validate_binary(binary_path: str, timeout_seconds: float = 3.0) -> dict[str, Any]:
+def validate_binary(
+    binary_path: str,
+    timeout_seconds: float = 3.0,
+    *,
+    llm_manager: Any | None = None,
+    run_probe: bool = False,
+) -> dict[str, Any]:
     """Validate a llama.cpp binary path without starting a managed server."""
     warnings: list[str] = []
     raw_path = str(binary_path).strip()
@@ -143,7 +155,12 @@ def validate_binary(binary_path: str, timeout_seconds: float = 3.0) -> dict[str,
     resolved_path = str(path.resolve()) if exists else None
     version_output = None
     help_output = None
-    if exists and executable:
+    probe_allowed = True
+    if run_probe and exists and executable:
+        probe_allowed = _matches_saved_or_active_executable(path, llm_manager)
+        if not probe_allowed:
+            warnings.append("Binary probe requires the path to be saved first.")
+    if run_probe and exists and executable and probe_allowed:
         version_output = _probe_binary(path, "--version", timeout_seconds, warnings)
         if version_output is None:
             help_output = _probe_binary(path, "--help", timeout_seconds, warnings)
@@ -151,7 +168,7 @@ def validate_binary(binary_path: str, timeout_seconds: float = 3.0) -> dict[str,
             warnings.append(f"Binary '{path.name}' did not return version or help output.")
 
     return {
-        "valid": bool(exists and executable and (version_output or help_output)),
+        "valid": bool(exists and executable and (not run_probe or bool((version_output or help_output) and probe_allowed))),
         "exists": bool(exists),
         "executable": bool(executable),
         "resolved_path": resolved_path,
@@ -161,7 +178,7 @@ def validate_binary(binary_path: str, timeout_seconds: float = 3.0) -> dict[str,
     }
 
 
-def _read_saved_config() -> dict[str, Any]:
+def _read_saved_config(warnings: list[str] | None = None) -> dict[str, Any]:
     parser = load_comprehensive_config()
     section = parser["LlamaCpp"] if parser and parser.has_section("LlamaCpp") else None
     saved: dict[str, Any] = {
@@ -174,10 +191,10 @@ def _read_saved_config() -> dict[str, Any]:
 
     for field in _SAVED_FIELDS:
         if field in _BOOL_FIELDS:
-            saved[field] = section.getboolean(field, fallback=False)
+            saved[field] = _bool_or_default(section.get(field, fallback=None), field, warnings, default=False)
         elif field in _INT_FIELDS:
             raw = section.get(field, fallback=None)
-            saved[field] = _int_or_none(raw)
+            saved[field] = _int_or_none(raw, field, warnings)
         elif field in _LIST_FIELDS:
             saved[field] = _split_list(section.get(field, fallback=""))
         else:
@@ -242,7 +259,8 @@ def _warnings(
 
 def _payload_to_updates(payload: Any) -> dict[str, Any]:
     if hasattr(payload, "model_dump"):
-        raw = payload.model_dump(exclude_none=True)
+        fields_set = getattr(payload, "model_fields_set", set()) or getattr(payload, "__fields_set__", set())
+        raw = {field: getattr(payload, field) for field in fields_set}
     elif isinstance(payload, dict):
         raw = {k: v for k, v in payload.items() if v is not None}
     else:
@@ -250,7 +268,9 @@ def _payload_to_updates(payload: Any) -> dict[str, Any]:
 
     updates: dict[str, Any] = {}
     for field, value in raw.items():
-        if field in _LIST_FIELDS and value is not None:
+        if value is None:
+            updates[field] = ""
+        elif field in _LIST_FIELDS:
             updates[field] = ", ".join(str(item).strip() for item in value if str(item).strip())
         else:
             updates[field] = value
@@ -288,12 +308,33 @@ def _split_list(raw: str | None) -> list[str]:
     return [part.strip() for part in str(raw).replace(os.pathsep, ",").split(",") if part.strip()]
 
 
-def _int_or_none(raw: str | None) -> int | None:
+def _bool_or_default(
+    raw: str | None,
+    field: str,
+    warnings: list[str] | None,
+    *,
+    default: bool,
+) -> bool:
+    if raw is None or not str(raw).strip():
+        return default
+    lowered = str(raw).strip().lower()
+    if lowered in {"true", "yes", "on", "1"}:
+        return True
+    if lowered in {"false", "no", "off", "0"}:
+        return False
+    if warnings is not None:
+        warnings.append(f"Invalid boolean value for LlamaCpp.{field}.")
+    return default
+
+
+def _int_or_none(raw: str | None, field: str | None = None, warnings: list[str] | None = None) -> int | None:
     if raw is None or not str(raw).strip():
         return None
     try:
         return int(str(raw).strip())
     except ValueError:
+        if warnings is not None and field is not None:
+            warnings.append(f"Invalid integer value for LlamaCpp.{field}.")
         return None
 
 
@@ -327,3 +368,28 @@ def _normalize_list(value: Any) -> list[str]:
     if not value:
         return []
     return sorted(str(item) for item in value)
+
+
+def _matches_saved_or_active_executable(path: Path, llm_manager: Any | None) -> bool:
+    requested = _resolve_for_compare(path)
+    candidates: list[str] = []
+
+    try:
+        saved_config = _read_saved_config([])
+    except Exception:
+        saved_config = {}
+    saved_executable = saved_config.get("executable_path")
+    if saved_executable:
+        candidates.append(str(saved_executable))
+
+    handler = getattr(llm_manager, "llamacpp", None) if llm_manager is not None else None
+    active_config = getattr(handler, "config", None) if handler is not None else None
+    active_executable = getattr(active_config, "executable_path", None) if active_config is not None else None
+    if active_executable:
+        candidates.append(str(active_executable))
+
+    return any(requested == _resolve_for_compare(Path(candidate).expanduser()) for candidate in candidates)
+
+
+def _resolve_for_compare(path: Path) -> str:
+    return str(path.expanduser().resolve())

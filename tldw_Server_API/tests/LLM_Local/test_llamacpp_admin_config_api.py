@@ -41,6 +41,34 @@ class _ManagerWithoutHandler:
     llamacpp = None
 
 
+class _HandlerWithConfig:
+    def __init__(self, executable_path: Path) -> None:
+        self.config = type(
+            "Config",
+            (),
+            {
+                "enabled": True,
+                "executable_path": executable_path,
+                "models_dir": Path("models/gguf_models"),
+                "default_host": "127.0.0.1",
+                "default_port": 8080,
+                "allowed_paths": [],
+                "log_output_file": None,
+            },
+        )()
+        self._active_server_model = None
+        self._active_server_host = None
+        self._active_server_port = None
+        self._active_server_process = None
+
+
+class _ManagerWithHandler:
+    logger = _Logger()
+
+    def __init__(self, executable_path: Path) -> None:
+        self.llamacpp = _HandlerWithConfig(executable_path)
+
+
 class _ExistingManagementManager:
     logger = _Logger()
 
@@ -90,6 +118,30 @@ def _make_app_with_manager(manager) -> FastAPI:  # noqa: ANN001
     return app
 
 
+def _llamacpp_parser(**overrides: str) -> ConfigParser:
+    parser = ConfigParser()
+    parser.add_section("LlamaCpp")
+    values = {
+        "enabled": "true",
+        "executable_path": "vendor/llama.cpp/server",
+        "models_dir": "models/gguf_models",
+        "default_host": "127.0.0.1",
+        "default_port": "8080",
+        "default_threads": "",
+        "default_n_gpu_layers": "0",
+        "default_ctx_size": "2048",
+        "allow_unvalidated_args": "false",
+        "allow_cli_secrets": "false",
+        "port_autoselect": "true",
+        "port_probe_max": "10",
+        "allowed_paths": "models/gguf_models, /srv/models",
+        "log_output_file": "",
+    }
+    values.update(overrides)
+    parser["LlamaCpp"] = values
+    return parser
+
+
 @pytest.mark.unit
 def test_llamacpp_config_reports_saved_active_and_restart_required(monkeypatch):
     app = _make_app_with_manager(_ManagerWithoutHandler())
@@ -131,25 +183,7 @@ def test_llamacpp_config_reports_saved_active_and_restart_required(monkeypatch):
 def test_llamacpp_config_service_reports_saved_vs_active_missing_handler(monkeypatch):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_config_service
 
-    parser = ConfigParser()
-    parser.add_section("LlamaCpp")
-    parser["LlamaCpp"] = {
-        "enabled": "true",
-        "executable_path": "vendor/llama.cpp/server",
-        "models_dir": "models/gguf_models",
-        "default_host": "127.0.0.1",
-        "default_port": "8080",
-        "default_threads": "",
-        "default_n_gpu_layers": "0",
-        "default_ctx_size": "2048",
-        "allow_unvalidated_args": "false",
-        "allow_cli_secrets": "false",
-        "port_autoselect": "true",
-        "port_probe_max": "10",
-        "allowed_paths": "models/gguf_models, /srv/models",
-        "log_output_file": "",
-    }
-    monkeypatch.setattr(llamacpp_config_service, "load_comprehensive_config", lambda: parser)
+    monkeypatch.setattr(llamacpp_config_service, "load_comprehensive_config", _llamacpp_parser)
     monkeypatch.setattr(
         llamacpp_config_service,
         "get_env_overrides",
@@ -163,6 +197,25 @@ def test_llamacpp_config_service_reports_saved_vs_active_missing_handler(monkeyp
     assert state["active_config"] == {"handler_configured": False}
     assert state["restart_required"] is True
     assert state["restart_reasons"] == ["handler_not_configured"]
+
+
+@pytest.mark.unit
+def test_llamacpp_config_service_reports_malformed_saved_config_warnings(monkeypatch):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_config_service
+
+    monkeypatch.setattr(
+        llamacpp_config_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(enabled="not-a-bool", default_port="not-a-port"),
+    )
+
+    state = llamacpp_config_service.get_config_state(_ManagerWithoutHandler())
+
+    assert state["saved_config"]["enabled"] is False
+    assert state["saved_config"]["default_port"] is None
+    assert state["restart_required"] is False
+    assert "Invalid boolean value for LlamaCpp.enabled." in state["warnings"]
+    assert "Invalid integer value for LlamaCpp.default_port." in state["warnings"]
 
 
 @pytest.mark.unit
@@ -256,9 +309,81 @@ def test_llamacpp_config_put_updates_with_setup_manager_and_refreshes_cache(monk
 
 
 @pytest.mark.unit
-def test_llamacpp_validate_reports_success_for_executable_binary(tmp_path: Path):
+def test_llamacpp_config_put_explicit_null_clears_nullable_scalar(monkeypatch):
+    from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import LlamaCppConfigUpdateRequest
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_config_service
+
+    calls: list[tuple[str, Any]] = []
+
+    monkeypatch.setattr(
+        llamacpp_config_service,
+        "get_env_overrides",
+        lambda: {field: False for field in llamacpp_config_service.LLAMACPP_ENV_OVERRIDES},
+    )
+    monkeypatch.setattr(
+        llamacpp_config_service.setup_manager,
+        "update_config",
+        lambda updates: calls.append(("update_config", updates)),
+    )
+    monkeypatch.setattr(
+        llamacpp_config_service,
+        "refresh_config_cache",
+        lambda: calls.append(("refresh_config_cache", None)),
+    )
+    monkeypatch.setattr(
+        llamacpp_config_service,
+        "get_config_state",
+        lambda llm_manager: {
+            "saved_config": {"enabled": False, "default_host": None, "allowed_paths": []},
+            "active_config": {"handler_configured": False},
+            "restart_required": False,
+            "restart_reasons": [],
+            "env_overrides": {},
+            "warnings": [],
+        },
+    )
+
+    llamacpp_config_service.update_config_state(
+        LlamaCppConfigUpdateRequest(default_host=None),
+        _ManagerWithoutHandler(),
+    )
+
+    assert calls == [
+        ("update_config", {"LlamaCpp": {"default_host": ""}}),
+        ("refresh_config_cache", None),
+    ]
+
+
+@pytest.mark.unit
+def test_llamacpp_config_put_returns_safe_error_when_config_write_fails(monkeypatch):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_config_service
+
+    app = _make_app_with_manager(_ManagerWithoutHandler())
+    monkeypatch.setattr(
+        llamacpp_config_service,
+        "get_env_overrides",
+        lambda: {field: False for field in llamacpp_config_service.LLAMACPP_ENV_OVERRIDES},
+    )
+
+    def _fail_update(updates):  # noqa: ANN001
+        _ = updates
+        raise RuntimeError("failed writing /private/sensitive/config.txt")
+
+    monkeypatch.setattr(llamacpp_config_service.setup_manager, "update_config", _fail_update)
+
+    with TestClient(app) as client:
+        response = client.put("/api/v1/llamacpp/config", json={"models_dir": "models/new"})
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to update llama.cpp configuration."
+    assert "/private/sensitive" not in response.text
+
+
+@pytest.mark.unit
+def test_llamacpp_validate_default_is_stat_only_and_does_not_execute(tmp_path: Path):
     script = tmp_path / "llama-server"
-    script.write_text("#!/bin/sh\nprintf 'llama-server version test\\n'\n", encoding="utf-8")
+    marker = tmp_path / "probe-ran"
+    script.write_text(f"#!/bin/sh\ntouch {marker}\nprintf 'llama-server version test\\n'\n", encoding="utf-8")
     script.chmod(script.stat().st_mode | stat.S_IXUSR)
     app = _make_app_with_manager(_ManagerWithoutHandler())
 
@@ -270,7 +395,82 @@ def test_llamacpp_validate_reports_success_for_executable_binary(tmp_path: Path)
     assert body["valid"] is True
     assert body["exists"] is True
     assert body["executable"] is True
+    assert body["version_output"] is None
+    assert body["help_output"] is None
+    assert not marker.exists()
+
+
+@pytest.mark.unit
+def test_llamacpp_validate_run_probe_requires_saved_or_active_binary_path(tmp_path: Path):
+    script = tmp_path / "llama-server"
+    marker = tmp_path / "probe-ran"
+    script.write_text(f"#!/bin/sh\ntouch {marker}\nprintf 'llama-server version test\\n'\n", encoding="utf-8")
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    app = _make_app_with_manager(_ManagerWithoutHandler())
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/llamacpp/validate",
+            json={"binary_path": str(script), "run_probe": True},
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["valid"] is False
+    assert body["exists"] is True
+    assert body["executable"] is True
+    assert body["version_output"] is None
+    assert "Binary probe requires the path to be saved first." in body["warnings"]
+    assert not marker.exists()
+
+
+@pytest.mark.unit
+def test_llamacpp_validate_run_probe_executes_saved_binary(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_config_service
+
+    script = tmp_path / "llama-server"
+    script.write_text("#!/bin/sh\nprintf 'llama-server version test\\n'\n", encoding="utf-8")
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setattr(
+        llamacpp_config_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(executable_path=str(script)),
+    )
+    app = _make_app_with_manager(_ManagerWithoutHandler())
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/llamacpp/validate",
+            json={"binary_path": str(script), "run_probe": True},
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["valid"] is True
+    assert body["exists"] is True
+    assert body["executable"] is True
     assert body["version_output"] == "llama-server version test"
+
+
+@pytest.mark.unit
+def test_llamacpp_validate_run_probe_executes_active_handler_binary(tmp_path: Path):
+    script = tmp_path / "llama-server"
+    script.write_text("#!/bin/sh\nprintf 'active llama-server version test\\n'\n", encoding="utf-8")
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    app = _make_app_with_manager(_ManagerWithHandler(script))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/llamacpp/validate",
+            json={"binary_path": str(script), "run_probe": True},
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["valid"] is True
+    assert body["exists"] is True
+    assert body["executable"] is True
+    assert body["version_output"] == "active llama-server version test"
 
 
 @pytest.mark.unit
