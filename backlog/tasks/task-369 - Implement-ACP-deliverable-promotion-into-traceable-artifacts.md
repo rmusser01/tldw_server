@@ -1,10 +1,10 @@
 ---
 id: TASK-369
 title: Implement ACP deliverable promotion into traceable artifacts
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-15 03:51'
-updated_date: '2026-05-15 04:16'
+updated_date: '2026-05-15 04:45'
 labels:
   - acp
   - artifacts
@@ -53,12 +53,24 @@ Implement GitHub issue #1706: promote one golden-path ACP run deliverable, such 
 Implemented ACP artifact promotion backend slice for issue #1706. Added a focused promotion service at tldw_Server_API/app/core/Agent_Orchestration/artifact_promotion.py and dispatch wiring in tldw_Server_API/app/api/v1/endpoints/agent_orchestration.py. Added regression coverage in tldw_Server_API/tests/Agent_Orchestration/test_artifact_promotion.py plus a dispatch-level golden path in test_orchestration_api.py. Verification: pytest tldw_Server_API/tests/Agent_Orchestration -q => 176 passed, 5 warnings. Ruff check on touched files => all checks passed. Bandit production touched files => exit 0; touched files with pytest B101/B105 excluded => exit 0.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented issue #1706 in draft PR #1718: https://github.com/rmusser01/tldw_server/pull/1718
+
+Added ACP deliverable promotion into traceable workspace artifacts through a focused backend service and ACP dispatch wiring. The implementation promotes only structured work-product artifacts with source lineage, preserves ACP producer/session/run/review metadata, stores redaction/version/source-lineage contract fields, updates existing artifacts by version, and leaves retry/rejected/malformed payloads out of accepted artifact state.
+
+Verification recorded: Agent Orchestration pytest suite passed (176 passed, 5 warnings); Ruff passed on touched files; Bandit passed on production touched files and on the touched set with pytest-only B101/B105 excluded.
+
+Known merge gate: PR remains draft until the requester adds the required human-authored Change summary.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
