@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-05-15 02:29'
-updated_date: '2026-05-15 02:53'
+updated_date: '2026-05-15 05:16'
 labels:
   - persona
   - webui
@@ -75,17 +75,34 @@ Verification 2026-05-15:
 Known skips/blockers 2026-05-15:
 - Backend/API import contract was not changed in this slice, so backend Persona visual API tests were not run.
 - Bandit was skipped as not applicable because no Python files changed.
+
+Review sweep 2026-05-15:
+- Live PR #1715 review surface has actionable Gemini i18n threads for new import copy.
+- Qodo MIME guard requirement is valid with browser File.type caveat: reject explicit unsupported non-empty types while allowing empty/generic archive types.
+- Qodo stale selectedPackId fallback is valid; fix should keep loadPacks stable and avoid refetching on selection changes.
+
+Review fixes 2026-05-15:
+- Addressed Gemini i18n comments by routing new import preview/commit copy through t() and adding English sidepanel locale keys.
+- Addressed Qodo MIME gap by rejecting explicit unsupported non-empty File.type values while allowing empty/generic zip archive media types for the custom extension.
+- Addressed Qodo stale reload selection by tracking the current selected pack id via ref and passing the selected pack explicitly from the pack refresh action.
+
+Review-fix verification 2026-05-15:
+- bunx vitest run ../packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx passed with 28 tests.
+- node -e JSON.parse(...) for apps/packages/ui/src/assets/locale/en/sidepanel.json passed.
+- git diff --check passed.
+- Bandit remains N/A because this review pass touched TypeScript/JSON/Markdown only.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the Persona Visual archive import handoff polish for #1696. The WebUI now sends import preview uploads with the backend archive field, rejects non-.tldw-persona-vpack filenames before upload, surfaces preview/commit job copy from status/stage/error fields, and selects the imported draft returned by a completed commit without activating it.
+Implemented the Persona Visual archive import handoff polish for #1696 and addressed PR #1715 review feedback. The WebUI now sends import preview uploads with the backend archive field, rejects unsupported extensions and explicit unsupported media types before upload, surfaces localized preview/commit job copy, preserves the selected pack across refreshes, and selects imported drafts after completed commits without activating them.
 
 Verification:
-- bunx vitest run ../packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx (26 passed)
-- git diff --check (passed)
-- Bandit N/A: TypeScript/Markdown-only changes.
+- bunx vitest run ../packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx (28 passed)
+- node -e JSON.parse(...) for apps/packages/ui/src/assets/locale/en/sidepanel.json
+- git diff --check
+- Bandit N/A: TypeScript/JSON/Markdown-only changes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

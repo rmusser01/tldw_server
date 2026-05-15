@@ -209,8 +209,11 @@ describe("VisualPackEditor", () => {
     )
 
     expect(await screen.findByTestId("persona-visual-pack-status")).toHaveTextContent("draft")
+    const candidatesRefreshButton = await screen.findByTestId(
+      "persona-visual-candidates-refresh-button"
+    )
     await waitFor(() =>
-      expect(screen.getAllByRole("button", { name: "Localized loading" })).toHaveLength(1)
+      expect(candidatesRefreshButton).toHaveTextContent("Localized loading")
     )
 
     resolveCandidates({
@@ -219,8 +222,75 @@ describe("VisualPackEditor", () => {
     })
 
     await waitFor(() =>
-      expect(screen.getAllByRole("button", { name: "Localized refresh" })).toHaveLength(2)
+      expect(candidatesRefreshButton).toHaveTextContent("Localized refresh")
     )
+  })
+
+  it("preserves the current pack selection when refreshing packs", async () => {
+    const activePack = {
+      id: "pack-active",
+      persona_id: "persona-1",
+      title: "Active pack",
+      renderer_type: "sprite_frames",
+      status: "active",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+    const draftPack = {
+      id: "pack-draft",
+      persona_id: "persona-1",
+      title: "Draft pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 4
+    }
+    let listRequests = 0
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        listRequests += 1
+        return okResponse({
+          packs: [activePack, draftPack],
+          active_pack: activePack
+        })
+      }
+      if (
+        path.startsWith("/api/v1/persona/profiles/persona-1/visual-packs/") &&
+        path.endsWith("/generated-candidates") &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    const select = await screen.findByTestId("persona-visual-pack-select")
+    await waitFor(() => expect(select).toHaveValue("pack-active"))
+
+    fireEvent.change(select, { target: { value: "pack-draft" } })
+    expect(select).toHaveValue("pack-draft")
+
+    fireEvent.click(screen.getByTestId("persona-visual-pack-refresh-button"))
+
+    await waitFor(() => expect(listRequests).toBeGreaterThan(1))
+    expect(select).toHaveValue("pack-draft")
   })
 
   it("shows selected pack health diagnostics from the shared visual pack classifier", async () => {
@@ -2195,6 +2265,71 @@ describe("VisualPackEditor", () => {
     ).toBe(false)
   })
 
+  it("rejects unsupported visual import archive media types before upload", async () => {
+    const calls: string[] = []
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent(
+        "draft"
+      )
+    )
+    const archive = new File(["not a portable archive"], "portable.tldw-persona-vpack", {
+      type: "text/plain"
+    })
+    fireEvent.change(screen.getByTestId("persona-visual-import-preview-input"), {
+      target: { files: [archive] }
+    })
+
+    expect(
+      await screen.findByTestId("persona-visual-import-preview-file-error")
+    ).toHaveTextContent("supported zip media type")
+    expect(screen.getByTestId("persona-visual-import-preview-button")).toBeDisabled()
+
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-button"))
+
+    expect(
+      calls.some((call) => call.includes("/visual-packs/import-previews"))
+    ).toBe(false)
+  })
+
   it("shows import preview failure copy from the job response", async () => {
     const pack = {
       id: "pack-1",
@@ -2625,7 +2760,9 @@ describe("VisualPackEditor", () => {
     await waitFor(() =>
       expect(screen.getByTestId("persona-visual-import-conflict-choice")).toBeInTheDocument()
     )
-    expect(screen.getByTestId("persona-visual-import-commit-button")).toBeDisabled()
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-commit-button")).toBeDisabled()
+    )
 
     fireEvent.change(screen.getByTestId("persona-visual-import-target-mode"), {
       target: { value: "replace_draft" }

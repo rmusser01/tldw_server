@@ -514,6 +514,25 @@
     "createNewCharacter": "Create a New Character+",
     "importCharacter": "Import Character"
   },
+  "personaGarden": {
+    "visuals": {
+      "importPreviewUnsupportedExtension": "Choose a {{extension}} archive exported from Persona Visual Packs.",
+      "importPreviewUnsupportedMimeType": "Choose a Persona Visual pack archive with a supported zip media type.",
+      "importPreviewTerminalStatus": "Import preview {{status}} during {{stage}}.",
+      "importPreviewBlocked": "Import preview completed with blockers. Review diagnostics before committing.",
+      "importPreviewCompleted": "Import preview completed. Review the draft plan before committing.",
+      "importPreviewQueued": "Import preview queued. Refresh to check validation status.",
+      "importPreviewProcessing": "Import preview is processing{{stageSuffix}}",
+      "importPreviewStatus": "Import preview {{status}}: {{stage}}",
+      "importPreviewQueuedStatus": "Import preview queued.",
+      "importCommitTerminalStatus": "Import commit {{status}} during {{stage}}.",
+      "importCommitCompleted": "Import commit completed. Review and activate the new draft when ready.",
+      "importCommitQueued": "Import commit queued. Refresh to check draft creation status.",
+      "importCommitProcessing": "Import commit is processing{{stageSuffix}}",
+      "importCommitStatus": "Import commit {{status}}: {{stage}}",
+      "importCommitQueuedStatus": "Import commit queued. Imported packs remain drafts until activated."
+    }
+  },
   "persona": {
     "unsavedStateDiscardPrompt": "You have unsaved state-doc changes. Discard local drafts?",
     "unsavedStateDiscardPromptConnect": "You have unsaved state-doc changes. Connect and discard local drafts?",

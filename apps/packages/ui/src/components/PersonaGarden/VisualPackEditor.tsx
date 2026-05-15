@@ -101,9 +101,14 @@ type LibraryEditDraft = {
   tags: string
 }
 
+type VisualPackTranslate = (
+  key: string,
+  options?: { defaultValue?: string; [key: string]: unknown }
+) => string
+
 const getGenerationReadinessCopy = (
   view: PersonaVisualGenerationReadinessView,
-  t: (key: string, options?: { defaultValue?: string }) => string
+  t: VisualPackTranslate
 ): { title: string; message: string; toneClassName: string } => {
   switch (view.status) {
     case "ready":
@@ -246,6 +251,12 @@ const TRIGGER_SOURCES: PersonaVisualAuthoredTrigger["source"][] = [
 ]
 
 const PORTABLE_VISUAL_PACK_EXTENSION = ".tldw-persona-vpack"
+const PORTABLE_VISUAL_PACK_MIME_TYPES = new Set([
+  "application/octet-stream",
+  "application/vnd.tldw.persona.visual-pack+zip",
+  "application/x-zip-compressed",
+  "application/zip"
+])
 const IMPORT_COMMIT_TERMINAL_STATUSES = new Set([
   "completed",
   "failed",
@@ -261,12 +272,33 @@ const IMPORT_PREVIEW_TERMINAL_STATUSES = new Set([
   "quarantined"
 ])
 
-const isPortableVisualPackFile = (file: File | null): boolean =>
+const hasPortableVisualPackExtension = (file: File | null): boolean =>
   !file || file.name.toLowerCase().endsWith(PORTABLE_VISUAL_PACK_EXTENSION)
 
-const getImportPreviewFileError = (file: File | null): string | null => {
+const hasSupportedPortableVisualPackMediaType = (file: File | null): boolean => {
+  if (!file) return true
+  const mediaType = file.type.trim().toLowerCase()
+  return !mediaType || PORTABLE_VISUAL_PACK_MIME_TYPES.has(mediaType)
+}
+
+const isPortableVisualPackFile = (file: File | null): boolean =>
+  hasPortableVisualPackExtension(file) && hasSupportedPortableVisualPackMediaType(file)
+
+const getImportPreviewFileError = (
+  file: File | null,
+  t: VisualPackTranslate
+): string | null => {
   if (isPortableVisualPackFile(file)) return null
-  return `Choose a ${PORTABLE_VISUAL_PACK_EXTENSION} archive exported from Persona Visual Packs.`
+  if (!hasPortableVisualPackExtension(file)) {
+    return t("sidepanel:personaGarden.visuals.importPreviewUnsupportedExtension", {
+      extension: PORTABLE_VISUAL_PACK_EXTENSION,
+      defaultValue: `Choose a ${PORTABLE_VISUAL_PACK_EXTENSION} archive exported from Persona Visual Packs.`
+    })
+  }
+  return t("sidepanel:personaGarden.visuals.importPreviewUnsupportedMimeType", {
+    defaultValue:
+      "Choose a Persona Visual pack archive with a supported zip media type."
+  })
 }
 
 type ImportPreviewStatus =
@@ -274,7 +306,10 @@ type ImportPreviewStatus =
   | PersonaVisualImportPreviewResponse
   | null
 
-const getImportPreviewJobCopy = (preview: ImportPreviewStatus): string | null => {
+const getImportPreviewJobCopy = (
+  preview: ImportPreviewStatus,
+  t: VisualPackTranslate
+): string | null => {
   if (!preview) return null
   const statusValue = String(preview.status || "").trim()
   const stageValue = String(preview.stage || "").trim()
@@ -288,26 +323,48 @@ const getImportPreviewJobCopy = (preview: ImportPreviewStatus): string | null =>
   ) {
     return (
       errorMessage ||
-      `Import preview ${statusValue} during ${stageValue || "validation"}.`
+      t("sidepanel:personaGarden.visuals.importPreviewTerminalStatus", {
+        stage: stageValue || "validation",
+        status: statusValue,
+        defaultValue: `Import preview ${statusValue} during ${stageValue || "validation"}.`
+      })
     )
   }
   if (statusValue === "blocked") {
-    return "Import preview completed with blockers. Review diagnostics before committing."
+    return t("sidepanel:personaGarden.visuals.importPreviewBlocked", {
+      defaultValue:
+        "Import preview completed with blockers. Review diagnostics before committing."
+    })
   }
   if (statusValue === "completed") {
-    return "Import preview completed. Review the draft plan before committing."
+    return t("sidepanel:personaGarden.visuals.importPreviewCompleted", {
+      defaultValue: "Import preview completed. Review the draft plan before committing."
+    })
   }
   if (statusValue === "queued") {
-    return "Import preview queued. Refresh to check validation status."
+    return t("sidepanel:personaGarden.visuals.importPreviewQueued", {
+      defaultValue: "Import preview queued. Refresh to check validation status."
+    })
   }
   if (statusValue === "processing") {
-    return `Import preview is processing${stageValue ? `: ${stageValue}` : "."}`
+    return t("sidepanel:personaGarden.visuals.importPreviewProcessing", {
+      stage: stageValue,
+      stageSuffix: stageValue ? `: ${stageValue}` : ".",
+      defaultValue: `Import preview is processing${stageValue ? `: ${stageValue}` : "."}`
+    })
   }
-  return stageValue ? `Import preview ${statusValue}: ${stageValue}` : null
+  return stageValue
+    ? t("sidepanel:personaGarden.visuals.importPreviewStatus", {
+        stage: stageValue,
+        status: statusValue,
+        defaultValue: `Import preview ${statusValue}: ${stageValue}`
+      })
+    : null
 }
 
 const getImportCommitJobCopy = (
-  job: PersonaVisualImportCommitStartResponse | PersonaVisualPortabilityJobResponse | null
+  job: PersonaVisualImportCommitStartResponse | PersonaVisualPortabilityJobResponse | null,
+  t: VisualPackTranslate
 ): string | null => {
   if (!job) return null
   const statusValue = String(job.status || "").trim()
@@ -319,19 +376,37 @@ const getImportCommitJobCopy = (
   if (["failed", "cancelled", "quarantined"].includes(statusValue)) {
     return (
       errorMessage ||
-      `Import commit ${statusValue} during ${stageValue || "commit"}.`
+      t("sidepanel:personaGarden.visuals.importCommitTerminalStatus", {
+        stage: stageValue || "commit",
+        status: statusValue,
+        defaultValue: `Import commit ${statusValue} during ${stageValue || "commit"}.`
+      })
     )
   }
   if (statusValue === "completed") {
-    return "Import commit completed. Review and activate the new draft when ready."
+    return t("sidepanel:personaGarden.visuals.importCommitCompleted", {
+      defaultValue: "Import commit completed. Review and activate the new draft when ready."
+    })
   }
   if (statusValue === "queued") {
-    return "Import commit queued. Refresh to check draft creation status."
+    return t("sidepanel:personaGarden.visuals.importCommitQueued", {
+      defaultValue: "Import commit queued. Refresh to check draft creation status."
+    })
   }
   if (statusValue === "processing") {
-    return `Import commit is processing${stageValue ? `: ${stageValue}` : "."}`
+    return t("sidepanel:personaGarden.visuals.importCommitProcessing", {
+      stage: stageValue,
+      stageSuffix: stageValue ? `: ${stageValue}` : ".",
+      defaultValue: `Import commit is processing${stageValue ? `: ${stageValue}` : "."}`
+    })
   }
-  return stageValue ? `Import commit ${statusValue}: ${stageValue}` : null
+  return stageValue
+    ? t("sidepanel:personaGarden.visuals.importCommitStatus", {
+        stage: stageValue,
+        status: statusValue,
+        defaultValue: `Import commit ${statusValue}: ${stageValue}`
+      })
+    : null
 }
 
 const DEFAULT_MANIFEST: PersonaVisualManifest = {
@@ -684,6 +759,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const unknownLabel = t("common:unknown", { defaultValue: "unknown" })
   const [packs, setPacks] = React.useState<PersonaVisualPack[]>([])
   const [selectedPackId, setSelectedPackId] = React.useState("")
+  const selectedPackIdRef = React.useRef("")
   const [draftTitle, setDraftTitle] = React.useState("")
   const [draftManifest, setDraftManifest] =
     React.useState<PersonaVisualManifest>(DEFAULT_MANIFEST)
@@ -836,6 +912,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     [generationReadinessView, t]
   )
 
+  React.useEffect(() => {
+    selectedPackIdRef.current = selectedPackId
+  }, [selectedPackId])
+
   const loadPacks = React.useCallback(async (
     preferredPackId?: string | null
   ): Promise<boolean> => {
@@ -858,7 +938,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       const preferred =
         explicitPreferredPack ??
         response.active_pack ??
-        nextPacks.find((pack) => pack.id === selectedPackId) ??
+        nextPacks.find((pack) => pack.id === selectedPackIdRef.current) ??
         nextPacks[0] ??
         null
       setSelectedPackId(preferred?.id || "")
@@ -1396,7 +1476,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
 
   const handleStartImportPreview = async () => {
     if (!selectedPersonaId || !selectedImportPreviewFile) return
-    const fileError = getImportPreviewFileError(selectedImportPreviewFile)
+    const fileError = getImportPreviewFileError(selectedImportPreviewFile, t)
     if (fileError) {
       setError(fileError)
       return
@@ -1415,7 +1495,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       setImportDraftTitle("")
       setSelectedImportPreviewFile(null)
       if (importPreviewInputRef.current) importPreviewInputRef.current.value = ""
-      setStatusMessage("Import preview queued.")
+      setStatusMessage(
+        t("sidepanel:personaGarden.visuals.importPreviewQueuedStatus", {
+          defaultValue: "Import preview queued."
+        })
+      )
     } catch (previewError) {
       setError(
         previewError instanceof Error
@@ -1473,7 +1557,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       )
       setImportCommitJob(job)
       setStatusMessage(
-        "Import commit queued. Imported packs remain drafts until activated."
+        t("sidepanel:personaGarden.visuals.importCommitQueuedStatus", {
+          defaultValue:
+            "Import commit queued. Imported packs remain drafts until activated."
+        })
       )
     } catch (commitError) {
       setError(
@@ -1501,7 +1588,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         const refreshed = await loadPacks(job.pack_id)
         if (refreshed) {
           setStatusMessage(
-            "Import commit completed. Review and activate the new draft when ready."
+            t("sidepanel:personaGarden.visuals.importCommitCompleted", {
+              defaultValue:
+                "Import commit completed. Review and activate the new draft when ready."
+            })
           )
         } else {
           setStatusMessage(null)
@@ -2033,9 +2123,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       ? exportJob.warnings
       : []
   const fullImportPreview = isFullImportPreview(importPreview) ? importPreview : null
-  const importPreviewFileError = getImportPreviewFileError(selectedImportPreviewFile)
-  const importPreviewJobCopy = getImportPreviewJobCopy(importPreview)
-  const importCommitJobCopy = getImportCommitJobCopy(importCommitJob)
+  const importPreviewFileError = getImportPreviewFileError(selectedImportPreviewFile, t)
+  const importPreviewJobCopy = getImportPreviewJobCopy(importPreview, t)
+  const importCommitJobCopy = getImportCommitJobCopy(importCommitJob, t)
   const importPreviewWarnings = fullImportPreview
     ? [
         ...(fullImportPreview.validation_warnings || []),
@@ -2103,8 +2193,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
             </div>
           </div>
           <Button
+            data-testid="persona-visual-pack-refresh-button"
             size="small"
-            onClick={() => void loadPacks()}
+            onClick={() => void loadPacks(selectedPack?.id)}
             disabled={loading}
           >
             {loading ? loadingLabel : refreshLabel}
@@ -3226,7 +3317,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
               <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
                 Generated Candidates
               </div>
-              <Button size="small" onClick={() => void loadCandidates()}>
+              <Button
+                data-testid="persona-visual-candidates-refresh-button"
+                size="small"
+                onClick={() => void loadCandidates()}
+              >
                 {candidatesLoading ? loadingLabel : refreshLabel}
               </Button>
             </div>
