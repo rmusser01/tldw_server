@@ -27,6 +27,8 @@ Tables (per-user, colocated with Media DB):
                 last_seen_at, elapsed_ms, reached_target, created_at)
 - watchlist_onboarding_events(id, user_id, session_id, event_type, event_at,
                 details_json, created_at)
+- watchlist_item_saved_views(id, user_id, watchlist_id, name, filters_json,
+                sort, is_default, created_at, updated_at)
 
 Notes:
 - Backed by DatabaseBackendFactory; default to per-user SQLite Media DB path.
@@ -81,6 +83,24 @@ _VALID_CONTENT_ALERT_RULE_KINDS = {"keyword", "regex", "descriptor", "classifica
 _VALID_CONTENT_ALERT_MATCH_MODES = {"contains", "exact", "regex"}
 _VALID_CONTENT_ALERT_SEVERITIES = {"info", "low", "medium", "high", "critical"}
 _VALID_CONTENT_ALERT_STATUSES = {"unread", "read", "dismissed"}
+_VALID_ITEM_SAVED_VIEW_FILTER_KEYS = {
+    "run_id",
+    "job_id",
+    "source_id",
+    "status",
+    "reviewed",
+    "queued_for_briefing",
+    "q",
+    "search",
+    "since",
+    "until",
+    "has_alert",
+    "alert_status",
+    "alert_severity",
+    "alert_rule_id",
+    "smart_filter",
+}
+_VALID_ITEM_SAVED_VIEW_SMART_FILTERS = {"all", "today", "today_unread", "todayUnread", "unread", "reviewed", "queued"}
 
 
 def _utcnow_iso() -> str:
@@ -250,6 +270,19 @@ class WatchlistContentAlertRow:
     created_at: str
     read_at: str | None = None
     dismissed_at: str | None = None
+
+
+@dataclass
+class WatchlistItemSavedViewRow:
+    id: int
+    user_id: str
+    watchlist_id: int
+    name: str
+    filters_json: str
+    sort: str
+    is_default: int
+    created_at: str
+    updated_at: str
 
 
 @dataclass
@@ -689,6 +722,20 @@ class WatchlistsDatabase:
             CREATE UNIQUE INDEX IF NOT EXISTS ux_content_alerts_dedupe_key
                 ON watchlist_content_alerts(dedupe_key);
 
+            CREATE TABLE IF NOT EXISTS watchlist_item_saved_views (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                watchlist_id BIGINT NOT NULL,
+                name TEXT NOT NULL,
+                filters_json TEXT NOT NULL,
+                sort TEXT NOT NULL DEFAULT 'created_desc',
+                is_default INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_item_saved_views_user_watchlist
+                ON watchlist_item_saved_views(user_id, watchlist_id);
+
             CREATE TABLE IF NOT EXISTS watchlist_clusters (
                 job_id BIGINT NOT NULL,
                 cluster_id BIGINT NOT NULL,
@@ -977,6 +1024,20 @@ class WatchlistsDatabase:
                 ON watchlist_content_alerts(user_id, watchlist_id, rule_id);
             CREATE UNIQUE INDEX IF NOT EXISTS ux_content_alerts_dedupe_key
                 ON watchlist_content_alerts(dedupe_key);
+
+            CREATE TABLE IF NOT EXISTS watchlist_item_saved_views (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                watchlist_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                filters_json TEXT NOT NULL,
+                sort TEXT NOT NULL DEFAULT 'created_desc',
+                is_default INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_item_saved_views_user_watchlist
+                ON watchlist_item_saved_views(user_id, watchlist_id);
 
             CREATE TABLE IF NOT EXISTS watchlist_clusters (
                 job_id INTEGER NOT NULL,
@@ -2992,6 +3053,198 @@ class WatchlistsDatabase:
                 summary["latest_matched_text"] = row.get("matched_text")
         return summaries
 
+    def _source_belongs_to_watchlist(self, *, watchlist_id: int, source_id: int) -> bool:
+        row = self.backend.execute(
+            """
+            SELECT 1
+            FROM watchlist_sources ws
+            JOIN sources s ON s.id = ws.source_id
+            WHERE ws.watchlist_id = ? AND ws.source_id = ? AND s.user_id = ?
+            """,
+            (int(watchlist_id), int(source_id), self.user_id),
+        ).first
+        return bool(row)
+
+    @staticmethod
+    def _normalize_item_saved_view_name(name: str) -> str:
+        value = str(name or "").strip()
+        if not value:
+            raise ValueError("saved_view_name_required")
+        if len(value) > 120:
+            raise ValueError("saved_view_name_too_long")
+        return value
+
+    def _normalize_item_filter_payload(
+        self,
+        filters: dict[str, Any] | None,
+        *,
+        watchlist_id: int,
+        allow_smart_filter: bool = False,
+    ) -> dict[str, Any]:
+        payload = dict(filters or {})
+        normalized: dict[str, Any] = {}
+        for key, value in payload.items():
+            if key not in _VALID_ITEM_SAVED_VIEW_FILTER_KEYS:
+                raise ValueError("invalid_saved_view_filter")
+            if value is None or value == "":
+                continue
+            if key == "source_id":
+                source_id = int(value)
+                if not self._source_belongs_to_watchlist(watchlist_id=watchlist_id, source_id=source_id):
+                    raise ValueError("source_not_in_watchlist")
+                normalized[key] = source_id
+            elif key in {"run_id", "job_id", "alert_rule_id"}:
+                normalized[key] = int(value)
+            elif key in {"reviewed", "queued_for_briefing", "has_alert"}:
+                normalized[key] = bool(value)
+            elif key == "alert_status":
+                normalized[key] = self._validate_content_alert_status(str(value))
+            elif key == "alert_severity":
+                normalized[key] = self._validate_content_alert_severity(str(value))
+            elif key == "smart_filter":
+                if not allow_smart_filter:
+                    raise ValueError("invalid_saved_view_filter")
+                smart_filter = str(value).strip()
+                if smart_filter not in _VALID_ITEM_SAVED_VIEW_SMART_FILTERS:
+                    raise ValueError("invalid_saved_view_filter")
+                normalized[key] = smart_filter
+            else:
+                normalized[key] = str(value)
+        return normalized
+
+    def create_item_saved_view(
+        self,
+        *,
+        watchlist_id: int,
+        name: str,
+        filters: dict[str, Any] | None,
+        sort: str | None = None,
+        is_default: bool = False,
+    ) -> WatchlistItemSavedViewRow:
+        self.get_watchlist(int(watchlist_id))
+        clean_name = self._normalize_item_saved_view_name(name)
+        clean_sort = self._validate_item_sort(sort)
+        clean_filters = self._normalize_item_filter_payload(
+            filters,
+            watchlist_id=int(watchlist_id),
+            allow_smart_filter=True,
+        )
+        now = _utcnow_iso()
+        if is_default:
+            self.backend.execute(
+                "UPDATE watchlist_item_saved_views SET is_default = 0, updated_at = ? WHERE user_id = ? AND watchlist_id = ?",
+                (now, self.user_id, int(watchlist_id)),
+            )
+        res = self._execute_insert(
+            """
+            INSERT INTO watchlist_item_saved_views
+                (user_id, watchlist_id, name, filters_json, sort, is_default, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                self.user_id,
+                int(watchlist_id),
+                clean_name,
+                json.dumps(clean_filters, sort_keys=True),
+                clean_sort,
+                1 if is_default else 0,
+                now,
+                now,
+            ),
+        )
+        view_id = self._extract_lastrowid(res)
+        if not view_id:
+            raise RuntimeError("failed_to_create_item_saved_view")
+        return self.get_item_saved_view(view_id=int(view_id), watchlist_id=int(watchlist_id))
+
+    def get_item_saved_view(self, *, view_id: int, watchlist_id: int) -> WatchlistItemSavedViewRow:
+        row = self.backend.execute(
+            """
+            SELECT id, user_id, watchlist_id, name, filters_json, sort, is_default, created_at, updated_at
+            FROM watchlist_item_saved_views
+            WHERE id = ? AND user_id = ? AND watchlist_id = ?
+            """,
+            (int(view_id), self.user_id, int(watchlist_id)),
+        ).first
+        if not row:
+            raise KeyError("item_saved_view_not_found")
+        return WatchlistItemSavedViewRow(**row)
+
+    def list_item_saved_views(self, *, watchlist_id: int) -> list[WatchlistItemSavedViewRow]:
+        self.get_watchlist(int(watchlist_id))
+        rows = self.backend.execute(
+            """
+            SELECT id, user_id, watchlist_id, name, filters_json, sort, is_default, created_at, updated_at
+            FROM watchlist_item_saved_views
+            WHERE user_id = ? AND watchlist_id = ?
+            ORDER BY is_default DESC, updated_at DESC, id DESC
+            """,
+            (self.user_id, int(watchlist_id)),
+        ).rows
+        return [WatchlistItemSavedViewRow(**row) for row in rows]
+
+    def update_item_saved_view(
+        self,
+        *,
+        view_id: int,
+        watchlist_id: int,
+        fields: dict[str, Any],
+    ) -> WatchlistItemSavedViewRow:
+        current = self.get_item_saved_view(view_id=int(view_id), watchlist_id=int(watchlist_id))
+        if not fields:
+            return current
+        sets: list[str] = []
+        params: list[Any] = []
+        if "name" in fields and fields["name"] is not None:
+            sets.append("name = ?")
+            params.append(self._normalize_item_saved_view_name(str(fields["name"])))
+        if "filters" in fields and fields["filters"] is not None:
+            clean_filters = self._normalize_item_filter_payload(
+                dict(fields["filters"] or {}),
+                watchlist_id=int(watchlist_id),
+                allow_smart_filter=True,
+            )
+            sets.append("filters_json = ?")
+            params.append(json.dumps(clean_filters, sort_keys=True))
+        if "sort" in fields and fields["sort"] is not None:
+            sets.append("sort = ?")
+            params.append(self._validate_item_sort(str(fields["sort"])))
+        if "is_default" in fields and fields["is_default"] is not None:
+            is_default = bool(fields["is_default"])
+            if is_default:
+                now = _utcnow_iso()
+                self.backend.execute(
+                    """
+                    UPDATE watchlist_item_saved_views
+                    SET is_default = 0, updated_at = ?
+                    WHERE user_id = ? AND watchlist_id = ? AND id != ?
+                    """,
+                    (now, self.user_id, int(watchlist_id), int(view_id)),
+                )
+            sets.append("is_default = ?")
+            params.append(1 if is_default else 0)
+        if not sets:
+            return current
+        sets.append("updated_at = ?")
+        params.append(_utcnow_iso())
+        params.extend([int(view_id), self.user_id, int(watchlist_id)])
+        self.backend.execute(
+            f"""
+            UPDATE watchlist_item_saved_views
+            SET {', '.join(sets)}
+            WHERE id = ? AND user_id = ? AND watchlist_id = ?
+            """,  # nosec B608
+            tuple(params),
+        )
+        return self.get_item_saved_view(view_id=int(view_id), watchlist_id=int(watchlist_id))
+
+    def delete_item_saved_view(self, *, view_id: int, watchlist_id: int) -> bool:
+        result = self.backend.execute(
+            "DELETE FROM watchlist_item_saved_views WHERE id = ? AND user_id = ? AND watchlist_id = ?",
+            (int(view_id), self.user_id, int(watchlist_id)),
+        )
+        return int(getattr(result, "rowcount", 0) or 0) > 0
+
     def list_items(
         self,
         *,
@@ -3648,6 +3901,134 @@ class WatchlistsDatabase:
             tuple(item_ids + [self.user_id]),
         ).rows
         return [ScrapedItemRow(**r) for r in rows]
+
+    def _get_watchlist_items_by_ids(self, *, watchlist_id: int, item_ids: list[int]) -> list[ScrapedItemRow]:
+        if not item_ids:
+            return []
+        unique_ids = list(dict.fromkeys(int(item_id) for item_id in item_ids))
+        placeholders = ",".join("?" for _ in unique_ids)
+        rows = self.backend.execute(
+            """
+            SELECT si.id, si.run_id, si.job_id, si.source_id, si.media_id, si.media_uuid, si.url, si.title,
+                   si.summary, si.content, si.published_at, si.tags_json, si.status, si.reviewed, si.queued_for_briefing, si.created_at
+            FROM scraped_items si
+            JOIN scrape_jobs sj ON sj.id = si.job_id
+            WHERE si.id IN ({placeholders}) AND sj.user_id = ? AND sj.watchlist_id = ?
+            """.format_map(locals()),  # nosec B608
+            tuple(unique_ids + [self.user_id, int(watchlist_id)]),
+        ).rows
+        by_id = {int(row["id"]): ScrapedItemRow(**row) for row in rows}
+        return [by_id[item_id] for item_id in unique_ids if item_id in by_id]
+
+    @staticmethod
+    def _item_patch_changes(
+        row: ScrapedItemRow,
+        *,
+        reviewed: bool | None = None,
+        status: str | None = None,
+        queued_for_briefing: bool | None = None,
+    ) -> bool:
+        if reviewed is not None and bool(row.reviewed) != bool(reviewed):
+            return True
+        if status is not None and str(row.status) != str(status):
+            return True
+        if queued_for_briefing is not None and bool(row.queued_for_briefing) != bool(queued_for_briefing):
+            return True
+        return False
+
+    def batch_update_items(
+        self,
+        *,
+        watchlist_id: int,
+        item_ids: list[int] | None = None,
+        scope: dict[str, Any] | None = None,
+        reviewed: bool | None = None,
+        status: str | None = None,
+        queued_for_briefing: bool | None = None,
+        limit: int = 500,
+    ) -> dict[str, Any]:
+        self.get_watchlist(int(watchlist_id))
+        if not item_ids and scope is None:
+            raise ValueError("batch_update_scope_required")
+        if item_ids and scope is not None:
+            raise ValueError("batch_update_scope_ambiguous")
+        if reviewed is None and status is None and queued_for_briefing is None:
+            raise ValueError("batch_update_patch_required")
+        capped_limit = max(1, int(limit))
+        failed_ids: list[int] = []
+        capped = False
+
+        if item_ids is not None:
+            unique_ids = list(dict.fromkeys(int(item_id) for item_id in item_ids))
+            process_ids = unique_ids[:capped_limit]
+            capped = len(unique_ids) > capped_limit
+            rows = self._get_watchlist_items_by_ids(
+                watchlist_id=int(watchlist_id),
+                item_ids=process_ids,
+            )
+            found_ids = {int(row.id) for row in rows}
+            failed_ids = [item_id for item_id in process_ids if item_id not in found_ids]
+        else:
+            clean_scope = self._normalize_item_filter_payload(
+                scope,
+                watchlist_id=int(watchlist_id),
+                allow_smart_filter=False,
+            )
+            rows, _ = self.list_items(
+                run_id=clean_scope.get("run_id"),
+                job_id=clean_scope.get("job_id"),
+                source_id=clean_scope.get("source_id"),
+                status=clean_scope.get("status"),
+                reviewed=clean_scope.get("reviewed"),
+                queued_for_briefing=clean_scope.get("queued_for_briefing"),
+                search=clean_scope.get("search") or clean_scope.get("q"),
+                since=clean_scope.get("since"),
+                until=clean_scope.get("until"),
+                watchlist_id=int(watchlist_id),
+                has_alert=clean_scope.get("has_alert"),
+                alert_status=clean_scope.get("alert_status"),
+                alert_severity=clean_scope.get("alert_severity"),
+                alert_rule_id=clean_scope.get("alert_rule_id"),
+                limit=capped_limit + 1,
+                offset=0,
+            )
+            capped = len(rows) > capped_limit
+            rows = rows[:capped_limit]
+
+        changed_ids: list[int] = []
+        unchanged_ids: list[int] = []
+        matched_ids = [int(row.id) for row in rows]
+        for row in rows:
+            item_id = int(row.id)
+            if self._item_patch_changes(
+                row,
+                reviewed=reviewed,
+                status=status,
+                queued_for_briefing=queued_for_briefing,
+            ):
+                self.update_item_flags(
+                    item_id,
+                    reviewed=reviewed,
+                    status=status,
+                    queued_for_briefing=queued_for_briefing,
+                )
+                changed_ids.append(item_id)
+            else:
+                unchanged_ids.append(item_id)
+
+        return {
+            "matched": len(matched_ids),
+            "changed": len(changed_ids),
+            "unchanged": len(unchanged_ids),
+            "failed": len(failed_ids),
+            "matched_ids": matched_ids,
+            "changed_ids": changed_ids,
+            "unchanged_ids": unchanged_ids,
+            "failed_ids": failed_ids,
+            "capped": capped,
+            "exhausted": not capped,
+            "limit": capped_limit,
+        }
 
     def update_item_flags(
         self,

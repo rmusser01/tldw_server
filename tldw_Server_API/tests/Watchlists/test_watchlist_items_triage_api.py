@@ -146,6 +146,8 @@ def _seed_items_and_alert(client: TestClient) -> dict:
     )
     return {
         "watchlist": watchlist,
+        "first_source_id": int(first_source["id"]),
+        "second_source_id": int(second_source["id"]),
         "older_id": int(older.id),
         "newer_id": int(newer.id),
         "rule_id": int(rule.id),
@@ -221,3 +223,135 @@ def test_items_endpoint_rejects_unsupported_triage_sort_and_preserves_static_cou
     )
     assert counts.status_code == 200, counts.text
     assert counts.json()["all"] == 1
+
+
+def test_items_batch_update_endpoint_handles_ids_scope_and_caps(client_with_user):
+    client = client_with_user
+    seeded = _seed_items_and_alert(client)
+    watchlist_id = int(seeded["watchlist"]["id"])
+    other_watchlist = _create_watchlist(client)
+    outsider_source = _create_source(client, watchlist_id=int(other_watchlist["id"]), label="outside")
+    outsider_job = _create_job(
+        client,
+        watchlist_id=int(other_watchlist["id"]),
+        source_ids=[int(outsider_source["id"])],
+    )
+    db = WatchlistsDatabase.for_user(779)
+    outsider_run = db.create_run(int(outsider_job["id"]), status="finished")
+    outsider = db.record_scraped_item(
+        run_id=int(outsider_run.id),
+        job_id=int(outsider_job["id"]),
+        source_id=int(outsider_source["id"]),
+        media_id=None,
+        media_uuid=None,
+        url="https://example.com/outside/item",
+        title="Outside item",
+        summary="Outside summary",
+        content="Outside content",
+        published_at="2026-05-15T09:00:00+00:00",
+        tags=["outside"],
+        status="ingested",
+    )
+
+    by_ids = client.post(
+        "/api/v1/watchlists/items/batch-update",
+        json={
+            "watchlist_id": watchlist_id,
+            "item_ids": [seeded["older_id"], seeded["newer_id"], int(outsider.id), 999999],
+            "reviewed": True,
+            "queued_for_briefing": True,
+        },
+    )
+
+    assert by_ids.status_code == 200, by_ids.text
+    body = by_ids.json()
+    assert body["matched"] == 2
+    assert body["changed"] == 2
+    assert body["failed"] == 2
+    assert body["changed_ids"] == [seeded["older_id"], seeded["newer_id"]]
+    assert body["failed_ids"] == [int(outsider.id), 999999]
+    assert body["capped"] is False
+    assert body["exhausted"] is True
+    assert client.get(f"/api/v1/watchlists/items/{seeded['older_id']}").json()["reviewed"] is True
+    assert client.get(f"/api/v1/watchlists/items/{int(outsider.id)}").json()["queued_for_briefing"] is False
+
+    client.patch(f"/api/v1/watchlists/items/{seeded['older_id']}", json={"reviewed": False})
+    client.patch(f"/api/v1/watchlists/items/{seeded['newer_id']}", json={"reviewed": False})
+    by_scope = client.post(
+        "/api/v1/watchlists/items/batch-update",
+        json={
+            "watchlist_id": watchlist_id,
+            "scope": {"status": "ingested", "reviewed": False},
+            "reviewed": True,
+            "limit": 1,
+        },
+    )
+
+    assert by_scope.status_code == 200, by_scope.text
+    scope_body = by_scope.json()
+    assert scope_body["matched"] == 1
+    assert scope_body["changed"] == 1
+    assert scope_body["capped"] is True
+    assert scope_body["exhausted"] is False
+
+
+def test_item_saved_views_endpoint_crud_and_validation(client_with_user):
+    client = client_with_user
+    seeded = _seed_items_and_alert(client)
+    watchlist_id = int(seeded["watchlist"]["id"])
+    other_watchlist = _create_watchlist(client)
+    outside_source = _create_source(client, watchlist_id=int(other_watchlist["id"]), label="outside-view")
+
+    created = client.post(
+        f"/api/v1/watchlists/{watchlist_id}/item-views",
+        json={
+            "name": "Critical unread",
+            "filters": {
+                "source_id": seeded["first_source_id"],
+                "smart_filter": "unread",
+                "alert_severity": "critical",
+            },
+            "sort": "unread_first",
+            "is_default": True,
+        },
+    )
+
+    assert created.status_code == 201, created.text
+    view = created.json()
+    assert view["name"] == "Critical unread"
+    assert view["filters"]["smart_filter"] == "unread"
+    assert view["sort"] == "unread_first"
+    assert view["is_default"] is True
+
+    listed = client.get(f"/api/v1/watchlists/{watchlist_id}/item-views")
+    assert listed.status_code == 200, listed.text
+    assert [row["id"] for row in listed.json()["items"]] == [view["id"]]
+
+    updated = client.patch(
+        f"/api/v1/watchlists/{watchlist_id}/item-views/{view['id']}",
+        json={"name": "Critical queue", "sort": "created_asc"},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["name"] == "Critical queue"
+    assert updated.json()["sort"] == "created_asc"
+
+    bad_sort = client.post(
+        f"/api/v1/watchlists/{watchlist_id}/item-views",
+        json={"name": "Bad sort", "filters": {}, "sort": "novelty_desc"},
+    )
+    assert bad_sort.status_code == 422
+
+    bad_source = client.post(
+        f"/api/v1/watchlists/{watchlist_id}/item-views",
+        json={
+            "name": "Bad source",
+            "filters": {"source_id": int(outside_source["id"])},
+            "sort": "created_desc",
+        },
+    )
+    assert bad_source.status_code == 400
+    assert bad_source.json()["detail"] == "source_not_in_watchlist"
+
+    deleted = client.delete(f"/api/v1/watchlists/{watchlist_id}/item-views/{view['id']}")
+    assert deleted.status_code == 204
+    assert client.get(f"/api/v1/watchlists/{watchlist_id}/item-views").json()["items"] == []

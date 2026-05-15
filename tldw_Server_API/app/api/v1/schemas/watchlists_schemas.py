@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import AnyUrl, BaseModel, Field, field_validator, model_validator
+from pydantic import AnyUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 SourceType = Literal["rss", "site", "forum"]  # forums are feature-flagged for Phase 3
@@ -14,6 +14,8 @@ WatchlistContentAlertRuleKind = Literal["keyword", "regex", "descriptor", "class
 WatchlistContentAlertMatchMode = Literal["contains", "exact", "regex"]
 WatchlistContentAlertSeverity = Literal["info", "low", "medium", "high", "critical"]
 WatchlistContentAlertStatus = Literal["unread", "read", "dismissed"]
+ScrapedItemMutableStatus = Literal["ingested", "filtered", "ignored", "reviewed"]
+ScrapedItemSavedViewSmartFilter = Literal["all", "today", "today_unread", "todayUnread", "unread", "reviewed", "queued"]
 ScrapedItemSortMode = Literal[
     "created_desc",
     "created_asc",
@@ -700,6 +702,94 @@ class ScrapedItemUpdateRequest(BaseModel):
         None,
         description="Optional explicit queue toggle for briefing/report inclusion.",
     )
+
+
+class ScrapedItemBatchScope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: int | None = Field(default=None, ge=1)
+    job_id: int | None = Field(default=None, ge=1)
+    source_id: int | None = Field(default=None, ge=1)
+    status: str | None = None
+    reviewed: bool | None = None
+    queued_for_briefing: bool | None = None
+    q: str | None = Field(default=None, description="Search by title/summary/content substring")
+    search: str | None = Field(default=None, description="Alias for q")
+    since: str | None = None
+    until: str | None = None
+    has_alert: bool | None = None
+    alert_status: WatchlistContentAlertStatus | None = None
+    alert_severity: WatchlistContentAlertSeverity | None = None
+    alert_rule_id: int | None = Field(default=None, ge=1)
+
+
+class ScrapedItemBatchUpdateRequest(BaseModel):
+    watchlist_id: int = Field(..., ge=1)
+    item_ids: list[int] | None = Field(default=None, description="Explicit selected item IDs to update")
+    scope: ScrapedItemBatchScope | None = Field(default=None, description="Filter scope for all-filtered updates")
+    reviewed: bool | None = None
+    status: ScrapedItemMutableStatus | None = Field(default=None, description="Explicit item status update")
+    queued_for_briefing: bool | None = None
+    limit: int = Field(default=500, ge=1, le=5000)
+
+    @model_validator(mode="after")
+    def _validate_batch_request(self):
+        has_ids = bool(self.item_ids)
+        has_scope = self.scope is not None
+        if has_ids == has_scope:
+            raise ValueError("provide_exactly_one_item_ids_or_scope")
+        if self.reviewed is None and self.status is None and self.queued_for_briefing is None:
+            raise ValueError("provide_at_least_one_update")
+        if self.item_ids:
+            self.item_ids = list(dict.fromkeys(int(item_id) for item_id in self.item_ids))
+        return self
+
+
+class ScrapedItemBatchUpdateResponse(BaseModel):
+    matched: int = 0
+    changed: int = 0
+    unchanged: int = 0
+    failed: int = 0
+    matched_ids: list[int] = Field(default_factory=list)
+    changed_ids: list[int] = Field(default_factory=list)
+    unchanged_ids: list[int] = Field(default_factory=list)
+    failed_ids: list[int] = Field(default_factory=list)
+    capped: bool = False
+    exhausted: bool = True
+    limit: int = 500
+
+
+class WatchlistItemSavedViewBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    filters: dict[str, Any] = Field(default_factory=dict)
+    sort: ScrapedItemSortMode = "created_desc"
+    is_default: bool = False
+
+
+class WatchlistItemSavedViewCreate(WatchlistItemSavedViewBase):
+    pass
+
+
+class WatchlistItemSavedViewUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    filters: dict[str, Any] | None = None
+    sort: ScrapedItemSortMode | None = None
+    is_default: bool | None = None
+
+
+class WatchlistItemSavedView(BaseModel):
+    id: int
+    watchlist_id: int
+    name: str
+    filters: dict[str, Any] = Field(default_factory=dict)
+    sort: ScrapedItemSortMode
+    is_default: bool = False
+    created_at: str
+    updated_at: str
+
+
+class WatchlistItemSavedViewsList(BaseModel):
+    items: list[WatchlistItemSavedView]
 
 
 class WatchlistOutputEmailDelivery(BaseModel):

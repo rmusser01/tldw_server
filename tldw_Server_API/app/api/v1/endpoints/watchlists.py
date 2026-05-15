@@ -150,6 +150,8 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
     RunDetail,
     RunsListResponse,
     ScrapedItem,
+    ScrapedItemBatchUpdateRequest,
+    ScrapedItemBatchUpdateResponse,
     ScrapedItemSortMode,
     ScrapedItemSmartCountsResponse,
     ScrapedItemsListResponse,
@@ -186,6 +188,10 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
     WatchlistDeleteResponse,
     WatchlistFilter,
     WatchlistFiltersPayload,
+    WatchlistItemSavedView,
+    WatchlistItemSavedViewCreate,
+    WatchlistItemSavedViewsList,
+    WatchlistItemSavedViewUpdate,
     WatchlistOnboardingTelemetryIngestRequest,
     WatchlistOnboardingTelemetryIngestResponse,
     WatchlistOnboardingTelemetrySummaryResponse,
@@ -1081,6 +1087,26 @@ def _row_to_scraped_item(row) -> ScrapedItem:
         queued_for_briefing=queued_for_briefing,
         created_at=row.created_at,
         alert_summary=getattr(row, "alert_summary", None),
+    )
+
+
+def _row_to_item_saved_view(row) -> WatchlistItemSavedView:
+    filters: dict[str, Any] = {}
+    try:
+        parsed = json.loads(row.filters_json or "{}")
+        if isinstance(parsed, dict):
+            filters = parsed
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        filters = {}
+    return WatchlistItemSavedView(
+        id=int(row.id),
+        watchlist_id=int(row.watchlist_id),
+        name=row.name,
+        filters=filters,
+        sort=row.sort,
+        is_default=bool(getattr(row, "is_default", 0)),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
     )
 
 
@@ -4852,6 +4878,48 @@ async def list_scraped_items(
     )
 
 
+@router.post("/items/batch-update", response_model=ScrapedItemBatchUpdateResponse, summary="Batch update item triage flags")
+async def batch_update_scraped_items(
+    payload: ScrapedItemBatchUpdateRequest = Body(...),
+    current_user: User = Depends(get_request_user),
+    db = Depends(get_watchlists_db_for_user),
+):
+    _ensure_watchlist_exists(db, payload.watchlist_id)
+    scope = payload.scope.model_dump(exclude_none=True) if payload.scope is not None else None
+    try:
+        result = db.batch_update_items(
+            watchlist_id=payload.watchlist_id,
+            item_ids=payload.item_ids,
+            scope=scope,
+            reviewed=payload.reviewed,
+            status=payload.status,
+            queued_for_briefing=payload.queued_for_briefing,
+            limit=payload.limit,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="watchlist_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    changed_patch: dict[str, Any] = {}
+    if payload.reviewed is not None:
+        changed_patch["reviewed"] = payload.reviewed
+    if payload.status is not None:
+        changed_patch["status"] = payload.status
+    if payload.queued_for_briefing is not None:
+        changed_patch["queued_for_briefing"] = payload.queued_for_briefing
+    if changed_patch and result.get("changed_ids"):
+        now = _utcnow_iso()
+        for row in db.get_items_by_ids(list(result.get("changed_ids", []))[:25]):
+            record_watchlist_item_updated(
+                user_id=current_user.id,
+                item=row,
+                patch=changed_patch,
+                event_timestamp=now,
+            )
+    return ScrapedItemBatchUpdateResponse(**result)
+
+
 @router.get("/items/{item_id}", response_model=ScrapedItem, summary="Get a scraped item")
 async def get_scraped_item(
     item_id: int = Path(..., ge=1),
@@ -4916,6 +4984,88 @@ async def update_scraped_item(
             event_timestamp=_utcnow_iso(),
         )
     return _row_to_scraped_item(row)
+
+
+@router.get("/{watchlist_id}/item-views", response_model=WatchlistItemSavedViewsList, summary="List saved item review views")
+async def list_item_saved_views(
+    watchlist_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db = Depends(get_watchlists_db_for_user),
+):
+    _ensure_watchlist_exists(db, watchlist_id)
+    rows = db.list_item_saved_views(watchlist_id=watchlist_id)
+    return WatchlistItemSavedViewsList(items=[_row_to_item_saved_view(row) for row in rows])
+
+
+@router.post(
+    "/{watchlist_id}/item-views",
+    response_model=WatchlistItemSavedView,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a saved item review view",
+)
+async def create_item_saved_view(
+    payload: WatchlistItemSavedViewCreate,
+    watchlist_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db = Depends(get_watchlists_db_for_user),
+):
+    _ensure_watchlist_exists(db, watchlist_id)
+    try:
+        row = db.create_item_saved_view(
+            watchlist_id=watchlist_id,
+            name=payload.name,
+            filters=payload.filters,
+            sort=payload.sort,
+            is_default=payload.is_default,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _row_to_item_saved_view(row)
+
+
+@router.patch(
+    "/{watchlist_id}/item-views/{view_id}",
+    response_model=WatchlistItemSavedView,
+    summary="Update a saved item review view",
+)
+async def update_item_saved_view(
+    payload: WatchlistItemSavedViewUpdate,
+    watchlist_id: int = Path(..., ge=1),
+    view_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db = Depends(get_watchlists_db_for_user),
+):
+    _ensure_watchlist_exists(db, watchlist_id)
+    fields = payload.model_dump(exclude_unset=True)
+    try:
+        row = db.update_item_saved_view(
+            view_id=view_id,
+            watchlist_id=watchlist_id,
+            fields=fields,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="item_saved_view_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _row_to_item_saved_view(row)
+
+
+@router.delete(
+    "/{watchlist_id}/item-views/{view_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a saved item review view",
+)
+async def delete_item_saved_view(
+    watchlist_id: int = Path(..., ge=1),
+    view_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db = Depends(get_watchlists_db_for_user),
+):
+    _ensure_watchlist_exists(db, watchlist_id)
+    deleted = db.delete_item_saved_view(view_id=view_id, watchlist_id=watchlist_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="item_saved_view_not_found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # --------------------
