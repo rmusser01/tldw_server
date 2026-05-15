@@ -227,36 +227,10 @@ describe("persona visuals service", () => {
   })
 
   it("does not route empty starter pack detail ids to the collection endpoint", async () => {
-    mocks.fetchWithAuth.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        id: "",
-        title: "Empty Detail",
-        description: "Detail",
-        renderer_type: "sprite_frames",
-        manifest_version: 1,
-        states_offered: [],
-        asset_count: 0,
-        total_bytes: 0,
-        tags: [],
-        license_label: "bundled",
-        manifest: {
-          manifest_version: 1,
-          renderer_type: "sprite_frames",
-          states: {},
-          animations: {}
-        },
-        assets: []
-      })
-    })
-
-    await getPersonaVisualStarterPack("")
-
-    expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
-      "/api/v1/persona/visual-starter-packs/",
-      expect.objectContaining({ method: "GET" })
+    await expect(getPersonaVisualStarterPack("")).rejects.toThrow(
+      "Starter pack id is required"
     )
+    expect(mocks.fetchWithAuth).not.toHaveBeenCalled()
   })
 
   it("copies a starter pack to a target persona without activation fields", async () => {
@@ -296,31 +270,18 @@ describe("persona visuals service", () => {
   })
 
   it("does not route empty starter pack copy ids to the collection endpoint", async () => {
-    mocks.fetchWithAuth.mockResolvedValueOnce({
-      ok: true,
-      status: 201,
-      json: async () => ({
-        id: "copied-pack",
-        persona_id: "persona-1",
-        title: "Research Buddy Starter",
-        renderer_type: "sprite_frames",
-        status: "draft",
-        manifest: {
-          manifest_version: 1,
-          renderer_type: "sprite_frames",
-          states: {},
-          animations: {}
-        }
+    await expect(
+      copyPersonaVisualStarterPack("", {
+        target_persona_id: "persona-1"
       })
-    })
+    ).rejects.toThrow("Starter pack id is required")
+    expect(mocks.fetchWithAuth).not.toHaveBeenCalled()
+  })
 
-    await copyPersonaVisualStarterPack("", {
-      target_persona_id: "persona-1"
-    })
-
-    expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
-      "/api/v1/persona/visual-starter-packs//copy",
-      expect.objectContaining({ method: "POST" })
+  it("rejects whitespace-only starter pack ids before fetch", async () => {
+    await expect(getPersonaVisualStarterPack("   ")).rejects.toThrow(
+      "Starter pack id is required"
     )
+    expect(mocks.fetchWithAuth).not.toHaveBeenCalled()
   })
 })

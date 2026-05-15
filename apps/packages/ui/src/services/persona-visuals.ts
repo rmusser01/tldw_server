@@ -78,13 +78,23 @@ const visualLibraryPath = (
 ): `/api/v1/persona/visual-library${string}` =>
   `/api/v1/persona/visual-library${suffix}`
 
-const visualStarterPackPath = (
-  starterPackId?: string,
-  suffix = ""
-): `/api/v1/persona/visual-starter-packs${string}` => {
-  if (starterPackId === undefined) return "/api/v1/persona/visual-starter-packs"
-  return `/api/v1/persona/visual-starter-packs/${encodeURIComponent(starterPackId)}${suffix}`
+const visualStarterPackCollectionPath =
+  (): "/api/v1/persona/visual-starter-packs" =>
+    "/api/v1/persona/visual-starter-packs"
+
+const normalizeStarterPackId = (starterPackId: string): string => {
+  const normalizedId = starterPackId.trim()
+  if (!normalizedId) {
+    throw new PersonaVisualApiError("Starter pack id is required")
+  }
+  return normalizedId
 }
+
+const visualStarterPackDetailPath = (
+  starterPackId: string,
+  suffix = ""
+): `/api/v1/persona/visual-starter-packs/${string}` =>
+  `/api/v1/persona/visual-starter-packs/${encodeURIComponent(normalizeStarterPackId(starterPackId))}${suffix}`
 
 const normalizeBody = (
   body: PersonaVisualFetchInit["body"],
@@ -168,7 +178,7 @@ export async function listPersonaVisualStarterPacks(): Promise<
 > {
   const payload = await fetchPersonaVisualJson<
     PersonaVisualStarterPackSummary[] | PersonaVisualStarterPackListResponse
-  >(visualStarterPackPath())
+  >(visualStarterPackCollectionPath())
   return normalizePersonaVisualStarterPackList(payload)
 }
 
@@ -176,7 +186,7 @@ export async function getPersonaVisualStarterPack(
   starterPackId: string
 ): Promise<PersonaVisualStarterPackDetail> {
   return fetchPersonaVisualJson<PersonaVisualStarterPackDetail>(
-    visualStarterPackPath(starterPackId)
+    visualStarterPackDetailPath(starterPackId)
   )
 }
 
@@ -185,7 +195,7 @@ export async function copyPersonaVisualStarterPack(
   payload: PersonaVisualStarterPackCopyRequest
 ): Promise<PersonaVisualPack> {
   return fetchPersonaVisualJson<PersonaVisualPack>(
-    visualStarterPackPath(starterPackId, "/copy"),
+    visualStarterPackDetailPath(starterPackId, "/copy"),
     {
       method: "POST",
       body: payload
