@@ -323,6 +323,39 @@ class _SuccessfulClient:
         }
 
 
+class _ArtifactPromotionClient:
+    async def create_session(self, *_args, **_kwargs):
+        return "session-promotion-1"
+
+    async def prompt(self, *_args, **_kwargs):
+        return {
+            "stopReason": "end",
+            "taskCompletion": {
+                "status": "completed",
+                "summary": "Brief ready",
+                "artifacts": [
+                    {
+                        "id": "brief-1",
+                        "artifact_type": "workspace_brief",
+                        "title": "ACP Research Brief",
+                        "content": "# Brief\nGrounded answer.",
+                        "summary": "Grounded answer.",
+                        "source_lineage": {
+                            "sources": [
+                                {
+                                    "source_id": "src-1",
+                                    "source_type": "media",
+                                    "label": "Transcript",
+                                }
+                            ]
+                        },
+                    }
+                ],
+            },
+            "usage": {},
+        }
+
+
 class _MissingCompletionClient:
     async def create_session(self, *_args, **_kwargs):
         return "session-1"
@@ -1083,6 +1116,141 @@ async def test_dispatch_run_valid_completion_without_reviewer_completes_task(mon
         assert runs[0].status.value == "completed"
         assert runs[0].result_summary == "Implemented dispatch work"
     finally:
+        db.close()
+
+
+async def test_dispatch_run_promotes_completion_artifact_to_canonical_workspace(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    note_db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
+    note_db.upsert_workspace("workspace-alpha", "Alpha Workspace")
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    workspace = db.create_workspace(
+        name="Linked",
+        root_path=str(workspace_root),
+        metadata={
+            "canonical_workspace_id": "workspace-alpha",
+            "canonical_workspace_source": "workspace_playground",
+            "link_status": "linked",
+        },
+    )
+    project = db.create_project(name="P1", workspace_id=workspace.id)
+    task = db.create_task(project.id, title="T1", description="Create a brief", agent_type="codex")
+    client = _ArtifactPromotionClient()
+
+    async def fake_store():
+        return _NoopSessionStore()
+
+    async def fake_client():
+        return client
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
+        fake_store,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client",
+        fake_client,
+    )
+    monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: (tmp_path.resolve(),))
+
+    try:
+        result = await orch_mod.dispatch_run(
+            task.id,
+            orch_mod.RunDispatchRequest(),
+            user=_TestUser(),
+            canonical_db=note_db,
+        )
+
+        assert result["status"] == TaskStatus.COMPLETE
+        assert result["artifact_promotion"] == {
+            "created_artifact_ids": ["brief-1"],
+            "updated_artifact_ids": [],
+            "skipped": [],
+            "errors": [],
+        }
+        [artifact] = note_db.list_workspace_artifacts("workspace-alpha")
+        assert artifact["id"] == "brief-1"
+        assert artifact["review_state"] == "accepted"
+        assert artifact["producer_metadata"]["producer_type"] == "acp"
+        assert artifact["producer_metadata"]["run_id"] == str(result["run_id"])
+        assert artifact["producer_metadata"]["session_id"] == "session-promotion-1"
+        assert artifact["source_lineage"]["sources"][0]["source_id"] == "src-1"
+    finally:
+        note_db.close_all_connections()
+        db.close()
+
+
+async def test_dispatch_run_reports_artifact_promotion_failure_without_rolling_back_task(
+    monkeypatch,
+    tmp_path,
+):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    note_db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
+    note_db.upsert_workspace("workspace-alpha", "Alpha Workspace")
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    workspace = db.create_workspace(
+        name="Linked",
+        root_path=str(workspace_root),
+        metadata={
+            "canonical_workspace_id": "workspace-alpha",
+            "canonical_workspace_source": "workspace_playground",
+            "link_status": "linked",
+        },
+    )
+    project = db.create_project(name="P1", workspace_id=workspace.id)
+    task = db.create_task(project.id, title="T1", description="Create a brief", agent_type="codex")
+    client = _ArtifactPromotionClient()
+
+    async def fake_store():
+        return _NoopSessionStore()
+
+    async def fake_client():
+        return client
+
+    def failing_promotion(*_args, **_kwargs):
+        raise RuntimeError("promotion backend unavailable")
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
+        fake_store,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client",
+        fake_client,
+    )
+    monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: (tmp_path.resolve(),))
+    monkeypatch.setattr(orch_mod, "promote_acp_completion_artifacts", failing_promotion)
+
+    try:
+        result = await orch_mod.dispatch_run(
+            task.id,
+            orch_mod.RunDispatchRequest(),
+            user=_TestUser(),
+            canonical_db=note_db,
+        )
+
+        assert result["status"] == TaskStatus.COMPLETE
+        assert result["artifact_promotion"] == {
+            "created_artifact_ids": [],
+            "updated_artifact_ids": [],
+            "skipped": [],
+            "errors": [{"artifact_id": "all", "reason": "promotion_failed"}],
+        }
+        updated_task = db.get_task(task.id)
+        assert updated_task.status == TaskStatus.COMPLETE
+        assert note_db.list_workspace_artifacts("workspace-alpha") == []
+    finally:
+        note_db.close_all_connections()
         db.close()
 
 

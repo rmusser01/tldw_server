@@ -16,6 +16,10 @@ from pydantic import BaseModel, Field, field_validator
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard, User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.core.Agent_Orchestration.artifact_promotion import (
+    ACPArtifactPromotionResult,
+    promote_acp_completion_artifacts,
+)
 from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
     CompletionSignalValidationError,
     ReviewDecisionValidationError,
@@ -1448,6 +1452,7 @@ async def dispatch_run(
     task_id: int,
     payload: RunDispatchRequest,
     user: User = Depends(get_request_user),
+    canonical_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> dict[str, Any]:
     """Dispatch a task run to an ACP agent.
 
@@ -1640,6 +1645,9 @@ async def dispatch_run(
             "artifact_count": len(completion_signal.artifacts),
         },
     )
+    artifact_promotion_result: ACPArtifactPromotionResult | None = None
+    review_decision_for_promotion = None
+    review_run_for_promotion = None
     if task.reviewer_agent_type:
         review_session_id: str | None = None
         review_run = None
@@ -1745,6 +1753,8 @@ async def dispatch_run(
                 result_summary=review_decision.feedback,
                 token_usage=review_result.get("usage", {}),
             ))
+            review_decision_for_promotion = review_decision
+            review_run_for_promotion = review_run
             task = await _run_sync(lambda: db.submit_review(
                 task_id,
                 review_decision.approved,
@@ -1798,6 +1808,49 @@ async def dispatch_run(
             metadata={"reason_code": "no_reviewer"},
         )
 
+    if completion_signal.artifacts:
+        if not isinstance(canonical_db, CharactersRAGDB):
+            logger.warning(
+                "Skipping ACP artifact promotion for task {} because the workspace artifact DB is unavailable",
+                task_id,
+            )
+        else:
+            try:
+                artifact_promotion_result = await _run_sync(
+                    lambda: promote_acp_completion_artifacts(
+                        canonical_db,
+                        task=task,
+                        project=project,
+                        workspace=workspace,
+                        run=run,
+                        completion_signal=completion_signal,
+                        final_status=task.status,
+                        review_decision=review_decision_for_promotion,
+                        review_run=review_run_for_promotion,
+                    )
+                )
+            except Exception:
+                logger.exception("ACP artifact promotion failed for task {}", task_id)
+                artifact_promotion_result = ACPArtifactPromotionResult(
+                    errors=[{"artifact_id": "all", "reason": "promotion_failed"}]
+                )
+            if any(
+                (
+                    artifact_promotion_result.created_artifact_ids,
+                    artifact_promotion_result.updated_artifact_ids,
+                    artifact_promotion_result.skipped,
+                    artifact_promotion_result.errors,
+                )
+            ):
+                _record_orchestration_audit_event(
+                    action="orchestration_artifact_promotion",
+                    user=user,
+                    task=task,
+                    session_id=session_id,
+                    run_id=run.id,
+                    metadata=artifact_promotion_result.to_dict(),
+                )
+
     # Refetch task to get post-transition status
     updated_task = await _run_sync(lambda: db.get_task(task_id))
     return {
@@ -1806,6 +1859,7 @@ async def dispatch_run(
         "session_id": session_id,
         "status": updated_task.status.value if updated_task else "unknown",
         "effective_cwd": effective_cwd,
+        "artifact_promotion": artifact_promotion_result.to_dict() if artifact_promotion_result else None,
     }
 
 
