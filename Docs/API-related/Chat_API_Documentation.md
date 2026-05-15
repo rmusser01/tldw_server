@@ -349,6 +349,12 @@ Configurable under `[Chat-Module]` in `Config_Files/config.txt`:
 - `rate_limit_tokens_per_minute`
 When exceeded, the endpoint returns `429`.
 
+Prompt cost guardrails (optional):
+- Disabled by default. Enable with `CHAT_PROMPT_GUARDRAILS_ENABLED=1` or `[Chat-Module] prompt_guardrails_enabled = true`.
+- Warning thresholds add bounded `tldw_prompt_guardrails` metadata to non-streaming chat responses and log equivalent diagnostics for streaming/character-chat paths.
+- Hard caps such as `prompt_guardrails_block_total_estimated_tokens` reject before provider dispatch with `413` and never include raw prompt text in the response.
+- The same prompt-size checks apply to local providers such as vLLM and llama.cpp; for local inference these are runtime/cache-efficiency diagnostics rather than third-party billing claims.
+
 Queued execution (optional):
 - Enable job-queue processing for chat calls to smooth bursts.
 - Env: `CHAT_QUEUED_EXECUTION=1` or config `[Chat-Module] queued_execution = True`

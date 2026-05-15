@@ -264,6 +264,8 @@ feat(usage): persist cache-aware llm usage fields
 
 **Goal:** Add pre-dispatch prompt/cost guardrails that can warn or block surprising prompt growth before the provider call.
 
+**Status:** Complete in `TASK-383` / commit `feat(chat): add prompt cost guardrails`.
+
 **Success Criteria:**
 - Guardrails can detect large static/world-book segments, cache-busting fingerprint churn, high output-token caps, high `n`/choice counts, and reasoning-token risk.
 - Default behavior is non-breaking and warn-only unless configured otherwise.
@@ -278,19 +280,19 @@ feat(usage): persist cache-aware llm usage fields
 - Modify config documentation if new settings are exposed.
 
 **Implementation Steps:**
-- [ ] Write failing guardrail tests for:
+- [x] Write failing guardrail tests for:
   - warn-only over threshold;
   - hard block over configured max;
   - fingerprint churn across adjacent turns;
   - high `max_tokens`/`max_completion_tokens`;
   - high `n`;
   - reasoning-effort risk when provider parameters indicate it.
-- [ ] Implement `PromptCostGuardrailConfig` and `PromptCostGuardrailDecision`.
-- [ ] Load config from existing config/env helpers, with disabled/warn-only defaults.
-- [ ] Evaluate guardrails after final prompt templating and world-book insertion, before provider dispatch.
-- [ ] Attach guardrail warnings to existing metadata/diagnostics surfaces without exposing full prompt text.
-- [ ] Ensure a blocked request logs a structured reason and returns a descriptive 4xx response.
-- [ ] Run focused tests plus existing chat token-estimate tests.
+- [x] Implement `PromptCostGuardrailConfig` and `PromptCostGuardrailDecision`.
+- [x] Load config from existing config/env helpers, with disabled/warn-only defaults.
+- [x] Evaluate guardrails after final prompt templating and world-book insertion, before provider dispatch.
+- [x] Attach guardrail warnings to existing metadata/diagnostics surfaces without exposing full prompt text.
+- [x] Ensure a blocked request logs a structured reason and returns a descriptive 4xx response.
+- [x] Run focused tests plus existing chat token-estimate tests.
 
 **Tests:**
 ```bash

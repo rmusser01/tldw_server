@@ -58,6 +58,12 @@ from tldw_Server_API.app.core.Chat.prompt_template_manager import (
     apply_template_to_string,
     load_template,
 )
+from tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope
+from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
+    PromptCostGuardrailDecision,
+    evaluate_prompt_cost_guardrails,
+    load_prompt_cost_guardrail_config,
+)
 from tldw_Server_API.app.core.Chat.request_queue import (
     RequestPriority,
     get_request_queue,
@@ -3358,6 +3364,90 @@ async def _maybe_refund_streaming_rg(
         pass
 
 
+def _evaluate_chat_prompt_cost_guardrails(
+    *,
+    cleaned_args: Mapping[str, Any],
+    templated_llm_payload: list[dict[str, Any]],
+    selected_provider: str,
+    model: str,
+    streaming: bool,
+    continuation_metadata: Mapping[str, Any] | None = None,
+) -> PromptCostGuardrailDecision | None:
+    """Evaluate prompt-cost guardrails and fail open on diagnostic errors."""
+    try:
+        config = load_prompt_cost_guardrail_config()
+        if not config.enabled:
+            return None
+        envelope = build_prompt_cost_envelope(templated_llm_payload)
+        decision = evaluate_prompt_cost_guardrails(
+            envelope,
+            request_options=cleaned_args,
+            previous_fingerprints=_extract_previous_prompt_guardrail_fingerprints(
+                cleaned_args=cleaned_args,
+                continuation_metadata=continuation_metadata,
+            ),
+            config=config,
+        )
+        if decision.action == "allow":
+            return None
+
+        metadata = decision.to_response_metadata()
+        log_metadata = {
+            "provider": selected_provider,
+            "model": model,
+            "streaming": streaming,
+            "decision": metadata,
+        }
+        if decision.action == "block":
+            logger.warning("Chat prompt cost guardrail blocked request: {}", log_metadata)
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail={
+                    "type": "prompt_cost_guardrail_block",
+                    "message": "Prompt cost guardrail blocked request before provider dispatch.",
+                    "prompt_guardrails": metadata,
+                },
+            )
+        logger.warning("Chat prompt cost guardrail warnings: {}", log_metadata)
+        return decision
+    except HTTPException:
+        raise
+    except _CHAT_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug(
+            "Prompt cost guardrail evaluation skipped due to {}",
+            type(exc).__name__,
+        )
+        return None
+
+
+def _extract_previous_prompt_guardrail_fingerprints(
+    *,
+    cleaned_args: Mapping[str, Any],
+    continuation_metadata: Mapping[str, Any] | None = None,
+) -> dict[str, str] | None:
+    candidates = (
+        cleaned_args.get("prompt_guardrail_previous_fingerprints"),
+        cleaned_args.get("previous_prompt_fingerprints"),
+        cleaned_args.get("tldw_previous_prompt_fingerprints"),
+        (
+            continuation_metadata.get("prompt_guardrail_fingerprints")
+            if isinstance(continuation_metadata, Mapping)
+            else None
+        ),
+    )
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping):
+            continue
+        sanitized = {
+            str(key): str(value)
+            for key, value in candidate.items()
+            if isinstance(key, str) and isinstance(value, str) and value
+        }
+        if sanitized:
+            return sanitized
+    return None
+
+
 async def execute_streaming_call(
     *,
     current_loop: Any,
@@ -3431,6 +3521,14 @@ async def execute_streaming_call(
             apply_structured_response_request(
                 cleaned_args=cleaned_args,
                 structured_request_context=structured_request_context,
+            )
+            _evaluate_chat_prompt_cost_guardrails(
+                cleaned_args=cleaned_args,
+                templated_llm_payload=templated_llm_payload,
+                selected_provider=selected_provider,
+                model=model,
+                streaming=True,
+                continuation_metadata=normalized_continuation_metadata,
             )
         except (
             StructuredGenerationCapabilityError,
@@ -4655,6 +4753,7 @@ async def execute_non_stream_call(
     queue_enabled = False
     pending_assistant_payload: dict[str, Any] | None = None
     pending_tool_messages: list[dict[str, Any]] = []
+    prompt_guardrail_decision: PromptCostGuardrailDecision | None = None
     try:
         try:
             if structured_request_context is None:
@@ -4666,6 +4765,14 @@ async def execute_non_stream_call(
             apply_structured_response_request(
                 cleaned_args=cleaned_args,
                 structured_request_context=structured_request_context,
+            )
+            prompt_guardrail_decision = _evaluate_chat_prompt_cost_guardrails(
+                cleaned_args=cleaned_args,
+                templated_llm_payload=templated_llm_payload,
+                selected_provider=selected_provider,
+                model=model,
+                streaming=False,
+                continuation_metadata=normalized_continuation_metadata,
             )
         except (
             StructuredGenerationCapabilityError,
@@ -5505,6 +5612,10 @@ async def execute_non_stream_call(
             encoded_payload["tldw_continuation"] = normalized_continuation_metadata
         if structured_metadata is not None:
             encoded_payload["tldw_structured"] = structured_metadata
+        if prompt_guardrail_decision is not None:
+            encoded_payload["tldw_prompt_guardrails"] = (
+                prompt_guardrail_decision.to_response_metadata()
+            )
 
     # Audit success
     if audit_service and audit_context:

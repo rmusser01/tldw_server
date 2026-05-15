@@ -94,6 +94,12 @@ How to apply changes
 - `db_transaction_max_retries` (int)
 - `rate_limit_per_minute` (int): Global rate per client.
 - `rate_limit_per_conversation_per_minute` (int): Per-conversation rate.
+- `prompt_guardrails_enabled` (bool): Enable pre-dispatch prompt/cost guardrails for chat and character chat. Default: `false`.
+- `prompt_guardrails_default_action` (str): `warn|block`; warning thresholds are non-blocking by default.
+- `prompt_guardrails_warn_total_estimated_tokens` / `prompt_guardrails_block_total_estimated_tokens` (int, optional): Total prompt estimate warning and hard-cap thresholds.
+- `prompt_guardrails_warn_static_segment_tokens` / `prompt_guardrails_warn_world_book_tokens` (int, optional): Segment-specific warning thresholds for cache-sensitive prompt sections.
+- `prompt_guardrails_warn_max_output_tokens` / `prompt_guardrails_warn_choice_count` (int, optional): Warn when output caps or `n` can multiply cost.
+- `prompt_guardrails_warn_reasoning_efforts` (csv): Reasoning-effort values that should warn about hidden/reasoning-token risk. Default: `high,xhigh`.
 - `history_messages_limit` (int): History window size for context (1-500).
 - `history_messages_order` (str): `asc|desc` ordering of loaded history.
 

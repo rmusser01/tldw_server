@@ -143,6 +143,11 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call_async,
     resolve_provider_and_model,
 )
+from tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope
+from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
+    evaluate_prompt_cost_guardrails,
+    load_prompt_cost_guardrail_config,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -4759,8 +4764,10 @@ async def character_chat_completion(
             )
 
         # Inject world book context and capture diagnostics for this turn.
+        pre_world_book_formatted_for_guardrails = [dict(message) for message in formatted]
         turn_lorebook_diagnostics: Optional[list[dict[str, Any]]] = None
         turn_lorebook_cost_diagnostics: Optional[dict[str, Any]] = None
+        turn_lorebook_text_for_guardrails: Optional[str] = None
         try:
             world_book_context = build_world_book_prompt_context(
                 formatted,
@@ -4771,6 +4778,7 @@ async def character_chat_completion(
                 ),
             )
             formatted = apply_world_book_prompt_context(formatted, world_book_context)
+            turn_lorebook_text_for_guardrails = world_book_context.text or None
             turn_lorebook_diagnostics = (
                 list(world_book_context.legacy_diagnostics)
                 if world_book_context.legacy_diagnostics
@@ -4935,6 +4943,55 @@ async def character_chat_completion(
         legacy_allow_local = parse_boolean(os.getenv("ALLOW_LOCAL_LLM_CALLS"))
         offline_sim = provider == "local-llm" and not (enable_local_llm or disable_offline_sim or legacy_allow_local)
         streams_unified = str(os.getenv("STREAMS_UNIFIED", "0")).strip().lower() in {"1", "true", "on", "yes"}
+        turn_prompt_guardrail_diagnostics: Optional[dict[str, Any]] = None
+        try:
+            prompt_guardrail_config = load_prompt_cost_guardrail_config()
+            if prompt_guardrail_config.enabled:
+                prompt_guardrail_envelope = build_prompt_cost_envelope(
+                    (
+                        pre_world_book_formatted_for_guardrails
+                        if turn_lorebook_text_for_guardrails
+                        else formatted
+                    ),
+                    world_book_text=turn_lorebook_text_for_guardrails,
+                )
+                prompt_guardrail_decision = evaluate_prompt_cost_guardrails(
+                    prompt_guardrail_envelope,
+                    request_options={"max_tokens": body.max_tokens, "streaming": bool(body.stream)},
+                    config=prompt_guardrail_config,
+                )
+                if prompt_guardrail_decision.action != "allow":
+                    turn_prompt_guardrail_diagnostics = prompt_guardrail_decision.to_response_metadata()
+                    log_metadata = {
+                        "provider": provider,
+                        "model": model,
+                        "streaming": bool(body.stream),
+                        "decision": turn_prompt_guardrail_diagnostics,
+                    }
+                    if prompt_guardrail_decision.action == "block":
+                        logger.warning(
+                            "Character chat prompt cost guardrail blocked request: {}",
+                            log_metadata,
+                        )
+                        raise HTTPException(
+                            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            detail={
+                                "type": "prompt_cost_guardrail_block",
+                                "message": "Prompt cost guardrail blocked request before provider dispatch.",
+                                "prompt_guardrails": turn_prompt_guardrail_diagnostics,
+                            },
+                        )
+                    logger.warning(
+                        "Character chat prompt cost guardrail warnings: {}",
+                        log_metadata,
+                    )
+        except HTTPException:
+            raise
+        except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug(
+                "Character chat prompt cost guardrail evaluation skipped due to {}",
+                type(exc).__name__,
+            )
         llm_resp = None
         if not offline_sim:
             # Enforce per-minute completion rate only for real provider calls
@@ -5370,6 +5427,8 @@ async def character_chat_completion(
                 metadata_extra["lorebook_diagnostics"] = turn_lorebook_diagnostics
             if turn_lorebook_cost_diagnostics:
                 metadata_extra["lorebook_cost_diagnostics"] = turn_lorebook_cost_diagnostics
+            if turn_prompt_guardrail_diagnostics:
+                metadata_extra["prompt_guardrails"] = turn_prompt_guardrail_diagnostics
             validated_tool_calls = (
                 _validate_and_truncate_tool_calls(assistant_tool_calls)
                 if assistant_tool_calls
