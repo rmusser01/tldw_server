@@ -695,6 +695,177 @@ def test_launchd_service_loaded_dry_run_reports_absent_for_nonzero_runner() -> N
     CASE.assertEqual(result, helperctl.CheckResult(ok=True, reason="launchd_service_absent"))
 
 
+def _make_launchd_drill_inputs(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+    private_root = tmp_path / "private"
+    private_root.mkdir(mode=0o700)
+    private_root.chmod(0o700)
+    helper = private_root / "macos-vz-helper"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    socket_path = private_root / "runtime" / "helper.sock"
+    log_dir = private_root / "logs"
+    plist_path = private_root / "launchd-drill" / "org.tldw.test.plist"
+    return helper, socket_path, log_dir, plist_path
+
+
+def test_launchd_drill_runs_bootstrap_status_kickstart_ping_bootout(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    helper, socket_path, log_dir, plist_path = _make_launchd_drill_inputs(tmp_path)
+    calls: list[list[str]] = []
+
+    def runner(argv: list[str], **kwargs: Any) -> int:
+        calls.append(argv)
+        if argv == ["launchctl", "print", "gui/501/org.tldw.test"] and calls.count(argv) == 1:
+            return 3
+        return 0
+
+    results = helperctl.run_launchd_drill(
+        helper_path=helper,
+        socket_path=socket_path,
+        log_dir=log_dir,
+        plist_path=plist_path,
+        label="org.tldw.test",
+        uid=501,
+        write_plist=True,
+        create_dirs=True,
+        launchd_runner=runner,
+        ping_checker=lambda path: helperctl.PingState(helperctl.CheckResult(ok=True), "1", "test"),
+        smoke_runner=None,
+    )
+
+    by_name = dict(results)
+    for name in (
+        "launchd_preflight",
+        "launchd_bootstrap",
+        "launchd_status",
+        "launchd_kickstart",
+        "helper_status",
+        "launchd_bootout",
+    ):
+        CASE.assertIn(name, by_name)
+        CASE.assertTrue(by_name[name].ok, name)
+    CASE.assertEqual(by_name["launchd_bootstrap"].reason, "ok")
+    CASE.assertEqual(by_name["launchd_bootout"].reason, "ok")
+    CASE.assertEqual(by_name["protocol_version"].message, "1")
+    CASE.assertEqual(by_name["helper_version"].message, "test")
+    CASE.assertFalse((socket_path.parent / "helper.pid").exists())
+    CASE.assertIn(["launchctl", "bootstrap", "gui/501", str(plist_path)], calls)
+    CASE.assertGreaterEqual(calls.count(["launchctl", "print", "gui/501/org.tldw.test"]), 2)
+    CASE.assertIn(["launchctl", "kickstart", "-k", "gui/501/org.tldw.test"], calls)
+    CASE.assertIn(["launchctl", "bootout", "gui/501/org.tldw.test"], calls)
+
+
+def test_launchd_drill_refuses_already_loaded_service_without_bootout(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    helper, socket_path, log_dir, plist_path = _make_launchd_drill_inputs(tmp_path)
+    calls: list[list[str]] = []
+
+    results = helperctl.run_launchd_drill(
+        helper_path=helper,
+        socket_path=socket_path,
+        log_dir=log_dir,
+        plist_path=plist_path,
+        label="org.tldw.test",
+        uid=501,
+        write_plist=True,
+        create_dirs=True,
+        launchd_runner=lambda argv, **kwargs: calls.append(argv) or 0,
+        ping_checker=lambda path: helperctl.PingState(helperctl.CheckResult(ok=True), "1", "test"),
+    )
+
+    CASE.assertEqual(
+        results,
+        [
+            (
+                "launchd_preflight",
+                helperctl.CheckResult(
+                    ok=False,
+                    reason="launchd_service_already_loaded",
+                    message="gui/501/org.tldw.test",
+                ),
+            )
+        ],
+    )
+    CASE.assertEqual(calls, [["launchctl", "print", "gui/501/org.tldw.test"]])
+
+
+def test_launchd_drill_bootouts_after_kickstart_success_and_ping_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    helper, socket_path, log_dir, plist_path = _make_launchd_drill_inputs(tmp_path)
+    calls: list[list[str]] = []
+    monotonic_values = iter([100.0, 111.0])
+    monkeypatch.setattr(helperctl.time, "monotonic", lambda: next(monotonic_values))
+
+    def runner(argv: list[str], **kwargs: Any) -> int:
+        calls.append(argv)
+        if argv == ["launchctl", "print", "gui/501/org.tldw.test"] and calls.count(argv) == 1:
+            return 3
+        return 0
+
+    results = helperctl.run_launchd_drill(
+        helper_path=helper,
+        socket_path=socket_path,
+        log_dir=log_dir,
+        plist_path=plist_path,
+        label="org.tldw.test",
+        uid=501,
+        write_plist=True,
+        create_dirs=True,
+        launchd_runner=runner,
+        ping_checker=lambda path: helperctl.CheckResult(ok=False, reason="helper_ping_failed"),
+    )
+
+    by_name = dict(results)
+    CASE.assertEqual(by_name["helper_status"], helperctl.CheckResult(ok=False, reason="helper_ping_failed"))
+    CASE.assertEqual(by_name["launchd_bootout"], helperctl.CheckResult(ok=True))
+    CASE.assertIn(["launchctl", "bootout", "gui/501/org.tldw.test"], calls)
+    CASE.assertFalse((socket_path.parent / "helper.pid").exists())
+
+
+def test_launchd_drill_preserves_primary_failure_when_bootout_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    helper, socket_path, log_dir, plist_path = _make_launchd_drill_inputs(tmp_path)
+    calls: list[list[str]] = []
+    monotonic_values = iter([100.0, 111.0])
+    monkeypatch.setattr(helperctl.time, "monotonic", lambda: next(monotonic_values))
+
+    def runner(argv: list[str], **kwargs: Any) -> int:
+        calls.append(argv)
+        if argv == ["launchctl", "print", "gui/501/org.tldw.test"] and calls.count(argv) == 1:
+            return 3
+        if argv == ["launchctl", "bootout", "gui/501/org.tldw.test"]:
+            return 5
+        return 0
+
+    results = helperctl.run_launchd_drill(
+        helper_path=helper,
+        socket_path=socket_path,
+        log_dir=log_dir,
+        plist_path=plist_path,
+        label="org.tldw.test",
+        uid=501,
+        write_plist=True,
+        create_dirs=True,
+        launchd_runner=runner,
+        ping_checker=lambda path: helperctl.CheckResult(ok=False, reason="helper_ping_failed"),
+    )
+
+    by_name = dict(results)
+    CASE.assertEqual(by_name["helper_status"], helperctl.CheckResult(ok=False, reason="helper_ping_failed"))
+    CASE.assertEqual(
+        by_name["launchd_bootout"],
+        helperctl.CheckResult(ok=False, reason="launchd_bootout_failed", message="5"),
+    )
+    CASE.assertIn(["launchctl", "bootout", "gui/501/org.tldw.test"], calls)
+    CASE.assertFalse((socket_path.parent / "helper.pid").exists())
+
+
 def test_launchd_bootstrap_requires_existing_plist_without_write(tmp_path: Path) -> None:
     helperctl = load_helperctl()
     commands: list[list[str]] = []

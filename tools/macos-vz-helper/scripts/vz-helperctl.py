@@ -730,6 +730,116 @@ def wait_for_ping(
         time.sleep(interval_sec)
 
 
+def run_launchd_drill(
+    *,
+    helper_path: Path,
+    socket_path: Path,
+    log_dir: Path,
+    plist_path: Path,
+    label: str,
+    uid: int | None = None,
+    write_plist: bool = False,
+    create_dirs: bool = False,
+    dry_run: bool = False,
+    ping_checker: Callable[[Path], CheckResult | PingState] = ping_helper_state,
+    launchd_runner: Callable[..., int] | None = None,
+    smoke_runner: Callable[[], CheckResult] | None = None,
+) -> list[tuple[str, CheckResult]]:
+    """Run an isolated launchd helper lifecycle validation drill."""
+    results: list[tuple[str, CheckResult]] = []
+    bootstrapped = False
+
+    preflight = launchd_service_loaded(label, uid=uid, dry_run=dry_run, command_runner=launchd_runner)
+    if preflight.reason == "launchd_service_loaded":
+        results.append(
+            (
+                "launchd_preflight",
+                CheckResult(False, "launchd_service_already_loaded", preflight.message),
+            )
+        )
+        return results
+    results.append(("launchd_preflight", preflight))
+    if not preflight.ok:
+        return results
+
+    bootstrap = run_launchd_action(
+        "bootstrap",
+        label=label,
+        plist_path=plist_path,
+        helper_path=helper_path,
+        socket_path=socket_path,
+        log_dir=log_dir,
+        uid=uid,
+        dry_run=dry_run,
+        write_plist=write_plist,
+        create_dirs=create_dirs,
+        command_runner=launchd_runner,
+    )
+    results.append(("launchd_bootstrap", bootstrap))
+    if not bootstrap.ok:
+        return results
+    bootstrapped = not dry_run
+
+    try:
+        status = run_launchd_action(
+            "status",
+            label=label,
+            plist_path=plist_path,
+            helper_path=helper_path,
+            socket_path=socket_path,
+            log_dir=log_dir,
+            uid=uid,
+            dry_run=dry_run,
+            command_runner=launchd_runner,
+        )
+        results.append(("launchd_status", status))
+        if not status.ok:
+            return results
+
+        kickstart = run_launchd_action(
+            "kickstart",
+            label=label,
+            plist_path=plist_path,
+            helper_path=helper_path,
+            socket_path=socket_path,
+            log_dir=log_dir,
+            uid=uid,
+            dry_run=dry_run,
+            command_runner=launchd_runner,
+        )
+        results.append(("launchd_kickstart", kickstart))
+        if not kickstart.ok:
+            return results
+
+        ping_state = wait_for_ping(socket_path, ping_checker=ping_checker)
+        results.append(("helper_status", ping_state.result))
+        if ping_state.protocol_version:
+            results.append(("protocol_version", CheckResult(ok=True, message=ping_state.protocol_version)))
+        if ping_state.helper_version:
+            results.append(("helper_version", CheckResult(ok=True, message=ping_state.helper_version)))
+        if not ping_state.result.ok:
+            return results
+
+        if smoke_runner is not None:
+            results.append(("vz_linux_smoke", smoke_runner()))
+
+        return results
+    finally:
+        if bootstrapped:
+            bootout = run_launchd_action(
+                "bootout",
+                label=label,
+                plist_path=plist_path,
+                helper_path=helper_path,
+                socket_path=socket_path,
+                log_dir=log_dir,
+                uid=uid,
+                dry_run=dry_run,
+                command_runner=launchd_runner,
+            )
+            results.append(("launchd_bootout", bootout))
+
+
 def wait_for_socket(
     socket_path: Path,
     *,
