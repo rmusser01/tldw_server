@@ -1318,7 +1318,18 @@ def migration_015_create_llm_usage_tables(conn: sqlite3.Connection) -> None:
                 remote_ip TEXT,
                 user_agent TEXT,
                 token_name TEXT,
-                conversation_id TEXT
+                conversation_id TEXT,
+                cached_input_tokens INTEGER,
+                cache_write_input_tokens INTEGER,
+                cache_read_input_tokens INTEGER,
+                billable_input_tokens INTEGER,
+                reasoning_tokens INTEGER,
+                choice_count INTEGER,
+                estimate_source TEXT,
+                prompt_fingerprint TEXT,
+                prompt_fingerprint_version TEXT,
+                world_book_fingerprint TEXT,
+                raw_usage_metadata_json TEXT
             )
             """
         )
@@ -1349,6 +1360,17 @@ def migration_015_create_llm_usage_tables(conn: sqlite3.Connection) -> None:
                 user_agent TEXT,
                 token_name TEXT,
                 conversation_id TEXT,
+                cached_input_tokens INTEGER,
+                cache_write_input_tokens INTEGER,
+                cache_read_input_tokens INTEGER,
+                billable_input_tokens INTEGER,
+                reasoning_tokens INTEGER,
+                choice_count INTEGER,
+                estimate_source TEXT,
+                prompt_fingerprint TEXT,
+                prompt_fingerprint_version TEXT,
+                world_book_fingerprint TEXT,
+                raw_usage_metadata_json TEXT,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
                 FOREIGN KEY (key_id) REFERENCES api_keys(id) ON DELETE SET NULL
             )
@@ -1843,6 +1865,29 @@ def migration_054_add_llm_usage_log_router_analytics_columns(conn: sqlite3.Conne
 
     conn.commit()
     logger.info("Migration 054: Added llm_usage_log router analytics columns/indexes")
+
+
+def migration_088_add_llm_usage_cache_accounting_columns(conn: sqlite3.Connection) -> None:
+    """Add cache-aware accounting columns to llm_usage_log (SQLite)."""
+    statements = (
+        "ALTER TABLE llm_usage_log ADD COLUMN cached_input_tokens INTEGER",
+        "ALTER TABLE llm_usage_log ADD COLUMN cache_write_input_tokens INTEGER",
+        "ALTER TABLE llm_usage_log ADD COLUMN cache_read_input_tokens INTEGER",
+        "ALTER TABLE llm_usage_log ADD COLUMN billable_input_tokens INTEGER",
+        "ALTER TABLE llm_usage_log ADD COLUMN reasoning_tokens INTEGER",
+        "ALTER TABLE llm_usage_log ADD COLUMN choice_count INTEGER",
+        "ALTER TABLE llm_usage_log ADD COLUMN estimate_source TEXT",
+        "ALTER TABLE llm_usage_log ADD COLUMN prompt_fingerprint TEXT",
+        "ALTER TABLE llm_usage_log ADD COLUMN prompt_fingerprint_version TEXT",
+        "ALTER TABLE llm_usage_log ADD COLUMN world_book_fingerprint TEXT",
+        "ALTER TABLE llm_usage_log ADD COLUMN raw_usage_metadata_json TEXT",
+    )
+    for statement in statements:
+        with contextlib.suppress(_AUTHNZ_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
+            conn.execute(statement)
+
+    conn.commit()
+    logger.info("Migration 088: Added llm_usage_log cache accounting columns")
 
 
 def migration_055_create_mcp_hub_tables(conn: sqlite3.Connection) -> None:
@@ -5148,6 +5193,11 @@ def get_authnz_migrations() -> list[Migration]:
             87,
             "Expand share_tokens resource_type for prototype workspace links",
             migration_087_expand_share_tokens_resource_type_for_prototypes,
+        ),
+        Migration(
+            88,
+            "Add llm_usage_log cache accounting columns",
+            migration_088_add_llm_usage_cache_accounting_columns,
         ),
     ]
 

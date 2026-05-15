@@ -212,7 +212,7 @@ feat(usage): normalize llm cache usage metadata
 - Add or modify `tldw_Server_API/tests/AuthNZ_Postgres/test_authnz_llm_usage_log_router_columns_pg.py`
 
 **Implementation Steps:**
-- [ ] Write failing SQLite migration tests for new nullable `llm_usage_log` columns:
+- [x] Write failing SQLite migration tests for new nullable `llm_usage_log` columns:
   - `cached_input_tokens`
   - `cache_write_input_tokens`
   - `cache_read_input_tokens`
@@ -225,15 +225,16 @@ feat(usage): normalize llm cache usage metadata
   - `world_book_fingerprint`
   - `raw_usage_metadata_json`
 - [ ] Write/update Postgres migration tests for the same logical fields when the fixture is available.
-- [ ] Extend repository insert logic with compatibility fallback for pre-migration schemas.
-- [ ] Add pricing catalog fields for cache-read/cache-write rates without requiring every model entry to provide them.
-- [ ] Update `compute_costs(...)` to:
+- [x] Write/update Postgres migration tests for the same logical fields when the fixture is available.
+- [x] Extend repository insert logic with compatibility fallback for pre-migration schemas.
+- [x] Add pricing catalog fields for cache-read/cache-write rates without requiring every model entry to provide them.
+- [x] Update `compute_costs(...)` to:
   - use cache-specific rates when present;
   - fall back to current prompt-token pricing when missing;
   - never make cached token cost negative;
   - keep old return keys stable.
-- [ ] Wire `NormalizedLLMUsage` into `log_llm_usage(...)` and repository insert.
-- [ ] Run focused migration/usage tests.
+- [x] Wire `NormalizedLLMUsage` into `log_llm_usage(...)` and repository insert.
+- [x] Run focused migration/usage tests.
 
 **Tests:**
 ```bash

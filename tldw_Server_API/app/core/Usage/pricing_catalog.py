@@ -31,6 +31,16 @@ def _lower_keys(d: dict) -> dict:
     return out
 
 
+def _rate_value(rates: dict, *keys: str, default: float | None = None) -> float | None:
+    for key in keys:
+        if key in rates:
+            try:
+                return float(rates.get(key) or 0.0)
+            except (TypeError, ValueError):
+                return default
+    return default
+
+
 # Baseline defaults (USD per 1K tokens). These are indicative and can be
 # refined over time. Kept conservative to avoid under-estimating.
 DEFAULT_PRICING: dict[str, dict[str, dict[str, float]]] = {
@@ -194,14 +204,75 @@ class PricingCatalog:
                         entry["note"] = str(note)
                     base[model] = entry
                     continue
-                pr = float(rates.get("prompt", rates.get("in", 0.0)) or 0.0)
-                cr = float(rates.get("completion", rates.get("out", 0.0)) or 0.0)
+                pr = _rate_value(rates, "prompt", "in", "input", default=0.0) or 0.0
+                cr = _rate_value(rates, "completion", "out", "output", default=0.0) or 0.0
                 entry = {"prompt": pr, "completion": cr}
+                cache_read = _rate_value(
+                    rates,
+                    "cache_read",
+                    "cache-read",
+                    "cached",
+                    "cached_input",
+                    "cache_read_input",
+                    "cached_input_tokens",
+                    default=None,
+                )
+                cache_write = _rate_value(
+                    rates,
+                    "cache_write",
+                    "cache-write",
+                    "cache_creation",
+                    "cache_creation_input",
+                    "cache_write_input",
+                    "cache_write_input_tokens",
+                    default=None,
+                )
+                if cache_read is not None:
+                    entry["cache_read"] = cache_read
+                if cache_write is not None:
+                    entry["cache_write"] = cache_write
                 if "placeholder" in rates:
                     entry["placeholder"] = bool(rates.get("placeholder"))
                 if note is not None:
                     entry["note"] = str(note)
                 base[model] = entry
+
+    def get_rate_details(self, provider: str, model: str) -> tuple[dict[str, float], bool]:
+        """
+        Return pricing fields and estimated flag for provider/model.
+
+        The returned mapping always contains ``prompt`` and ``completion``.
+        Optional ``cache_read`` and ``cache_write`` rates are present only when
+        supplied by defaults or overrides.
+        """
+        prov = (provider or "").lower()
+        mdl = (model or "").lower()
+        prov_map = self._catalog.get(prov, {})
+
+        if mdl in prov_map:
+            return self._entry_rate_details(prov_map[mdl], estimated=False)
+
+        for mk, rates in prov_map.items():
+            if mk in mdl or mdl in mk:
+                return self._entry_rate_details(rates, estimated=True)
+
+        return {"prompt": 0.01, "completion": 0.03}, True
+
+    @staticmethod
+    def _entry_rate_details(rates: dict, *, estimated: bool) -> tuple[dict[str, float], bool]:
+        if isinstance(rates, dict) and rates.get("placeholder"):
+            return {"prompt": 0.0, "completion": 0.0}, True
+        if not isinstance(rates, dict):
+            return {"prompt": 0.0, "completion": 0.0}, True
+        details = {
+            "prompt": float(rates.get("prompt", 0.0) or 0.0),
+            "completion": float(rates.get("completion", 0.0) or 0.0),
+        }
+        if "cache_read" in rates:
+            details["cache_read"] = float(rates.get("cache_read", 0.0) or 0.0)
+        if "cache_write" in rates:
+            details["cache_write"] = float(rates.get("cache_write", 0.0) or 0.0)
+        return details, estimated
 
     def get_rates(self, provider: str, model: str) -> tuple[float, float, bool]:
         """
@@ -209,27 +280,8 @@ class PricingCatalog:
         If exact model not found, try partial matches; otherwise fall back to a
         small sentinel rate (estimated=True).
         """
-        prov = (provider or "").lower()
-        mdl = (model or "").lower()
-        prov_map = self._catalog.get(prov, {})
-
-        # Exact match
-        if mdl in prov_map:
-            r = prov_map[mdl]
-            if isinstance(r, dict) and r.get("placeholder"):
-                return 0.0, 0.0, True
-            return float(r.get("prompt", 0.0)), float(r.get("completion", 0.0)), False
-
-        # Partial match (substring)
-        for mk, r in prov_map.items():
-            if mk in mdl or mdl in mk:
-                if isinstance(r, dict) and r.get("placeholder"):
-                    return 0.0, 0.0, True
-                return float(r.get("prompt", 0.0)), float(r.get("completion", 0.0)), True
-
-        # Provider baseline fallback (conservative): avoid under-estimating unknown models
-        # Defaults approximate a mid/high rate similar to GPT-4o/4.1 tiers
-        return 0.01, 0.03, True
+        rates, estimated = self.get_rate_details(provider, model)
+        return rates["prompt"], rates["completion"], estimated
 
 
 _DEFAULT_CATALOG = PricingCatalog()
