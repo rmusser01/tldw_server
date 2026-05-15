@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-05-15 02:33'
-updated_date: '2026-05-15 20:04'
+updated_date: '2026-05-15 03:33'
 labels:
   - acp
   - artifacts
@@ -56,6 +56,8 @@ Implemented traceable artifact response typing and store hydration for review_st
 PR #1714 review follow-up reopened this task to address Qodo and Gemini feedback on redaction-aware rendering, stable list keys, schema-version metadata detection, router-aware ACP session links, i18n-ready labels, and missing contract ticket references.
 
 Review follow-up verification: `bunx vitest run src/components/Option/WorkspacePlayground/StudioPane/__tests__/TraceableArtifactDetail.test.tsx` passed with 11 tests; `bunx vitest run src/components/Option/WorkspacePlayground/StudioPane/__tests__/TraceableArtifactDetail.test.tsx src/store/__tests__/workspace-api-first.test.ts` passed with 27 tests; `bunx vitest run src/components/Option/WorkspacePlayground/__tests__/StudioPane.stage2.test.tsx` passed with 26 tests; `git diff --check` passed; `bun run verify:design-system-state` passed with existing allowed baseline exceptions. Bandit remains not applicable because this review follow-up only changed TypeScript/React and Backlog metadata.
+
+Fresh PR #1714 closeout rerun on 2026-05-15: focused traceable artifact/store tests passed again (27 tests), git diff hygiene passed, and design-system verifier passed with the existing 486 allowed product-state baseline exceptions. Full UI TypeScript remains blocked by unrelated repo-wide baseline errors; grep over redirected output found no touched traceable-artifact file errors. A fresh local rerun of StudioPane.stage2 timed out in broad pre-existing StudioPane workflows (22/26 failed by timeout), so current closeout relies on the focused review-fix regression tests plus GitHub CI for the wider StudioPane gate.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
