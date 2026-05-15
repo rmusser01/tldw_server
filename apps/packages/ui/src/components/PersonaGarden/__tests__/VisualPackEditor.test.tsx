@@ -513,6 +513,60 @@ describe("VisualPackEditor", () => {
     expect(screen.queryByTestId("visual-buddy-setup-choice-card")).not.toBeInTheDocument()
   })
 
+  it("clears pack loading when inactive state invalidates an in-flight load", async () => {
+    const personaPacks = deferredResponse<any>()
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return personaPacks.promise
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    const { rerender } = render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    const refreshButton = await screen.findByTestId(
+      "persona-visual-pack-refresh-button"
+    )
+    await waitFor(() => expect(refreshButton).toBeDisabled())
+
+    rerender(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive={false}
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-refresh-button")).toBeEnabled()
+    )
+    expect(screen.getByTestId("persona-visual-pack-refresh-button")).toHaveTextContent(
+      "Refresh"
+    )
+  })
+
   it("ignores stale draft creation after switching personas", async () => {
     const createDeferred = deferredResponse<any>()
     const staleDraft = makeVisualPack({

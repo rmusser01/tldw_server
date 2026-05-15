@@ -2,6 +2,26 @@ import React from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (
+      _key: string,
+      options?:
+        | string
+        | {
+            defaultValue?: string
+            count?: number
+          }
+    ) => {
+      if (typeof options === "string") return options
+      if (typeof options?.count === "number" && options.defaultValue) {
+        return options.defaultValue.replace("{{count}}", String(options.count))
+      }
+      return options?.defaultValue ?? _key
+    }
+  })
+}))
+
 import { VisualBuddySetupChoiceCard } from "../VisualBuddySetupChoiceCard"
 
 const starter = {

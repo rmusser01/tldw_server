@@ -46,7 +46,7 @@ import {
   updatePersonaVisualLibraryItem,
   updatePersonaVisualManifest,
   uploadPersonaVisualAsset,
-  usePersonaVisualLibraryItem
+  usePersonaVisualLibraryItem as copyPersonaVisualLibraryItem
 } from "@/services/persona-visuals"
 import { PERSONA_VISUAL_PACK_ACTIVATED_EVENT } from "@/types/persona-visuals"
 import type {
@@ -895,6 +895,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const packListRequestIdRef = React.useRef(0)
   const candidatesRequestIdRef = React.useRef(0)
   const candidateReviewRequestIdRef = React.useRef(0)
+  const draftCreateRequestIdRef = React.useRef(0)
+  const assetUploadRequestIdRef = React.useRef(0)
+  const manifestSaveRequestIdRef = React.useRef(0)
   const starterCatalogRequestIdRef = React.useRef(0)
   const starterCopyRequestIdRef = React.useRef(0)
   const importPreviewRequestIdRef = React.useRef(0)
@@ -916,11 +919,20 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
 
   const packStateMatchesSelectedPersona =
     Boolean(selectedPersonaId) && packsLoadedPersonaId === selectedPersonaId
-  const visiblePacks = packStateMatchesSelectedPersona
-    ? packs.filter((pack) => pack.persona_id === selectedPersonaId)
-    : []
-  const selectedPack =
-    visiblePacks.find((pack) => pack.id === selectedPackId) ?? visiblePacks[0] ?? null
+  const visiblePacks = React.useMemo(
+    () =>
+      packStateMatchesSelectedPersona
+        ? packs.filter((pack) => pack.persona_id === selectedPersonaId)
+        : [],
+    [packStateMatchesSelectedPersona, packs, selectedPersonaId]
+  )
+  const selectedPack = React.useMemo(
+    () =>
+      visiblePacks.find((pack) => pack.id === selectedPackId) ??
+      visiblePacks[0] ??
+      null,
+    [selectedPackId, visiblePacks]
+  )
   const availableDuplicateTargets = React.useMemo(
     () => duplicateTargets.filter((target) => target.id !== selectedPersonaId),
     [duplicateTargets, selectedPersonaId]
@@ -1020,6 +1032,8 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         packListRequestIdRef.current += 1
         setPacks([])
         setActivePackId("")
+        setLoading(false)
+        setError(null)
         setPacksLoaded(false)
         setPacksLoadedPersonaId("")
         selectPackId("")
@@ -1374,6 +1388,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   }, [generationTargetState, normalizedGenerationTargetState])
 
   React.useEffect(() => {
+    draftCreateRequestIdRef.current += 1
+    assetUploadRequestIdRef.current += 1
+    manifestSaveRequestIdRef.current += 1
     setExportJob(null)
     setLastDuplicatedPersonaId("")
     setLibraryEditingItemId("")
@@ -1454,6 +1471,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     const title = draftTitle.trim()
     if (!selectedPersonaId || !title) return
     const targetPersonaId = selectedPersonaId
+    const requestId = draftCreateRequestIdRef.current + 1
+    draftCreateRequestIdRef.current = requestId
+    const isCurrentDraftCreateRequest = () =>
+      draftCreateRequestIdRef.current === requestId &&
+      selectedPersonaIdRef.current === targetPersonaId
     setSaving(true)
     setError(null)
     try {
@@ -1461,7 +1483,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         title,
         manifest: DEFAULT_MANIFEST
       })
-      if (selectedPersonaIdRef.current !== targetPersonaId) return
+      if (!isCurrentDraftCreateRequest()) return
       setPacks((current) => mergePack(current, created))
       selectPackId(created.id)
       setDraftTitle("")
@@ -1471,7 +1493,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         })
       )
     } catch (createError) {
-      if (selectedPersonaIdRef.current === targetPersonaId) {
+      if (isCurrentDraftCreateRequest()) {
         setError(
           createError instanceof Error
             ? createError.message
@@ -1481,7 +1503,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         )
       }
     } finally {
-      if (selectedPersonaIdRef.current === targetPersonaId) setSaving(false)
+      if (isCurrentDraftCreateRequest()) setSaving(false)
     }
   }
 
@@ -1534,6 +1556,12 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     if (!selectedPersonaId || !selectedPack || !selectedUploadFile) return
     const targetPersonaId = selectedPersonaId
     const targetPackId = selectedPack.id
+    const requestId = assetUploadRequestIdRef.current + 1
+    assetUploadRequestIdRef.current = requestId
+    const isCurrentAssetUploadRequest = () =>
+      assetUploadRequestIdRef.current === requestId &&
+      selectedPersonaIdRef.current === targetPersonaId &&
+      selectedPackIdRef.current === targetPackId
     setUploading(true)
     setError(null)
     try {
@@ -1543,12 +1571,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         selectedUploadFile,
         uploadRole
       )
-      if (
-        selectedPersonaIdRef.current !== targetPersonaId ||
-        selectedPackIdRef.current !== targetPackId
-      ) {
-        return
-      }
+      if (!isCurrentAssetUploadRequest()) return
       const nextPack = {
         ...selectedPack,
         assets: [...getPackAssets(selectedPack), asset]
@@ -1562,10 +1585,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         })
       )
     } catch (uploadError) {
-      if (
-        selectedPersonaIdRef.current === targetPersonaId &&
-        selectedPackIdRef.current === targetPackId
-      ) {
+      if (isCurrentAssetUploadRequest()) {
         setError(
           uploadError instanceof Error
             ? uploadError.message
@@ -1575,12 +1595,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         )
       }
     } finally {
-      if (
-        selectedPersonaIdRef.current === targetPersonaId &&
-        selectedPackIdRef.current === targetPackId
-      ) {
-        setUploading(false)
-      }
+      if (isCurrentAssetUploadRequest()) setUploading(false)
     }
   }
 
@@ -1808,7 +1823,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     setLibraryMutatingItemId(item.id)
     setError(null)
     try {
-      const duplicated = await usePersonaVisualLibraryItem(item.id, {
+      const duplicated = await copyPersonaVisualLibraryItem(item.id, {
         target_persona_id: targetPersonaId
       })
       if (duplicated.persona_id === selectedPersonaId) {
@@ -2016,6 +2031,12 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     if (!selectedPersonaId || !selectedPack) return
     const targetPersonaId = selectedPersonaId
     const targetPackId = selectedPack.id
+    const requestId = manifestSaveRequestIdRef.current + 1
+    manifestSaveRequestIdRef.current = requestId
+    const isCurrentManifestSaveRequest = () =>
+      manifestSaveRequestIdRef.current === requestId &&
+      selectedPersonaIdRef.current === targetPersonaId &&
+      selectedPackIdRef.current === targetPackId
     setSaving(true)
     setError(null)
     try {
@@ -2027,12 +2048,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           expected_version: selectedPack.version ?? null
         }
       )
-      if (
-        selectedPersonaIdRef.current !== targetPersonaId ||
-        selectedPackIdRef.current !== targetPackId
-      ) {
-        return
-      }
+      if (!isCurrentManifestSaveRequest()) return
       setPacks((current) =>
         mergePack(current, {
           ...saved,
@@ -2046,10 +2062,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         })
       )
     } catch (saveError) {
-      if (
-        selectedPersonaIdRef.current === targetPersonaId &&
-        selectedPackIdRef.current === targetPackId
-      ) {
+      if (isCurrentManifestSaveRequest()) {
         setError(
           saveError instanceof Error
             ? saveError.message
@@ -2059,12 +2072,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         )
       }
     } finally {
-      if (
-        selectedPersonaIdRef.current === targetPersonaId &&
-        selectedPackIdRef.current === targetPackId
-      ) {
-        setSaving(false)
-      }
+      if (isCurrentManifestSaveRequest()) setSaving(false)
     }
   }
 
@@ -2678,6 +2686,290 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     !importPreview &&
     !importCommitJob
   const recommendedStarter = starterPacks[0] ?? null
+  const importPreviewPanel = (
+    <div className="rounded border border-border bg-bg p-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Typography.Text strong>Import preview</Typography.Text>
+        <Tag>review only</Tag>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <input
+          ref={importPreviewInputRef}
+          data-testid="persona-visual-import-preview-input"
+          type="file"
+          accept={`${PORTABLE_VISUAL_PACK_EXTENSION},application/zip,application/octet-stream`}
+          className="text-xs text-text"
+          onChange={(event) =>
+            setSelectedImportPreviewFile(event.target.files?.[0] ?? null)
+          }
+        />
+        <Button
+          data-testid="persona-visual-import-preview-button"
+          size="small"
+          icon={<FileSearch className="h-3.5 w-3.5" />}
+          loading={previewingImport}
+          disabled={!selectedImportPreviewFile || Boolean(importPreviewFileError)}
+          onClick={() => void handleStartImportPreview()}
+        >
+          Preview
+        </Button>
+        <Button
+          data-testid="persona-visual-import-preview-refresh-button"
+          size="small"
+          icon={<RefreshCw className="h-3.5 w-3.5" />}
+          loading={refreshingImportPreview}
+          disabled={!importPreview?.preview_id}
+          onClick={() => void handleRefreshImportPreview()}
+        >
+          Refresh
+        </Button>
+      </div>
+      {importPreviewFileError ? (
+        <div
+          data-testid="persona-visual-import-preview-file-error"
+          className="mt-2 text-xs text-state-error"
+        >
+          {importPreviewFileError}
+        </div>
+      ) : null}
+      {importPreview ? (
+        <div className="mt-2 space-y-1 text-xs text-text-muted">
+          <div className="flex flex-wrap items-center gap-2">
+            <Tag data-testid="persona-visual-import-preview-status">
+              {importPreview.status}
+            </Tag>
+            <span>{importPreview.stage}</span>
+            <span>{importPreview.preview_id}</span>
+          </div>
+          <div data-testid="persona-visual-import-preview-summary">
+            {formatImportPreviewSummary(importPreview)}
+          </div>
+          {importPreviewJobCopy ? (
+            <div data-testid="persona-visual-import-preview-job-copy">
+              {importPreviewJobCopy}
+            </div>
+          ) : null}
+          {importPreviewWarnings.length ? (
+            <div data-testid="persona-visual-import-preview-warnings">
+              {formatPreviewList(importPreviewWarnings)}
+            </div>
+          ) : null}
+          {importPreviewConflicts.length ? (
+            <div data-testid="persona-visual-import-preview-conflicts">
+              {formatPreviewList(importPreviewConflicts)}
+            </div>
+          ) : null}
+          {importPreviewPlan ? (
+            <div data-testid="persona-visual-import-preview-plan">
+              {stringifyPreviewValue(importPreviewPlan)}
+            </div>
+          ) : null}
+          {rendererImportPreview ? (
+            <div
+              data-testid="persona-visual-import-renderer-diagnostics"
+              className="rounded border border-border bg-bg p-2"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium text-text">
+                  {t("sidepanel:personaGarden.visuals.rendererDiagnosticsTitle", {
+                    defaultValue: "Renderer diagnostics"
+                  })}
+                </span>
+                <Tag>{rendererImportPreview.renderer_type || unknownLabel}</Tag>
+                <Tag>{rendererImportPreview.status || unknownLabel}</Tag>
+                {rendererImportPreview.setup_status ? (
+                  <Tag>{rendererImportPreview.setup_status}</Tag>
+                ) : null}
+              </div>
+              <div className="mt-1">
+                {t("sidepanel:personaGarden.visuals.manifestVersion", {
+                  defaultValue: "Manifest v"
+                })}
+                {rendererImportPreview.manifest_version ?? unknownLabel}
+                {" / "}
+                {t("sidepanel:personaGarden.visuals.contractVersion", {
+                  defaultValue: "Contract v"
+                })}
+                {rendererImportPreview.renderer_contract_version ?? unknownLabel}
+              </div>
+              <div className="mt-1">
+                {rendererImportPreview.activation_eligible
+                  ? t("sidepanel:personaGarden.visuals.activationEligible", {
+                      defaultValue: "Activation eligible"
+                    })
+                  : t("sidepanel:personaGarden.visuals.activationUnavailable", {
+                      defaultValue: "Activation unavailable"
+                    })}
+              </div>
+              {importCommitBlockers.length ? (
+                <div className="mt-1">
+                  {t("sidepanel:personaGarden.visuals.commitBlockers", {
+                    defaultValue: "Commit blockers"
+                  })}
+                  : {formatPreviewList(importCommitBlockers)}
+                </div>
+              ) : null}
+              {rendererImportPreview.warnings?.length ? (
+                <div className="mt-1">
+                  {t("sidepanel:personaGarden.visuals.rendererWarnings", {
+                    defaultValue: "Warnings"
+                  })}
+                  : {formatPreviewList(rendererImportPreview.warnings)}
+                </div>
+              ) : null}
+              {rendererImportRoleSummary ? (
+                <div className="mt-1">
+                  {t("sidepanel:personaGarden.visuals.assetRoles", {
+                    defaultValue: "Asset roles"
+                  })}
+                  : {rendererImportRoleSummary}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {canCommitImportPreview ? (
+            <div className="mt-2 border-t border-border pt-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="font-medium text-text">Commit reviewed import</div>
+                <Tag>creates draft</Tag>
+              </div>
+              <div className="mt-1 text-text-muted">
+                Commit creates a new draft pack. Activation remains separate.
+              </div>
+              {!importPreviewCommitEligible ? (
+                <div
+                  data-testid="persona-visual-import-commit-blocked"
+                  className="mt-2 rounded border border-border bg-bg p-2 text-text-muted"
+                >
+                  {t("sidepanel:personaGarden.visuals.importCommitBlocked", {
+                    defaultValue:
+                      "Commit unavailable until preview blockers are resolved"
+                  })}
+                  {importCommitBlockers.length
+                    ? `: ${formatPreviewList(importCommitBlockers)}`
+                    : "."}
+                </div>
+              ) : null}
+              {importConflictChoiceRequired ? (
+                <div
+                  data-testid="persona-visual-import-conflict-choice"
+                  className="mt-2 grid gap-2 md:grid-cols-[minmax(140px,180px)_minmax(180px,1fr)_minmax(180px,1fr)]"
+                >
+                  <label className="text-xs text-text-muted">
+                    <span className="mb-1 block">Target mode</span>
+                    <select
+                      data-testid="persona-visual-import-target-mode"
+                      className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                      value={importTargetMode}
+                      onChange={(event) => {
+                        const nextMode = event.target
+                          .value as PersonaVisualImportTargetMode | ""
+                        setImportTargetMode(nextMode)
+                        setImportTargetChoicePreviewId(
+                          nextMode ? fullImportPreview?.preview_id || "" : ""
+                        )
+                        if (nextMode !== "replace_draft") {
+                          setImportReplacePackId("")
+                        } else if (!importReplacePackId) {
+                          setImportReplacePackId(
+                            replaceableImportConflicts[0]?.pack_id || ""
+                          )
+                        }
+                      }}
+                    >
+                      <option value="">Choose</option>
+                      {importAllowedTargetModes.map((mode) => (
+                        <option key={mode} value={mode}>
+                          {mode === "replace_draft"
+                            ? "Replace draft"
+                            : "Create new draft"}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {importTargetMode === "replace_draft" ? (
+                    <label className="text-xs text-text-muted">
+                      <span className="mb-1 block">Draft</span>
+                      <select
+                        data-testid="persona-visual-import-replace-pack"
+                        className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                        value={importReplacePackId}
+                        onChange={(event) =>
+                          setImportReplacePackId(event.target.value)
+                        }
+                      >
+                        <option value="">Select draft</option>
+                        {replaceableImportConflicts.map((conflict) => (
+                          <option key={conflict.pack_id} value={conflict.pack_id}>
+                            {getImportConflictLabel(conflict)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+                  <label className="text-xs text-text-muted">
+                    <span className="mb-1 block">Draft title</span>
+                    <input
+                      data-testid="persona-visual-import-draft-title"
+                      className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+                      value={importDraftTitle}
+                      onChange={(event) => setImportDraftTitle(event.target.value)}
+                    />
+                  </label>
+                </div>
+              ) : null}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Button
+                  data-testid="persona-visual-import-commit-button"
+                  size="small"
+                  icon={<CheckCircle2 className="h-3.5 w-3.5" />}
+                  loading={committingImport}
+                  disabled={!canStartImportCommit}
+                  onClick={() => void handleStartImportCommit()}
+                >
+                  Commit as draft
+                </Button>
+                <Button
+                  data-testid="persona-visual-import-commit-refresh-button"
+                  size="small"
+                  icon={<RefreshCw className="h-3.5 w-3.5" />}
+                  loading={refreshingImportCommit}
+                  disabled={!canRefreshImportCommit}
+                  onClick={() => void handleRefreshImportCommit()}
+                >
+                  Refresh commit
+                </Button>
+              </div>
+              {importCommitJob ? (
+                <div className="mt-2 space-y-1 text-text-muted">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Tag data-testid="persona-visual-import-commit-status">
+                      {importCommitJob.status}
+                    </Tag>
+                    <span data-testid="persona-visual-import-commit-stage">
+                      {importCommitJob.stage}
+                    </span>
+                    <span data-testid="persona-visual-import-commit-job-id">
+                      {importCommitJob.job_id}
+                    </span>
+                  </div>
+                  {selectedPack && importCommitJobCopy ? (
+                    <div data-testid="persona-visual-import-commit-job-copy">
+                      {importCommitJobCopy}
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="mt-2 text-text-muted">No import commit job.</div>
+              )}
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <div className="mt-2 text-xs text-text-muted">No import preview.</div>
+      )}
+    </div>
+  )
   const firstRunImportPanel = (
     <div className="rounded-lg border border-border bg-surface p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2691,198 +2983,8 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         </div>
         <Tag>creates draft</Tag>
       </div>
-      <div className="mt-3 rounded border border-border bg-bg p-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <Typography.Text strong>Import preview</Typography.Text>
-          <Tag>review only</Tag>
-        </div>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <input
-            ref={importPreviewInputRef}
-            data-testid="persona-visual-import-preview-input"
-            type="file"
-            accept={`${PORTABLE_VISUAL_PACK_EXTENSION},application/zip,application/octet-stream`}
-            className="text-xs text-text"
-            onChange={(event) =>
-              setSelectedImportPreviewFile(event.target.files?.[0] ?? null)
-            }
-          />
-          <Button
-            data-testid="persona-visual-import-preview-button"
-            size="small"
-            icon={<FileSearch className="h-3.5 w-3.5" />}
-            loading={previewingImport}
-            disabled={!selectedImportPreviewFile}
-            onClick={() => void handleStartImportPreview()}
-          >
-            Preview
-          </Button>
-          <Button
-            data-testid="persona-visual-import-preview-refresh-button"
-            size="small"
-            icon={<RefreshCw className="h-3.5 w-3.5" />}
-            loading={refreshingImportPreview}
-            disabled={!importPreview?.preview_id}
-            onClick={() => void handleRefreshImportPreview()}
-          >
-            Refresh
-          </Button>
-        </div>
-        {importPreview ? (
-          <div className="mt-2 space-y-1 text-xs text-text-muted">
-            <div className="flex flex-wrap items-center gap-2">
-              <Tag data-testid="persona-visual-import-preview-status">
-                {importPreview.status}
-              </Tag>
-              <span>{importPreview.stage}</span>
-              <span>{importPreview.preview_id}</span>
-            </div>
-            <div data-testid="persona-visual-import-preview-summary">
-              {formatImportPreviewSummary(importPreview)}
-            </div>
-            {importPreviewWarnings.length ? (
-              <div data-testid="persona-visual-import-preview-warnings">
-                {formatPreviewList(importPreviewWarnings)}
-              </div>
-            ) : null}
-            {importPreviewConflicts.length ? (
-              <div data-testid="persona-visual-import-preview-conflicts">
-                {formatPreviewList(importPreviewConflicts)}
-              </div>
-            ) : null}
-            {canCommitImportPreview ? (
-              <div className="mt-2 border-t border-border pt-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="font-medium text-text">Commit reviewed import</div>
-                  <Tag>creates draft</Tag>
-                </div>
-                <div className="mt-1 text-text-muted">
-                  Commit creates a new draft pack. Activation remains separate.
-                </div>
-                {!importPreviewCommitEligible ? (
-                  <div
-                    data-testid="persona-visual-import-commit-blocked"
-                    className="mt-2 rounded border border-border bg-bg p-2 text-text-muted"
-                  >
-                    {t("sidepanel:personaGarden.visuals.importCommitBlocked", {
-                      defaultValue:
-                        "Commit unavailable until preview blockers are resolved"
-                    })}
-                    {importCommitBlockers.length
-                      ? `: ${formatPreviewList(importCommitBlockers)}`
-                      : "."}
-                  </div>
-                ) : null}
-                {importConflictChoiceRequired ? (
-                  <div
-                    data-testid="persona-visual-import-conflict-choice"
-                    className="mt-2 grid gap-2 md:grid-cols-[minmax(140px,180px)_minmax(180px,1fr)_minmax(180px,1fr)]"
-                  >
-                    <label className="text-xs text-text-muted">
-                      <span className="mb-1 block">Target mode</span>
-                      <select
-                        data-testid="persona-visual-import-target-mode"
-                        className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
-                        value={importTargetMode}
-                        onChange={(event) => {
-                          const nextMode = event.target
-                            .value as PersonaVisualImportTargetMode | ""
-                          setImportTargetMode(nextMode)
-                          if (nextMode !== "replace_draft") {
-                            setImportReplacePackId("")
-                          } else if (!importReplacePackId) {
-                            setImportReplacePackId(
-                              replaceableImportConflicts[0]?.pack_id || ""
-                            )
-                          }
-                        }}
-                      >
-                        <option value="">Choose</option>
-                        {importAllowedTargetModes.map((mode) => (
-                          <option key={mode} value={mode}>
-                            {mode === "replace_draft"
-                              ? "Replace draft"
-                              : "Create new draft"}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    {importTargetMode === "replace_draft" ? (
-                      <label className="text-xs text-text-muted">
-                        <span className="mb-1 block">Draft</span>
-                        <select
-                          data-testid="persona-visual-import-replace-pack"
-                          className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
-                          value={importReplacePackId}
-                          onChange={(event) =>
-                            setImportReplacePackId(event.target.value)
-                          }
-                        >
-                          <option value="">Select draft</option>
-                          {replaceableImportConflicts.map((conflict) => (
-                            <option key={conflict.pack_id} value={conflict.pack_id}>
-                              {getImportConflictLabel(conflict)}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ) : null}
-                    <label className="text-xs text-text-muted">
-                      <span className="mb-1 block">Draft title</span>
-                      <input
-                        data-testid="persona-visual-import-draft-title"
-                        className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
-                        value={importDraftTitle}
-                        onChange={(event) => setImportDraftTitle(event.target.value)}
-                      />
-                    </label>
-                  </div>
-                ) : null}
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <Button
-                    key="first-run-import-commit"
-                    data-testid="persona-visual-import-commit-button"
-                    size="small"
-                    icon={<CheckCircle2 className="h-3.5 w-3.5" />}
-                    loading={committingImport}
-                    disabled={!canStartImportCommit}
-                    onClick={() => void handleStartImportCommit()}
-                  >
-                    Commit as draft
-                  </Button>
-                  <Button
-                    key="first-run-import-commit-refresh"
-                    data-testid="persona-visual-import-commit-refresh-button"
-                    size="small"
-                    icon={<RefreshCw className="h-3.5 w-3.5" />}
-                    loading={refreshingImportCommit}
-                    disabled={!canRefreshImportCommit}
-                    onClick={() => void handleRefreshImportCommit()}
-                  >
-                    Refresh commit
-                  </Button>
-                </div>
-                {importCommitJob ? (
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-text-muted">
-                    <Tag data-testid="persona-visual-import-commit-status">
-                      {importCommitJob.status}
-                    </Tag>
-                    <span data-testid="persona-visual-import-commit-stage">
-                      {importCommitJob.stage}
-                    </span>
-                    <span data-testid="persona-visual-import-commit-job-id">
-                      {importCommitJob.job_id}
-                    </span>
-                  </div>
-                ) : (
-                  <div className="mt-2 text-text-muted">No import commit job.</div>
-                )}
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <div className="mt-2 text-xs text-text-muted">No import preview.</div>
-        )}
+      <div className="mt-3">
+        {importPreviewPanel}
       </div>
     </div>
   )
@@ -2989,7 +3091,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           <Button
             data-testid="persona-visual-pack-refresh-button"
             size="small"
-            onClick={() => void loadPacks(selectedPack?.id)}
+            onClick={() =>
+              void loadPacks({ preferredPackId: selectedPack?.id })
+            }
             disabled={loading}
           >
             {loading ? loadingLabel : refreshLabel}
@@ -3626,308 +3730,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 )}
               </div>
 
-              <div className="rounded border border-border bg-bg p-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <Typography.Text strong>Import preview</Typography.Text>
-                  <Tag>review only</Tag>
-                </div>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <input
-                    ref={importPreviewInputRef}
-                    data-testid="persona-visual-import-preview-input"
-                    type="file"
-                    accept={`${PORTABLE_VISUAL_PACK_EXTENSION},application/zip,application/octet-stream`}
-                    className="text-xs text-text"
-                    onChange={(event) =>
-                      setSelectedImportPreviewFile(event.target.files?.[0] ?? null)
-                    }
-                  />
-                  <Button
-                    data-testid="persona-visual-import-preview-button"
-                    size="small"
-                    icon={<FileSearch className="h-3.5 w-3.5" />}
-                    loading={previewingImport}
-                    disabled={!selectedImportPreviewFile || Boolean(importPreviewFileError)}
-                    onClick={() => void handleStartImportPreview()}
-                  >
-                    Preview
-                  </Button>
-                  <Button
-                    data-testid="persona-visual-import-preview-refresh-button"
-                    size="small"
-                    icon={<RefreshCw className="h-3.5 w-3.5" />}
-                    loading={refreshingImportPreview}
-                    disabled={!importPreview?.preview_id}
-                    onClick={() => void handleRefreshImportPreview()}
-                  >
-                    Refresh
-                  </Button>
-                </div>
-                {importPreviewFileError ? (
-                  <div
-                    data-testid="persona-visual-import-preview-file-error"
-                    className="mt-2 text-xs text-state-error"
-                  >
-                    {importPreviewFileError}
-                  </div>
-                ) : null}
-                {importPreview ? (
-                  <div className="mt-2 space-y-1 text-xs text-text-muted">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Tag data-testid="persona-visual-import-preview-status">
-                        {importPreview.status}
-                      </Tag>
-                      <span>{importPreview.stage}</span>
-                      <span>{importPreview.preview_id}</span>
-                    </div>
-                    <div data-testid="persona-visual-import-preview-summary">
-                      {formatImportPreviewSummary(importPreview)}
-                    </div>
-                    {importPreviewJobCopy ? (
-                      <div data-testid="persona-visual-import-preview-job-copy">
-                        {importPreviewJobCopy}
-                      </div>
-                    ) : null}
-                    {importPreviewWarnings.length ? (
-                      <div data-testid="persona-visual-import-preview-warnings">
-                        {formatPreviewList(importPreviewWarnings)}
-                      </div>
-                    ) : null}
-                    {importPreviewConflicts.length ? (
-                      <div data-testid="persona-visual-import-preview-conflicts">
-                        {formatPreviewList(importPreviewConflicts)}
-                      </div>
-                    ) : null}
-                    {importPreviewPlan ? (
-                      <div data-testid="persona-visual-import-preview-plan">
-                        {stringifyPreviewValue(importPreviewPlan)}
-                      </div>
-                    ) : null}
-                    {rendererImportPreview ? (
-                      <div
-                        data-testid="persona-visual-import-renderer-diagnostics"
-                        className="rounded border border-border bg-bg p-2"
-                      >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-medium text-text">
-                            {t(
-                              "sidepanel:personaGarden.visuals.rendererDiagnosticsTitle",
-                              { defaultValue: "Renderer diagnostics" }
-                            )}
-                          </span>
-                          <Tag>
-                            {rendererImportPreview.renderer_type || unknownLabel}
-                          </Tag>
-                          <Tag>{rendererImportPreview.status || unknownLabel}</Tag>
-                          {rendererImportPreview.setup_status ? (
-                            <Tag>{rendererImportPreview.setup_status}</Tag>
-                          ) : null}
-                        </div>
-                        <div className="mt-1">
-                          {t("sidepanel:personaGarden.visuals.manifestVersion", {
-                            defaultValue: "Manifest v"
-                          })}
-                          {rendererImportPreview.manifest_version ?? unknownLabel}
-                          {" / "}
-                          {t("sidepanel:personaGarden.visuals.contractVersion", {
-                            defaultValue: "Contract v"
-                          })}
-                          {rendererImportPreview.renderer_contract_version ??
-                            unknownLabel}
-                        </div>
-                        <div className="mt-1">
-                          {rendererImportPreview.activation_eligible
-                            ? t(
-                                "sidepanel:personaGarden.visuals.activationEligible",
-                                { defaultValue: "Activation eligible" }
-                              )
-                            : t(
-                                "sidepanel:personaGarden.visuals.activationUnavailable",
-                                { defaultValue: "Activation unavailable" }
-                              )}
-                        </div>
-                        {importCommitBlockers.length ? (
-                          <div className="mt-1">
-                            {t("sidepanel:personaGarden.visuals.commitBlockers", {
-                              defaultValue: "Commit blockers"
-                            })}
-                            : {formatPreviewList(importCommitBlockers)}
-                          </div>
-                        ) : null}
-                        {rendererImportPreview.warnings?.length ? (
-                          <div className="mt-1">
-                            {t("sidepanel:personaGarden.visuals.rendererWarnings", {
-                              defaultValue: "Warnings"
-                            })}
-                            : {formatPreviewList(rendererImportPreview.warnings)}
-                          </div>
-                        ) : null}
-                        {rendererImportRoleSummary ? (
-                          <div className="mt-1">
-                            {t("sidepanel:personaGarden.visuals.assetRoles", {
-                              defaultValue: "Asset roles"
-                            })}
-                            : {rendererImportRoleSummary}
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    {canCommitImportPreview ? (
-                      <div className="mt-2 border-t border-border pt-2">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="font-medium text-text">
-                            Commit reviewed import
-                          </div>
-                          <Tag>creates draft</Tag>
-                        </div>
-                        <div className="mt-1 text-text-muted">
-                          Commit creates a new draft pack. Activation remains separate.
-                        </div>
-                        {!importPreviewCommitEligible ? (
-                          <div
-                            data-testid="persona-visual-import-commit-blocked"
-                            className="mt-2 rounded border border-border bg-bg p-2 text-text-muted"
-                          >
-                            {t(
-                              "sidepanel:personaGarden.visuals.importCommitBlocked",
-                              {
-                                defaultValue:
-                                  "Commit unavailable until preview blockers are resolved"
-                              }
-                            )}
-                            {importCommitBlockers.length
-                              ? `: ${formatPreviewList(importCommitBlockers)}`
-                              : "."}
-                          </div>
-                        ) : null}
-                        {importConflictChoiceRequired ? (
-                          <div
-                            data-testid="persona-visual-import-conflict-choice"
-                            className="mt-2 grid gap-2 md:grid-cols-[minmax(140px,180px)_minmax(180px,1fr)_minmax(180px,1fr)]"
-                          >
-                            <label className="text-xs text-text-muted">
-                              <span className="mb-1 block">Target mode</span>
-                              <select
-                                data-testid="persona-visual-import-target-mode"
-                                className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
-                                value={importTargetMode}
-                                onChange={(event) => {
-                                  const nextMode = event.target
-                                    .value as PersonaVisualImportTargetMode | ""
-                                  setImportTargetMode(nextMode)
-                                  setImportTargetChoicePreviewId(
-                                    nextMode ? fullImportPreview?.preview_id || "" : ""
-                                  )
-                                  if (nextMode !== "replace_draft") {
-                                    setImportReplacePackId("")
-                                  } else if (!importReplacePackId) {
-                                    setImportReplacePackId(
-                                      replaceableImportConflicts[0]?.pack_id || ""
-                                    )
-                                  }
-                                }}
-                              >
-                                <option value="">Choose</option>
-                                {importAllowedTargetModes.map((mode) => (
-                                  <option key={mode} value={mode}>
-                                    {mode === "replace_draft"
-                                      ? "Replace draft"
-                                      : "Create new draft"}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            {importTargetMode === "replace_draft" ? (
-                              <label className="text-xs text-text-muted">
-                                <span className="mb-1 block">Draft</span>
-                                <select
-                                  data-testid="persona-visual-import-replace-pack"
-                                  className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
-                                  value={importReplacePackId}
-                                  onChange={(event) =>
-                                    setImportReplacePackId(event.target.value)
-                                  }
-                                >
-                                  <option value="">Select draft</option>
-                                  {replaceableImportConflicts.map((conflict) => (
-                                    <option
-                                      key={conflict.pack_id}
-                                      value={conflict.pack_id}
-                                    >
-                                      {getImportConflictLabel(conflict)}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                            ) : null}
-                            <label className="text-xs text-text-muted">
-                              <span className="mb-1 block">Draft title</span>
-                              <input
-                                data-testid="persona-visual-import-draft-title"
-                                className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
-                                value={importDraftTitle}
-                                onChange={(event) =>
-                                  setImportDraftTitle(event.target.value)
-                                }
-                              />
-                            </label>
-                          </div>
-                        ) : null}
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <Button
-                            key="selected-import-commit"
-                            data-testid="persona-visual-import-commit-button"
-                            size="small"
-                            icon={<CheckCircle2 className="h-3.5 w-3.5" />}
-                            loading={committingImport}
-                            disabled={!canStartImportCommit}
-                            onClick={() => void handleStartImportCommit()}
-                          >
-                            Commit as draft
-                          </Button>
-                          <Button
-                            key="selected-import-commit-refresh"
-                            data-testid="persona-visual-import-commit-refresh-button"
-                            size="small"
-                            icon={<RefreshCw className="h-3.5 w-3.5" />}
-                            loading={refreshingImportCommit}
-                            disabled={!canRefreshImportCommit}
-                            onClick={() => void handleRefreshImportCommit()}
-                          >
-                            Refresh commit
-                          </Button>
-                        </div>
-                        {importCommitJob ? (
-                          <div className="mt-2 space-y-1 text-text-muted">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Tag data-testid="persona-visual-import-commit-status">
-                                {importCommitJob.status}
-                              </Tag>
-                              <span data-testid="persona-visual-import-commit-stage">
-                                {importCommitJob.stage}
-                              </span>
-                              <span data-testid="persona-visual-import-commit-job-id">
-                                {importCommitJob.job_id}
-                              </span>
-                            </div>
-                            {importCommitJobCopy ? (
-                              <div data-testid="persona-visual-import-commit-job-copy">
-                                {importCommitJobCopy}
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : (
-                          <div className="mt-2 text-text-muted">
-                            No import commit job.
-                          </div>
-                        )}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : (
-                  <div className="mt-2 text-xs text-text-muted">No import preview.</div>
-                )}
-              </div>
+              {importPreviewPanel}
             </div>
           </div>
 

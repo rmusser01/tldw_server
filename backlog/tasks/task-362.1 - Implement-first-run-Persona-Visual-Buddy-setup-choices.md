@@ -4,7 +4,7 @@ title: Implement first-run Persona Visual Buddy setup choices
 status: Done
 assignee: []
 created_date: '2026-05-15 03:44'
-updated_date: '2026-05-15 15:25'
+updated_date: '2026-05-15 19:29'
 labels:
   - persona
   - buddy
@@ -63,12 +63,20 @@ Final wizard-detour closeout: AssistantSetupWizard now accepts optional compact 
 Quality review found that the first visual detour patch exposed all Persona Garden tabs while setup was still required. Resolved by filtering the detour view to the Visuals tab only and adding route regression assertions that Profiles, Commands, and Live Session are absent during the detour.
 
 Post-rebase verification on latest origin/dev passed: bunx vitest run src/components/PersonaGarden/__tests__/VisualBuddySetupChoiceCard.test.tsx src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx src/components/PersonaGarden/__tests__/AssistantSetupWizard.test.tsx src/routes/__tests__/sidepanel-persona.test.tsx src/services/__tests__/persona-visuals.test.ts --testTimeout=30000 -> 5 files passed, 153 tests passed. bun run verify:design-system-state passed with existing baseline exceptions only. git diff --check origin/dev...HEAD passed.
+
+PR #1725 review-fix pass started. Verified live review surface: Qodo reported loadPacks invalidation/loading and refresh handler contract bugs; Gemini requested i18n cleanup for setup card copy, memoized visible pack derivations, broader stale mutation guards, and import-panel duplication review. Plan: fix verified low-risk bugs first, apply narrow memoization/i18n improvements where consistent with local patterns, evaluate broader refactors against scope, then run focused Vitest/design-system/diff verification before pushing.
+
+PR #1725 review-fix pass completed. Fixed verified Qodo bugs by clearing pack loading/error state on inactive/persona invalidation and changing the refresh handler to call loadPacks with the expected options object. Addressed Gemini comments by memoizing visible/selected pack derivations, adding request IDs to draft create, asset upload, and manifest save mutation handlers with persona/pack invalidation, moving VisualBuddySetupChoiceCard copy through sidepanel i18n defaults plus English locale keys, and extracting the import preview/commit panel into a single shared JSX block for first-run and selected-pack flows. Also aliased the visual-library copy service import to avoid hook-rule false positives in direct package lint.
+
+Review-fix verification: focused Vitest suite passed with 5 files and 154 tests; bun run verify:design-system-state passed with existing baseline exceptions only; git diff --check passed; direct ESLint on touched package files completed with zero errors and existing warnings only. Bandit remains not applicable because the review-fix touched frontend TypeScript/TSX, English locale JSON, and Backlog Markdown only.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented first-run Persona Visual Buddy setup choices for issue #1695. The shared setup card supports full Visuals-tab actions and compact wizard routing. VisualPackEditor shows first-run setup choices only when no active visual exists, preserves advanced library/reuse affordances, copies bundled defaults into inactive drafts, focuses existing import controls, and routes blank setup to existing draft controls without auto-activation. Assistant setup now has an optional visual detour so users blocked by setup gating can open only the Visuals tab and return without changing setup completion state. Verification after rebasing onto latest dev: focused UI/service Vitest suite passed with 153 tests, design-system state verification passed with existing baseline exceptions only, git diff --check passed, and Bandit is not applicable for the frontend-only touched scope.
+
+Review fixes for PR #1725 addressed the loadPacks invalidation/loading bug, corrected the refresh call contract, localized the setup card copy, memoized pack derivations, added request-id guards to the older mutation handlers, and shared the import preview panel between first-run and selected-pack paths. Validation passed with the focused 154-test Vitest suite, design-system state guard, git diff check, and touched-file ESLint with warnings only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
