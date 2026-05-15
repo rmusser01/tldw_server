@@ -122,20 +122,99 @@ export type ArtifactReviewStatus =
   | "reviewing"
   | "accepted"
   | "needs_revision"
+  | "rejected"
   | "exported"
   | "assigned"
+  | "archived"
+
+export type ArtifactExportTarget =
+  | "markdown"
+  | "docx"
+  | "pdf"
+  | "slides"
+  | "chatbook"
 
 export interface ArtifactSourceLineage {
   sourceId: string
+  sourceType?: string
   mediaId?: number
   title?: string
+  label?: string
   citationCount?: number
+  citationSpans?: unknown[]
+  evidenceIds?: string[]
+  coverageNotes?: string
+  [key: string]: unknown
 }
 
 export interface ArtifactReviewChecklistItem {
   id: string
   label: string
   checked: boolean
+}
+
+export interface TraceableArtifactProducerLinks {
+  session?: string
+  run?: string
+  review?: string
+  diagnostics?: string
+  artifacts?: string
+  audit?: string
+  [key: string]: string | undefined
+}
+
+export interface TraceableArtifactProducerMetadata {
+  producerType?: string
+  producerId?: string
+  runId?: string
+  sessionId?: string
+  reviewId?: string
+  taskId?: string
+  promptId?: string
+  templateId?: string
+  model?: string
+  provider?: string
+  completionReason?: string
+  links?: TraceableArtifactProducerLinks
+  [key: string]: unknown
+}
+
+export interface TraceableArtifactReviewMetadata {
+  reviewerId?: string
+  decision?: ArtifactReviewStatus | string
+  decidedAt?: string
+  reason?: string
+  checklist?: ArtifactReviewChecklistItem[]
+  [key: string]: unknown
+}
+
+export interface TraceableArtifactVersionMetadata {
+  revisionReason?: string
+  versionLabel?: string
+  comparedToVersionId?: string
+  [key: string]: unknown
+}
+
+export interface TraceableArtifactExportRef {
+  format: string
+  fileId?: number | string
+  jobId?: number | string
+  artifactVersionId?: string
+  generatedAt?: string
+  expiresAt?: string
+  status?: string
+  url?: string
+  error?: string
+  [key: string]: unknown
+}
+
+export interface TraceableArtifactRedaction {
+  supportSafe?: boolean
+  redacted?: boolean
+  retentionClass?: string
+  redactedFields?: string[]
+  visibility?: string
+  [key: string]: unknown
 }
 
 export type StudyMaterialsPolicy = "general" | "workspace"
@@ -175,8 +254,25 @@ export interface GeneratedArtifact {
   reviewStatus?: ArtifactReviewStatus
   sourceLineage?: ArtifactSourceLineage[]
   reviewChecklist?: ArtifactReviewChecklistItem[]
-  exportTargets?: Array<"markdown" | "docx" | "pdf" | "slides" | "chatbook">
+  exportTargets?: ArtifactExportTarget[]
+  version?: number
   previousVersionId?: string
+  rootArtifactId?: string
+  artifactVersionId?: string
+  ownerScope?: string
+  ownerId?: string
+  projectId?: string
+  taskId?: string
+  sourceCollectionId?: string
+  contentType?: string
+  previewText?: string
+  summary?: string
+  schemaVersion?: number
+  producerMetadata?: TraceableArtifactProducerMetadata
+  reviewMetadata?: TraceableArtifactReviewMetadata
+  versionMetadata?: TraceableArtifactVersionMetadata
+  exportRefs?: TraceableArtifactExportRef[]
+  redaction?: TraceableArtifactRedaction
   estimatedTokens?: number
   estimatedCostUsd?: number
   totalTokens?: number
