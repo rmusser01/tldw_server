@@ -1,9 +1,10 @@
 ---
 id: TASK-368.4
 title: Implement llama.cpp frontend API client
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-15 03:44'
+updated_date: '2026-05-15 06:51'
 labels:
   - implementation
   - frontend
@@ -31,6 +32,12 @@ Implement the frontend API client and type slice from the implementation plan. A
 - [ ] #3 Client ownership metadata is updated for the new methods.
 - [ ] #4 Existing llama.cpp admin page tests still pass before page reshape.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Started Task 4 frontend API client/types slice after TASK-368.3 was finalized and committed at a10bd4376. Scope is limited to `apps/packages/ui/src/types/llamacpp-admin.ts`, `apps/packages/ui/src/services/tldw/TldwApiClient.ts`, `apps/packages/ui/src/services/tldw/domains/models-audio.ts`, and `apps/packages/ui/src/services/tldw/client-ownership.ts`; no page reshape in this task.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
