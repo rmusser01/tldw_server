@@ -82,7 +82,7 @@ const visualStarterPackPath = (
   starterPackId?: string,
   suffix = ""
 ): `/api/v1/persona/visual-starter-packs${string}` => {
-  if (!starterPackId) return "/api/v1/persona/visual-starter-packs"
+  if (starterPackId === undefined) return "/api/v1/persona/visual-starter-packs"
   return `/api/v1/persona/visual-starter-packs/${encodeURIComponent(starterPackId)}${suffix}`
 }
 

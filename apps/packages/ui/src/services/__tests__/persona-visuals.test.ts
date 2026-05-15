@@ -171,6 +171,28 @@ describe("persona visuals service", () => {
     )
   })
 
+  it("normalizes malformed starter pack wrapper responses to an empty list", async () => {
+    mocks.fetchWithAuth.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({})
+    })
+
+    await expect(listPersonaVisualStarterPacks()).resolves.toEqual({
+      starter_packs: []
+    })
+
+    mocks.fetchWithAuth.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ starter_packs: {} })
+    })
+
+    await expect(listPersonaVisualStarterPacks()).resolves.toEqual({
+      starter_packs: []
+    })
+  })
+
   it("loads starter pack details with an encoded id", async () => {
     mocks.fetchWithAuth.mockResolvedValueOnce({
       ok: true,
@@ -200,6 +222,39 @@ describe("persona visuals service", () => {
 
     expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
       "/api/v1/persona/visual-starter-packs/starter%2Fwith%20space",
+      expect.objectContaining({ method: "GET" })
+    )
+  })
+
+  it("does not route empty starter pack detail ids to the collection endpoint", async () => {
+    mocks.fetchWithAuth.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "",
+        title: "Empty Detail",
+        description: "Detail",
+        renderer_type: "sprite_frames",
+        manifest_version: 1,
+        states_offered: [],
+        asset_count: 0,
+        total_bytes: 0,
+        tags: [],
+        license_label: "bundled",
+        manifest: {
+          manifest_version: 1,
+          renderer_type: "sprite_frames",
+          states: {},
+          animations: {}
+        },
+        assets: []
+      })
+    })
+
+    await getPersonaVisualStarterPack("")
+
+    expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
+      "/api/v1/persona/visual-starter-packs/",
       expect.objectContaining({ method: "GET" })
     )
   })
@@ -238,5 +293,34 @@ describe("persona visuals service", () => {
     expect(JSON.parse(String(init.body))).toEqual({
       target_persona_id: "persona-1"
     })
+  })
+
+  it("does not route empty starter pack copy ids to the collection endpoint", async () => {
+    mocks.fetchWithAuth.mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        id: "copied-pack",
+        persona_id: "persona-1",
+        title: "Research Buddy Starter",
+        renderer_type: "sprite_frames",
+        status: "draft",
+        manifest: {
+          manifest_version: 1,
+          renderer_type: "sprite_frames",
+          states: {},
+          animations: {}
+        }
+      })
+    })
+
+    await copyPersonaVisualStarterPack("", {
+      target_persona_id: "persona-1"
+    })
+
+    expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
+      "/api/v1/persona/visual-starter-packs//copy",
+      expect.objectContaining({ method: "POST" })
+    )
   })
 })
