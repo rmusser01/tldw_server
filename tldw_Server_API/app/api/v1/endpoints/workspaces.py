@@ -2,12 +2,20 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from loguru import logger
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
-from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
+    WORKSPACES_DELETE_RATE_LIMIT,
+    WORKSPACES_READ_RATE_LIMIT,
+    WORKSPACES_WRITE_RATE_LIMIT,
+)
 from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     StatusResponse,
     WorkspaceArtifactCreateRequest,
+    WorkspaceArtifactExportRequest,
+    WorkspaceArtifactExportResponse,
     WorkspaceArtifactResponse,
     WorkspaceArtifactUpdateRequest,
     WorkspaceListResponse,
@@ -23,17 +31,16 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceSourceUpdateRequest,
     WorkspaceUpsertRequest,
 )
-from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
-    WORKSPACES_DELETE_RATE_LIMIT,
-    WORKSPACES_READ_RATE_LIMIT,
-    WORKSPACES_WRITE_RATE_LIMIT,
-)
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
     ConflictError,
     InputError,
+)
+from tldw_Server_API.app.core.exceptions import WorkspaceArtifactExportStateError
+from tldw_Server_API.app.core.Workspaces.workspace_artifact_exports import (
+    export_workspace_artifact_version,
 )
 
 router = APIRouter()
@@ -111,6 +118,37 @@ def _art_to_response(art: dict) -> WorkspaceArtifactResponse:
         completed_at=str(art["completed_at"]) if art.get("completed_at") else None,
         version=version,
     )
+
+
+def _workspace_artifact_version_for_export(
+    db: CharactersRAGDB,
+    workspace_id: str,
+    artifact_id: str,
+    artifact_version_id: str | None,
+) -> dict:
+    """Fetch the current artifact or a version snapshot for export."""
+    artifact = db.get_workspace_artifact(workspace_id, artifact_id)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="Workspace artifact not found")
+    if artifact_version_id is None:
+        return artifact
+
+    version = db.get_workspace_artifact_version(workspace_id, artifact_id, artifact_version_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="Workspace artifact version not found")
+    merged = {**artifact, **version}
+    merged["id"] = artifact_id
+    merged["workspace_id"] = workspace_id
+    merged["artifact_type"] = artifact.get("artifact_type")
+    merged["content_type"] = artifact.get("content_type") or "text/markdown"
+    merged["status"] = artifact.get("status")
+    merged["owner_scope"] = artifact.get("owner_scope")
+    merged["owner_id"] = artifact.get("owner_id")
+    merged["project_id"] = artifact.get("project_id")
+    merged["task_id"] = artifact.get("task_id")
+    merged["source_collection_id"] = artifact.get("source_collection_id")
+    merged["schema_version"] = artifact.get("schema_version") or 1
+    return merged
 
 
 def _note_to_response(note: dict) -> WorkspaceNoteResponse:
@@ -442,6 +480,57 @@ async def update_artifact(
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to update workspace artifact") from exc
     return _art_to_response(art)
+
+
+@router.post(
+    "/{workspace_id}/artifacts/{artifact_id}/exports",
+    response_model=WorkspaceArtifactExportResponse,
+    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
+    summary="Export accepted workspace artifact version",
+)
+async def export_artifact(
+    workspace_id: str,
+    artifact_id: str,
+    body: WorkspaceArtifactExportRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceArtifactExportResponse:
+    """Export an accepted workspace artifact version as Markdown, HTML, or JSON."""
+    try:
+        _require_workspace(db, workspace_id)
+        artifact = _workspace_artifact_version_for_export(
+            db,
+            workspace_id,
+            artifact_id,
+            body.artifact_version_id,
+        )
+        payload = export_workspace_artifact_version(artifact, export_format=body.format)
+        db.append_workspace_artifact_export_ref(workspace_id, artifact_id, payload["export_ref"])
+    except WorkspaceArtifactExportStateError as exc:
+        logger.warning(
+            "Workspace artifact export rejected: workspace_id={} artifact_id={} artifact_version_id={} "
+            "format={} reason={}",
+            workspace_id,
+            artifact_id,
+            body.artifact_version_id,
+            body.format,
+            str(exc),
+        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        logger.exception(
+            "Workspace artifact export failed: workspace_id={} artifact_id={} artifact_version_id={} format={}",
+            workspace_id,
+            artifact_id,
+            body.artifact_version_id,
+            body.format,
+        )
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to export workspace artifact",
+            log_error=False,
+        ) from exc
+    return WorkspaceArtifactExportResponse(**payload)
 
 
 @router.delete(

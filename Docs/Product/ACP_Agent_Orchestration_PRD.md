@@ -351,6 +351,7 @@ Implementation should be split into:
 | --- | --- |
 | Storage/API | Backend foundation implemented by #1703 on `workspace_artifacts`: traceable artifact fields, version rows, source-lineage metadata, review metadata, export references, redaction posture, schema version, and ACP producer references. |
 | UI detail | Show artifact detail, source lineage, ACP provenance, review state, revise/retry/reject/accept controls, exports, and authenticated ACP drill-through links. |
+| Export identity | Backend foundation implemented by #1705 on `POST /api/v1/workspaces/{workspace_id}/artifacts/{artifact_id}/exports`: accepted Markdown/HTML/JSON exports preserve artifact/version/workspace identity, source lineage, review state, ACP producer metadata, generated timestamp, and export references. |
 | Verification | Contract tests for ACP-to-artifact promotion, redacted support-safe views, reviewer-loop state mapping, versioning, and export identity. |
 
 The initial implementation should target one golden-path deliverable, such as a
@@ -398,3 +399,7 @@ minimum, a release candidate needs:
 - 2026-05-14 storage/API foundation: #1703 added traceable workspace artifact
   fields, API exposure, and per-version storage while leaving UI detail, ACP
   promotion, export adapters, and broader signoff checks as follow-up slices.
+- 2026-05-15 accepted export foundation: #1705 added the backend
+  Markdown/HTML/JSON accepted-version export contract while leaving richer
+  file/document export channels, retention policy, and UI download workflows as
+  follow-up slices.

@@ -15299,6 +15299,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         row = cursor.fetchone()
         return self._normalize_workspace_artifact_row(row)
 
+    def get_workspace_artifact(self, workspace_id: str, artifact_id: str) -> dict[str, Any] | None:
+        """Fetch a workspace artifact by id."""
+        return self._get_workspace_artifact(workspace_id, artifact_id)
+
     def list_workspace_artifacts(self, workspace_id: str) -> list[dict[str, Any]]:
         """List all artifacts for a workspace."""
         cursor = self.execute_query(
@@ -15328,6 +15332,125 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
             versions.append(item)
         return versions
+
+    def get_workspace_artifact_version(
+        self,
+        workspace_id: str,
+        artifact_id: str,
+        artifact_version_id: str,
+    ) -> dict[str, Any] | None:
+        """Fetch one workspace artifact version snapshot by stable version id."""
+        cursor = self.execute_query(
+            "SELECT * FROM workspace_artifact_versions "
+            "WHERE workspace_id = ? AND artifact_id = ? AND artifact_version_id = ?",
+            (workspace_id, artifact_id, artifact_version_id),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        for column_name, response_name, default in self._WORKSPACE_ARTIFACT_JSON_FIELDS:
+            item[response_name] = self._load_workspace_artifact_json(
+                item.get(column_name),
+                default,
+                field_name=column_name,
+            )
+        return item
+
+    def append_workspace_artifact_export_ref(
+        self,
+        workspace_id: str,
+        artifact_id: str,
+        export_ref: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Append an export reference without creating a new artifact content version."""
+        for _attempt in range(3):
+            with self.transaction() as conn:
+                artifact_row = conn.execute(
+                    "SELECT artifact_version_id, export_refs_json FROM workspace_artifacts "
+                    "WHERE workspace_id = ? AND id = ?",
+                    (workspace_id, artifact_id),
+                ).fetchone()
+                if artifact_row is None:
+                    raise ConflictError(  # noqa: TRY003
+                        f"Workspace artifact '{artifact_id}' not found.",
+                        entity="workspace_artifacts",
+                        entity_id=artifact_id,
+                    )
+
+                artifact_export_refs_json = artifact_row["export_refs_json"]
+                artifact_version_id = str(
+                    export_ref.get("artifact_version_id") or artifact_row["artifact_version_id"] or ""
+                )
+                if not artifact_version_id:
+                    raise InputError("Workspace artifact export_ref artifact_version_id is required.")  # noqa: TRY003
+
+                artifact_export_refs = self._load_workspace_artifact_json(
+                    artifact_export_refs_json,
+                    [],
+                    field_name="workspace_artifacts.export_refs_json",
+                )
+                if not isinstance(artifact_export_refs, list):
+                    raise InputError("Workspace artifact export_refs must be a list.")  # noqa: TRY003
+                artifact_export_refs = list(artifact_export_refs)
+                artifact_export_refs.append(dict(export_ref))
+                updated_artifact_export_refs_json = self._dump_workspace_artifact_json(artifact_export_refs, [])
+
+                if artifact_export_refs_json is None:
+                    artifact_cursor = conn.execute(
+                        "UPDATE workspace_artifacts SET export_refs_json = ? "
+                        "WHERE workspace_id = ? AND id = ? AND export_refs_json IS NULL",
+                        (updated_artifact_export_refs_json, workspace_id, artifact_id),
+                    )
+                else:
+                    artifact_cursor = conn.execute(
+                        "UPDATE workspace_artifacts SET export_refs_json = ? "
+                        "WHERE workspace_id = ? AND id = ? AND export_refs_json = ?",
+                        (updated_artifact_export_refs_json, workspace_id, artifact_id, artifact_export_refs_json),
+                    )
+                if artifact_cursor.rowcount == 0:
+                    continue
+
+                version_row = conn.execute(
+                    "SELECT export_refs_json FROM workspace_artifact_versions "
+                    "WHERE workspace_id = ? AND artifact_id = ? AND artifact_version_id = ?",
+                    (workspace_id, artifact_id, artifact_version_id),
+                ).fetchone()
+                if version_row is None:
+                    raise ConflictError(  # noqa: TRY003
+                        f"Workspace artifact version '{artifact_version_id}' missing for artifact '{artifact_id}'.",
+                        entity="workspace_artifact_versions",
+                        entity_id=artifact_version_id,
+                    )
+
+                version_export_refs = self._load_workspace_artifact_json(
+                    version_row["export_refs_json"],
+                    [],
+                    field_name="workspace_artifact_versions.export_refs_json",
+                )
+                if not isinstance(version_export_refs, list):
+                    raise InputError("Workspace artifact version export_refs must be a list.")  # noqa: TRY003
+                version_export_refs = list(version_export_refs)
+                version_export_refs.append(dict(export_ref))
+                version_export_refs_json = self._dump_workspace_artifact_json(version_export_refs, [])
+                version_cursor = conn.execute(
+                    "UPDATE workspace_artifact_versions SET export_refs_json = ? "
+                    "WHERE workspace_id = ? AND artifact_id = ? AND artifact_version_id = ?",
+                    (version_export_refs_json, workspace_id, artifact_id, artifact_version_id),
+                )
+                if version_cursor.rowcount == 0:
+                    raise ConflictError(  # noqa: TRY003
+                        f"Artifact version '{artifact_version_id}' export ref update failed.",
+                        entity="workspace_artifact_versions",
+                        entity_id=artifact_version_id,
+                    )
+                return self._get_workspace_artifact(workspace_id, artifact_id)  # type: ignore[return-value]
+
+        raise ConflictError(  # noqa: TRY003
+            f"Artifact '{artifact_id}' export ref update conflicted with another writer.",
+            entity="workspace_artifacts",
+            entity_id=artifact_id,
+        )
 
     def update_workspace_artifact(
         self,

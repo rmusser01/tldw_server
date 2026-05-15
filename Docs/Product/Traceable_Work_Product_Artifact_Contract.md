@@ -134,6 +134,28 @@ Exports are representations of a work product, not the work product itself.
 | Chatbooks | Include artifact manifest, source references, version chain, and export references without assuming all large binaries are bundled. |
 | Prompt/output surfaces | Link back to source artifact and version rather than copying detached generated text where possible. |
 
+### Implemented Markdown/HTML/JSON Export Contract
+
+Issue #1705 implements the first accepted-version export contract at
+`POST /api/v1/workspaces/{workspace_id}/artifacts/{artifact_id}/exports`.
+The request accepts `format: "md" | "html" | "json"` and an optional
+`artifact_version_id`; omitting the version exports the current artifact
+version. Only `accepted` artifact versions are exportable. Draft, reviewing,
+needs-revision, rejected, assigned, archived, or otherwise non-accepted states
+fail closed with `workspace_artifact_not_accepted`.
+
+Each export response includes the rendered content, UTF-8 byte count, content
+type, generated timestamp, export reference, and metadata preserving workspace
+ID, artifact ID, artifact version ID, review state, source lineage, producer
+metadata, review metadata, version metadata, and redaction posture. The backend
+records the export reference back onto the workspace artifact without creating
+a new content version and without replacing existing export references.
+
+This implementation covers portable text representations. File-artifact
+materialization, Chatbook packaging, document/slides exports, table-specific
+sidecar manifests, retention controls, and support-safe redaction views remain
+separate follow-up slices.
+
 ## Existing Surface Mapping
 
 | Existing surface | Reuse path |
@@ -189,6 +211,17 @@ version record and carry the previous version ID forward.
 This does not complete the full product contract. Workspace artifact detail UI,
 ACP deliverable promotion flows, accepted-version export adapters, and broader
 redaction/retention verification remain separate follow-up slices.
+
+### Current Accepted Export Foundation
+
+Issue #1705 implements accepted workspace artifact version exports for Markdown,
+HTML, and JSON. The export endpoint renders from the exact accepted artifact
+version, embeds or exposes the traceability metadata required by this contract,
+and appends a version-specific export reference to the workspace artifact.
+
+This does not complete all export channels. Rich document/slides/table exports,
+external file-artifact storage, Chatbook bundling, export retention policies,
+and UI-triggered download workflows remain separate follow-up slices.
 
 ## Release Caveats
 

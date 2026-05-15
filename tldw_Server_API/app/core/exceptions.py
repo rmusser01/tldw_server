@@ -180,6 +180,10 @@ class StorageUnavailableError(StoragePathValidationError):
     """Raised when storage base directories cannot be resolved."""
 
 
+class WorkspaceArtifactExportStateError(ValueError):
+    """Raised when a workspace artifact version is not eligible for export."""
+
+
 class InvalidStorageUserIdError(StoragePathValidationError):
     """Raised when a storage path resolution is attempted with an invalid user id."""
 

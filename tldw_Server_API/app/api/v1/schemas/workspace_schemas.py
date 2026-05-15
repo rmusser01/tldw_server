@@ -108,6 +108,8 @@ WorkspaceArtifactReviewState = Literal[
     "archived",
 ]
 
+WorkspaceArtifactExportFormat = Literal["md", "html", "json"]
+
 
 class WorkspaceArtifactRedaction(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -199,6 +201,28 @@ class WorkspaceArtifactResponse(BaseModel):
     created_at: str
     completed_at: str | None = None
     version: int
+
+
+class WorkspaceArtifactExportRequest(BaseModel):
+    format: WorkspaceArtifactExportFormat
+    artifact_version_id: str | None = Field(
+        default=None,
+        description="Optional artifact version id to export. Defaults to the current artifact version.",
+    )
+
+
+class WorkspaceArtifactExportResponse(BaseModel):
+    workspace_id: str
+    artifact_id: str
+    artifact_version_id: str
+    review_state: WorkspaceArtifactReviewState
+    format: WorkspaceArtifactExportFormat
+    content_type: str
+    content: str
+    bytes: int
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    export_ref: dict[str, Any] = Field(default_factory=dict)
+    generated_at: str
 
 
 # --- Note schemas ---

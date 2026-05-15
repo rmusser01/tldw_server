@@ -1,4 +1,5 @@
 """Tests for workspace CRUD endpoints and scoped chat session isolation."""
+import base64
 import json
 from types import SimpleNamespace
 
@@ -13,8 +14,8 @@ from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
-    CharactersRAGDBError,
     CharactersRAGDB,
+    CharactersRAGDBError,
     ConflictError,
     InputError,
 )
@@ -107,11 +108,11 @@ class TestWorkspaceLifecycle:
 
 @pytest.mark.integration
 def test_workspace_api_accepts_and_returns_study_materials_policy(workspace_fastapi_app, db):
-    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User
     from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
         WORKSPACES_READ_RATE_LIMIT,
         WORKSPACES_WRITE_RATE_LIMIT,
     )
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
     async def _allow_rate_limit() -> None:
         return None
@@ -581,6 +582,232 @@ def test_workspace_artifact_redaction_schema_requires_typed_posture():
     redaction_schema = schema["$defs"][redaction_ref.rsplit("/", 1)[-1]]
     assert redaction_schema["properties"]["support_safe"]["type"] == "boolean"
     assert redaction_schema["properties"]["redacted"]["type"] == "boolean"
+
+
+@pytest.mark.integration
+def test_workspace_artifact_export_accepted_version_preserves_identity_and_refs(workspace_fastapi_app, db):
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    async def _user() -> User:
+        return User(
+            id=1,
+            username="testuser",
+            email="test@example.com",
+            is_active=True,
+            roles=["admin"],
+            is_admin=True,
+        )
+
+    def _db() -> CharactersRAGDB:
+        return db
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = _user
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = _db
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        db.upsert_workspace("ws-export-api", "Workspace Exports")
+        db.add_workspace_artifact(
+            "ws-export-api",
+            {
+                "id": "brief-1",
+                "artifact_type": "workspace_brief",
+                "title": "ACP Research Brief --> Review",
+                "status": "completed",
+                "content": "# Brief\nGrounded <answer>.",
+                "content_type": "text/markdown",
+                "review_state": "accepted",
+                "owner_scope": "workspace",
+                "owner_id": "ws-export-api",
+                "producer_metadata": {
+                    "producer_type": "acp",
+                    "producer_id": "task-42",
+                    "marker": "json --> comment boundary",
+                    "run_id": "run-7",
+                    "session_id": "session-abc",
+                },
+                "source_lineage": {
+                    "sources": [
+                        {"source_id": "src-1", "source_type": "media", "label": "Transcript"}
+                    ]
+                },
+                "review_metadata": {"decision": "accepted"},
+                "version_metadata": {"revision_reason": "initial"},
+                "export_refs": [{"format": "legacy", "artifact_version_id": "brief-1:v1"}],
+                "redaction": {"support_safe": True, "redacted": False},
+            },
+        )
+
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            by_format = {}
+            for export_format in ("md", "html", "json"):
+                request_json = {"format": export_format}
+                if export_format == "json":
+                    request_json["artifact_version_id"] = "brief-1:v1"
+                response = client.post(
+                    "/api/v1/workspaces/ws-export-api/artifacts/brief-1/exports",
+                    json=request_json,
+                )
+                assert response.status_code == 200, response.text
+                payload = response.json()
+                by_format[export_format] = payload
+                assert payload["workspace_id"] == "ws-export-api"
+                assert payload["artifact_id"] == "brief-1"
+                assert payload["artifact_version_id"] == "brief-1:v1"
+                assert payload["review_state"] == "accepted"
+                assert payload["format"] == export_format
+                assert payload["bytes"] == len(payload["content"].encode("utf-8"))
+                assert payload["metadata"]["source_lineage"]["sources"][0]["source_id"] == "src-1"
+                assert payload["metadata"]["producer_metadata"]["run_id"] == "run-7"
+                assert payload["export_ref"]["artifact_version_id"] == "brief-1:v1"
+
+            md_content = by_format["md"]["content"]
+            assert "artifact_id: brief-1" in md_content
+            assert "tldw-artifact-metadata-base64:" in md_content
+            marker = md_content.split("<!-- tldw-artifact-metadata-base64: ", 1)[1].split(" -->", 1)[0]
+            decoded_metadata = json.loads(base64.b64decode(marker).decode("utf-8"))
+            assert decoded_metadata["artifact"]["title"] == "ACP Research Brief --> Review"
+            assert decoded_metadata["producer_metadata"]["marker"] == "json --> comment boundary"
+            assert 'data-artifact-id="brief-1"' in by_format["html"]["content"]
+            assert "<h1>Brief</h1>" in by_format["html"]["content"]
+            assert "&lt;answer&gt;" in by_format["html"]["content"]
+            exported_json = json.loads(by_format["json"]["content"])
+            assert exported_json["artifact"]["id"] == "brief-1"
+            assert exported_json["metadata"]["source_lineage"]["sources"][0]["source_id"] == "src-1"
+
+            fetch_response = client.get("/api/v1/workspaces/ws-export-api/artifacts")
+            assert fetch_response.status_code == 200, fetch_response.text
+            exported_artifact = fetch_response.json()[0]
+            export_refs = exported_artifact["export_refs"]
+            assert export_refs[0]["format"] == "legacy"
+            assert [ref["format"] for ref in export_refs[-3:]] == ["md", "html", "json"]
+            assert {ref["artifact_version_id"] for ref in export_refs[-3:]} == {"brief-1:v1"}
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+
+@pytest.mark.integration
+def test_workspace_artifact_export_missing_version_snapshot_fails_loudly(workspace_fastapi_app, db):
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    async def _user() -> User:
+        return User(
+            id=1,
+            username="testuser",
+            email="test@example.com",
+            is_active=True,
+            roles=["admin"],
+            is_admin=True,
+        )
+
+    def _db() -> CharactersRAGDB:
+        return db
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = _user
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = _db
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        db.upsert_workspace("ws-export-api", "Workspace Exports")
+        db.add_workspace_artifact(
+            "ws-export-api",
+            {
+                "id": "brief-1",
+                "artifact_type": "workspace_brief",
+                "title": "ACP Research Brief",
+                "content": "# Brief\nGrounded answer.",
+                "review_state": "accepted",
+                "source_lineage": {"sources": [{"source_id": "src-1"}]},
+            },
+        )
+        with db.transaction() as conn:
+            conn.execute(
+                "DELETE FROM workspace_artifact_versions "
+                "WHERE workspace_id = ? AND artifact_id = ? AND artifact_version_id = ?",
+                ("ws-export-api", "brief-1", "brief-1:v1"),
+            )
+
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.post(
+                "/api/v1/workspaces/ws-export-api/artifacts/brief-1/exports",
+                json={"format": "md"},
+            )
+            assert response.status_code == 409, response.text
+            assert "missing" in response.json()["detail"].lower()
+
+            fetch_response = client.get("/api/v1/workspaces/ws-export-api/artifacts")
+            assert fetch_response.status_code == 200, fetch_response.text
+            assert fetch_response.json()[0]["export_refs"] == []
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+
+@pytest.mark.integration
+def test_workspace_artifact_export_rejects_non_accepted_state(workspace_fastapi_app, db):
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    async def _user() -> User:
+        return User(
+            id=1,
+            username="testuser",
+            email="test@example.com",
+            is_active=True,
+            roles=["admin"],
+            is_admin=True,
+        )
+
+    def _db() -> CharactersRAGDB:
+        return db
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = _user
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = _db
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        db.upsert_workspace("ws-export-api", "Workspace Exports")
+        db.add_workspace_artifact(
+            "ws-export-api",
+            {
+                "id": "brief-1",
+                "artifact_type": "workspace_brief",
+                "title": "ACP Research Brief",
+                "content": "# Draft\nNeeds more evidence.",
+                "review_state": "needs_revision",
+                "source_lineage": {"sources": [{"source_id": "src-1"}]},
+            },
+        )
+
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.post(
+                "/api/v1/workspaces/ws-export-api/artifacts/brief-1/exports",
+                json={"format": "md"},
+            )
+            assert response.status_code == 409, response.text
+            assert response.json()["detail"] == "workspace_artifact_not_accepted"
+
+            fetch_response = client.get("/api/v1/workspaces/ws-export-api/artifacts")
+            assert fetch_response.status_code == 200, fetch_response.text
+            assert fetch_response.json()[0]["export_refs"] == []
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
 
 
 @pytest.mark.integration
