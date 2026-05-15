@@ -290,6 +290,29 @@ export interface RunDetailResponse {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type ItemStatus = "ingested" | "filtered"
+export type ItemMutableStatus = ItemStatus | "ignored" | "reviewed"
+export type ScrapedItemSortMode =
+  | "created_desc"
+  | "created_asc"
+  | "published_desc"
+  | "published_asc"
+  | "unread_first"
+  | "source_asc"
+  | "alert_severity_desc"
+
+export interface ScrapedItemAlertSummary {
+  total: number
+  unread: number
+  read: number
+  dismissed: number
+  highest_severity?: WatchlistContentAlertSeverity | null
+  latest_alert_id?: number | null
+  latest_alert_status?: WatchlistContentAlertStatus | null
+  latest_alert_created_at?: string | null
+  latest_matched_text?: string | null
+  rule_ids: number[]
+  severities: WatchlistContentAlertSeverity[]
+}
 
 export interface ScrapedItem {
   id: number
@@ -308,6 +331,7 @@ export interface ScrapedItem {
   reviewed: boolean
   queued_for_briefing?: boolean
   created_at: string
+  alert_summary?: ScrapedItemAlertSummary | null
 }
 
 export interface ScrapedItemSmartCounts {
@@ -321,8 +345,100 @@ export interface ScrapedItemSmartCounts {
 
 export interface ScrapedItemUpdate {
   reviewed?: boolean
-  status?: ItemStatus
+  status?: ItemMutableStatus
   queued_for_briefing?: boolean
+}
+
+export interface ScrapedItemAlertFilterParams {
+  has_alert?: boolean
+  alert_status?: WatchlistContentAlertStatus
+  alert_severity?: WatchlistContentAlertSeverity
+  alert_rule_id?: number
+}
+
+export interface ScrapedItemBatchScope extends ScrapedItemAlertFilterParams {
+  run_id?: number
+  job_id?: number
+  source_id?: number
+  status?: string
+  reviewed?: boolean
+  queued_for_briefing?: boolean
+  q?: string
+  search?: string
+  since?: string
+  until?: string
+}
+
+export interface ScrapedItemBatchUpdateRequest {
+  watchlist_id: number
+  item_ids?: number[]
+  scope?: ScrapedItemBatchScope
+  reviewed?: boolean
+  status?: ItemMutableStatus
+  queued_for_briefing?: boolean
+  limit?: number
+}
+
+export interface ScrapedItemBatchUpdateResponse {
+  matched: number
+  changed: number
+  unchanged: number
+  failed: number
+  matched_ids: number[]
+  changed_ids: number[]
+  unchanged_ids: number[]
+  failed_ids: number[]
+  capped: boolean
+  exhausted: boolean
+  limit: number
+}
+
+export type WatchlistItemSavedViewSmartFilter =
+  | "all"
+  | "today"
+  | "today_unread"
+  | "todayUnread"
+  | "unread"
+  | "reviewed"
+  | "queued"
+
+export interface WatchlistItemSavedViewFilters extends ScrapedItemAlertFilterParams {
+  run_id?: number
+  job_id?: number
+  source_id?: number
+  status?: string
+  reviewed?: boolean
+  queued_for_briefing?: boolean
+  q?: string
+  search?: string
+  since?: string
+  until?: string
+  smart_filter?: WatchlistItemSavedViewSmartFilter
+}
+
+export interface WatchlistItemSavedViewCreate {
+  name: string
+  filters: WatchlistItemSavedViewFilters
+  sort: ScrapedItemSortMode
+  is_default?: boolean
+}
+
+export interface WatchlistItemSavedViewUpdate {
+  name?: string
+  filters?: WatchlistItemSavedViewFilters
+  sort?: ScrapedItemSortMode
+  is_default?: boolean
+}
+
+export interface WatchlistItemSavedView {
+  id: number
+  watchlist_id: number
+  name: string
+  filters: WatchlistItemSavedViewFilters
+  sort: ScrapedItemSortMode
+  is_default: boolean
+  created_at: string
+  updated_at: string
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

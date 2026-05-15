@@ -1,4 +1,10 @@
-import type { ScrapedItem, WatchlistSource } from "@/types/watchlists"
+import type {
+  ScrapedItem,
+  ScrapedItemSortMode,
+  WatchlistItemSavedViewCreate,
+  WatchlistItemSavedViewFilters,
+  WatchlistSource
+} from "@/types/watchlists"
 
 export const SOURCE_LOAD_PAGE_SIZE = 200
 export const SOURCE_LOAD_MAX_ITEMS = 1000
@@ -78,6 +84,13 @@ export const normalizeItemsSortMode = (value: unknown): ItemsSortMode => {
     return value
   }
   return DEFAULT_ITEMS_SORT_MODE
+}
+
+export const toServerItemSortMode = (value: unknown): ScrapedItemSortMode => {
+  const normalized = normalizeItemsSortMode(value)
+  if (normalized === "oldest") return "created_asc"
+  if (normalized === "unreadFirst") return "unread_first"
+  return "created_desc"
 }
 
 const uniquePresetsById = (
@@ -238,6 +251,36 @@ export const persistItemsViewPresets = (
     // Ignore storage write errors (private browsing, quota, etc.)
   }
 }
+
+export const buildServerItemViewCreatePayload = (
+  preset: PersistedItemsViewPreset
+): WatchlistItemSavedViewCreate => {
+  const filters: WatchlistItemSavedViewFilters = {}
+  if (preset.sourceId != null) {
+    filters.source_id = preset.sourceId
+  }
+  if (preset.smartFilter && preset.smartFilter !== "all") {
+    filters.smart_filter = preset.smartFilter as WatchlistItemSavedViewFilters["smart_filter"]
+  }
+  if (preset.statusFilter && preset.statusFilter !== "all") {
+    filters.status = preset.statusFilter
+  }
+  const query = preset.searchQuery.trim()
+  if (query) {
+    filters.q = query
+  }
+  return {
+    name: preset.name.trim(),
+    filters,
+    sort: toServerItemSortMode(preset.sortMode),
+    is_default: false
+  }
+}
+
+export const getMigratableItemsViewPresets = (
+  storage: Pick<Storage, "getItem"> | null | undefined
+): PersistedItemsViewPreset[] =>
+  loadPersistedItemsViewPresets(storage).filter((preset) => !isSystemItemsViewPresetId(preset.id))
 
 export const filterSourcesForReader = (
   sources: WatchlistSource[],
