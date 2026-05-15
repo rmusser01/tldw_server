@@ -171,6 +171,13 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
     SourceUpdateRequest,
     Tag,
     TagsListResponse,
+    WatchlistContentAlert,
+    WatchlistContentAlertList,
+    WatchlistContentAlertRule,
+    WatchlistContentAlertRuleCreate,
+    WatchlistContentAlertRuleList,
+    WatchlistContentAlertRuleUpdate,
+    WatchlistContentAlertUpdate,
     WatchlistContainer,
     WatchlistCreateRequest,
     WatchlistDeleteResponse,
@@ -503,6 +510,58 @@ def _watchlist_response_from_row(row: Any) -> WatchlistContainer:
         restore_expires_at=getattr(row, "restore_expires_at", None),
         created_at=row.created_at,
         updated_at=row.updated_at,
+    )
+
+
+def _json_object_from_text(raw: str | None) -> dict[str, Any] | None:
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        return None
+
+
+def _content_alert_rule_response_from_row(row: Any) -> WatchlistContentAlertRule:
+    return WatchlistContentAlertRule(
+        id=int(row.id),
+        watchlist_id=int(row.watchlist_id),
+        name=row.name,
+        enabled=bool(row.enabled),
+        rule_kind=row.rule_kind,
+        match_mode=row.match_mode,
+        pattern=row.pattern,
+        severity=row.severity,
+        classification=getattr(row, "classification", None),
+        descriptor=getattr(row, "descriptor", None),
+        entity_type=getattr(row, "entity_type", None),
+        source_constraints=_json_object_from_text(getattr(row, "source_constraints_json", None)),
+        metadata=_json_object_from_text(getattr(row, "metadata_json", None)),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _content_alert_response_from_row(row: Any) -> WatchlistContentAlert:
+    return WatchlistContentAlert(
+        id=int(row.id),
+        watchlist_id=int(row.watchlist_id),
+        rule_id=int(row.rule_id),
+        item_id=int(row.item_id),
+        run_id=int(row.run_id),
+        job_id=int(row.job_id),
+        source_id=int(row.source_id),
+        severity=row.severity,
+        status=row.status,
+        title=getattr(row, "title", None),
+        snippet=getattr(row, "snippet", None),
+        matched_text=getattr(row, "matched_text", None),
+        evidence=_json_object_from_text(getattr(row, "evidence_json", None)) or {},
+        dedupe_key=row.dedupe_key,
+        created_at=row.created_at,
+        read_at=getattr(row, "read_at", None),
+        dismissed_at=getattr(row, "dismissed_at", None),
     )
 
 
@@ -6199,6 +6258,217 @@ async def delete_template(
     except template_store.TemplateNotFoundError:
         raise HTTPException(status_code=404, detail="template_not_found") from None
     return {"deleted": True}
+
+
+@router.get(
+    "/{watchlist_id}/content-alert-rules",
+    response_model=WatchlistContentAlertRuleList,
+    summary="List content alert rules for a Watchlist",
+)
+async def list_content_alert_rules(
+    watchlist_id: int = Path(..., ge=1),
+    enabled: bool | None = Query(None),
+    page: int = Query(1, ge=1),
+    size: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(get_request_user),
+    db = Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        limit = size
+        offset = (page - 1) * limit
+        rows, total = db.list_content_alert_rules(
+            watchlist_id,
+            enabled=enabled,
+            limit=limit,
+            offset=offset,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="watchlist_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return WatchlistContentAlertRuleList(
+        items=[_content_alert_rule_response_from_row(row) for row in rows],
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(rows),
+        ),
+    )
+
+
+@router.post(
+    "/{watchlist_id}/content-alert-rules",
+    response_model=WatchlistContentAlertRule,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a content alert rule for a Watchlist",
+)
+async def create_content_alert_rule(
+    watchlist_id: int = Path(..., ge=1),
+    payload: WatchlistContentAlertRuleCreate = Body(...),
+    current_user: User = Depends(get_request_user),
+    db = Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        row = db.create_content_alert_rule(
+            watchlist_id=watchlist_id,
+            name=payload.name,
+            rule_kind=payload.rule_kind,
+            match_mode=payload.match_mode,
+            pattern=payload.pattern,
+            severity=payload.severity,
+            enabled=payload.enabled,
+            classification=payload.classification,
+            descriptor=payload.descriptor,
+            entity_type=payload.entity_type,
+            source_constraints=payload.source_constraints,
+            metadata=payload.metadata,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="watchlist_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _content_alert_rule_response_from_row(row)
+
+
+@router.patch(
+    "/{watchlist_id}/content-alert-rules/{rule_id}",
+    response_model=WatchlistContentAlertRule,
+    summary="Update a Watchlist content alert rule",
+)
+async def update_content_alert_rule(
+    watchlist_id: int = Path(..., ge=1),
+    rule_id: int = Path(..., ge=1),
+    payload: WatchlistContentAlertRuleUpdate = Body(...),
+    current_user: User = Depends(get_request_user),
+    db = Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        row = db.update_content_alert_rule(
+            rule_id,
+            watchlist_id=watchlist_id,
+            fields=payload.model_dump(exclude_unset=True),
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="content_alert_rule_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _content_alert_rule_response_from_row(row)
+
+
+@router.delete(
+    "/{watchlist_id}/content-alert-rules/{rule_id}",
+    summary="Delete a Watchlist content alert rule",
+)
+async def delete_content_alert_rule(
+    watchlist_id: int = Path(..., ge=1),
+    rule_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db = Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        db.get_watchlist(watchlist_id)
+        deleted = db.delete_content_alert_rule(rule_id, watchlist_id=watchlist_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="watchlist_not_found") from None
+    if not deleted:
+        raise HTTPException(status_code=404, detail="content_alert_rule_not_found")
+    return {"deleted": True}
+
+
+@router.get(
+    "/{watchlist_id}/alerts",
+    response_model=WatchlistContentAlertList,
+    summary="List content alerts for a Watchlist",
+)
+async def list_content_alerts(
+    watchlist_id: int = Path(..., ge=1),
+    status_filter: str | None = Query(None, alias="status"),
+    severity: str | None = Query(None),
+    rule_id: int | None = Query(None, ge=1),
+    source_id: int | None = Query(None, ge=1),
+    page: int = Query(1, ge=1),
+    size: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(get_request_user),
+    db = Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        limit = size
+        offset = (page - 1) * limit
+        rows, total = db.list_content_alerts(
+            watchlist_id,
+            status=status_filter,
+            severity=severity,
+            rule_id=rule_id,
+            source_id=source_id,
+            limit=limit,
+            offset=offset,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="watchlist_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return WatchlistContentAlertList(
+        items=[_content_alert_response_from_row(row) for row in rows],
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(rows),
+        ),
+    )
+
+
+@router.get(
+    "/{watchlist_id}/alerts/{alert_id}",
+    response_model=WatchlistContentAlert,
+    summary="Get a Watchlist content alert",
+)
+async def get_content_alert(
+    watchlist_id: int = Path(..., ge=1),
+    alert_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    db = Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        row = db.get_content_alert(alert_id, watchlist_id=watchlist_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="content_alert_not_found") from None
+    return _content_alert_response_from_row(row)
+
+
+@router.patch(
+    "/{watchlist_id}/alerts/{alert_id}",
+    response_model=WatchlistContentAlert,
+    summary="Update a Watchlist content alert review state",
+)
+async def update_content_alert(
+    watchlist_id: int = Path(..., ge=1),
+    alert_id: int = Path(..., ge=1),
+    payload: WatchlistContentAlertUpdate = Body(...),
+    current_user: User = Depends(get_request_user),
+    db = Depends(get_watchlists_db_for_user),
+):
+    _ = current_user
+    try:
+        row = db.update_content_alert(
+            alert_id,
+            watchlist_id=watchlist_id,
+            fields=payload.model_dump(exclude_unset=True),
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="content_alert_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _content_alert_response_from_row(row)
 
 
 @router.get("/{watchlist_id}", response_model=WatchlistContainer, summary="Get Watchlist")

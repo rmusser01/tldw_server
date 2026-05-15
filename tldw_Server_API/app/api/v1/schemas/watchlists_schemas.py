@@ -10,6 +10,10 @@ SourceType = Literal["rss", "site", "forum"]  # forums are feature-flagged for P
 WatchlistDomain = Literal["cti_osint", "news", "general"]
 WatchlistStatus = Literal["active", "paused", "archived"]
 WatchlistPriority = Literal["low", "medium", "high", "critical"]
+WatchlistContentAlertRuleKind = Literal["keyword", "regex", "descriptor", "classification", "entity", "ioc", "cve"]
+WatchlistContentAlertMatchMode = Literal["contains", "exact", "regex"]
+WatchlistContentAlertSeverity = Literal["info", "low", "medium", "high", "critical"]
+WatchlistContentAlertStatus = Literal["unread", "read", "dismissed"]
 
 
 def _default_offset_pagination_aliases(response):
@@ -94,6 +98,118 @@ class WatchlistContainer(BaseModel):
 
 class WatchlistsListResponse(BaseModel):
     items: list[WatchlistContainer]
+    total: int
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
+
+
+class WatchlistContentAlertRuleCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    rule_kind: WatchlistContentAlertRuleKind
+    match_mode: WatchlistContentAlertMatchMode = "contains"
+    pattern: str = Field(..., min_length=1, max_length=1000)
+    severity: WatchlistContentAlertSeverity = "medium"
+    enabled: bool = True
+    classification: str | None = Field(default=None, max_length=200)
+    descriptor: str | None = Field(default=None, max_length=200)
+    entity_type: str | None = Field(default=None, max_length=200)
+    source_constraints: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
+
+    @field_validator("name", "pattern")
+    @classmethod
+    def _strip_required_text(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("must not be blank")
+        return cleaned
+
+
+class WatchlistContentAlertRuleUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    enabled: bool | None = None
+    rule_kind: WatchlistContentAlertRuleKind | None = None
+    match_mode: WatchlistContentAlertMatchMode | None = None
+    pattern: str | None = Field(default=None, min_length=1, max_length=1000)
+    severity: WatchlistContentAlertSeverity | None = None
+    classification: str | None = Field(default=None, max_length=200)
+    descriptor: str | None = Field(default=None, max_length=200)
+    entity_type: str | None = Field(default=None, max_length=200)
+    source_constraints: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
+
+    @field_validator("name", "pattern")
+    @classmethod
+    def _strip_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("must not be blank")
+        return cleaned
+
+
+class WatchlistContentAlertRule(BaseModel):
+    id: int
+    watchlist_id: int
+    name: str
+    enabled: bool
+    rule_kind: WatchlistContentAlertRuleKind
+    match_mode: WatchlistContentAlertMatchMode
+    pattern: str
+    severity: WatchlistContentAlertSeverity
+    classification: str | None = None
+    descriptor: str | None = None
+    entity_type: str | None = None
+    source_constraints: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
+    created_at: str
+    updated_at: str
+
+
+class WatchlistContentAlertRuleList(BaseModel):
+    items: list[WatchlistContentAlertRule]
+    total: int
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
+
+
+class WatchlistContentAlertUpdate(BaseModel):
+    status: WatchlistContentAlertStatus
+
+
+class WatchlistContentAlert(BaseModel):
+    id: int
+    watchlist_id: int
+    rule_id: int
+    item_id: int
+    run_id: int
+    job_id: int
+    source_id: int
+    severity: WatchlistContentAlertSeverity
+    status: WatchlistContentAlertStatus
+    title: str | None = None
+    snippet: str | None = None
+    matched_text: str | None = None
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    dedupe_key: str
+    created_at: str
+    read_at: str | None = None
+    dismissed_at: str | None = None
+
+
+class WatchlistContentAlertList(BaseModel):
+    items: list[WatchlistContentAlert]
     total: int
     pagination: OffsetPaginationMeta
     has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")

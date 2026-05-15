@@ -90,6 +90,15 @@ Outputs:
 - `GET /outputs/{output_id}`
 - `GET /outputs/{output_id}/download`
 
+Content alerts:
+- `GET /{watchlist_id}/content-alert-rules`
+- `POST /{watchlist_id}/content-alert-rules`
+- `PATCH /{watchlist_id}/content-alert-rules/{rule_id}`
+- `DELETE /{watchlist_id}/content-alert-rules/{rule_id}`
+- `GET /{watchlist_id}/alerts`
+- `GET /{watchlist_id}/alerts/{alert_id}`
+- `PATCH /{watchlist_id}/alerts/{alert_id}` (review state)
+
 Templates:
 - `GET /templates`
 - `GET /templates/{template_name}`
@@ -185,6 +194,34 @@ Create a job:
   }
 }
 ```
+
+Create a content alert rule:
+```json
+{
+  "name": "Active exploitation",
+  "rule_kind": "cve",
+  "match_mode": "contains",
+  "pattern": "CVE-2026-1234",
+  "severity": "critical",
+  "source_constraints": {
+    "source_tags": ["advisory"]
+  },
+  "metadata": {
+    "descriptor": "active exploitation"
+  }
+}
+```
+
+Supported rule kinds are `keyword`, `regex`, `descriptor`, `classification`, `entity`, `ioc`, and `cve`. The first implementation is deterministic text matching; richer extractors can later populate descriptors, classifications, entities, and IOCs before matching. `source_constraints` is structured JSON and may include `source_ids`, `source_types`, `source_tags`, or `url_contains`.
+
+Review a content alert:
+```json
+{
+  "status": "read"
+}
+```
+
+Alert review states are `unread`, `read`, and `dismissed`.
 
 Trigger a run:
 ```json
@@ -357,7 +394,9 @@ Sharing policy is controlled by `WATCHLIST_SHARING_MODE`:
 
 ## Alerts boundary
 
-Stage 1 Watchlists expose the container and scoping contract only. Content-match alerts for user descriptors, classifications, entities, keywords, and source constraints are future work. Existing run-stat alert rules should be treated as pipeline health issues, not user-facing content-match alerts.
+Watchlist content alerts are user-facing notifications created when newly collected Watchlist items match user-defined descriptors, classifications, entities, keywords, CVEs, IOCs, or source constraints. Alert records preserve matched evidence, item/run/job/source IDs, snippets, and review state.
+
+Existing run-stat alert rules remain pipeline health behavior. Conditions such as no items, high error rate, item thresholds, or run failure should be shown as health issues, not unqualified content alerts. Topic Monitoring remains an internal dependency/reference for matching and notification patterns; product Watchlists do not store user-facing rules in the separate `monitoring_watchlists` model.
 
 ## Ingestion and persistence
 
