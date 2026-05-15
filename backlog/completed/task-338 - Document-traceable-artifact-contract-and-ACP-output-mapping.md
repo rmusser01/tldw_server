@@ -62,7 +62,12 @@ Post-merge closeout: PR #1687 merged into dev at 2026-05-14T19:39:31Z with merge
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed after PR #1687 merged. Added the traceable work-product artifact contract, mapped ACP run outputs and promotable deliverables into it, addressed review feedback on producer/task identity, workspace-history linkage, CSV/XLSX lineage, artifact-detail visibility, and needs_revision state spelling, closed issues #1525 and #1538 with merge evidence, and left follow-up implementation slices for storage/API, UI detail, export adapters, ACP promotion, and verification.
+Completed after PR #1687 merged.
+- Added the traceable work-product artifact contract.
+- Mapped ACP run outputs and promotable deliverables into the contract.
+- Addressed review feedback on producer/task identity, workspace-history linkage, CSV/XLSX lineage, artifact-detail visibility, and needs_revision state spelling.
+- Closed issues #1525 and #1538 with merge evidence.
+- Identified follow-up implementation slices for storage/API, UI detail, export adapters, ACP promotion, and verification.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
