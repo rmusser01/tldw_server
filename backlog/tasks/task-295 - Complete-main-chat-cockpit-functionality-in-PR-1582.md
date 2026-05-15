@@ -4,7 +4,7 @@ title: Complete main /chat cockpit functionality in PR 1582
 status: Done
 assignee: []
 created_date: '2026-05-12 05:10'
-updated_date: '2026-05-15 02:15'
+updated_date: '2026-05-15 02:20'
 labels:
   - webui
   - chat
@@ -163,7 +163,7 @@ Task 9 plan/status synchronization: updated the implementation plan Task 9 check
 
 Corrected P2 visual proof after the earlier screenshot was invalid. Root cause was the proof backend running from the worktree without Config_Files/.env so OpenAI credentials were not loaded. Re-ran with an env-backed real backend using the path-valued assignment TLDW_ENV_FILE=tldw_Server_API/Config_Files/.env from repo root; "real" referred to the non-mocked /chat WebUI proof, not an env var value. The run used no mocked payloads, no route interception, and no Computer Use. Screenshot path /private/tmp/chat-cockpit-openai-working-20260514.png. Observed POST /api/v1/chat/completions status 200 with api_provider openai model gpt-4o-mini and rendered assistant text cockpit proof ok. Temporary proof processes were shut down afterward.
 
-Live PR state refresh after corrected proof: gh pr view 1582 reports state MERGED and isDraft false for codex/chat-degraded-health into dev. gh pr checks shows required frontend backend e2e security build lint gates passing. Broad Full Suite matrix jobs remain failed or cancelled due the previously noted one-hour broad-suite behavior while required aggregate gates are green.
+Live PR state refresh after corrected proof: gh pr view 1582 reports state MERGED and isDraft false for codex/chat-degraded-health into dev. gh pr checks shows required frontend backend e2e security build lint gates passing. Broad Full Suite matrix jobs remain failed or cancelled due to the previously noted one-hour broad-suite behavior while required aggregate gates are green.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
