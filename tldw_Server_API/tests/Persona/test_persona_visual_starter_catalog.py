@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from io import BytesIO
 from pathlib import Path
 
@@ -30,7 +31,7 @@ def _png_bytes(width: int = 2, height: int = 2) -> bytes:
 
 
 @pytest.fixture()
-def db_instance(tmp_path: Path):
+def db_instance(tmp_path: Path) -> Iterator[CharactersRAGDB]:
     db = CharactersRAGDB(tmp_path / "persona_visual_starter_catalog.sqlite", "persona-visual-starter-test")
     yield db
     db.close_connection()
@@ -66,9 +67,7 @@ def test_starter_catalog_lists_bundled_sprite_pack(
     assert starter["manifest_version"] == 1
     assert starter["asset_count"] >= 1
     assert starter["total_bytes"] > 0
-    assert {"idle", "listening", "thinking", "speaking", "error"}.issubset(
-        set(starter["states_offered"])
-    )
+    assert {"idle", "listening", "thinking", "speaking", "error"}.issubset(set(starter["states_offered"]))
 
 
 def test_copy_starter_pack_to_persona_creates_inactive_user_owned_draft(
@@ -102,10 +101,13 @@ def test_copy_starter_pack_to_persona_creates_inactive_user_owned_draft(
     assert copied["title"] == "Research Buddy Starter"
     assert copied["provenance"] == "imported"
     assert copied["active_at"] is None
-    assert db_instance.get_active_persona_visual_pack(
-        persona_id=persona_id,
-        user_id=user_id,
-    )["id"] == active_pack["id"]
+    assert (
+        db_instance.get_active_persona_visual_pack(
+            persona_id=persona_id,
+            user_id=user_id,
+        )["id"]
+        == active_pack["id"]
+    )
 
     copied_assets = db_instance.list_persona_visual_assets(
         pack_id=copied["id"],
@@ -163,4 +165,118 @@ def test_copy_starter_pack_rejects_malformed_fixture_manifest(
         )
 
     assert exc_info.value.code == "invalid_starter_manifest"
+    assert db_instance.list_persona_visual_packs(persona_id=persona_id, user_id=user_id) == []
+
+
+def test_list_starter_packs_rejects_invalid_fixture_renderer_type(
+    db_instance: CharactersRAGDB,
+) -> None:
+    malformed = PersonaVisualStarterPack(
+        id="bad-renderer",
+        title="Bad renderer",
+        description="Invalid test fixture",
+        renderer_type="unknown_renderer",
+        manifest={
+            "manifest_version": 1,
+            "renderer_type": "unknown_renderer",
+            "states": {"idle": {"animation_id": "idle"}},
+            "animations": {
+                "idle": {
+                    "frames": [{"asset_id": "starter_idle", "duration_ms": 100}],
+                    "frame_rate": 1,
+                }
+            },
+        },
+        assets=(
+            PersonaVisualStarterAsset(
+                asset_key="starter_idle",
+                filename="idle.png",
+                mime_type="image/png",
+                content=_png_bytes(),
+                asset_role="frame",
+            ),
+        ),
+    )
+    service = PersonaVisualStarterCatalogService(db_instance, starter_packs=(malformed,))
+
+    with pytest.raises(PersonaVisualStarterCatalogError) as exc_info:
+        service.list_starter_packs()
+
+    assert exc_info.value.code == "invalid_starter_fixture"
+
+
+def test_get_starter_pack_rejects_invalid_fixture_asset_role(
+    db_instance: CharactersRAGDB,
+) -> None:
+    malformed = PersonaVisualStarterPack(
+        id="bad-asset-role",
+        title="Bad asset role",
+        description="Invalid test fixture",
+        renderer_type="sprite_frames",
+        manifest={
+            "manifest_version": 1,
+            "renderer_type": "sprite_frames",
+            "states": {"idle": {"animation_id": "idle"}},
+            "animations": {
+                "idle": {
+                    "frames": [{"asset_id": "starter_idle", "duration_ms": 100}],
+                    "frame_rate": 1,
+                }
+            },
+        },
+        assets=(
+            PersonaVisualStarterAsset(
+                asset_key="starter_idle",
+                filename="idle.png",
+                mime_type="image/png",
+                content=_png_bytes(),
+                asset_role="unsupported_role",
+            ),
+        ),
+    )
+    service = PersonaVisualStarterCatalogService(db_instance, starter_packs=(malformed,))
+
+    with pytest.raises(PersonaVisualStarterCatalogError) as exc_info:
+        service.get_starter_pack("bad-asset-role")
+
+    assert exc_info.value.code == "invalid_starter_fixture"
+
+
+def test_copy_starter_pack_cleans_up_when_manifest_update_returns_none(
+    db_instance: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = "user-1"
+    persona_id = db_instance.create_persona_profile({"user_id": user_id, "name": "Target"})
+    service = PersonaVisualStarterCatalogService(db_instance)
+    monkeypatch.setattr(db_instance, "update_persona_visual_pack_manifest", lambda **_: None)
+
+    with pytest.raises(PersonaVisualStarterCatalogError) as exc_info:
+        service.copy_starter_pack_to_persona(
+            starter_pack_id=DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+
+    assert exc_info.value.code == "starter_copy_failed"
+    assert db_instance.list_persona_visual_packs(persona_id=persona_id, user_id=user_id) == []
+
+
+def test_copy_starter_pack_cleans_up_when_status_update_returns_none(
+    db_instance: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = "user-1"
+    persona_id = db_instance.create_persona_profile({"user_id": user_id, "name": "Target"})
+    service = PersonaVisualStarterCatalogService(db_instance)
+    monkeypatch.setattr(db_instance, "update_persona_visual_pack_status", lambda **_: None)
+
+    with pytest.raises(PersonaVisualStarterCatalogError) as exc_info:
+        service.copy_starter_pack_to_persona(
+            starter_pack_id=DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+
+    assert exc_info.value.code == "starter_copy_failed"
     assert db_instance.list_persona_visual_packs(persona_id=persona_id, user_id=user_id) == []

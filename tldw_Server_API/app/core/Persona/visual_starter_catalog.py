@@ -19,6 +19,9 @@ from tldw_Server_API.app.core.Persona.visual_manifest_assets import (
     collect_visual_manifest_asset_ids,
     remap_visual_manifest_assets,
 )
+from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
+    get_persona_visual_renderer_capability,
+)
 from tldw_Server_API.app.core.Persona.visual_service import (
     PersonaVisualService,
     PersonaVisualServiceError,
@@ -34,6 +37,17 @@ from tldw_Server_API.app.core.Persona.visuals import (
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+
+_ALLOWED_STARTER_RESPONSE_ASSET_ROLES = frozenset(
+    {
+        "frame",
+        "still_pose",
+        "sprite_sheet",
+        "preview",
+        "generated_candidate",
+    }
+)
 
 
 class PersonaVisualStarterCatalogError(Exception):
@@ -61,11 +75,15 @@ class PersonaVisualStarterCatalogService:
 
     def list_starter_packs(self) -> list[dict[str, Any]]:
         """Return safe summaries for all bundled starter packs."""
-        return [self._starter_summary(starter) for starter in self._starter_packs.values()]
+        starter_packs = tuple(self._starter_packs.values())
+        for starter in starter_packs:
+            self._validate_starter_fixture(starter)
+        return [self._starter_summary(starter) for starter in starter_packs]
 
     def get_starter_pack(self, starter_pack_id: str) -> dict[str, Any]:
         """Return one starter pack summary with a manifest preview."""
         starter = self._get_starter(starter_pack_id)
+        self._validate_starter_fixture(starter)
         detail = self._starter_summary(starter)
         detail["manifest"] = deepcopy(starter.manifest)
         detail["assets"] = [
@@ -157,7 +175,7 @@ class PersonaVisualStarterCatalogService:
                 asset_id_map[starter_asset.asset_key] = str(copied["id"])
                 copied_assets.append(copied)
 
-            remapped_manifest = remap_visual_manifest_assets(starter.manifest, asset_id_map)
+            remapped_manifest = remap_visual_manifest_assets(deepcopy(starter.manifest), asset_id_map)
             asset_ids = {str(asset["id"]) for asset in copied_assets}
             asset_dimensions = {
                 str(asset["id"]): (int(asset["width"]), int(asset["height"]))
@@ -185,13 +203,31 @@ class PersonaVisualStarterCatalogService:
                 manifest=validation.manifest,
                 expected_version=int(target_pack["version"]),
             )
+            if not updated_pack:
+                raise PersonaVisualStarterCatalogError(
+                    "starter_copy_failed",
+                    "Failed to persist remapped starter manifest.",
+                    details={
+                        "starter_pack_id": starter.id,
+                        "target_pack_id": str(target_pack["id"]),
+                    },
+                )
             finalized = self._db.update_persona_visual_pack_status(
                 pack_id=str(target_pack["id"]),
                 persona_id=persona_id_value,
                 user_id=user_id_value,
                 status="draft",
-                expected_version=int(updated_pack["version"]) if updated_pack else None,
+                expected_version=int(updated_pack["version"]),
             )
+            if not finalized:
+                raise PersonaVisualStarterCatalogError(
+                    "starter_copy_failed",
+                    "Failed to transition copied starter pack to draft.",
+                    details={
+                        "starter_pack_id": starter.id,
+                        "target_pack_id": str(target_pack["id"]),
+                    },
+                )
         except Exception:
             self._cleanup_partial_pack(
                 target_pack_id=str(target_pack["id"]),
@@ -260,6 +296,32 @@ class PersonaVisualStarterCatalogService:
 
     @staticmethod
     def _validate_starter_fixture(starter: PersonaVisualStarterPack) -> None:
+        renderer_type = str(starter.renderer_type or "").strip()
+        capability = get_persona_visual_renderer_capability(renderer_type)
+        if capability is None or not capability.can_activate:
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter renderer_type is not supported for starter packs.",
+                details={"starter_pack_id": starter.id, "renderer_type": renderer_type},
+            )
+        if not isinstance(starter.manifest, dict):
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter manifest must be an object.",
+                details={"starter_pack_id": starter.id},
+            )
+        manifest_renderer_type = str(starter.manifest.get("renderer_type") or "").strip()
+        if manifest_renderer_type != renderer_type:
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter renderer_type must match its manifest.",
+                details={
+                    "starter_pack_id": starter.id,
+                    "renderer_type": renderer_type,
+                    "manifest_renderer_type": manifest_renderer_type,
+                },
+            )
+
         asset_keys: set[str] = set()
         for asset in starter.assets:
             key = str(asset.asset_key or "").strip()
@@ -274,6 +336,20 @@ class PersonaVisualStarterCatalogService:
                     "invalid_starter_asset",
                     "Bundled starter asset keys must be unique.",
                     details={"starter_pack_id": starter.id, "asset_key": key},
+                )
+            asset_role = str(asset.asset_role or "").strip()
+            if (
+                asset_role not in capability.supported_asset_roles
+                or asset_role not in _ALLOWED_STARTER_RESPONSE_ASSET_ROLES
+            ):
+                raise PersonaVisualStarterCatalogError(
+                    "invalid_starter_fixture",
+                    "Bundled starter asset_role is not supported for starter-pack responses.",
+                    details={
+                        "starter_pack_id": starter.id,
+                        "asset_key": key,
+                        "asset_role": asset_role,
+                    },
                 )
             if not asset.content:
                 raise PersonaVisualStarterCatalogError(
