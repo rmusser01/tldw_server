@@ -1303,6 +1303,61 @@ def test_launchd_drill_cli_json_captures_launchd_subprocess_output(
     CASE.assertEqual(subprocess_kwargs[0]["stderr"], helperctl.subprocess.PIPE)
 
 
+def test_launchd_drill_cli_json_captures_bundle_smoke_subprocess_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    helperctl = load_helperctl()
+    helper, socket_path, log_dir, plist_path = _make_launchd_drill_inputs(tmp_path)
+    bundle = tmp_path / "bundle"
+    subprocess_calls: list[tuple[list[str], dict[str, Any]]] = []
+    status_calls = 0
+
+    def fake_subprocess_run(argv: list[str], **kwargs: Any) -> CompletedProcess[str]:
+        nonlocal status_calls
+        subprocess_calls.append((argv, kwargs))
+        return_code = 0
+        if argv[:2] == ["launchctl", "print"]:
+            status_calls += 1
+            return_code = 3 if status_calls == 1 else 0
+        return CompletedProcess(argv, return_code, stdout="child stdout", stderr="child stderr")
+
+    def fake_wait_for_ping(socket: Path, **kwargs: Any) -> helperctl.PingState:
+        return helperctl.PingState(helperctl.CheckResult(ok=True))
+
+    monkeypatch.setattr(helperctl.subprocess, "run", fake_subprocess_run)
+    monkeypatch.setattr(helperctl, "wait_for_ping", fake_wait_for_ping)
+
+    code = helperctl.main(
+        [
+            "launchd-drill",
+            "--json",
+            "--bundle",
+            str(bundle),
+            "--helper",
+            str(helper),
+            "--socket",
+            str(socket_path),
+            "--log-dir",
+            str(log_dir),
+            "--plist-output",
+            str(plist_path),
+            "--label",
+            "org.tldw.test",
+            "--write-plist",
+            "--create-dirs",
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    CASE.assertEqual(code, 0)
+    CASE.assertIn("vz_linux_smoke", [step["name"] for step in output])
+    smoke_call = next(call for call in subprocess_calls if "pytest" in call[0])
+    CASE.assertEqual(smoke_call[1]["stdout"], helperctl.subprocess.PIPE)
+    CASE.assertEqual(smoke_call[1]["stderr"], helperctl.subprocess.PIPE)
+
+
 def test_launchd_drill_cli_bundle_with_skip_smoke_passes_no_bundle(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -553,6 +553,11 @@ def run_vz_linux_host_smoke(
     dry_run: bool = False,
     command_runner: Callable[..., int] | None = None,
 ) -> CheckResult:
+    """Run host-gated `vz_linux` smoke against an already-managed helper.
+
+    The smoke uses the existing pytest contract, points it at the provided
+    helper socket, and reports nonzero exits as `vz_linux_smoke_failed`.
+    """
     runner = command_runner or run_command
     python_bin = python_path if python_path is not None else Path(sys.executable)
     env = os.environ.copy()
@@ -801,6 +806,7 @@ def run_launchd_drill(
     launchd_runner: Callable[..., int] | None = None,
     bundle_path: Path | None = None,
     python_path: Path | None = None,
+    smoke_command_runner: Callable[..., int] | None = None,
     smoke_runner: Callable[[], CheckResult] | None = None,
 ) -> list[tuple[str, CheckResult]]:
     """Run an isolated launchd helper lifecycle validation drill."""
@@ -875,12 +881,15 @@ def run_launchd_drill(
         if dry_run:
             results.append(("helper_status", CheckResult(ok=True, reason="dry_run")))
             if smoke_runner is None and bundle_path is not None:
-                smoke_result = run_vz_linux_host_smoke(
-                    bundle_path=bundle_path,
-                    socket_path=socket_path,
-                    python_path=python_path,
-                    dry_run=True,
-                )
+                smoke_kwargs = {
+                    "bundle_path": bundle_path,
+                    "socket_path": socket_path,
+                    "python_path": python_path,
+                    "dry_run": True,
+                }
+                if smoke_command_runner is not None:
+                    smoke_kwargs["command_runner"] = smoke_command_runner
+                smoke_result = run_vz_linux_host_smoke(**smoke_kwargs)
                 results.append(("vz_linux_smoke", smoke_result))
                 if not smoke_result.ok:
                     primary_failure = smoke_result
@@ -902,12 +911,15 @@ def run_launchd_drill(
             if not smoke_result.ok:
                 primary_failure = smoke_result
         elif bundle_path is not None:
-            smoke_result = run_vz_linux_host_smoke(
-                bundle_path=bundle_path,
-                socket_path=socket_path,
-                python_path=python_path,
-                dry_run=dry_run,
-            )
+            smoke_kwargs = {
+                "bundle_path": bundle_path,
+                "socket_path": socket_path,
+                "python_path": python_path,
+                "dry_run": dry_run,
+            }
+            if smoke_command_runner is not None:
+                smoke_kwargs["command_runner"] = smoke_command_runner
+            smoke_result = run_vz_linux_host_smoke(**smoke_kwargs)
             results.append(("vz_linux_smoke", smoke_result))
             if not smoke_result.ok:
                 primary_failure = smoke_result
@@ -1894,6 +1906,7 @@ def _launchd_drill_command(args: argparse.Namespace) -> int:
     }
     if args.json:
         drill_kwargs["launchd_runner"] = run_command_captured
+        drill_kwargs["smoke_command_runner"] = run_command_captured
         with contextlib.redirect_stdout(io.StringIO()):
             results = run_launchd_drill(**drill_kwargs)
     else:
