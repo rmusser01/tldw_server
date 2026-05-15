@@ -100,6 +100,27 @@ class PersonaVisualPackDuplicateRequest(BaseModel):
         return normalized or None
 
 
+class PersonaVisualStarterPackCopyRequest(BaseModel):
+    target_persona_id: str = Field(min_length=1, max_length=128)
+    title: str | None = Field(default=None, max_length=200)
+
+    @field_validator("target_persona_id")
+    @classmethod
+    def normalize_target_persona_id(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("target_persona_id is required")
+        return normalized
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+
 class PersonaVisualLibrarySaveRequest(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     notes: str | None = Field(default=None, max_length=4000)
@@ -259,6 +280,36 @@ class PersonaVisualPackResponse(BaseModel):
     created_at: str
     last_modified: str
     version: int = 1
+
+
+class PersonaVisualStarterAssetResponse(BaseModel):
+    asset_key: str
+    filename: str
+    mime_type: str
+    asset_role: PersonaVisualAssetRole
+    byte_size: int
+
+
+class PersonaVisualStarterPackResponse(BaseModel):
+    id: str
+    title: str
+    description: str
+    renderer_type: PersonaVisualRendererType
+    manifest_version: int = 1
+    states_offered: list[str] = Field(default_factory=list)
+    asset_count: int = 0
+    total_bytes: int = 0
+    tags: list[str] = Field(default_factory=list)
+    license_label: str = "bundled"
+
+
+class PersonaVisualStarterPackDetailResponse(PersonaVisualStarterPackResponse):
+    manifest: dict[str, Any] = Field(default_factory=dict)
+    assets: list[PersonaVisualStarterAssetResponse] = Field(default_factory=list)
+
+
+class PersonaVisualStarterPackListResponse(BaseModel):
+    starter_packs: list[PersonaVisualStarterPackResponse] = Field(default_factory=list)
 
 
 class PersonaVisualLibraryItemResponse(BaseModel):

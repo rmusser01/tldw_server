@@ -208,6 +208,30 @@ Runtime state triggers are transient session behavior; library reuse is a
 durable draft-creation action that must preserve review and explicit activation
 semantics.
 
+## Bundled Starter Pack Catalog
+
+Bundled starter packs are immutable server fixtures for first-run or recovery
+flows. They are not global Persona Visual pack rows, shared library entries, or
+runtime assets. Listing the catalog returns safe fixture metadata only.
+
+Copying a bundled starter pack creates a normal user-owned draft pack attached
+to the selected target persona. The copy path validates the fixture manifest and
+assets, writes new asset files through the existing Persona Visual storage
+service, remaps fixture asset keys to newly created asset ids, and stores the
+resulting manifest on the new draft pack.
+
+Starter-pack copies do not activate automatically. If the target persona already
+has an active pack, that active pack stays active until the user explicitly
+activates the copied draft through the existing activation endpoint. This keeps
+bundled defaults aligned with the same review-before-activation rule used by
+imports, library reuse, and generated candidates.
+
+Current starter-pack API routes:
+
+1. `GET /api/v1/persona/visual-starter-packs`
+2. `GET /api/v1/persona/visual-starter-packs/{starter_pack_id}`
+3. `POST /api/v1/persona/visual-starter-packs/{starter_pack_id}/copy`
+
 Core implementation points:
 
 1. `persona_visual_library_items` in the ChaChaNotes persona store.
@@ -217,6 +241,9 @@ Core implementation points:
 4. `VisualPackEditor` for save/list/edit/remove/use controls in Persona Garden.
 5. `PersonaVisualsModule` for MCP discovery and draft reuse on top of the same
    reference-backed service semantics.
+6. `PersonaVisualStarterCatalogService` for bundled fixture listing and
+   copy-to-draft creation on top of the existing asset storage and manifest
+   validation path.
 
 ## External MCP-Compatible Pack Providers
 
