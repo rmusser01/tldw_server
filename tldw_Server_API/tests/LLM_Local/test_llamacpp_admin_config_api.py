@@ -42,19 +42,28 @@ class _ManagerWithoutHandler:
 
 
 class _HandlerWithConfig:
-    def __init__(self, executable_path: Path) -> None:
+    def __init__(self, executable_path: Path, **config_overrides: Any) -> None:
+        config_values = {
+            "enabled": True,
+            "executable_path": executable_path,
+            "models_dir": Path("models/gguf_models"),
+            "default_host": "127.0.0.1",
+            "default_port": 8080,
+            "default_threads": None,
+            "default_n_gpu_layers": 0,
+            "default_ctx_size": 2048,
+            "allow_unvalidated_args": False,
+            "allow_cli_secrets": False,
+            "port_autoselect": True,
+            "port_probe_max": 10,
+            "allowed_paths": [],
+            "log_output_file": None,
+        }
+        config_values.update(config_overrides)
         self.config = type(
             "Config",
             (),
-            {
-                "enabled": True,
-                "executable_path": executable_path,
-                "models_dir": Path("models/gguf_models"),
-                "default_host": "127.0.0.1",
-                "default_port": 8080,
-                "allowed_paths": [],
-                "log_output_file": None,
-            },
+            config_values,
         )()
         self._active_server_model = None
         self._active_server_host = None
@@ -65,8 +74,8 @@ class _HandlerWithConfig:
 class _ManagerWithHandler:
     logger = _Logger()
 
-    def __init__(self, executable_path: Path) -> None:
-        self.llamacpp = _HandlerWithConfig(executable_path)
+    def __init__(self, executable_path: Path, **config_overrides: Any) -> None:
+        self.llamacpp = _HandlerWithConfig(executable_path, **config_overrides)
 
 
 class _ExistingManagementManager:
@@ -197,6 +206,56 @@ def test_llamacpp_config_service_reports_saved_vs_active_missing_handler(monkeyp
     assert state["active_config"] == {"handler_configured": False}
     assert state["restart_required"] is True
     assert state["restart_reasons"] == ["handler_not_configured"]
+
+
+@pytest.mark.unit
+def test_llamacpp_config_service_reports_default_port_change_restart_required(monkeypatch):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_config_service
+
+    monkeypatch.setattr(
+        llamacpp_config_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(default_port="9090"),
+    )
+    monkeypatch.setattr(
+        llamacpp_config_service,
+        "get_env_overrides",
+        lambda: {field: False for field in llamacpp_config_service.LLAMACPP_ENV_OVERRIDES},
+    )
+
+    state = llamacpp_config_service.get_config_state(
+        _ManagerWithHandler(Path("vendor/llama.cpp/server"), default_port=8080)
+    )
+
+    assert state["active_config"]["default_port"] == 8080
+    assert state["saved_config"]["default_port"] == 9090
+    assert state["restart_required"] is True
+    assert "default_port_changed" in state["restart_reasons"]
+
+
+@pytest.mark.unit
+def test_llamacpp_config_service_reports_security_flag_change_restart_required(monkeypatch):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_config_service
+
+    monkeypatch.setattr(
+        llamacpp_config_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(allow_cli_secrets="true"),
+    )
+    monkeypatch.setattr(
+        llamacpp_config_service,
+        "get_env_overrides",
+        lambda: {field: False for field in llamacpp_config_service.LLAMACPP_ENV_OVERRIDES},
+    )
+
+    state = llamacpp_config_service.get_config_state(
+        _ManagerWithHandler(Path("vendor/llama.cpp/server"), allow_cli_secrets=False)
+    )
+
+    assert state["active_config"]["allow_cli_secrets"] is False
+    assert state["saved_config"]["allow_cli_secrets"] is True
+    assert state["restart_required"] is True
+    assert "allow_cli_secrets_changed" in state["restart_reasons"]
 
 
 @pytest.mark.unit
