@@ -22,39 +22,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Common/QuickIngest/AddContentStep.tsx:Alert#antd-alert-addcontentstep-type-warning-line-298-3vldi3",
-    "path": "src/components/Common/QuickIngest/AddContentStep.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Common/QuickIngest/AddContentStep.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Common/QuickIngest/AddContentStep.tsx:Alert#antd-alert-addcontentstep-type-warning-line-343-w13em8",
-    "path": "src/components/Common/QuickIngest/AddContentStep.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Common/QuickIngest/AddContentStep.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Common/QuickIngest/AddContentStep.tsx:Tag",
-    "path": "src/components/Common/QuickIngest/AddContentStep.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Tag",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Tag product-state UI in src/components/Common/QuickIngest/AddContentStep.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Common/Settings/LlamaCppAdvancedControls.tsx:Alert#antd-alert-llamacppadvancedcontrols-type-info-line-225-1ac43xr",
     "path": "src/components/Common/Settings/LlamaCppAdvancedControls.tsx",
     "rule": "antd-product-state-import",
