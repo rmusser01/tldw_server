@@ -291,7 +291,7 @@ Expected: commit includes only the clarity/test files touched in this task.
 - Test: `apps/tldw-frontend/e2e/workflows/media-ingest.spec.ts`
 - Test helper: `apps/tldw-frontend/e2e/utils/journey-helpers.ts`
 
-- [ ] **Step 1: Write failing tests for result actions**
+- [x] **Step 1: Write failing tests for result actions**
 
 Extend `WizardResultsStep.navigation.test.tsx` with tests that prove:
 
@@ -313,7 +313,7 @@ it("does not render Remove for errors when no remove callback exists", () => {
 
 Adjust to the existing harness types and helpers.
 
-- [ ] **Step 2: Run the failing results tests**
+- [x] **Step 2: Run the failing results tests**
 
 Run:
 
@@ -323,7 +323,7 @@ bunx vitest run apps/packages/ui/src/components/Common/QuickIngest/__tests__/Wiz
 
 Expected: new result-action tests fail before implementation.
 
-- [ ] **Step 3: Add or refactor result action mapping**
+- [x] **Step 3: Add or refactor result action mapping**
 
 If `WizardResultsStep.tsx` becomes difficult to reason about, create `result-actions.ts` with pure helpers:
 
@@ -336,7 +336,7 @@ export const canOpenMedia = (item: WizardResultItem): boolean =>
 
 Keep helpers pure and unit-testable. Do not add routing side effects to the helper.
 
-- [ ] **Step 4: Wire primary Media handoff from the modal**
+- [x] **Step 4: Wire primary Media handoff from the modal**
 
 In `QuickIngestWizardModal.tsx`, pass an `onOpenMedia` callback into `WizardResultsStep`. The callback should:
 
@@ -346,7 +346,7 @@ In `QuickIngestWizardModal.tsx`, pass an `onOpenMedia` callback into `WizardResu
 
 If no stable direct-media route exists, use the existing Media page destination and preserve the item label in visible result text. Record the limitation in task notes.
 
-- [ ] **Step 5: Remove or implement error Remove**
+- [x] **Step 5: Remove or implement error Remove**
 
 In `WizardResultsStep.tsx`, remove the unconditional no-op remove path. Acceptable outcomes:
 
@@ -355,7 +355,7 @@ In `WizardResultsStep.tsx`, remove the unconditional no-op remove path. Acceptab
 
 Do not leave a visible action wired to a no-op.
 
-- [ ] **Step 6: Clarify duplicate and skipped copy**
+- [x] **Step 6: Clarify duplicate and skipped copy**
 
 Update skipped/duplicate copy so it distinguishes:
 
@@ -365,7 +365,7 @@ Update skipped/duplicate copy so it distinguishes:
 
 Keep this copy in existing i18n/default-string patterns.
 
-- [ ] **Step 7: Run focused results tests**
+- [x] **Step 7: Run focused results tests**
 
 Run:
 
@@ -375,7 +375,7 @@ bunx vitest run apps/packages/ui/src/components/Common/QuickIngest/__tests__/Wiz
 
 Expected: result-action tests pass and session lifecycle tests still pass.
 
-- [ ] **Step 8: Run focused WebUI e2e for result handoff**
+- [x] **Step 8: Run focused WebUI e2e for result handoff**
 
 Run:
 
@@ -385,7 +385,7 @@ npx playwright test apps/tldw-frontend/e2e/workflows/media-ingest.spec.ts --grep
 
 Expected: the deterministic quick-ingest URL completion test passes and observes the updated handoff behavior.
 
-- [ ] **Step 9: Commit the results/recovery change**
+- [x] **Step 9: Commit the results/recovery change**
 
 Run:
 
