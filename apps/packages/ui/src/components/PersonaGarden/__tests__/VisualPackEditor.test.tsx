@@ -13,10 +13,16 @@ const mocks = vi.hoisted(() => ({
         | string
         | {
             defaultValue?: string
+            count?: number
           }
     ) => {
       if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
-      if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
+      if (defaultValueOrOptions?.defaultValue) {
+        return defaultValueOrOptions.defaultValue.replace(
+          "{{count}}",
+          String(defaultValueOrOptions.count ?? "")
+        )
+      }
       return key
     }
   )
@@ -376,7 +382,9 @@ describe("VisualPackEditor", () => {
         path === "/api/v1/persona/profiles/persona-1/visual-packs/active-pack/generated-candidates" &&
         method === "GET"
       ) {
-        return okResponse({ candidates: [candidate] })
+        return okResponse({
+          candidates: [candidate, { ...candidate, id: "candidate-2" }]
+        })
       }
       if (path.endsWith("/generation-readiness") && method === "GET") {
         return okResponse(readyGenerationReadiness)
@@ -404,13 +412,14 @@ describe("VisualPackEditor", () => {
     )
 
     const header = await screen.findByTestId("persona-visual-management-header")
+    expect(header).toHaveTextContent("Selected persona")
     expect(header).toHaveTextContent("Garden Helper")
     expect(header).toHaveTextContent("Rendered now")
     expect(header).toHaveTextContent("active 1")
     expect(header).toHaveTextContent("draft 1")
     expect(header).toHaveTextContent("review 1")
     await waitFor(() => expect(header).toHaveTextContent("Review required"))
-    expect(header).toHaveTextContent("1 generated candidate needs review.")
+    expect(header).toHaveTextContent("2 generated candidates need review.")
     expect(screen.getByTestId("persona-visual-pack-select")).toBeInTheDocument()
   })
 

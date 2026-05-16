@@ -1,5 +1,5 @@
 ---
-id: TASK-409
+id: TASK-410
 title: Implement Persona Visual management header
 status: Done
 labels:
@@ -42,6 +42,13 @@ Verification:
 - `git diff --check` passed.
 - `bunx tsc --noEmit -p tsconfig.json` was attempted from `apps/packages/ui` and failed on existing package-wide baseline type errors outside the touched PersonaGarden files; no errors were reported for the touched files in the visible output.
 - Bandit is not applicable to this frontend-only slice.
+
+Review follow-up:
+- Corrected the management header persona-label fallback from an active-pack phrase to `Selected persona`.
+- Added count-aware i18n options, interpolation-ready defaults, and singular/plural default copy for management attention messages.
+- Localized lifecycle status labels through the existing `t()` helper and hid the duplicate persona context row when the management header is visible.
+- Removed unrelated backlog status edits from the PR scope so the branch remains focused on Persona Visual management.
+- Verification after review fixes: `bun run test src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx -t "management header"` passed; `bun run test src/components/PersonaGarden/__tests__/personaVisualManagementSummary.test.ts src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx` passed with 63 tests; `git diff --check` passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

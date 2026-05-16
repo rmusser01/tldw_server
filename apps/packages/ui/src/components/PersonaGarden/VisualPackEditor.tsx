@@ -141,87 +141,117 @@ const getManagementAttentionCopy = (
     }
   }
 
+  const countMessage = (
+    key: string,
+    singular: string,
+    plural: string
+  ): string =>
+    t(key, {
+      count: row.count,
+      defaultValue: row.count === 1 ? `1 ${singular}` : `${row.count} ${plural}`,
+      defaultValue_one: "{{count}} " + singular,
+      defaultValue_other: "{{count}} " + plural
+    })
+
   switch (row.kind) {
     case "failed_pack":
       return {
         title: t("sidepanel:personaGarden.visuals.management.failedPackTitle", {
           defaultValue: "Failed pack needs review"
         }),
-        message: t("sidepanel:personaGarden.visuals.management.failedPackMessage", {
-          defaultValue: `${row.count} failed pack needs cleanup or replacement.`
-        })
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.failedPackMessage",
+          "failed pack needs cleanup or replacement.",
+          "failed packs need cleanup or replacement."
+        )
       }
     case "invalid_manifest":
       return {
         title: t("sidepanel:personaGarden.visuals.management.invalidManifestTitle", {
           defaultValue: "Activation is blocked"
         }),
-        message: t("sidepanel:personaGarden.visuals.management.invalidManifestMessage", {
-          defaultValue: `${row.count} selected manifest issue blocks activation.`
-        })
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.invalidManifestMessage",
+          "selected manifest issue blocks activation.",
+          "selected manifest issues block activation."
+        )
       }
     case "generated_candidates_review":
       return {
         title: t("sidepanel:personaGarden.visuals.management.reviewRequiredTitle", {
           defaultValue: "Review required"
         }),
-        message: t("sidepanel:personaGarden.visuals.management.reviewRequiredMessage", {
-          defaultValue: `${row.count} generated candidate needs review.`
-        })
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.reviewRequiredMessage",
+          "generated candidate needs review.",
+          "generated candidates need review."
+        )
       }
     case "generated_candidates_failed":
       return {
         title: t("sidepanel:personaGarden.visuals.management.failedCandidateTitle", {
           defaultValue: "Generation failed"
         }),
-        message: t("sidepanel:personaGarden.visuals.management.failedCandidateMessage", {
-          defaultValue: `${row.count} generated candidate failed.`
-        })
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.failedCandidateMessage",
+          "generated candidate failed.",
+          "generated candidates failed."
+        )
       }
     case "import_preview_ready":
       return {
         title: t("sidepanel:personaGarden.visuals.management.importPreviewTitle", {
           defaultValue: "Import preview ready"
         }),
-        message: t("sidepanel:personaGarden.visuals.management.importPreviewMessage", {
-          defaultValue: `${row.count} import preview needs choices or review.`
-        })
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.importPreviewMessage",
+          "import preview needs choices or review.",
+          "import previews need choices or review."
+        )
       }
     case "import_commit_completed":
       return {
         title: t("sidepanel:personaGarden.visuals.management.importCommitTitle", {
           defaultValue: "Imported draft ready"
         }),
-        message: t("sidepanel:personaGarden.visuals.management.importCommitMessage", {
-          defaultValue: `${row.count} import commit created a draft for review.`
-        })
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.importCommitMessage",
+          "import commit created a draft for review.",
+          "import commits created drafts for review."
+        )
       }
     case "export_completed":
       return {
         title: t("sidepanel:personaGarden.visuals.management.exportCompletedTitle", {
           defaultValue: "Export ready"
         }),
-        message: t("sidepanel:personaGarden.visuals.management.exportCompletedMessage", {
-          defaultValue: `${row.count} archive is ready to download.`
-        })
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.exportCompletedMessage",
+          "archive is ready to download.",
+          "archives are ready to download."
+        )
       }
     case "library_source_unavailable":
       return {
         title: t("sidepanel:personaGarden.visuals.management.libraryUnavailableTitle", {
           defaultValue: "Library source unavailable"
         }),
-        message: t("sidepanel:personaGarden.visuals.management.libraryUnavailableMessage", {
-          defaultValue: `${row.count} library item points to a missing source pack.`
-        })
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.libraryUnavailableMessage",
+          "library item points to a missing source pack.",
+          "library items point to missing source packs."
+        )
       }
     case "library_source_changed":
       return {
         title: t("sidepanel:personaGarden.visuals.management.libraryChangedTitle", {
           defaultValue: "Library source changed"
         }),
-        message: t("sidepanel:personaGarden.visuals.management.libraryChangedMessage", {
-          defaultValue: `${row.count} library item may be stale.`
-        })
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.libraryChangedMessage",
+          "library item may be stale.",
+          "library items may be stale."
+        )
       }
     case "generation_unavailable":
       return {
@@ -237,9 +267,11 @@ const getManagementAttentionCopy = (
         title: t("sidepanel:personaGarden.visuals.management.pendingJobTitle", {
           defaultValue: "Job in progress"
         }),
-        message: t("sidepanel:personaGarden.visuals.management.pendingJobMessage", {
-          defaultValue: `${row.count} visual job is still running.`
-        })
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.pendingJobMessage",
+          "visual job is still running.",
+          "visual jobs are still running."
+        )
       }
     case "failed_job":
     default:
@@ -247,9 +279,11 @@ const getManagementAttentionCopy = (
         title: t("sidepanel:personaGarden.visuals.management.failedJobTitle", {
           defaultValue: "Job failed"
         }),
-        message: t("sidepanel:personaGarden.visuals.management.failedJobMessage", {
-          defaultValue: `${row.count} visual job needs recovery.`
-        })
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.failedJobMessage",
+          "visual job needs recovery.",
+          "visual jobs need recovery."
+        )
       }
   }
 }
@@ -275,7 +309,7 @@ const VisualManagementHeader: React.FC<{
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
             {t("sidepanel:personaGarden.visuals.management.personaLabel", {
-              defaultValue: "Rendered now"
+              defaultValue: "Selected persona"
             })}
           </div>
           <div className="mt-1 text-sm font-medium text-text">{personaName}</div>
@@ -298,7 +332,11 @@ const VisualManagementHeader: React.FC<{
                 key={status}
                 className="rounded border border-border bg-surface px-2 py-1 text-text-muted"
               >
-                <span>{status}</span>{" "}
+                <span>
+                  {t(`sidepanel:personaGarden.visuals.management.status.${status}`, {
+                    defaultValue: status
+                  })}
+                </span>{" "}
                 <span className="font-medium text-text">{counts[status]}</span>
               </span>
             )
@@ -3303,17 +3341,25 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
             t={t}
           />
         ) : null}
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
-              {t("sidepanel:personaGarden.visuals.heading", {
-                defaultValue: "Visual Packs"
-              })}
+        <div
+          className={
+            showManagementHeader
+              ? "mt-3 flex flex-wrap items-start justify-end gap-3"
+              : "flex flex-wrap items-start justify-between gap-3"
+          }
+        >
+          {!showManagementHeader ? (
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+                {t("sidepanel:personaGarden.visuals.heading", {
+                  defaultValue: "Visual Packs"
+                })}
+              </div>
+              <div className="mt-1 text-sm font-medium text-text">
+                {selectedPersonaName || selectedPersonaId}
+              </div>
             </div>
-            <div className="mt-1 text-sm font-medium text-text">
-              {selectedPersonaName || selectedPersonaId}
-            </div>
-          </div>
+          ) : null}
           <Button
             data-testid="persona-visual-pack-refresh-button"
             size="small"

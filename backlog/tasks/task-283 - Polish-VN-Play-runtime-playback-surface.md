@@ -1,7 +1,7 @@
 ---
 id: TASK-283
 title: Polish VN Play runtime playback surface
-status: Done
+status: In Progress
 assignee: []
 created_date: '2026-05-12 02:17'
 labels:
