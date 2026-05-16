@@ -54,6 +54,29 @@ def _create_persona(db: CharactersRAGDB, *, user_id: str = "1", name: str = "Vis
     return db.create_persona_profile({"user_id": user_id, "name": name})
 
 
+def _custom_visual_state_manifest() -> dict[str, Any]:
+    return {
+        "manifest_version": 1,
+        "renderer_type": "sprite_frames",
+        "state_catalog": {
+            "tool.notes_search": {
+                "label": "Searching notes",
+                "kind": "tool_variant",
+            },
+        },
+        "states": {
+            "idle": {"animation_id": "idle"},
+            "tool.notes_search": {"animation_id": "tool-notes-search"},
+        },
+        "animations": {
+            "idle": {"frames": [{"asset_id": "idle-asset", "duration_ms": 100}]},
+            "tool-notes-search": {
+                "frames": [{"asset_id": "tool-notes-search-asset", "duration_ms": 100}]
+            },
+        },
+    }
+
+
 def test_visual_state_override_payload_helper_clamps_and_labels_tool() -> None:
     payload = _persona_visual_override_payload_from_tool_result(
         tool_name="persona_visuals.trigger_state",
@@ -92,6 +115,50 @@ def test_visual_state_override_payload_helper_clamps_and_labels_tool() -> None:
     )
 
 
+def test_visual_state_override_payload_helper_accepts_safe_custom_states() -> None:
+    payload = _persona_visual_override_payload_from_tool_result(
+        tool_name="persona_visuals.trigger_state",
+        result={
+            "ok": True,
+            "output": {
+                "type": "visual_state_override",
+                "persona_id": "persona-1",
+                "session_id": "session-1",
+                "state": "tool.notes_search",
+                "duration_ms": 1200,
+                "reason": "mcp_runtime.notes.search",
+            },
+        },
+        persona_id="persona-1",
+        session_id="session-1",
+    )
+
+    assert payload == {
+        "type": "visual_state_override",
+        "persona_id": "persona-1",
+        "session_id": "session-1",
+        "state": "tool.notes_search",
+        "duration_ms": 1200,
+        "reason": "mcp_runtime.notes.search",
+        "tool": "persona_visuals.trigger_state",
+    }
+    assert (
+        _persona_visual_override_payload_from_tool_result(
+            tool_name="persona_visuals.trigger_state",
+            result={
+                "ok": True,
+                "output": {
+                    "type": "visual_state_override",
+                    "state": "file:/tmp/secret",
+                },
+            },
+            persona_id="persona-1",
+            session_id="session-1",
+        )
+        is None
+    )
+
+
 def test_persona_visuals_module_config_is_present_and_disabled() -> None:
     repo_root = Path(__file__).resolve().parents[5]
     config_path = repo_root / "tldw_Server_API" / "Config_Files" / "mcp_modules.yaml"
@@ -118,7 +185,7 @@ async def test_capabilities_returns_active_and_draft_pack_summaries(chacha_db) -
         persona_id=persona_id,
         user_id="1",
         title="Active Pack",
-        manifest={"manifest_version": 1, "renderer_type": "sprite_frames"},
+        manifest=_custom_visual_state_manifest(),
         status="active",
     )
     draft = db.create_persona_visual_pack(
@@ -153,6 +220,7 @@ async def test_capabilities_returns_active_and_draft_pack_summaries(chacha_db) -
     assert result["active_pack"]["assets_count"] == 1
     assert [pack["id"] for pack in result["draft_packs"]] == [draft["id"]]
     assert "thinking" in result["states"]
+    assert "tool.notes_search" in result["states"]
 
 
 @pytest.mark.asyncio
@@ -237,7 +305,7 @@ async def test_trigger_state_requires_context_rejects_unknown_states_and_clamps_
     )
     assert minimum["duration_ms"] == 100
 
-    with pytest.raises(ValueError, match="Unknown visual state"):
+    with pytest.raises(ValueError, match="not available in the active Persona Visual pack"):
         await module.execute_tool(
             "persona_visuals.trigger_state",
             {"state": "dancing"},
@@ -260,6 +328,60 @@ async def test_trigger_state_requires_context_rejects_unknown_states_and_clamps_
                 db_paths={"chacha": str(db_path)},
                 metadata={},
             ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_trigger_state_accepts_custom_state_declared_by_active_pack(chacha_db) -> None:
+    db, db_path = chacha_db
+    persona_id = _create_persona(db)
+    db.create_persona_visual_pack(
+        persona_id=persona_id,
+        user_id="1",
+        title="Active Custom Pack",
+        manifest=_custom_visual_state_manifest(),
+        status="active",
+    )
+    module = PersonaVisualsModule(ModuleConfig(name="persona_visuals"))
+
+    payload = await module.execute_tool(
+        "persona_visuals.trigger_state",
+        {
+            "state": "tool.notes_search",
+            "duration_ms": 1200,
+            "reason": "mcp_runtime.notes.search",
+        },
+        context=_context(db_path, persona_id),
+    )
+
+    assert payload == {
+        "type": "visual_state_override",
+        "persona_id": persona_id,
+        "session_id": "session-visuals",
+        "state": "tool.notes_search",
+        "duration_ms": 1200,
+        "reason": "mcp_runtime.notes.search",
+    }
+
+
+@pytest.mark.asyncio
+async def test_trigger_state_rejects_custom_state_missing_from_active_pack(chacha_db) -> None:
+    db, db_path = chacha_db
+    persona_id = _create_persona(db)
+    db.create_persona_visual_pack(
+        persona_id=persona_id,
+        user_id="1",
+        title="Active Custom Pack",
+        manifest=_custom_visual_state_manifest(),
+        status="active",
+    )
+    module = PersonaVisualsModule(ModuleConfig(name="persona_visuals"))
+
+    with pytest.raises(ValueError, match="not available in the active Persona Visual pack"):
+        await module.execute_tool(
+            "persona_visuals.trigger_state",
+            {"state": "tool.other_search"},
+            context=_context(db_path, persona_id),
         )
 
 

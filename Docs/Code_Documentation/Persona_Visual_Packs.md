@@ -234,6 +234,16 @@ Runtime state triggers are transient session behavior; library reuse is a
 durable draft-creation action that must preserve review and explicit activation
 semantics.
 
+`persona_visuals.trigger_state` accepts built-in visual states and safe custom
+state IDs declared by the persona's active pack. Custom runtime IDs must use the
+same bounded `state_catalog` ID grammar as manifests and must have a matching
+entry in the active pack's `states` map before the backend emits a
+`visual_state_override` event. The WebUI stores safe custom override candidates,
+but Persona Buddy only resolves them when the currently loaded active pack
+declares the state; otherwise it falls back to normal live/tool state resolution.
+This keeps direct MCP triggers compatible with large custom state catalogs
+without allowing arbitrary runtime state strings to become renderable states.
+
 ## Bundled Starter Catalog Scaffolds
 
 Bundled starter catalog entries are immutable server fixtures for first-run or

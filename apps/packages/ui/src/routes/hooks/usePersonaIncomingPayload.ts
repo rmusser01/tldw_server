@@ -2,10 +2,9 @@ import React from "react"
 import type { PersonaSetupStep } from "@/hooks/usePersonaSetupWizard"
 import type { SetupTestOutcome } from "@/components/PersonaGarden/SetupTestAndFinishStep"
 import { usePersonaVisualRuntimeStore } from "@/store/persona-visual-runtime"
-import type { PersonaVisualBuiltinStateId } from "@/types/persona-visuals"
 import {
-  isPersonaVisualBuiltinStateId,
-  PERSONA_VISUAL_BUILTIN_STATES
+  asPersonaVisualStateId,
+  isPersonaVisualStateIdText
 } from "@/types/persona-visuals"
 import {
   coerceGovernanceContext as _coerceGovernanceContext,
@@ -91,10 +90,7 @@ export const usePersonaIncomingPayload = ({
 
       if (eventType === "visual_state_override") {
         const state = String(payload?.state || payload?.visual_state || "").trim()
-        const allowedStates = new Set<PersonaVisualBuiltinStateId>(
-          PERSONA_VISUAL_BUILTIN_STATES
-        )
-        if (!isPersonaVisualBuiltinStateId(state) || !allowedStates.has(state)) return
+        if (!isPersonaVisualStateIdText(state)) return
         const durationMsRaw =
           typeof payload?.duration_ms === "number"
             ? payload.duration_ms
@@ -102,6 +98,11 @@ export const usePersonaIncomingPayload = ({
         const durationMs = Number.isFinite(durationMsRaw)
           ? Math.max(250, Math.min(durationMsRaw, 30_000))
           : 1500
+        const reason = String(payload?.reason || "")
+          .split(/\s+/)
+          .filter(Boolean)
+          .join(" ")
+          .slice(0, 200)
         setVisualRuntimeOverride({
           personaId: String(payload?.persona_id || personaId || ""),
           sessionId: payload?.session_id
@@ -109,8 +110,8 @@ export const usePersonaIncomingPayload = ({
             : sessionId
               ? String(sessionId)
               : null,
-          state,
-          reason: payload?.reason ? String(payload.reason) : null,
+          state: asPersonaVisualStateId(state),
+          reason: reason || null,
           expiresAt: Date.now() + durationMs
         })
         return

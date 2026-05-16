@@ -13,6 +13,35 @@ export const PERSONA_VISUAL_BUILTIN_STATES = [
 export type PersonaVisualBuiltinStateId =
   (typeof PERSONA_VISUAL_BUILTIN_STATES)[number]
 
+export const PERSONA_VISUAL_CUSTOM_STATE_ID_PATTERN =
+  /^[a-z][a-z0-9_.:-]{0,95}$/
+
+const PERSONA_VISUAL_UNSAFE_CUSTOM_STATE_MARKERS = [
+  "access_token",
+  "api_key",
+  "apikey",
+  "auth_token",
+  "authorization",
+  "bearer_token",
+  "client_secret",
+  "password",
+  "passwd",
+  "private_key",
+  "refresh_token",
+  "secret",
+  "secret_key"
+] as const
+
+const PERSONA_VISUAL_UNSAFE_CUSTOM_STATE_PREFIXES = [
+  "env:",
+  "file:",
+  "ftp:",
+  "http:",
+  "https:",
+  "proc:",
+  "ssh:"
+] as const
+
 declare const personaVisualCustomStateIdBrand: unique symbol
 export type PersonaVisualCustomStateId = string & {
   readonly [personaVisualCustomStateIdBrand]: "PersonaVisualCustomStateId"
@@ -29,6 +58,29 @@ export const isPersonaVisualBuiltinStateId = (
   value: string
 ): value is PersonaVisualBuiltinStateId =>
   (PERSONA_VISUAL_BUILTIN_STATES as readonly string[]).includes(value)
+
+export const isPersonaVisualCustomStateIdText = (
+  value: string
+): value is PersonaVisualCustomStateId => {
+  if (!PERSONA_VISUAL_CUSTOM_STATE_ID_PATTERN.test(value)) return false
+  const lowered = value.toLowerCase()
+  if (
+    PERSONA_VISUAL_UNSAFE_CUSTOM_STATE_PREFIXES.some((prefix) =>
+      lowered.startsWith(prefix)
+    )
+  ) {
+    return false
+  }
+  const compact = lowered.replace(/[._:-]+/g, "_")
+  return !PERSONA_VISUAL_UNSAFE_CUSTOM_STATE_MARKERS.some((marker) =>
+    compact.includes(marker)
+  )
+}
+
+export const isPersonaVisualStateIdText = (
+  value: string
+): value is PersonaVisualStateId =>
+  isPersonaVisualBuiltinStateId(value) || isPersonaVisualCustomStateIdText(value)
 
 export const asPersonaVisualCustomStateId = (
   value: string

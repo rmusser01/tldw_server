@@ -181,6 +181,7 @@ from tldw_Server_API.app.core.Persona.visuals import (
     MAX_TRIGGER_DURATION_MS,
     MIN_TRIGGER_DURATION_MS,
     VISUAL_STATE_IDS,
+    custom_visual_state_id_error,
 )
 from tldw_Server_API.app.core.Persona.visual_service import (
     MAX_VISUAL_UPLOAD_BYTES,
@@ -2116,8 +2117,10 @@ def _persona_visual_override_payload_from_tool_result(
     if not isinstance(payload, dict) or payload.get("type") != "visual_state_override":
         return None
 
-    state = str(payload.get("state") or payload.get("visual_state") or "").strip()
-    if state not in VISUAL_STATE_IDS:
+    state = _safe_persona_visual_override_state(
+        payload.get("state") or payload.get("visual_state")
+    )
+    if state is None:
         return None
 
     try:
@@ -2131,16 +2134,38 @@ def _persona_visual_override_payload_from_tool_result(
     if not resolved_persona_id or not resolved_session_id:
         return None
 
-    reason = str(payload.get("reason") or "persona_visuals.trigger_state").strip()
+    reason = _safe_persona_visual_override_reason(payload.get("reason"))
     return {
         "type": "visual_state_override",
         "persona_id": resolved_persona_id,
         "session_id": resolved_session_id,
         "state": state,
         "duration_ms": duration_ms,
-        "reason": reason or "persona_visuals.trigger_state",
+        "reason": reason,
         "tool": "persona_visuals.trigger_state",
     }
+
+
+def _safe_persona_visual_override_state(value: Any) -> str | None:
+    """Return a built-in or safe custom visual state ID for runtime payloads."""
+    state = str(value or "").strip()
+    if not state:
+        return None
+    if state in VISUAL_STATE_IDS:
+        return state
+    if custom_visual_state_id_error(state) is None:
+        return state
+    return None
+
+
+def _safe_persona_visual_override_reason(value: Any) -> str:
+    """Return a bounded, single-line reason for trace-safe runtime payloads."""
+    if value is not None and not isinstance(value, str):
+        return "persona_visuals.trigger_state"
+    reason = " ".join(str(value or "persona_visuals.trigger_state").split())
+    if not reason:
+        return "persona_visuals.trigger_state"
+    return reason[:200]
 
 
 def _persona_visual_pack_to_response(

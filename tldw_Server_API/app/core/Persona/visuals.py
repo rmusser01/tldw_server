@@ -457,6 +457,11 @@ def _custom_state_id_error(state_id: Any) -> str | None:
     return None
 
 
+def custom_visual_state_id_error(state_id: Any) -> str | None:
+    """Return a validation error for a custom runtime visual state ID, if any."""
+    return _custom_state_id_error(state_id)
+
+
 def _contains_control_character(value: str) -> bool:
     """Return whether user-facing manifest text contains ASCII control codes."""
     return any(ord(character) < 32 or ord(character) == 127 for character in value)
@@ -598,5 +603,6 @@ __all__ = [
     "VISUAL_STATE_IDS",
     "PersonaVisualManifestError",
     "PersonaVisualManifestValidation",
+    "custom_visual_state_id_error",
     "validate_visual_manifest",
 ]

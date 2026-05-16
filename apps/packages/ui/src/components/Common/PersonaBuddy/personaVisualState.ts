@@ -9,7 +9,7 @@ import {
 } from "@/types/persona-visuals"
 
 export type PersonaVisualRuntimeOverride = {
-  state: PersonaVisualBuiltinStateId
+  state: PersonaVisualStateId
   reason?: string | null
   expiresAt: number
 }
@@ -20,6 +20,7 @@ export type ResolvePersonaVisualStateInput = {
   recovering?: boolean
   approvalNeeded?: boolean
   runtimeOverride?: PersonaVisualRuntimeOverride | null
+  runtimeStateIds?: Iterable<string> | null
   authoredTriggers?: PersonaVisualAuthoredTrigger[] | null
   activeToolName?: string | null
   activeToolStatus?: string | null
@@ -100,6 +101,21 @@ const triggerMatches = (
   return false
 }
 
+const runtimeOverrideStateAllowed = (
+  state: PersonaVisualStateId,
+  runtimeStateIds: Iterable<string> | null | undefined
+): boolean => {
+  if (BUILTIN_VISUAL_STATES.has(state as PersonaVisualBuiltinStateId)) {
+    return true
+  }
+  for (const candidate of runtimeStateIds || []) {
+    if (String(candidate) === state) {
+      return true
+    }
+  }
+  return false
+}
+
 const resolveAuthoredTriggerState = (
   input: ResolvePersonaVisualStateInput,
   liveState: PersonaVisualBuiltinStateId | null
@@ -121,7 +137,10 @@ export const resolvePersonaVisualState = (
   if (
     input.runtimeOverride &&
     input.runtimeOverride.expiresAt > now &&
-    BUILTIN_VISUAL_STATES.has(input.runtimeOverride.state)
+    runtimeOverrideStateAllowed(
+      input.runtimeOverride.state,
+      input.runtimeStateIds
+    )
   ) {
     return input.runtimeOverride.state
   }
