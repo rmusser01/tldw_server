@@ -12,6 +12,10 @@ from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
     PersonaVisualRendererSetupStatus,
 )
+from tldw_Server_API.app.core.Persona.visual_starter_recipe_taxonomy import (
+    BUDDY_VISUAL_ANIMATION_OUTPUT_IDS,
+    BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS,
+)
 
 
 PersonaMode = Literal["session_scoped", "persistent_scoped"]
@@ -304,6 +308,16 @@ class PersonaVisualStarterProductionRecipeResponse(BaseModel):
     animation_outputs: PersonaVisualStarterRecipeItems
     review_checks: PersonaVisualStarterRecipeItems
 
+    @field_validator("animation_outputs")
+    @classmethod
+    def validate_animation_outputs(cls, value: list[str]) -> list[str]:
+        invalid_outputs = [
+            output for output in value if output not in BUDDY_VISUAL_ANIMATION_OUTPUT_IDS
+        ]
+        if invalid_outputs:
+            raise ValueError("animation_outputs must use supported animation output ids")
+        return value
+
     @field_validator("review_checks")
     @classmethod
     def validate_review_checks(cls, value: list[str]) -> list[str]:
@@ -329,6 +343,16 @@ class PersonaVisualStarterPackResponse(BaseModel):
     expected_asset_groups: list[str] = Field(default_factory=list)
     animation_coverage_notes: list[str] = Field(default_factory=list)
     production_recipe: PersonaVisualStarterProductionRecipeResponse
+
+    @field_validator("expected_asset_groups")
+    @classmethod
+    def validate_expected_asset_groups(cls, value: list[str]) -> list[str]:
+        invalid_groups = [
+            group for group in value if group not in BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS
+        ]
+        if invalid_groups:
+            raise ValueError("expected_asset_groups must use supported asset group ids")
+        return value
 
 
 class PersonaVisualStarterPackDetailResponse(PersonaVisualStarterPackResponse):

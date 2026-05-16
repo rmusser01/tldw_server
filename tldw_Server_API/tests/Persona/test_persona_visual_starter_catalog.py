@@ -10,7 +10,10 @@ import pytest
 from PIL import Image
 from pydantic import ValidationError
 
-from tldw_Server_API.app.api.v1.schemas.persona import PersonaVisualStarterProductionRecipeResponse
+from tldw_Server_API.app.api.v1.schemas.persona import (
+    PersonaVisualStarterPackResponse,
+    PersonaVisualStarterProductionRecipeResponse,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Persona.visual_manifest_assets import (
@@ -220,6 +223,47 @@ def test_default_starter_production_recipes_use_pipeline_taxonomy(
         assert not (animation_outputs & BUDDY_VISUAL_STATIC_SOURCE_ASSET_GROUP_IDS)
 
 
+def test_list_starter_packs_rejects_static_source_animation_outputs(
+    db_instance: CharactersRAGDB,
+) -> None:
+    malformed_recipe = replace(
+        DEFAULT_PERSONA_VISUAL_STARTER_PACKS[0].production_recipe,
+        animation_outputs=("static_talking_reaction_sheet",),
+    )
+    malformed = replace(
+        DEFAULT_PERSONA_VISUAL_STARTER_PACKS[0],
+        production_recipe=malformed_recipe,
+    )
+    service = PersonaVisualStarterCatalogService(db_instance, starter_packs=(malformed,))
+
+    with pytest.raises(PersonaVisualStarterCatalogError) as exc_info:
+        service.list_starter_packs()
+
+    assert exc_info.value.code == "invalid_starter_fixture"
+    assert exc_info.value.details["field_name"] == "production_recipe.animation_outputs"
+
+
+def test_list_starter_packs_rejects_recipe_outputs_missing_expected_groups(
+    db_instance: CharactersRAGDB,
+) -> None:
+    malformed_recipe = replace(
+        DEFAULT_PERSONA_VISUAL_STARTER_PACKS[0].production_recipe,
+        animation_outputs=("custom_state_variants",),
+    )
+    malformed = replace(
+        DEFAULT_PERSONA_VISUAL_STARTER_PACKS[0],
+        production_recipe=malformed_recipe,
+    )
+    service = PersonaVisualStarterCatalogService(db_instance, starter_packs=(malformed,))
+
+    with pytest.raises(PersonaVisualStarterCatalogError) as exc_info:
+        service.list_starter_packs()
+
+    assert exc_info.value.code == "invalid_starter_fixture"
+    assert exc_info.value.details["field_name"] == "production_recipe.animation_outputs"
+    assert exc_info.value.details["invalid_outputs"] == ["custom_state_variants"]
+
+
 @pytest.mark.parametrize(
     "starter_pack_id",
     (
@@ -317,6 +361,40 @@ def test_production_recipe_response_enforces_catalog_bounds(patch: dict[str, obj
 
     with pytest.raises(ValidationError):
         PersonaVisualStarterProductionRecipeResponse.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "animation_outputs",
+    (
+        ["static_talking_reaction_sheet"],
+        ["identity_brief"],
+        ["neutral_anchor"],
+        ["model_sheet"],
+        ["unknown_output"],
+    ),
+)
+def test_production_recipe_response_rejects_non_animation_outputs(
+    animation_outputs: list[str],
+) -> None:
+    payload = _valid_recipe_payload()
+    payload["animation_outputs"] = animation_outputs
+
+    with pytest.raises(ValidationError):
+        PersonaVisualStarterProductionRecipeResponse.model_validate(payload)
+
+
+def test_starter_pack_response_rejects_unknown_expected_asset_groups() -> None:
+    with pytest.raises(ValidationError):
+        PersonaVisualStarterPackResponse.model_validate(
+            {
+                "id": "starter",
+                "title": "Starter",
+                "description": "Starter fixture",
+                "renderer_type": "sprite_frames",
+                "expected_asset_groups": ["neutral_anchor", "unknown_group"],
+                "production_recipe": _valid_recipe_payload(),
+            }
+        )
 
 
 def test_get_starter_pack_accepts_legacy_research_buddy_alias(

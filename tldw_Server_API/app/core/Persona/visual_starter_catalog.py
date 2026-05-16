@@ -26,6 +26,10 @@ from tldw_Server_API.app.core.Persona.visual_service import (
     PersonaVisualService,
     PersonaVisualServiceError,
 )
+from tldw_Server_API.app.core.Persona.visual_starter_recipe_taxonomy import (
+    BUDDY_VISUAL_ANIMATION_OUTPUT_IDS,
+    BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS,
+)
 from tldw_Server_API.app.core.Persona.visual_starter_fixtures import (
     DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID,
     DEFAULT_PERSONA_VISUAL_STARTER_PACKS,
@@ -402,6 +406,21 @@ class PersonaVisualStarterCatalogService:
             field_name="expected_asset_groups",
             starter_id=starter.id,
         )
+        invalid_expected_groups = [
+            group
+            for group in expected_asset_groups
+            if group not in BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS
+        ]
+        if invalid_expected_groups:
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter expected asset groups must use the shared taxonomy.",
+                details={
+                    "starter_pack_id": starter.id,
+                    "field_name": "expected_asset_groups",
+                    "invalid_groups": invalid_expected_groups,
+                },
+            )
         neutral_anchor_required = PersonaVisualStarterCatalogService._starter_metadata_bool(
             starter.neutral_anchor_required,
             field_name="neutral_anchor_required",
@@ -427,10 +446,25 @@ class PersonaVisualStarterCatalogService:
                 "Bundled starter animation coverage notes are required.",
                 details={"starter_pack_id": starter.id},
             )
-        PersonaVisualStarterCatalogService._starter_production_recipe(
+        production_recipe = PersonaVisualStarterCatalogService._starter_production_recipe(
             starter.production_recipe,
             starter_id=starter.id,
         )
+        invalid_recipe_outputs = [
+            output
+            for output in production_recipe["animation_outputs"]
+            if output not in expected_asset_groups
+        ]
+        if invalid_recipe_outputs:
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter recipe outputs must be declared by expected asset groups.",
+                details={
+                    "starter_pack_id": starter.id,
+                    "field_name": "production_recipe.animation_outputs",
+                    "invalid_outputs": invalid_recipe_outputs,
+                },
+            )
 
         asset_keys: set[str] = set()
         for asset in starter.assets:
@@ -585,6 +619,21 @@ class PersonaVisualStarterCatalogService:
             field_name="production_recipe.animation_outputs",
             starter_id=starter_id,
         )
+        invalid_animation_outputs = [
+            output
+            for output in animation_outputs
+            if output not in BUDDY_VISUAL_ANIMATION_OUTPUT_IDS
+        ]
+        if invalid_animation_outputs:
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter production recipe outputs must be runtime animation ids.",
+                details={
+                    "starter_pack_id": starter_id,
+                    "field_name": "production_recipe.animation_outputs",
+                    "invalid_outputs": invalid_animation_outputs,
+                },
+            )
         review_checks = PersonaVisualStarterCatalogService._starter_recipe_tuple(
             value.review_checks,
             field_name="production_recipe.review_checks",
