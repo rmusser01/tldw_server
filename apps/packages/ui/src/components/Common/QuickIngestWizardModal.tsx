@@ -947,13 +947,13 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     if (
       autoProcessQueued &&
       !autoProcessedRef.current &&
-      queueItems.length > 0 &&
+      validQueueItems.length > 0 &&
       isOnlineForIngest
     ) {
       autoProcessedRef.current = true
       skipToProcessing()
     }
-  }, [autoProcessQueued, isOnlineForIngest, queueItems.length, skipToProcessing])
+  }, [autoProcessQueued, isOnlineForIngest, skipToProcessing, validQueueItems.length])
 
   // Whether processing is actively running
   const isProcessingActive = processingState.status === "running"

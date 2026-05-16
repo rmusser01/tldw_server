@@ -28,7 +28,12 @@ const addUrlToQuickIngest = async (dialog: Locator, url: string) => {
     .first()
   await urlInput.click()
   await urlInput.fill(url)
-  await dialog.getByRole('button', { name: /Add URLs|Add URLs to queue|Add/i }).first().click()
+  const addButton = dialog.locator('button').filter({ hasText: /^Add$/i }).last()
+  await expect(addButton).toBeEnabled()
+  await addButton.click()
+  await expect(
+    dialog.getByRole('button', { name: /configure \d+ items/i })
+  ).toBeEnabled()
 }
 
 const startQueuedQuickIngest = async (dialog: Locator) => {
@@ -69,6 +74,10 @@ const patchQuickIngestRuntimeResults = async (
         typeof runtime?.sendMessage === 'function'
           ? runtime.sendMessage.bind(runtime)
           : null
+      const originalGetManifest =
+        typeof runtime?.getManifest === 'function'
+          ? runtime.getManifest.bind(runtime)
+          : null
       if (!runtime || !onMessage || !originalSendMessage) {
         return false
       }
@@ -85,11 +94,7 @@ const patchQuickIngestRuntimeResults = async (
 
       const emit = (message: any) => {
         for (const listener of [...listeners]) {
-          try {
-            listener(message, {}, () => undefined)
-          } catch {
-            // best-effort test emitter
-          }
+          listener(message, {}, () => undefined)
         }
       }
 
@@ -99,8 +104,15 @@ const patchQuickIngestRuntimeResults = async (
       onMessage.removeListener = (listener: any) => {
         listeners.delete(listener)
       }
+      runtime.getManifest = () => ({
+        ...(originalGetManifest?.() || {}),
+        manifest_version: 2
+      })
 
       runtime.sendMessage = async (message: any) => {
+        if (message?.type === 'tldw:ping') {
+          return { ok: true }
+        }
         if (message?.type === 'tldw:quick-ingest/start') {
           const sessionId = 'qi-e2e-ux-audit-session'
           setTimeout(() => {
@@ -122,6 +134,9 @@ const patchQuickIngestRuntimeResults = async (
 
       ;(window as any).__restoreQuickIngestUxAuditPatch = () => {
         runtime.sendMessage = originalSendMessage
+        if (originalGetManifest) {
+          runtime.getManifest = originalGetManifest
+        }
         if (originalAddListener) {
           onMessage.addListener = originalAddListener
         }
@@ -216,13 +231,10 @@ test.describe('Quick ingest – UX audit', () => {
           mediaId: 'qi-extension-media-1'
         }
       ])
-      if (!patched) {
-        test.skip(
-          true,
-          'Quick-ingest runtime patching failed in page context; skipping deterministic success handoff audit.'
-        )
-        return
-      }
+      expect(
+        patched,
+        'Quick-ingest runtime patching must succeed for deterministic success handoff audit.'
+      ).toBe(true)
 
       const modal = await openQuickIngestDialog(page)
 
@@ -272,7 +284,7 @@ test.describe('Quick ingest – UX audit', () => {
       await expect(
         modal.getByRole('button', { name: /Hide advanced options/i })
       ).toHaveAttribute('aria-expanded', 'true')
-      await expect(modal.getByText(/Audio options/i)).toBeVisible()
+      await expect(modal.getByText(/Audio options|quickIngest\.audioOptions/i)).toBeVisible()
     } finally {
       await context.close()
     }
@@ -308,13 +320,10 @@ test.describe('Quick ingest – UX audit', () => {
         }
       ])
 
-      if (!patched) {
-        test.skip(
-          true,
-          'Quick-ingest message patching failed in page context; skipping mixed-results UX audit.'
-        )
-        return
-      }
+      expect(
+        patched,
+        'Quick-ingest message patching must succeed for deterministic mixed-results UX audit.'
+      ).toBe(true)
 
       const modal = await openQuickIngestDialog(page)
       await addUrlToQuickIngest(modal, 'https://example.com/mixed')
@@ -367,7 +376,7 @@ test.describe('Quick ingest – UX audit', () => {
         ).toBeVisible()
 
         // Close between states so each run starts clean.
-        await page.keyboard.press('Escape')
+        await modal.getByRole('button', { name: /close/i }).click()
         await expect(modal).toBeHidden()
       }
 

@@ -119,6 +119,17 @@ const mergeCustomOptions = (
   return next
 }
 
+const buildInitialProgress = (items: WizardQueueItem[]): ItemProgress[] =>
+  items
+    .filter((item) => item.validation.valid)
+    .map((item) => ({
+      id: item.id,
+      status: "queued" as const,
+      progressPercent: 0,
+      currentStage: "",
+      estimatedRemaining: 0,
+    }))
+
 const findMatchingPreset = (
   config: PresetConfig
 ): Exclude<IngestPreset, "custom"> | null => {
@@ -260,13 +271,8 @@ const reducer = (state: IngestWizardState, action: Action): IngestWizardState =>
     }
 
     case "START_PROCESSING": {
-      const perItemProgress: ItemProgress[] = state.queueItems.map((item) => ({
-        id: item.id,
-        status: "queued",
-        progressPercent: 0,
-        currentStage: "",
-        estimatedRemaining: 0,
-      }))
+      const perItemProgress = buildInitialProgress(state.queueItems)
+      if (perItemProgress.length === 0) return state
       return {
         ...state,
         processingState: {
@@ -331,13 +337,8 @@ const reducer = (state: IngestWizardState, action: Action): IngestWizardState =>
 
     case "SKIP_TO_PROCESSING": {
       // Quick Mode: skip Steps 2-3, jump directly to Step 4 with default preset
-      const perItemProgress: ItemProgress[] = state.queueItems.map((item) => ({
-        id: item.id,
-        status: "queued" as const,
-        progressPercent: 0,
-        currentStage: "",
-        estimatedRemaining: 0,
-      }))
+      const perItemProgress = buildInitialProgress(state.queueItems)
+      if (perItemProgress.length === 0) return state
       return {
         ...state,
         currentStep: 4 as WizardStep,

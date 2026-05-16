@@ -36,6 +36,7 @@ function TestHarness() {
     setQueueItems,
     setPreset,
     setCustomOptions,
+    startProcessing,
     skipToProcessing,
     cancelProcessing,
     cancelItem,
@@ -51,6 +52,9 @@ function TestHarness() {
       <span data-testid="preset">{state.selectedPreset}</span>
       <span data-testid="queueLen">{state.queueItems.length}</span>
       <span data-testid="status">{state.processingState.status}</span>
+      <span data-testid="progressIds">
+        {state.processingState.perItemProgress.map((item) => item.id).join(",")}
+      </span>
       <span data-testid="isMinimized">{String(state.isMinimized)}</span>
       <span data-testid="presetAnalysis">
         {String(state.presetConfig.common.perform_analysis)}
@@ -95,6 +99,43 @@ function TestHarness() {
       >
         setQueue
       </button>
+      <button
+        onClick={() =>
+          setQueueItems([
+            {
+              id: "valid-a",
+              detectedType: "audio",
+              fileSize: 100,
+              icon: "mic",
+              validation: { valid: true },
+            },
+            {
+              id: "invalid-b",
+              detectedType: "unknown",
+              fileSize: 0,
+              icon: "file",
+              validation: { valid: false, errors: ["Invalid URL format"] },
+            },
+          ] as WizardQueueItem[])
+        }
+      >
+        setMixedQueue
+      </button>
+      <button
+        onClick={() =>
+          setQueueItems([
+            {
+              id: "invalid-only",
+              detectedType: "unknown",
+              fileSize: 0,
+              icon: "file",
+              validation: { valid: false, errors: ["Unsupported file type"] },
+            },
+          ] as WizardQueueItem[])
+        }
+      >
+        setInvalidQueue
+      </button>
       <button onClick={() => setPreset("deep")}>setDeep</button>
       <button onClick={() => setPreset("custom")}>setCustomPreset</button>
       <button
@@ -124,6 +165,7 @@ function TestHarness() {
         setAudioLanguage
       </button>
       <button onClick={skipToProcessing}>skipToProcessing</button>
+      <button onClick={startProcessing}>startProcessing</button>
       <button onClick={cancelProcessing}>cancelProcessing</button>
       <button onClick={() => cancelItem("a")}>cancelItemA</button>
       <button onClick={minimize}>minimize</button>
@@ -430,6 +472,67 @@ describe("IngestWizardContext", () => {
       })
       expect(screen.getByTestId("currentStep").textContent).toBe("4")
       expect(screen.getByTestId("status").textContent).toBe("running")
+    })
+
+    it("initializes processing progress only for valid queue items", async () => {
+      renderWithProvider()
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("setMixedQueue"))
+      })
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("startProcessing"))
+      })
+
+      expect(screen.getByTestId("status").textContent).toBe("running")
+      expect(screen.getByTestId("progressIds").textContent).toBe("valid-a")
+    })
+
+    it("initializes quick processing progress only for valid queue items", async () => {
+      renderWithProvider()
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("setMixedQueue"))
+      })
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("skipToProcessing"))
+      })
+
+      expect(screen.getByTestId("currentStep").textContent).toBe("4")
+      expect(screen.getByTestId("progressIds").textContent).toBe("valid-a")
+    })
+
+    it("does not start processing an invalid-only queue", async () => {
+      renderWithProvider()
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("setInvalidQueue"))
+      })
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("startProcessing"))
+      })
+
+      expect(screen.getByTestId("status").textContent).toBe("idle")
+      expect(screen.getByTestId("progressIds").textContent).toBe("")
+    })
+
+    it("does not quick-process an invalid-only queue", async () => {
+      renderWithProvider()
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("setInvalidQueue"))
+      })
+
+      await act(async () => {
+        await userEvent.click(screen.getByText("skipToProcessing"))
+      })
+
+      expect(screen.getByTestId("currentStep").textContent).toBe("1")
+      expect(screen.getByTestId("status").textContent).toBe("idle")
+      expect(screen.getByTestId("progressIds").textContent).toBe("")
     })
 
     it("cancelProcessing sets status to cancelled", async () => {

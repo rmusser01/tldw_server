@@ -128,8 +128,12 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
 
   // Storage mode
   const storageMode = presetConfig.storeRemote ? "Server" : "Local"
+  const validItemCount = useMemo(
+    () => queueItems.filter((item) => item.validation.valid).length,
+    [queueItems]
+  )
   const canStartProcessing =
-    queueItems.length > 0 && isOnlineForIngest && !isCheckingConnection
+    validItemCount > 0 && isOnlineForIngest && !isCheckingConnection
 
   const handleStartProcessing = useCallback(() => {
     if (!canStartProcessing) return
