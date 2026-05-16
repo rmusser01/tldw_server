@@ -573,7 +573,7 @@ describe("SourceList researcher workflows", () => {
     Object.assign(navigator, { clipboard: { writeText } })
 
     render(<SourceList />)
-    fireEvent.click(screen.getAllByRole("button", { name: "Cite" })[0])
+    fireEvent.click(screen.getAllByRole("button", { name: /Copy citation/i })[0])
 
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith(

@@ -61,10 +61,10 @@ describe("SourceCard copy interactions", () => {
       />
     )
 
-    // "Copy text" is now in the overflow menu
-    await clickOverflowItem(/Copy text/i)
-    // "Cite" is a primary button
-    fireEvent.click(screen.getByRole("button", { name: /Cite/i }))
+    // "Copy excerpt" is now in the overflow menu
+    await clickOverflowItem(/Copy excerpt/i)
+    // "Copy citation" is a primary button
+    fireEvent.click(screen.getByRole("button", { name: /Copy citation/i }))
 
     await act(async () => {
       await Promise.resolve()
@@ -79,10 +79,10 @@ describe("SourceCard copy interactions", () => {
 
     // The cite confirmation still shows; stale copy-text does not overwrite it
     expect(screen.getByText("Copied!")).toBeInTheDocument()
-    // The overflow menu item should NOT show "Copied text" from the stale first copy
+    // The overflow menu item should NOT show "Copied excerpt" from the stale first copy
     const moreButton = screen.getByRole("button", { name: /More actions/i })
     fireEvent.click(moreButton)
-    expect(screen.queryByRole("menuitem", { name: /Copied text/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("menuitem", { name: /Copied excerpt/i })).not.toBeInTheDocument()
   })
 
   it("keeps the latest copy confirmation visible until its own timeout completes", async () => {
@@ -124,20 +124,20 @@ describe("SourceCard copy interactions", () => {
       />
     )
 
-    // Copy text via overflow menu
-    await clickOverflowItem(/Copy text/i)
+    // Copy excerpt via overflow menu
+    await clickOverflowItem(/Copy excerpt/i)
     await act(async () => {
       await Promise.resolve()
     })
-    // Open overflow to verify "Copied text" label
+    // Open overflow to verify "Copied excerpt" label
     fireEvent.click(screen.getByRole("button", { name: /More actions/i }))
-    expect(screen.getByRole("menuitem", { name: /Copied text/i })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: /Copied excerpt/i })).toBeInTheDocument()
 
     act(() => {
       vi.advanceTimersByTime(1000)
     })
-    // Click Cite primary button
-    fireEvent.click(screen.getByRole("button", { name: /Cite/i }))
+    // Click Copy citation primary button
+    fireEvent.click(screen.getByRole("button", { name: /Copy citation/i }))
     await act(async () => {
       await Promise.resolve()
     })
@@ -146,14 +146,14 @@ describe("SourceCard copy interactions", () => {
     act(() => {
       vi.advanceTimersByTime(1000)
     })
-    // Still showing "Copied!" on the primary Cite button
+    // Still showing "Copied!" on the primary Copy citation button
     expect(screen.getByText("Copied!")).toBeInTheDocument()
 
     act(() => {
       vi.advanceTimersByTime(1000)
     })
-    // Timeout expired, label reverts to "Cite"
-    expect(screen.getByRole("button", { name: /Cite/i })).toBeInTheDocument()
+    // Timeout expired, accessible name reverts to "Copy citation"
+    expect(screen.getByRole("button", { name: /Copy citation/i })).toBeInTheDocument()
     expect(screen.queryByText("Copied!")).not.toBeInTheDocument()
 
     vi.useRealTimers()
@@ -204,8 +204,8 @@ describe("SourceCard copy interactions", () => {
       />
     )
 
-    // Copy text via overflow menu
-    await clickOverflowItem(/Copy text/i)
+    // Copy excerpt via overflow menu
+    await clickOverflowItem(/Copy excerpt/i)
     unmount()
 
     resolveCopy?.()
@@ -219,7 +219,7 @@ describe("SourceCard copy interactions", () => {
 })
 
 describe("SourceCard action structure", () => {
-  it("shows View and Cite as primary buttons and overflow menu with secondary actions", () => {
+  it("shows View and Copy citation as primary buttons and overflow menu with secondary actions", () => {
     Object.defineProperty(globalThis.navigator, "clipboard", {
       value: { writeText: vi.fn().mockResolvedValue(undefined) },
       configurable: true,
@@ -258,7 +258,7 @@ describe("SourceCard action structure", () => {
 
     // Primary buttons are always visible
     expect(screen.getByRole("button", { name: /View source 1/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /Cite/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Copy citation/i })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /More actions/i })).toBeInTheDocument()
 
     // Secondary actions are hidden until overflow is opened
@@ -270,8 +270,11 @@ describe("SourceCard action structure", () => {
     expect(screen.getByRole("menuitem", { name: /Tell me more/i })).toBeInTheDocument()
     expect(screen.getByRole("menuitem", { name: /Summarize/i })).toBeInTheDocument()
     expect(screen.getByRole("menuitem", { name: /Key quotes/i })).toBeInTheDocument()
-    expect(screen.getByRole("menuitem", { name: /Copy text/i })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: /Copy excerpt/i })).toBeInTheDocument()
     expect(screen.getByRole("menuitem", { name: /Open original/i })).toBeInTheDocument()
+    expect(screen.getAllByRole("button", { name: /Copy citation/i })).toHaveLength(1)
+    expect(screen.getAllByRole("menuitem", { name: /Copy excerpt/i })).toHaveLength(1)
+    expect(screen.queryByRole("menuitem", { name: /Copy text/i })).not.toBeInTheDocument()
   })
 
   it("calls onAskAbout with the correct template from overflow menu items", async () => {

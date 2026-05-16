@@ -908,10 +908,11 @@ git commit -m "feat: show knowledge source health before search"
 - Create: `apps/packages/ui/src/components/Option/KnowledgeQA/trustSummary.ts`
 - Test: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/AnswerPanel.states.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/SourceCard.behavior.test.tsx`
+- Regression Test: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/SourceList.behavior.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/EvidenceRail.motion.test.ts`
 - Test: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/trustSummary.test.ts`
 
-- [ ] **Step 1: Write failing trust summary helper test**
+- [x] **Step 1: Write failing trust summary helper test**
 
 Create `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/trustSummary.test.ts`:
 
@@ -946,7 +947,7 @@ describe("buildAnswerTrustSummary", () => {
 
 Expected: FAIL because `trustSummary.ts` does not exist.
 
-- [ ] **Step 2: Implement trust summary helper**
+- [x] **Step 2: Implement trust summary helper**
 
 Create `apps/packages/ui/src/components/Option/KnowledgeQA/trustSummary.ts`:
 
@@ -964,7 +965,7 @@ export function formatSourceList(sources: RagSource[]): string {
 
 Add `buildAnswerTrustSummary` with deterministic copy and no viewport-specific logic.
 
-- [ ] **Step 3: Add AnswerPanel trust strip**
+- [x] **Step 3: Add AnswerPanel trust strip**
 
 Modify `AnswerPanel.tsx`:
 
@@ -980,7 +981,7 @@ Suggested markup:
 </div>
 ```
 
-- [ ] **Step 4: Audit SourceCard evidence actions**
+- [x] **Step 4: Audit SourceCard evidence actions**
 
 Modify `SourceCard.tsx` only after reading existing action structure:
 
@@ -990,7 +991,9 @@ Modify `SourceCard.tsx` only after reading existing action structure:
 - Do not add persistent `Pin evidence`.
 - Add `Save to note` only if the existing API contract is verified to preserve backlinks. Otherwise add a code comment in the test or plan notes that it is deferred.
 
-- [ ] **Step 5: Add EvidenceRail action affordance without a new panel**
+Implementation note: `Save to note` is deferred in this slice because a backlink-preserving note handoff contract was not verified.
+
+- [x] **Step 5: Add EvidenceRail action affordance without a new panel**
 
 Modify `EvidenceRail.tsx`:
 
@@ -1004,7 +1007,7 @@ Modify `EvidenceRail.tsx`:
 
 - Keep tabs and lazy details panel unchanged.
 
-- [ ] **Step 6: Update tests for evidence/trust UI**
+- [x] **Step 6: Update tests for evidence/trust UI**
 
 Extend:
 
@@ -1012,7 +1015,7 @@ Extend:
 - `SourceCard.behavior.test.tsx`: assert accessible names include `Copy citation` and `Copy excerpt`, and no duplicate copy controls are added.
 - Add a small EvidenceRail test if current motion test is not enough; otherwise keep EvidenceRail change covered by layout test.
 
-- [ ] **Step 7: Run evidence/trust tests**
+- [x] **Step 7: Run evidence/trust tests**
 
 Run:
 
@@ -1022,12 +1025,13 @@ cd apps/packages/ui
   src/components/Option/KnowledgeQA/__tests__/trustSummary.test.ts \
   src/components/Option/KnowledgeQA/__tests__/AnswerPanel.states.test.tsx \
   src/components/Option/KnowledgeQA/__tests__/SourceCard.behavior.test.tsx \
+  src/components/Option/KnowledgeQA/__tests__/SourceList.behavior.test.tsx \
   src/components/Option/KnowledgeQA/__tests__/EvidenceRail.motion.test.ts
 ```
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit evidence/trust UI**
+- [x] **Step 8: Commit evidence/trust UI**
 
 ```bash
 git add \
@@ -1038,6 +1042,7 @@ git add \
   apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/trustSummary.test.ts \
   apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/AnswerPanel.states.test.tsx \
   apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/SourceCard.behavior.test.tsx \
+  apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/SourceList.behavior.test.tsx \
   apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/EvidenceRail.motion.test.ts
 git commit -m "feat: clarify knowledge evidence trust controls"
 ```
