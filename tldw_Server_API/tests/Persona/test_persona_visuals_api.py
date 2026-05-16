@@ -220,12 +220,11 @@ def test_get_persona_visual_starter_pack_detail_exposes_static_sheet_source_grou
 
     assert response.status_code == 200
     payload = response.json()
-    assert "static_talking_reaction_sheet" in payload["expected_asset_groups"]
+    assert "static_talking_sheet" in payload["expected_asset_groups"]
+    assert "static_reaction_sheet" in payload["expected_asset_groups"]
     assert "static" in payload["production_recipe"]["static_sheet"].lower()
-    assert (
-        "static_talking_reaction_sheet"
-        not in payload["production_recipe"]["animation_outputs"]
-    )
+    assert "static_talking_sheet" not in payload["production_recipe"]["animation_outputs"]
+    assert "static_reaction_sheet" not in payload["production_recipe"]["animation_outputs"]
 
 
 def _upload_png(client: TestClient, persona_id: str, pack_id: str) -> dict:
@@ -415,13 +414,15 @@ def test_list_persona_visual_starter_packs(persona_db: CharactersRAGDB) -> None:
         for item in payload["starter_packs"]
         if item["id"] == "study-desk-intermediate"
     )
-    assert (
-        "static_talking_reaction_sheet"
-        in static_sheet_starter["expected_asset_groups"]
-    )
+    assert "static_talking_sheet" in static_sheet_starter["expected_asset_groups"]
+    assert "static_reaction_sheet" in static_sheet_starter["expected_asset_groups"]
     assert "static" in static_sheet_starter["production_recipe"]["static_sheet"].lower()
     assert (
-        "static_talking_reaction_sheet"
+        "static_talking_sheet"
+        not in static_sheet_starter["production_recipe"]["animation_outputs"]
+    )
+    assert (
+        "static_reaction_sheet"
         not in static_sheet_starter["production_recipe"]["animation_outputs"]
     )
     assert {"idle", "listening", "thinking", "speaking", "error"}.issubset(

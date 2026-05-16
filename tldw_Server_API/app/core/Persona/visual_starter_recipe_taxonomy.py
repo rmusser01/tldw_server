@@ -11,7 +11,8 @@ BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS = frozenset(
         "neutral_anchor",
         "preview_image",
         "model_sheet",
-        "static_talking_reaction_sheet",
+        "static_talking_sheet",
+        "static_reaction_sheet",
         "required_state_loops",
         "animation_strips",
         "animation_atlas",
@@ -24,7 +25,8 @@ BUDDY_VISUAL_STATIC_SOURCE_ASSET_GROUP_IDS = frozenset(
         "neutral_anchor",
         "preview_image",
         "model_sheet",
-        "static_talking_reaction_sheet",
+        "static_talking_sheet",
+        "static_reaction_sheet",
     }
 )
 BUDDY_VISUAL_ANIMATION_OUTPUT_IDS = frozenset(

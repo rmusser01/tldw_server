@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
     PersonaVisualRendererSetupStatus,
@@ -361,6 +361,23 @@ class PersonaVisualStarterPackResponse(BaseModel):
                 f"Invalid: {invalid_group_list}"
             )
         return value
+
+    @model_validator(mode="after")
+    def validate_recipe_outputs_are_expected(self) -> "PersonaVisualStarterPackResponse":
+        expected_groups = set(self.expected_asset_groups)
+        missing_outputs = sorted(
+            output
+            for output in self.production_recipe.animation_outputs
+            if output not in expected_groups
+        )
+        if missing_outputs:
+            missing_output_list = ", ".join(missing_outputs)
+            raise ValueError(
+                "production_recipe.animation_outputs must be declared in "
+                "expected_asset_groups. "
+                f"Missing: {missing_output_list}"
+            )
+        return self
 
 
 class PersonaVisualStarterPackDetailResponse(PersonaVisualStarterPackResponse):

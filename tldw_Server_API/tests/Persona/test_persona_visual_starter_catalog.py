@@ -180,7 +180,7 @@ def test_get_starter_pack_returns_isolated_manifest_preview(
         (
             "study-desk-intermediate",
             "intermediate",
-            "static_talking_reaction_sheet",
+            "static_talking_sheet",
             "required_state_loops",
         ),
         ("lofi-study-intricate", "intricate", "animation_atlas", "animation_atlas"),
@@ -228,7 +228,7 @@ def test_list_starter_packs_rejects_static_source_animation_outputs(
 ) -> None:
     malformed_recipe = replace(
         DEFAULT_PERSONA_VISUAL_STARTER_PACKS[0].production_recipe,
-        animation_outputs=("static_talking_reaction_sheet",),
+        animation_outputs=("static_talking_sheet",),
     )
     malformed = replace(
         DEFAULT_PERSONA_VISUAL_STARTER_PACKS[0],
@@ -275,7 +275,7 @@ def test_list_starter_packs_rejects_recipe_outputs_missing_expected_groups(
         "elaborate-persona-intricate",
     ),
 )
-def test_static_talking_sheet_is_source_material_not_animation_output(
+def test_static_talking_and_reaction_sheets_are_source_material_not_animation_output(
     db_instance: CharactersRAGDB,
     starter_pack_id: str,
 ) -> None:
@@ -283,12 +283,11 @@ def test_static_talking_sheet_is_source_material_not_animation_output(
 
     detail = service.get_starter_pack(starter_pack_id)
 
-    assert "static_talking_reaction_sheet" in detail["expected_asset_groups"]
+    assert "static_talking_sheet" in detail["expected_asset_groups"]
+    assert "static_reaction_sheet" in detail["expected_asset_groups"]
     assert "static" in detail["production_recipe"]["static_sheet"].lower()
-    assert (
-        "static_talking_reaction_sheet"
-        not in detail["production_recipe"]["animation_outputs"]
-    )
+    assert "static_talking_sheet" not in detail["production_recipe"]["animation_outputs"]
+    assert "static_reaction_sheet" not in detail["production_recipe"]["animation_outputs"]
 
 
 @pytest.mark.parametrize(
@@ -366,7 +365,8 @@ def test_production_recipe_response_enforces_catalog_bounds(patch: dict[str, obj
 @pytest.mark.parametrize(
     "animation_outputs",
     (
-        ["static_talking_reaction_sheet"],
+        ["static_talking_sheet"],
+        ["static_reaction_sheet"],
         ["identity_brief"],
         ["neutral_anchor"],
         ["model_sheet"],
@@ -401,6 +401,25 @@ def test_starter_pack_response_rejects_unknown_expected_asset_groups() -> None:
         )
 
     assert "unknown_group" in str(exc_info.value)
+
+
+def test_starter_pack_response_rejects_recipe_outputs_missing_expected_groups() -> None:
+    payload = {
+        "id": "starter",
+        "title": "Starter",
+        "description": "Starter fixture",
+        "renderer_type": "sprite_frames",
+        "expected_asset_groups": ["neutral_anchor", "required_state_loops"],
+        "production_recipe": {
+            **_valid_recipe_payload(),
+            "animation_outputs": ["required_state_loops", "custom_state_variants"],
+        },
+    }
+
+    with pytest.raises(ValidationError) as exc_info:
+        PersonaVisualStarterPackResponse.model_validate(payload)
+
+    assert "custom_state_variants" in str(exc_info.value)
 
 
 def test_get_starter_pack_accepts_legacy_research_buddy_alias(

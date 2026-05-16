@@ -267,7 +267,7 @@ scaffolds from final authored default assets:
    from a neutral identity anchor.
 4. `expected_asset_groups` lists the authored inputs and outputs expected
    before a scaffold becomes production artwork, such as `identity_brief`,
-   `neutral_anchor`, `static_talking_reaction_sheet`,
+   `neutral_anchor`, `static_talking_sheet`, `static_reaction_sheet`,
    `required_state_loops`, `animation_strips`, or `animation_atlas`.
 5. `animation_coverage_notes` are bounded notes for reviewers and future
    generation jobs. They describe the missing neutral-anchor-derived animation
@@ -277,20 +277,20 @@ scaffolds from final authored default assets:
    guidance, timed runtime `animation_outputs`, and `review_checks`.
 
 The neutral-anchor pipeline remains: identity brief, neutral anchor, optional
-static talking/reaction sheet, animation strips or atlas regions, review, then
-copy/import into an inactive draft with separate activation. The production
+static talking and reaction sheets, animation strips or atlas regions, review,
+then copy/import into an inactive draft with separate activation. The production
 metadata is catalog guidance for that pipeline; it does not create final art,
 run image generation, activate a pack, or change renderer support.
 
 Production recipes make the scaffold-to-art handoff explicit. Basic starters
 usually expect only required-state loops derived from a single neutral anchor.
-Intermediate starters add a static talking/reaction sheet and custom-state
+Intermediate starters add separate static talking and reaction sheets and custom-state
 variants. Intricate starters add animation strips or atlas regions on top of the
 same neutral anchor. These recipes are not prompts that the server executes and
 are not proof that finished animation assets exist; they are bounded metadata
 for reviewers, future generation jobs, and custom provider handoffs.
 
-Static talking/reaction sheets are source material, not timed animation outputs.
+Static talking sheets and static reaction sheets are source material, not timed animation outputs.
 They may appear in `expected_asset_groups` and in the recipe `static_sheet`
 guidance, but they must not appear in `production_recipe.animation_outputs`.
 Those outputs name runtime artifacts that can be mapped into manifest

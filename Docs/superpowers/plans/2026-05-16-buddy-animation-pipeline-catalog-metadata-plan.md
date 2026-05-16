@@ -4,7 +4,7 @@
 
 **Goal:** Make the bundled Buddy starter catalog metadata enforce the neutral-anchor-first animation pipeline contract without claiming final default animation art exists.
 
-**Architecture:** Keep the current Persona Visual pack/runtime contract intact. The first implementation slice only tightens starter catalog recipe metadata, schema validation, documentation, and tests so static talking/reaction sheets remain separate from timed animation outputs. It does not add final art assets, new renderers, or activation behavior.
+**Architecture:** Keep the current Persona Visual pack/runtime contract intact. The first implementation slice only tightens starter catalog recipe metadata, schema validation, documentation, and tests so static talking sheets and static reaction sheets remain separate from timed animation outputs. It does not add final art assets, new renderers, or activation behavior.
 
 **Tech Stack:** Python dataclasses and Pydantic schemas in `tldw_Server_API`, pytest unit tests, existing Persona Visual starter catalog service, existing Markdown docs.
 
@@ -31,8 +31,8 @@ Do not generate final Buddy images in this slice. Do not change runtime renderin
 
 - Modify: `tldw_Server_API/app/core/Persona/visual_starter_fixtures.py`
   - Owns immutable bundled starter catalog fixture definitions and production recipes.
-  - Remove `static_talking_reaction_sheet` from `animation_outputs`.
-  - Keep `static_talking_reaction_sheet` in `expected_asset_groups` where appropriate.
+  - Remove static talking and reaction sheet groups from `animation_outputs`.
+  - Keep `static_talking_sheet` and `static_reaction_sheet` in `expected_asset_groups` where appropriate.
 
 - Modify: `tldw_Server_API/app/core/Persona/visual_starter_catalog.py`
   - Owns service-level starter fixture validation.
@@ -52,7 +52,7 @@ Do not generate final Buddy images in this slice. Do not change runtime renderin
 - Modify: `tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py`
   - Owns focused starter catalog fixture/service validation.
   - Add tests for the pipeline taxonomy and static/animation separation.
-  - Update existing expectations that currently treat `static_talking_reaction_sheet` as an animation output.
+  - Update existing expectations that currently treat static talking sheets and static reaction sheets as animation outputs.
 
 - Modify: `tldw_Server_API/tests/Persona/test_persona_visuals_api.py`
   - Owns API-level starter catalog and generation enqueue coverage.
@@ -74,7 +74,7 @@ Do not generate final Buddy images in this slice. Do not change runtime renderin
 
 - Modify: `Docs/Code_Documentation/Persona_Visual_Packs.md`
   - Owns durable technical documentation for Persona/Buddy visual packs.
-  - Clarify that static talking/reaction sheets are expected asset groups and source material, not timed animation outputs.
+  - Clarify that static talking sheets and static reaction sheets are expected asset groups and source material, not timed animation outputs.
 
 - Modify: implementation Backlog task for this slice.
   - Use `TASK-411` if present: `backlog/tasks/task-411 - Separate-Buddy-static-source-sheets-from-animation-outputs.md`.
@@ -134,7 +134,7 @@ Add this test to prove intermediate/intricate starters still ask for static sour
         "elaborate-persona-intricate",
     ),
 )
-def test_static_talking_sheet_is_source_material_not_animation_output(
+def test_static_talking_and_reaction_sheets_are_source_material_not_animation_output(
     db_instance: CharactersRAGDB,
     starter_pack_id: str,
 ) -> None:
@@ -142,12 +142,11 @@ def test_static_talking_sheet_is_source_material_not_animation_output(
 
     detail = service.get_starter_pack(starter_pack_id)
 
-    assert "static_talking_reaction_sheet" in detail["expected_asset_groups"]
+    assert "static_talking_sheet" in detail["expected_asset_groups"]
+    assert "static_reaction_sheet" in detail["expected_asset_groups"]
     assert "static" in detail["production_recipe"]["static_sheet"].lower()
-    assert (
-        "static_talking_reaction_sheet"
-        not in detail["production_recipe"]["animation_outputs"]
-    )
+    assert "static_talking_sheet" not in detail["production_recipe"]["animation_outputs"]
+    assert "static_reaction_sheet" not in detail["production_recipe"]["animation_outputs"]
 ```
 
 - [ ] **Step 2: Run tests and verify they fail**
@@ -161,7 +160,7 @@ Run:
   -v
 ```
 
-Expected: fail because the taxonomy module/constants do not exist and the current recipes include `static_talking_reaction_sheet` in some `animation_outputs`.
+Expected: fail because the taxonomy module/constants do not exist and the current recipes include static talking or reaction sheet groups in some `animation_outputs`.
 
 - [ ] **Step 3: Add the shared taxonomy module**
 
@@ -181,7 +180,8 @@ BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS = frozenset(
         "neutral_anchor",
         "preview_image",
         "model_sheet",
-        "static_talking_reaction_sheet",
+        "static_talking_sheet",
+        "static_reaction_sheet",
         "required_state_loops",
         "animation_strips",
         "animation_atlas",
@@ -194,7 +194,8 @@ BUDDY_VISUAL_STATIC_SOURCE_ASSET_GROUP_IDS = frozenset(
         "neutral_anchor",
         "preview_image",
         "model_sheet",
-        "static_talking_reaction_sheet",
+        "static_talking_sheet",
+        "static_reaction_sheet",
     }
 )
 BUDDY_VISUAL_ANIMATION_OUTPUT_IDS = frozenset(
@@ -231,7 +232,7 @@ Expected: constants import, but the static-sheet separation test still fails unt
 
 - [ ] **Step 1: Update recipe outputs in fixtures**
 
-In `_multi_asset_pack()`, change `animation_outputs` so it no longer includes `static_talking_reaction_sheet`:
+In `_multi_asset_pack()`, change `animation_outputs` so it no longer includes static talking or reaction sheet groups:
 
 ```python
 animation_outputs=(
@@ -249,7 +250,7 @@ animation_outputs=(
 ),
 ```
 
-In `_atlas_pack()`, remove `static_talking_reaction_sheet` from `animation_outputs`:
+In `_atlas_pack()`, remove static talking or reaction sheet groups from `animation_outputs`:
 
 ```python
 animation_outputs=(
@@ -260,7 +261,7 @@ animation_outputs=(
 ),
 ```
 
-Do not remove `static_talking_reaction_sheet` from `_INTERMEDIATE_EXPECTED_ASSET_GROUPS` or `_INTRICATE_EXPECTED_ASSET_GROUPS`.
+Do not remove `static_talking_sheet` or `static_reaction_sheet` from `_INTERMEDIATE_EXPECTED_ASSET_GROUPS` or `_INTRICATE_EXPECTED_ASSET_GROUPS`.
 Add `required_state_loops` to `_INTRICATE_EXPECTED_ASSET_GROUPS` so every
 recipe `animation_outputs` value is also declared as an expected asset group.
 
@@ -278,7 +279,7 @@ Use this parametrization:
         (
             "study-desk-intermediate",
             "intermediate",
-            "static_talking_reaction_sheet",
+            "static_talking_sheet",
             "required_state_loops",
         ),
         ("lofi-study-intricate", "intricate", "animation_atlas", "animation_atlas"),
@@ -337,7 +338,7 @@ def test_list_starter_packs_rejects_static_source_animation_outputs(
             identity_brief="Identity",
             neutral_anchor="Neutral anchor",
             static_sheet="Static sheet",
-            animation_outputs=("static_talking_reaction_sheet",),
+            animation_outputs=("static_talking_sheet",),
         ),
     )
     service = PersonaVisualStarterCatalogService(db_instance, starter_packs=(malformed,))
@@ -381,7 +382,8 @@ Add a test near `test_production_recipe_response_enforces_catalog_bounds`:
 @pytest.mark.parametrize(
     "animation_outputs",
     (
-        ["static_talking_reaction_sheet"],
+        ["static_talking_sheet"],
+        ["static_reaction_sheet"],
         ["identity_brief"],
         ["neutral_anchor"],
         ["model_sheet"],
@@ -594,14 +596,14 @@ git commit -m "fix: bound buddy starter recipe animation outputs"
 Run:
 
 ```bash
-rg -n '"static_sheet"|"static_talking_reaction_sheet"|recipe_output' \
+rg -n '"static_sheet"|"static_talking_sheet"|"static_reaction_sheet"|recipe_output' \
   tldw_Server_API/tests/Persona/test_persona_visuals_api.py \
   tldw_Server_API/tests/Persona/test_persona_visual_jobs.py \
   tldw_Server_API/tests/Persona/test_persona_visual_candidate_provenance.py \
   tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py
 ```
 
-Expected: identify any test fixtures that use `recipe_output: "static_sheet"` or expect `static_talking_reaction_sheet` as an animation output.
+Expected: identify any test fixtures that use `recipe_output: "static_sheet"` or expect static talking sheets or static reaction sheets as animation outputs.
 
 - [ ] **Step 2: Update invalid job/API fixtures**
 
@@ -612,9 +614,11 @@ If a test intentionally validates invalid recipe output handling, prefer `not_a_
 For any API assertion that verifies static sheet availability, assert it through:
 
 ```python
-assert "static_talking_reaction_sheet" in starter["expected_asset_groups"]
+assert "static_talking_sheet" in starter["expected_asset_groups"]
+assert "static_reaction_sheet" in starter["expected_asset_groups"]
 assert "static" in starter["production_recipe"]["static_sheet"].lower()
-assert "static_talking_reaction_sheet" not in starter["production_recipe"]["animation_outputs"]
+assert "static_talking_sheet" not in starter["production_recipe"]["animation_outputs"]
+assert "static_reaction_sheet" not in starter["production_recipe"]["animation_outputs"]
 ```
 
 - [ ] **Step 3: Run focused API/job tests**
@@ -655,9 +659,9 @@ git commit -m "test: align buddy recipe output consumers"
 
 In the "Bundled Starter Catalog Scaffolds" section, update the production recipe explanation to state:
 
-- `expected_asset_groups` may include source groups such as `static_talking_reaction_sheet`.
+- `expected_asset_groups` may include source groups such as `static_talking_sheet` and `static_reaction_sheet`.
 - `production_recipe.animation_outputs` only names timed runtime outputs.
-- Static talking/reaction sheets become animation only when cells are explicitly mapped into manifest `animations` frames.
+- Static talking sheets and static reaction sheets become animation only when cells are explicitly mapped into manifest `animations` frames.
 
 Keep wording explicit that current PNGs are scaffolds and not final animation packs.
 
@@ -666,7 +670,7 @@ Keep wording explicit that current PNGs are scaffolds and not final animation pa
 Run:
 
 ```bash
-rg -n "Persona_Visual_Packs|Bundled Starter Catalog|static_talking_reaction_sheet" tldw_Server_API/tests Docs
+rg -n "Persona_Visual_Packs|Bundled Starter Catalog|static_talking_sheet|static_reaction_sheet" tldw_Server_API/tests Docs
 ```
 
 If there is no existing docs test for this exact file, do not add a new broad docs-test harness in this slice. The source and API tests are enough.
@@ -789,7 +793,7 @@ path instead and note the fallback in the commit summary.
 
 This slice is complete when:
 
-- `static_talking_reaction_sheet` is present only as source/expected asset metadata, not as a recipe animation output.
+- `static_talking_sheet` and `static_reaction_sheet` are present only as source/expected asset metadata, not as recipe animation outputs.
 - catalog service validation and API schema validation reject static/source
   groups in `animation_outputs`.
 - starter catalog/API/job tests pass.

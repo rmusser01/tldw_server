@@ -40,7 +40,8 @@ _BASIC_EXPECTED_ASSET_GROUPS = (
 _INTERMEDIATE_EXPECTED_ASSET_GROUPS = (
     "identity_brief",
     "neutral_anchor",
-    "static_talking_reaction_sheet",
+    "static_talking_sheet",
+    "static_reaction_sheet",
     "required_state_loops",
     "custom_state_variants",
 )
@@ -48,7 +49,8 @@ _INTRICATE_EXPECTED_ASSET_GROUPS = (
     "identity_brief",
     "neutral_anchor",
     "model_sheet",
-    "static_talking_reaction_sheet",
+    "static_talking_sheet",
+    "static_reaction_sheet",
     "required_state_loops",
     "animation_strips",
     "animation_atlas",
@@ -60,7 +62,7 @@ _BASIC_ANIMATION_NOTES = (
 )
 _INTERMEDIATE_ANIMATION_NOTES = (
     "Scaffold fixture only: final intermediate art should add a neutral model "
-    "sheet, talking/reaction sheet, and short custom-state loops.",
+    "sheet, separate talking and reaction sheets, and short custom-state loops.",
 )
 _INTRICATE_ANIMATION_NOTES = (
     "Scaffold fixture only: final intricate art should compile reviewed "
@@ -424,8 +426,8 @@ def _multi_asset_pack(
                 "Author a neutral model sheet or pose set before generating state frames."
             ),
             static_sheet=(
-                "Create a static talking/reaction sheet for mouth, face, and small pose "
-                "changes before compiling timed animation loops."
+                "Create separate static talking and reaction sheets for mouth, face, "
+                "and small pose changes before compiling timed animation loops."
             ),
             animation_outputs=(
                 (
@@ -483,8 +485,8 @@ def _atlas_pack(
                 "Author a full neutral model sheet before generating atlas-backed loops."
             ),
             static_sheet=(
-                "Create a separate static talking/reaction sheet for expression choices "
-                "before compiling timed atlas regions."
+                "Create separate static talking and reaction sheets for expression "
+                "choices before compiling timed atlas regions."
             ),
             animation_outputs=(
                 "required_state_loops",

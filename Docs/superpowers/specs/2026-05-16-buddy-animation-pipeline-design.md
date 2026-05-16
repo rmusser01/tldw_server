@@ -16,7 +16,7 @@ The key decision is to make final Buddy art a neutral-pose-first production
 workflow:
 
 1. establish one approved neutral identity anchor for a Buddy,
-2. optionally produce a static talking/reaction sheet from that anchor,
+2. optionally produce separate static talking and reaction sheets from that anchor,
 3. generate timed animation strips or atlas regions from the same anchor,
 4. review generated candidates,
 5. import or copy the result into an inactive Persona Visual draft pack,
@@ -68,7 +68,7 @@ existing stack, not a new avatar runtime.
    through an intricate art workflow.
 5. Support many custom states and per-tool animation variants while keeping IDs,
    labels, triggers, and fallback chains bounded and safe.
-6. Keep static talking/reaction sheets distinct from timed animation frames.
+6. Keep static talking sheets and static reaction sheets distinct from timed animation frames.
 
 ## Non-Goals
 
@@ -96,7 +96,7 @@ contracts.
 | Intermediate | `study-desk-intermediate` | Calm study companion in the Puzzle Attack clean anime/game-sprite style. | Neutral anchor, static talking sheet, separate required-state loops. |
 | Intermediate | `tool-helper-intermediate` | Utility-themed helper with exact tool variant support. | Required states plus at least one exact `tool_name` animation variant. |
 | Intermediate | `object-creature-intermediate` | Non-human expressive object companion. | Proves the format is not humanoid-only. |
-| Intricate | `lofi-study-intricate` | Original lofi-study companion, not a copyrighted character clone. | Full model sheet, talking/reaction sheet, atlas-backed loops, tool variants. |
+| Intricate | `lofi-study-intricate` | Original lofi-study companion, not a copyrighted character clone. | Full model sheet, separate talking and reaction sheets, atlas-backed loops, tool variants. |
 | Intricate | `action-guide-intricate` | High-motion guide with anticipation and success beats. | Rich reaction states and more expressive motion arcs. |
 | Intricate | `elaborate-persona-intricate` | High-detail fantasy/sci-fi assistant. | Multiple custom-state rows, atlas/strip compilation, richer review gates. |
 
@@ -139,7 +139,7 @@ Required production assets:
 
 - identity brief
 - neutral anchor or simple model sheet
-- static talking/reaction sheet
+- static talking and reaction sheets
 - separate required-state loops
 - one or more custom-state variants
 
@@ -155,7 +155,7 @@ Required production assets:
 
 - identity brief
 - approved neutral model sheet
-- static talking/reaction sheet
+- static talking and reaction sheets
 - animation strips or atlas source
 - compiled runtime atlas or frame set
 - multiple custom-state variants
@@ -172,7 +172,7 @@ The production sequence is intentionally linear:
 ```text
 identity brief
   -> neutral identity anchor
-  -> optional static talking/reaction sheet
+  -> optional static talking and reaction sheets
   -> generated animation strips or atlas frames
   -> validation and compilation
   -> human review
@@ -185,7 +185,7 @@ Rules:
 1. The neutral anchor is the identity source of truth for all downstream assets.
 2. Do not generate timed animation frames directly from text after the anchor is
    approved.
-3. Static talking/reaction sheets are still images with semantic cells. They are
+3. Static talking sheets and static reaction sheets are still images with semantic cells. They are
    not animations until manifest `animations` map cells into timed frames.
 4. Animation outputs must be generated from the neutral anchor or a model sheet
    using image-to-image continuity.
@@ -471,7 +471,7 @@ go through:
 
 1. identity brief,
 2. neutral anchor,
-3. static talking/reaction sheet if applicable,
+3. static talking and reaction sheets if applicable,
 4. animation strip/atlas generation,
 5. machine validation,
 6. human visual review,
