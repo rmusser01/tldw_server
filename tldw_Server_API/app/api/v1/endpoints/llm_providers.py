@@ -7,7 +7,7 @@ from functools import partial
 from typing import Any, Optional
 from urllib.parse import urljoin, urlparse
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from loguru import logger
 
 import tldw_Server_API.app.core.LLM_Calls.adapter_registry as llm_adapter_registry
@@ -25,6 +25,11 @@ from tldw_Server_API.app.core.exceptions import (
 from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
 from tldw_Server_API.app.core.http_client import fetch as _http_fetch
 from tldw_Server_API.app.core.Image_Generation.listing import list_image_models_for_catalog
+from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import LLMInferenceLibError
+from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_capabilities import (
+    managed_profile_model_metadata,
+)
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
     PROVIDER_CAPABILITIES,
     provider_requires_api_key,
@@ -71,6 +76,9 @@ _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS = (
     EgressPolicyError,
     NetworkError,
     RetryExhaustedError,
+)
+_LLAMACPP_METADATA_EXCEPTIONS = _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS + (
+    LLMInferenceLibError,
 )
 
 # ----------------------------------------------------------------------------------
@@ -2039,6 +2047,56 @@ def _model_matches_filters(
         return False
     return not (output_filters and not set(output_mods).intersection(output_filters))
 
+
+def _managed_llamacpp_profile_metadata_entries(supervisor: Any | None) -> list[dict[str, Any]]:
+    """Return bounded model metadata entries for managed llama.cpp profiles."""
+    if supervisor is None:
+        return []
+    try:
+        profiles = supervisor.list_profiles()
+    except _LLAMACPP_METADATA_EXCEPTIONS:
+        logger.debug("Failed to list managed llama.cpp profiles for model metadata", exc_info=True)
+        return []
+    if not profiles:
+        return []
+
+    asset_scan_warnings: list[str] = []
+    try:
+        asset_scan = llamacpp_inventory_service.scan_assets()
+        assets = asset_scan.assets
+        if asset_scan.scan_limited:
+            asset_scan_warnings.append(
+                "Managed llama.cpp asset inventory scan was truncated; capability metadata may be incomplete."
+            )
+    except _LLAMACPP_METADATA_EXCEPTIONS:
+        logger.debug("Failed to scan llama.cpp assets for model metadata", exc_info=True)
+        assets = []
+        asset_scan_warnings.append("Managed llama.cpp asset scan failed; capability metadata may be incomplete.")
+
+    entries: list[dict[str, Any]] = []
+    for profile in profiles:
+        try:
+            entry = managed_profile_model_metadata(profile, assets=assets)
+        except _LLAMACPP_METADATA_EXCEPTIONS:
+            logger.debug("Failed to build managed llama.cpp profile metadata", exc_info=True)
+            continue
+        if asset_scan_warnings:
+            warnings = entry.setdefault("capability_warnings", [])
+            if isinstance(warnings, list):
+                warnings.extend(asset_scan_warnings)
+            else:
+                entry["capability_warnings"] = list(asset_scan_warnings)
+        entries.append(entry)
+    return entries
+
+
+def _llamacpp_supervisor_from_request(request: Request | None) -> Any | None:
+    """Return the managed llama.cpp supervisor attached to the app, if present."""
+    if request is None:
+        return None
+    manager = getattr(request.app.state, "llm_manager", None)
+    return getattr(manager, "llamacpp_supervisor", None)
+
 #######################################################################################################################
 #
 # Endpoints:
@@ -2119,6 +2177,7 @@ async def get_llm_providers(include_deprecated: bool = False):
     ),
     response_model=dict[str, Any])
 async def get_models_metadata(
+    request: Request,
     include_deprecated: bool = False,
     refresh_openrouter: bool = Query(
         False,
@@ -2169,6 +2228,19 @@ async def get_models_metadata(
                 ):
                     continue
                 flattened.append(entry)
+        managed_entries = await asyncio.to_thread(
+            _managed_llamacpp_profile_metadata_entries,
+            _llamacpp_supervisor_from_request(request),
+        )
+        for entry in managed_entries:
+            if not _model_matches_filters(
+                entry,
+                type_filters=type_filters,
+                input_filters=input_filters,
+                output_filters=output_filters,
+            ):
+                continue
+            flattened.append(entry)
         # Append image generation backends to the catalog
         try:
             image_models = list_image_models_for_catalog()

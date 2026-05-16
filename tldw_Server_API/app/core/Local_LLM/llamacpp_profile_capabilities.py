@@ -77,6 +77,27 @@ def profile_capability_metadata(
     }
 
 
+def managed_profile_model_metadata(
+    profile: LlamaCppProfile,
+    assets: list[LlamaCppAsset] | None = None,
+) -> dict[str, object]:
+    """Build public model-catalog metadata for one managed llama.cpp profile."""
+    alias = profile.provider_alias or f"llamacpp:{profile.profile_id}"
+    capabilities = profile_capability_metadata(profile, assets=assets)
+    return {
+        "provider": "llama.cpp",
+        "model": alias,
+        "name": profile.name,
+        "type": _type_for_mode(profile.mode),
+        "llamacpp_profile_id": profile.profile_id,
+        "source": "managed_llamacpp_profile",
+        "provider_is_configured": profile.enabled,
+        "is_configured": profile.enabled,
+        "catalog_only": False,
+        **capabilities,
+    }
+
+
 def _resolve_base_model_path(
     profile: LlamaCppProfile,
     assets: list[LlamaCppAsset] | None,
@@ -190,8 +211,20 @@ def _modalities_for_mode(
     return {"input": ["text"], "output": ["text"]}
 
 
+def _type_for_mode(mode: LlamaCppProfileMode) -> str:
+    """Map managed profile modes onto the public model catalog type vocabulary."""
+    if mode in {LlamaCppProfileMode.CHAT, LlamaCppProfileMode.VISION}:
+        return "chat"
+    if mode == LlamaCppProfileMode.EMBEDDING:
+        return "embedding"
+    if mode == LlamaCppProfileMode.RERANK:
+        return "rerank"
+    return "other"
+
+
 __all__ = [
     "LlamaCppResolvedProfileLaunch",
+    "managed_profile_model_metadata",
     "profile_capability_metadata",
     "resolve_profile_launch",
 ]

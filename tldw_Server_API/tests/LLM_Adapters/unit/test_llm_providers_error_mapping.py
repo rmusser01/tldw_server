@@ -165,6 +165,7 @@ async def test_get_models_metadata_sanitizes_generic_failure(monkeypatch):
 
     with pytest.raises(HTTPException) as exc_info:
         await llm_endpoints.get_models_metadata(
+            request=None,
             refresh_openrouter=False,
             model_type=None,
             input_modality=None,
@@ -191,6 +192,7 @@ async def test_get_models_metadata_sanitizes_image_model_warning(monkeypatch):
     monkeypatch.setattr(llm_endpoints, "list_image_models_for_catalog", boom)
 
     result = await llm_endpoints.get_models_metadata(
+        request=None,
         refresh_openrouter=False,
         model_type=None,
         input_modality=None,
