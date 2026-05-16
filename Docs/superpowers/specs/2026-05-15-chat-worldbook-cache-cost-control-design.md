@@ -464,16 +464,39 @@ Tests should cover:
 - Risk: Schema migration adds admin/reporting complexity.
   Mitigation: nullable columns and backward-compatible fallback inserts.
 
-## Open Questions
+## Resolved V2 Direction
 
-- Should raw prompt envelopes ever be persisted, or should they remain
-  request-local unless an explicit debug mode is enabled?
-- Should users be able to pin specific world-book entries into the stable prefix,
-  or should pinned/static classification remain internal at first?
-- Which admin surface should own cache-aware cost reporting: existing usage
-  analytics, chat diagnostics, or a dedicated LLM cost-control view?
-- Should local engines expose compute-risk budgets in tokens only, or also in
-  estimated prefill latency once enough telemetry exists?
+The initial implementation answered the measurement, accounting, guardrail,
+provider-cache, local-diagnostic, and usage-reporting questions. The remaining
+product questions are resolved for a follow-up v2 implementation:
+
+- Raw prompt envelopes may be persisted only behind an explicit debug mode.
+  Debug persistence must be disabled by default, clearly marked as sensitive,
+  bounded by size and retention limits, excluded from normal exports, and
+  subject to the same redaction/canonicalization constraints as the request-local
+  envelope diagnostics. Normal usage rows should continue to store hashes,
+  counts, ids, and bounded metadata by default.
+- Users should be able to pin specific world-book entries into the stable
+  prefix. The UI and API must make this explicit, not infer it silently from
+  activation metadata. Pinned entries should be ordered deterministically ahead
+  of dynamic triggered entries, surfaced in diagnostics, and bounded by existing
+  world-book prompt budgets so pinning cannot create invisible token bursts.
+- Cache-aware reporting should stay in the existing usage analytics surface.
+  A dedicated cost-control page is not needed for the next iteration. Existing
+  usage list, summary, and CSV/reporting paths should gain the new debug-envelope,
+  pinned-prefix, and local-latency fields where they are useful and safe.
+- Local engines should report prefill latency when reliable signal exists. The
+  product must distinguish:
+  - `observed_exact`: response-level timing returned by the engine, such as
+    llama.cpp prompt timing fields when present.
+  - `observed_metrics`: server metrics or tracing correlated to the request,
+    such as vLLM metrics where correlation is possible.
+  - `app_observed_ttft`: application-measured time-to-first-token for streaming
+    calls, which can include queueing and scheduling and is not pure prefill.
+  - `estimated`: token-count or throughput-derived projections.
+
+Estimated local latency must never be presented as authoritative. It is a
+capacity and UX signal, not billing evidence.
 
 ## Approval State
 
