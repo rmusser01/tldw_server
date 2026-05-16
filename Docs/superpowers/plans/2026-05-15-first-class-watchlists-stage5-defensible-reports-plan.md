@@ -572,7 +572,7 @@ git commit -m "feat: persist watchlist report evidence snapshots"
 - Test: `apps/packages/ui/src/services/__tests__/watchlists-reports.test.ts`
 - Test: `apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/outputMetadata.test.ts`
 
-- [ ] **Step 1: Write failing frontend contract tests**
+- [x] **Step 1: Write failing frontend contract tests**
 
 Cover:
 
@@ -582,7 +582,7 @@ Cover:
 - Metadata helpers return labels/colors/counts for `ready`, `warning`, `blocked`, and `legacy_live_only`.
 - Snapshot helpers handle absent legacy metadata without throwing.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -595,7 +595,7 @@ bunx vitest run \
 
 Expected: FAIL because frontend contract does not exist yet.
 
-- [ ] **Step 3: Add TypeScript types**
+- [x] **Step 3: Add TypeScript types**
 
 Add types matching backend schema:
 
@@ -634,7 +634,7 @@ export interface WatchlistReportEvidenceSnapshot {
 
 Extend `WatchlistOutputCreate` with optional Stage 5 fields.
 
-- [ ] **Step 4: Add service functions**
+- [x] **Step 4: Add service functions**
 
 Add to `watchlists.ts`:
 
@@ -648,7 +648,7 @@ export const getWatchlistOutputReadiness = async (
 ): Promise<WatchlistReportReadiness> => bgRequest({ ... })
 ```
 
-- [ ] **Step 5: Add metadata helpers**
+- [x] **Step 5: Add metadata helpers**
 
 In `outputMetadata.ts`, add:
 
@@ -665,7 +665,7 @@ In `outputMetadata.ts`, add:
 
 Helpers must use defensive parsing and return safe defaults for legacy outputs.
 
-- [ ] **Step 6: Run frontend contract tests**
+- [x] **Step 6: Run frontend contract tests**
 
 Run:
 
@@ -677,6 +677,14 @@ bunx vitest run \
 ```
 
 Expected: PASS.
+
+Stage 5C verification note: the focused contract/regression run passed for
+`watchlists-reports.test.ts`, `watchlists-first-class.test.ts`,
+`outputMetadata.test.ts`, `OutputsTab.regenerate-modal.test.tsx`, and
+`ItemsTab.batch-controls.test.tsx`. `git diff --check` passed. A full
+`tsc --noEmit -p tsconfig.json` still reports existing repo-wide typecheck
+failures, but no errors referenced the Stage 5C touched files after the typed
+fixture was corrected.
 
 - [ ] **Step 7: Commit Stage 5C**
 

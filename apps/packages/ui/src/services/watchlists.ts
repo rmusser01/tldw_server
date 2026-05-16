@@ -50,6 +50,8 @@ import type {
   WatchlistJobUpdate,
   WatchlistOutput,
   WatchlistOutputCreate,
+  WatchlistOutputEvidenceResponse,
+  WatchlistReportReadiness,
   WatchlistRun,
   WatchlistSettings,
   WatchlistSource,
@@ -881,6 +883,24 @@ export const downloadWatchlistOutputBinary = async (outputId: number): Promise<A
     path: `/api/v1/watchlists/outputs/${outputId}/download` as any,
     method: "GET",
     responseType: "arrayBuffer"
+  })
+}
+
+export const getWatchlistOutputEvidence = async (
+  outputId: number
+): Promise<WatchlistOutputEvidenceResponse> => {
+  return bgRequest<WatchlistOutputEvidenceResponse>({
+    path: `/api/v1/watchlists/outputs/${outputId}/evidence` as any,
+    method: "GET"
+  })
+}
+
+export const getWatchlistOutputReadiness = async (
+  outputId: number
+): Promise<WatchlistReportReadiness> => {
+  return bgRequest<WatchlistReportReadiness>({
+    path: `/api/v1/watchlists/outputs/${outputId}/readiness` as any,
+    method: "GET"
   })
 }
 

@@ -559,6 +559,85 @@ export interface WatchlistContentAlertUpdate {
 
 export type OutputFormat = "md" | "html" | "mp3" | "wav" | "ogg" | "m4a" | "aac" | "flac" | string
 
+export type WatchlistReportPreset = "auto" | "cti_osint" | "news_briefing" | "general_research"
+export type WatchlistReportReadinessState = "ready" | "warning" | "blocked" | "legacy_live_only"
+export type WatchlistReportReadinessWarningSeverity = "info" | "warning" | "blocking"
+
+export interface WatchlistReportReadinessWarning {
+  code: string
+  severity: WatchlistReportReadinessWarningSeverity
+  message: string
+  affected_item_ids: number[]
+}
+
+export interface WatchlistReportReadiness {
+  state: WatchlistReportReadinessState
+  score: number
+  warnings: WatchlistReportReadinessWarning[]
+}
+
+export interface WatchlistReportEvidenceAlert {
+  id: number
+  rule_id: number
+  rule_name?: string | null
+  severity: string
+  status: string
+  title?: string | null
+  snippet?: string | null
+  matched_text?: string | null
+  evidence: Record<string, unknown>
+  created_at?: string | null
+}
+
+export interface WatchlistReportEvidenceItem {
+  id: number
+  title?: string | null
+  url?: string | null
+  source_id?: number | null
+  source_name?: string | null
+  published_at?: string | null
+  summary?: string | null
+  tags: string[]
+  reviewed: boolean
+  queued_for_briefing: boolean
+  alerts: WatchlistReportEvidenceAlert[]
+}
+
+export interface WatchlistReportExcludedItem {
+  id: number
+  title?: string | null
+  url?: string | null
+  reason: string
+}
+
+export interface WatchlistReportEvidenceSnapshot {
+  schema_version: number
+  snapshot_id: string
+  generated_at: string
+  preset: WatchlistReportPreset
+  watchlist_id?: number | null
+  job_id: number
+  run_id: number
+  output_id?: number | null
+  included_items: WatchlistReportEvidenceItem[]
+  excluded_items: WatchlistReportExcludedItem[]
+  source_summary: Record<string, unknown>
+  included_count: number
+  excluded_count: number
+  excluded_total_count?: number | null
+  excluded_items_truncated: boolean
+  alert_count: number
+  critical_alert_count: number
+  readiness: WatchlistReportReadiness
+}
+
+export interface WatchlistOutputEvidenceResponse {
+  output_id: number
+  immutable_snapshot: boolean
+  snapshot?: WatchlistReportEvidenceSnapshot | null
+  readiness: WatchlistReportReadiness
+}
+
 export interface WatchlistOutput {
   id: number
   run_id: number
@@ -584,6 +663,11 @@ export interface WatchlistOutputCreate {
   type?: string
   format?: OutputFormat
   metadata?: Record<string, unknown>
+  report_preset?: WatchlistReportPreset
+  include_evidence_table?: boolean
+  include_excluded_items?: boolean
+  require_reviewed_items?: boolean
+  allow_weak_evidence?: boolean
   template_name?: string
   template_version?: number
   retention_seconds?: number
