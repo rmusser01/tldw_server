@@ -787,7 +787,7 @@ Omit untouched files from `git add`.
 - Modify: relevant Backlog task files for implementation tasks.
 - Read: all touched files from Tasks 1 through 6.
 
-- [ ] **Step 1: Review all commits and touched files**
+- [x] **Step 1: Review all commits and touched files**
 
 Run:
 
@@ -798,7 +798,7 @@ git diff --stat dev...HEAD
 
 Expected: only quick-ingest/shared test/planning files are touched.
 
-- [ ] **Step 2: Run final verification command set**
+- [x] **Step 2: Run final verification command set**
 
 Run the final focused commands from previous tasks:
 
@@ -810,7 +810,7 @@ git diff --check
 
 Expected: all pass or known skips are documented with exact reason.
 
-- [ ] **Step 3: Run Bandit only if backend Python code was touched**
+- [x] **Step 3: Run Bandit only if backend Python code was touched**
 
 This plan should not require backend Python changes. If implementation expands
 into backend Python anyway, first record why in Backlog, then run Bandit on the
@@ -825,7 +825,7 @@ Expected: no new findings in touched backend code.
 
 If no Python/backend files were touched, document: "Bandit not applicable; frontend/docs/tests only."
 
-- [ ] **Step 4: Update Backlog implementation task notes**
+- [x] **Step 4: Update Backlog implementation task notes**
 
 Record:
 
@@ -835,7 +835,7 @@ Record:
 - remaining verification gaps, if any
 - whether the large-file strategy used Truthful limit fix or was changed by the human owner
 
-- [ ] **Step 5: Prepare PR summary with human-owned Change summary section**
+- [x] **Step 5: Prepare PR summary with human-owned Change summary section**
 
 Draft PR notes with:
 
@@ -855,7 +855,7 @@ Human requester to write: what changed and why these implementation choices were
 
 Do not fabricate the human-owned Change summary.
 
-- [ ] **Step 6: Commit Backlog closeout if needed**
+- [x] **Step 6: Commit Backlog closeout if needed**
 
 Run:
 
@@ -869,6 +869,33 @@ git commit -m "docs: record quick ingest remediation verification"
 ```
 
 Expected: commit contains only Backlog/task closeout files.
+
+**Completion notes:**
+- Branch scope review: `git diff --stat dev...HEAD` shows Quick Ingest shared UI/components/tests, WebUI/extension Quick Ingest e2e specs/helpers, planning docs, and Backlog task records only.
+- Final verification: `./node_modules/.bin/vitest run src/components/Common/QuickIngest/__tests__ src/services/__tests__/quick-ingest-batch.test.ts src/services/__tests__/quick-ingest-session-reattach.test.ts --maxWorkers=1 --no-file-parallelism` passed with 15 files / 178 tests.
+- Final verification: `TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://127.0.0.1:18001 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/media-ingest.spec.ts --grep "Quick Ingest" --project=chromium --reporter=line` passed outside the macOS sandbox with 11 tests.
+- Final verification: `git diff --check` passed.
+- Extension verification gap remains documented in `TASK-394.6` and `TASK-394.7`: extension Playwright global setup did not reach test execution because the Chrome extension build path failed/hung before the specs ran.
+- Bandit: not applicable; touched implementation/test files are frontend TypeScript/TSX/JSON/docs/Backlog only.
+
+**PR-ready notes:**
+
+```markdown
+## Summary
+- Clarified Quick Ingest entry, first-open purpose copy, and destination expectations.
+- Improved result handoff, retry/remove affordances, and post-ingest navigation actions.
+- Corrected offline, cancel, progress, and minimized status semantics.
+- Hardened URL/file validation, truthful browser-buffered upload limits, and current wizard coverage.
+
+## Tests
+- `./node_modules/.bin/vitest run src/components/Common/QuickIngest/__tests__ src/services/__tests__/quick-ingest-batch.test.ts src/services/__tests__/quick-ingest-session-reattach.test.ts --maxWorkers=1 --no-file-parallelism` - passed, 15 files / 178 tests.
+- `TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://127.0.0.1:18001 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/media-ingest.spec.ts --grep "Quick Ingest" --project=chromium --reporter=line` - passed, 11 tests.
+- `git diff --check` - passed.
+- Extension Playwright focused run did not reach test execution because the extension build/globalSetup path failed/hung before running specs; details recorded in Backlog.
+
+## Change summary
+Human requester to write: what changed and why these implementation choices were made.
+```
 
 ---
 
