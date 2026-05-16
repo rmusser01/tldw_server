@@ -1,10 +1,10 @@
 ---
-id: TASK-401
+id: TASK-403
 title: Add Persona Visual starter production-readiness metadata
 status: Done
 assignee: []
 created_date: '2026-05-16 02:34'
-updated_date: '2026-05-16 04:36'
+updated_date: '2026-05-16 04:58'
 labels:
   - persona
   - visual-packs
@@ -35,7 +35,7 @@ Expose bounded production-readiness metadata for the nine Persona Visual starter
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Implemented production-readiness metadata for Persona Visual starter catalog summaries/details: complexity_tier, production_status, neutral_anchor_required, expected_asset_groups, and animation_coverage_notes. Added fixture validation for tier/status/neutral-anchor consistency while preserving existing copy-to-draft behavior. PR review follow-up: added canonical metadata validation for complexity_tier/production_status, explicit immutable tuple validation for expected_asset_groups/animation_coverage_notes, strict boolean validation for neutral_anchor_required, direct immutable tuple dataclass defaults, and regression coverage for malformed production metadata. Verification: focused pytest 38 passed; py_compile exit 0; git diff --check exit 0; Bandit JSON results empty at /tmp/bandit_persona_visual_starter_production_1741_review2.json.
+Implemented production-readiness metadata for Persona Visual starter catalog summaries/details: complexity_tier, production_status, neutral_anchor_required, expected_asset_groups, and animation_coverage_notes. Added fixture validation for tier/status/neutral-anchor consistency while preserving existing copy-to-draft behavior. PR review follow-up: added canonical metadata validation for complexity_tier/production_status, explicit immutable tuple validation for expected_asset_groups/animation_coverage_notes, strict boolean validation for neutral_anchor_required, direct immutable tuple dataclass defaults, and regression coverage for malformed production metadata. Post-rebase tracker fix: renumbered this task from TASK-401 to TASK-403 to avoid colliding with the merged #1740 task. Verification: focused Persona Visual pytest 85 passed; py_compile exit 0; git diff --check exit 0; git diff --check origin/dev...HEAD exit 0; Bandit JSON written to /tmp/bandit_persona_visual_starter_production_1741_rebase.json with exit 0.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
