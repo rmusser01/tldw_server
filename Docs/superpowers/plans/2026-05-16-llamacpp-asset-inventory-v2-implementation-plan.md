@@ -903,7 +903,7 @@ git commit -m "Add llama.cpp assets panel"
 - Modify: `apps/packages/ui/src/components/Option/Admin/LlamacppAdminPage.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppAdminPage.test.tsx`
 
-- [ ] **Step 1: Write failing Admin page tests**
+- [x] **Step 1: Write failing Admin page tests**
 
 Add tests for:
 
@@ -912,7 +912,7 @@ Add tests for:
 - import folder calls the folder endpoint and reloads assets;
 - asset endpoint failure is shown without hiding the legacy inventory panel.
 
-- [ ] **Step 2: Run selected Admin page tests**
+- [x] **Step 2: Run selected Admin page tests**
 
 Run:
 
@@ -922,7 +922,9 @@ bunx vitest run apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppA
 
 Expected: FAIL because Admin page does not yet load/render assets.
 
-- [ ] **Step 3: Integrate asset state**
+Verification note: `./node_modules/.bin/vitest run src/components/Option/Admin/__tests__/LlamacppAdminPage.test.tsx` failed with 5 expected asset-integration failures before implementation.
+
+- [x] **Step 3: Integrate asset state**
 
 In `LlamacppAdminPage.tsx`:
 
@@ -937,7 +939,7 @@ In `LlamacppAdminPage.tsx`:
 - render `<LlamacppAssetsPanel />` near the existing inventory panel;
 - keep the existing `LlamacppInventoryPanel` and launch flow intact.
 
-- [ ] **Step 4: Run Admin tests**
+- [x] **Step 4: Run Admin tests**
 
 Run:
 
@@ -948,7 +950,9 @@ bunx vitest run apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppA
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+Verification note: `./node_modules/.bin/vitest run src/components/Option/Admin/__tests__/LlamacppAssetsPanel.test.tsx src/components/Option/Admin/__tests__/LlamacppAdminPage.test.tsx` passed from `apps/packages/ui`.
+
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Admin/LlamacppAdminPage.tsx \
