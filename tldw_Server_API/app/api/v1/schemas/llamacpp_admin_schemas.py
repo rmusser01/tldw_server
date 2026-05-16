@@ -287,11 +287,20 @@ class LlamaCppRuntimeResponse(BaseModel):
     pid: int | None = None
     host: str | None = None
     port: int | None = Field(default=None, ge=1, le=65535)
+    endpoint: str | None = None
     model_id: str | None = None
     model_path: str | None = None
+    resolved_args: list[str] = Field(default_factory=list)
     started_at: str | None = None
     stopped_at: str | None = None
+    last_health_at: str | None = None
+    restart_count: int = Field(default=0, ge=0)
+    next_restart_at: str | None = None
     exit_code: int | None = None
+    last_error: str | None = None
+    log_tail_available: bool = False
+    warnings: list[str] = Field(default_factory=list)
+    health: dict[str, object] = Field(default_factory=dict)
     message: str | None = None
 
 

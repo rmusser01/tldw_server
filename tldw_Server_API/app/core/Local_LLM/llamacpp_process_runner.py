@@ -36,6 +36,7 @@ _PATH_ARG_KEYS = {
     "lora_base",
     "control_vector",
     "mmproj",
+    "model_draft",
 }
 
 
@@ -92,6 +93,8 @@ def _server_arg_formatters() -> dict[str, Callable[[Any], list[str]]]:
         "no_kv_offload": lambda v: ["--no-kv-offload"] if v else [],
         "cpu_moe": lambda v: ["--cpu-moe"] if v else [],
         "n_cpu_moe": lambda v: ["--n-cpu-moe", str(int(v))],
+        "rope_scaling_type": lambda v: ["--rope-scaling", str(v)],
+        "rope_scaling": lambda v: ["--rope-scaling", str(v)],
         "tensor_split": lambda v: ["--tensor-split", ",".join(map(str, v))]
         if isinstance(v, (list, tuple))
         else ["--tensor-split", str(v)],
@@ -116,16 +119,23 @@ def _server_arg_formatters() -> dict[str, Callable[[Any], list[str]]]:
         "hf_file": lambda v: ["--hf-file", str(v)],
         "offline": lambda v: ["--offline"] if v else [],
         "conversation": lambda v: ["--conversation"] if v else [],
+        "cnv": lambda v: ["--conversation"] if v else [],
         "no_conversation": lambda v: ["--no-conversation"] if v else [],
+        "no_cnv": lambda v: ["--no-conversation"] if v else [],
         "interactive": lambda v: ["--interactive"] if v else [],
+        "i": lambda v: ["--interactive"] if v else [],
         "interactive_first": lambda v: ["--interactive-first"] if v else [],
+        "if": lambda v: ["--interactive-first"] if v else [],
         "single_turn": lambda v: ["--single-turn"] if v else [],
+        "st": lambda v: ["--single-turn"] if v else [],
         "jinja": lambda v: ["--jinja"] if v else [],
         "chat_template": lambda v: ["--chat-template", str(v)],
         "chat_template_file": lambda v: ["--chat-template-file", str(v)],
         "in_prefix": lambda v: ["--in-prefix", str(v)],
         "in_suffix": lambda v: ["--in-suffix", str(v)],
+        "in_prefix_bos": lambda v: ["--in-prefix-bos"] if v else [],
         "reverse_prompt": lambda v: ["--reverse-prompt", str(v)],
+        "r": lambda v: ["--reverse-prompt", str(v)],
         "predict": lambda v: ["-n", str(int(v))],
         "n": lambda v: ["-n", str(int(v))],
         "keep": lambda v: ["--keep", str(int(v))],
@@ -133,13 +143,18 @@ def _server_arg_formatters() -> dict[str, Callable[[Any], list[str]]]:
         "no_context_shift": lambda v: ["--no-context-shift"] if v else [],
         "temp": lambda v: ["--temp", str(float(v))],
         "seed": lambda v: ["-s", str(int(v))],
+        "dynatemp_range": lambda v: ["--dynatemp-range", str(float(v))],
         "top_k": lambda v: ["--top-k", str(int(v))],
         "top_p": lambda v: ["--top-p", str(float(v))],
         "min_p": lambda v: ["--min-p", str(float(v))],
+        "typical": lambda v: ["--typical", str(float(v))],
         "repeat_penalty": lambda v: ["--repeat-penalty", str(float(v))],
         "repeat_last_n": lambda v: ["--repeat-last-n", str(int(v))],
         "presence_penalty": lambda v: ["--presence-penalty", str(float(v))],
         "frequency_penalty": lambda v: ["--frequency-penalty", str(float(v))],
+        "dry_multiplier": lambda v: ["--dry-multiplier", str(float(v))],
+        "dry_base": lambda v: ["--dry-base", str(float(v))],
+        "dry_allowed_length": lambda v: ["--dry-allowed-length", str(int(v))],
         "mirostat": lambda v: ["--mirostat", str(int(v))],
         "mirostat_lr": lambda v: ["--mirostat-lr", str(float(v))],
         "mirostat_ent": lambda v: ["--mirostat-ent", str(float(v))],
@@ -150,6 +165,7 @@ def _server_arg_formatters() -> dict[str, Callable[[Any], list[str]]]:
         "grammar_file": lambda v: ["--grammar-file", str(v)],
         "json_schema": lambda v: ["--json-schema", str(v)],
         "json_schema_file": lambda v: ["--json-schema-file", str(v)],
+        "j": lambda v: ["-j", str(v)],
         "reasoning_format": lambda v: ["--reasoning-format", str(v)],
         "reasoning_budget": lambda v: ["--reasoning-budget", str(int(v))],
         "prompt_cache": lambda v: ["--prompt-cache", str(v)],
@@ -199,13 +215,20 @@ class LlamaCppProcessRunner:
         self._model_path: Path | None = None
         self._host: str | None = None
         self._port: int | None = None
+        self._endpoint: str | None = None
         self._started_at: str | None = None
         self._stopped_at: str | None = None
+        self._last_health_at: str | None = None
         self._exit_code: int | None = None
         self._log_handle: Any | None = None
         self._log_file_path: Path | None = None
         self._redacted_command: list[str] = []
+        self._last_error: str | None = None
+        self._warnings: list[str] = []
+        self._health: dict[str, object] = {}
+        self._failed = False
         self._message: str | None = None
+        self._stream_drain_tasks: list[asyncio.Task[None]] = []
 
     def _is_port_free(self, host: str, port: int) -> bool:
         return handler_utils.is_port_free(host, port)
@@ -234,37 +257,47 @@ class LlamaCppProcessRunner:
         command = self._build_command(executable_path, resolved_model_path, host, port, args)
         redacted_command = http_utils.redact_cmd_args(command)
         stdout_target, stderr_target, log_handle, log_file_path = self._open_log_targets()
+        client_host = handler_utils.resolve_client_host(host)
+        base_url = handler_utils.build_base_url(client_host, port)
+
+        self._record_start_attempt(
+            profile=profile,
+            model_path=resolved_model_path,
+            host=host,
+            port=port,
+            endpoint=base_url,
+            log_handle=log_handle,
+            log_file_path=log_file_path,
+            redacted_command=redacted_command,
+        )
 
         try:
             process = await self._spawn(command, stdout_target=stdout_target, stderr_target=stderr_target)
-            client_host = handler_utils.resolve_client_host(host)
-            base_url = handler_utils.build_base_url(client_host, port)
+            self._process = process
+            self._start_stream_drainers(process)
             readiness_timeout = getattr(self.config, "readiness_timeout", 30.0) or 30.0
             is_ready = await wait_for_http_ready(base_url, timeout_total=readiness_timeout, interval=0.5)
             if process.returncode is not None or not is_ready:
-                if log_handle is not None:
-                    log_handle.close()
                 await self._terminate_process(process)
-                self._message = "Llama.cpp server failed to start or become ready."
-                raise ServerError(self._message)
+                message = "Llama.cpp server failed to start or become ready."
+                self._record_failure(message, process)
+                raise ServerError(message)
         except Exception as exc:
             if log_handle is not None and not log_handle.closed:
-                log_handle.close()
+                self._close_log_handle()
             if isinstance(exc, ServerError):
                 raise
-            raise ServerError(f"Exception starting Llama.cpp server: {exc}") from exc
+            message = f"Exception starting Llama.cpp server: {exc}"
+            self._record_failure(message)
+            raise ServerError(message) from exc
 
-        self._process = process
-        self._profile = profile
-        self._model_path = resolved_model_path
-        self._host = host
-        self._port = port
         self._started_at = _utc_now()
         self._stopped_at = None
         self._exit_code = None
-        self._log_handle = log_handle
-        self._log_file_path = log_file_path
-        self._redacted_command = redacted_command
+        self._failed = False
+        self._last_error = None
+        self._last_health_at = _utc_now()
+        self._health = {"ready": True}
         self._message = None
         logger.info("Started llama.cpp profile {} on {}:{} with PID {}", profile.profile_id, host, port, process.pid)
         return self.status()
@@ -280,8 +313,10 @@ class LlamaCppProcessRunner:
             await self._terminate_process(process)
         else:
             self._exit_code = process.returncode
+        self._stop_stream_drainers()
         self._close_log_handle()
         self._process = None
+        self._failed = False
         self._stopped_at = _utc_now()
         self._message = "Stopped"
         return self.status()
@@ -293,6 +328,18 @@ class LlamaCppProcessRunner:
             state = LlamaCppRuntimeState.RUNNING
             pid = process.pid
             exit_code = None
+        elif self._failed:
+            state = LlamaCppRuntimeState.FAILED
+            pid = None
+            exit_code = self._exit_code if self._exit_code is not None else getattr(process, "returncode", None)
+        elif process is not None and process.returncode is not None:
+            state = LlamaCppRuntimeState.FAILED
+            pid = None
+            exit_code = process.returncode
+            self._exit_code = process.returncode
+            self._last_error = self._last_error or "Llama.cpp server process exited unexpectedly."
+            self._message = self._message or self._last_error
+            self._health = {"ready": False}
         elif self._started_at is None and self._stopped_at is None:
             state = LlamaCppRuntimeState.DEFINED
             pid = None
@@ -343,6 +390,7 @@ class LlamaCppProcessRunner:
                     process.terminate()
                 else:
                     os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+        self._stop_stream_drainers()
         self._close_log_handle()
         self._process = None
         self._stopped_at = self._stopped_at or _utc_now()
@@ -360,15 +408,64 @@ class LlamaCppProcessRunner:
             pid=pid,
             host=self._host,
             port=self._port,
+            endpoint=self._endpoint,
             model_id=self._profile.model_id if self._profile else None,
             model_path=str(self._model_path) if self._model_path else None,
+            resolved_args=list(self._redacted_command),
             started_at=self._started_at,
             stopped_at=self._stopped_at,
+            last_health_at=self._last_health_at,
             exit_code=exit_code,
+            last_error=self._last_error,
+            log_tail_available=self._log_file_path is not None,
             log_file=str(self._log_file_path) if self._log_file_path else None,
             command=list(self._redacted_command),
+            warnings=list(self._warnings),
+            health=dict(self._health),
             message=self._message,
         )
+
+    def _record_start_attempt(
+        self,
+        *,
+        profile: LlamaCppProfile,
+        model_path: Path,
+        host: str,
+        port: int,
+        endpoint: str,
+        log_handle: Any | None,
+        log_file_path: Path | None,
+        redacted_command: list[str],
+    ) -> None:
+        self._profile = profile
+        self._model_path = model_path
+        self._host = host
+        self._port = port
+        self._endpoint = endpoint
+        self._started_at = _utc_now()
+        self._stopped_at = None
+        self._last_health_at = None
+        self._exit_code = None
+        self._log_handle = log_handle
+        self._log_file_path = log_file_path
+        self._redacted_command = redacted_command
+        self._last_error = None
+        self._warnings = []
+        self._health = {"ready": False}
+        self._failed = False
+        self._message = None
+
+    def _record_failure(self, message: str, process: asyncio.subprocess.Process | None = None) -> None:
+        self._failed = True
+        self._message = message
+        self._last_error = message
+        self._health = {"ready": False}
+        self._stopped_at = _utc_now()
+        if process is not None:
+            self._exit_code = process.returncode
+        self._stop_stream_drainers()
+        self._close_log_handle()
+        self._process = None
 
     def _validate_model_path(self, model_path: Path) -> Path:
         try:
@@ -394,7 +491,10 @@ class LlamaCppProcessRunner:
 
     def _resolve_port(self, host: str, profile: LlamaCppProfile) -> int:
         if profile.port_policy == LlamaCppPortPolicy.EXPLICIT:
-            return int(profile.port)
+            port = int(profile.port)
+            if not self._is_port_free(host, port):
+                raise ServerError(f"Explicit llama.cpp port {port} is not available on {host}.")
+            return port
         max_probe = int(getattr(self.config, "port_probe_max", 10) or 0)
         for offset in range(max_probe + 1):
             candidate = int(profile.port) + offset
@@ -463,6 +563,11 @@ class LlamaCppProcessRunner:
             for item in values:
                 if not self._is_path_allowed(Path(item)):
                     raise ServerError("LoRA path must be under allowed directories.")
+        if key == "lora_scaled":
+            paths = [value[0]] if isinstance(value, (list, tuple)) and value else [value]
+            for item in paths:
+                if item is not None and not self._is_path_allowed(Path(item)):
+                    raise ServerError("LoRA path must be under allowed directories.")
 
     def _open_log_targets(self) -> tuple[Any, Any, Any | None, Path | None]:
         log_file = getattr(self.config, "log_output_file", None)
@@ -480,6 +585,43 @@ class LlamaCppProcessRunner:
         else:
             create_kwargs["preexec_fn"] = os.setsid
         return await asyncio.create_subprocess_exec(*command, **create_kwargs)
+
+    async def _drain_stream(self, stream: Any, label: str) -> None:
+        try:
+            while True:
+                chunk = await stream.readline()
+                if not chunk:
+                    break
+                text = chunk.decode("utf-8", errors="replace").rstrip()
+                if text:
+                    logger.debug("llama.cpp {}: {}", label, _redact_log_line(text))
+        except Exception:
+            logger.debug("llama.cpp {} stream drain stopped", label, exc_info=True)
+
+    def _start_stream_drainers(self, process: asyncio.subprocess.Process) -> None:
+        tasks: list[asyncio.Task[None]] = []
+        if getattr(process, "stdout", None) is not None:
+            tasks.append(asyncio.create_task(self._drain_stream(process.stdout, "stdout")))
+        if getattr(process, "stderr", None) is not None:
+            tasks.append(asyncio.create_task(self._drain_stream(process.stderr, "stderr")))
+        for task in tasks:
+            task.add_done_callback(self._discard_stream_drain_result)
+        self._stream_drain_tasks = tasks
+
+    @staticmethod
+    def _discard_stream_drain_result(task: asyncio.Task[None]) -> None:
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.debug("llama.cpp stream drain task failed", exc_info=True)
+
+    def _stop_stream_drainers(self) -> None:
+        for task in self._stream_drain_tasks:
+            if not task.done():
+                task.cancel()
+        self._stream_drain_tasks = []
 
     async def _terminate_process(self, process: asyncio.subprocess.Process) -> None:
         if process.returncode is not None:

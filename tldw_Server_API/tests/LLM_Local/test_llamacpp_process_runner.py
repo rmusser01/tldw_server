@@ -17,10 +17,11 @@ from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
 
 
 class FakeProcess:
-    def __init__(self, pid: int):
+    def __init__(self, pid: int, *, stdout: Any = None, stderr: Any = None):
         self.pid = pid
         self.returncode: int | None = None
-        self.stderr = None
+        self.stdout = stdout
+        self.stderr = stderr
         self.terminated = False
         self.killed = False
 
@@ -36,6 +37,18 @@ class FakeProcess:
         if self.returncode is None:
             self.returncode = 0
         return self.returncode
+
+
+class FakeStream:
+    def __init__(self, chunks: list[bytes]):
+        self.chunks = list(chunks)
+        self.read_count = 0
+
+    async def readline(self) -> bytes:
+        self.read_count += 1
+        if self.chunks:
+            return self.chunks.pop(0)
+        return b""
 
 
 def make_config(tmp_path: Path, *, log_output_file: Path | None = None, port_autoselect: bool = True) -> LlamaCppConfig:
@@ -95,6 +108,8 @@ def test_runner_reports_defined_before_first_start(tmp_path: Path):
 
     assert runtime.state == LlamaCppRuntimeState.DEFINED
     assert runtime.pid is None
+    assert runtime.restart_count == 0
+    assert runtime.warnings == []
 
 
 @pytest.mark.asyncio
@@ -122,12 +137,18 @@ async def test_runner_starts_two_profiles_on_distinct_ports_without_stopping_eac
     model_path = make_model(config)
     first = LlamaCppProcessRunner(config, profile_id="one")
     second = LlamaCppProcessRunner(config, profile_id="two")
+    monkeypatch.setattr(first, "_is_port_free", lambda _host, _port: True)
+    monkeypatch.setattr(second, "_is_port_free", lambda _host, _port: True)
 
     first_runtime = await first.start(model_path, profile=profile("one", port=8181))
     second_runtime = await second.start(model_path, profile=profile("two", port=8182))
 
     assert first_runtime.state == LlamaCppRuntimeState.RUNNING
     assert first_runtime.port == 8181
+    assert first_runtime.endpoint == "http://127.0.0.1:8181"
+    assert first_runtime.last_health_at is not None
+    assert first_runtime.log_tail_available is False
+    assert first_runtime.resolved_args == first_runtime.command
     assert second_runtime.port == 8182
     assert commands[0][commands[0].index("--port") + 1] == "8181"
     assert commands[1][commands[1].index("--port") + 1] == "8182"
@@ -138,6 +159,33 @@ async def test_runner_starts_two_profiles_on_distinct_ports_without_stopping_eac
     assert processes[0].terminated is True
     assert processes[1].terminated is False
     assert second.status().state == LlamaCppRuntimeState.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_runner_rejects_occupied_explicit_port_before_spawn(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as runner_module
+
+    spawned = False
+
+    async def fake_create_subprocess_exec(*_command: str, **_kwargs: Any) -> FakeProcess:
+        nonlocal spawned
+        spawned = True
+        return FakeProcess(1005)
+
+    monkeypatch.setattr(runner_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    config = make_config(tmp_path)
+    model_path = make_model(config)
+    runner = LlamaCppProcessRunner(config, profile_id="occupied")
+    monkeypatch.setattr(runner, "_is_port_free", lambda _host, _port: False)
+
+    with pytest.raises(ServerError, match="port 8181 is not available"):
+        await runner.start(model_path, profile=profile("occupied", port=8181))
+
+    assert spawned is False
 
 
 @pytest.mark.asyncio
@@ -172,6 +220,42 @@ async def test_runner_autoselects_port_when_profile_policy_requests_it(
 
 
 @pytest.mark.asyncio
+async def test_runner_retains_failed_runtime_details_after_start_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as runner_module
+
+    async def fake_create_subprocess_exec(*_command: str, **_kwargs: Any) -> FakeProcess:
+        return FakeProcess(1006)
+
+    async def fake_not_ready(*_args: Any, **_kwargs: Any) -> bool:
+        return False
+
+    monkeypatch.setattr(runner_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(runner_module, "wait_for_http_ready", fake_not_ready)
+    monkeypatch.setattr(runner_module.platform, "system", lambda: "Windows")
+
+    config = make_config(tmp_path)
+    model_path = make_model(config)
+    runner = LlamaCppProcessRunner(config, profile_id="failed")
+    monkeypatch.setattr(runner, "_is_port_free", lambda _host, _port: True)
+
+    with pytest.raises(ServerError, match="failed to start"):
+        await runner.start(model_path, profile=profile("failed", port=8181))
+
+    runtime = runner.status()
+
+    assert runtime.state == LlamaCppRuntimeState.FAILED
+    assert runtime.port == 8181
+    assert runtime.endpoint == "http://127.0.0.1:8181"
+    assert runtime.model_path == str(model_path.resolve())
+    assert runtime.command
+    assert runtime.resolved_args == runtime.command
+    assert runtime.last_error == "Llama.cpp server failed to start or become ready."
+
+
+@pytest.mark.asyncio
 async def test_runner_rejects_model_path_outside_allowed_paths(tmp_path: Path):
     config = make_config(tmp_path)
     outside_model = tmp_path / "outside" / "model.gguf"
@@ -181,6 +265,119 @@ async def test_runner_rejects_model_path_outside_allowed_paths(tmp_path: Path):
 
     with pytest.raises(ServerError, match="allowed directories"):
         await runner.start(outside_model, profile=profile("outside"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("server_args", "match"),
+    [
+        ({"model_draft": "OUTSIDE"}, "model_draft"),
+        ({"lora_scaled": ["OUTSIDE", 0.5]}, "LoRA path"),
+    ],
+)
+async def test_runner_rejects_path_bearing_args_outside_allowed_paths(
+    tmp_path: Path,
+    server_args: dict[str, Any],
+    match: str,
+):
+    config = make_config(tmp_path)
+    outside_model = tmp_path / "outside" / "model.gguf"
+    outside_model.parent.mkdir()
+    outside_model.write_text("not really gguf", encoding="utf-8")
+    resolved_args = {
+        key: [str(outside_model) if item == "OUTSIDE" else item for item in value]
+        if isinstance(value, list)
+        else str(outside_model)
+        if value == "OUTSIDE"
+        else value
+        for key, value in server_args.items()
+    }
+    runner = LlamaCppProcessRunner(config, profile_id="arg-path")
+    runner._is_port_free = lambda _host, _port: True
+
+    with pytest.raises(ServerError, match=match):
+        await runner.start(make_model(config), profile=profile("arg-path", server_args=resolved_args))
+
+
+@pytest.mark.asyncio
+async def test_runner_accepts_existing_handler_server_arg_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as runner_module
+
+    commands: list[list[str]] = []
+
+    async def fake_create_subprocess_exec(*command: str, **_kwargs: Any) -> FakeProcess:
+        commands.append(list(command))
+        return FakeProcess(1007)
+
+    async def fake_ready(*_args: Any, **_kwargs: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(runner_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(runner_module, "wait_for_http_ready", fake_ready)
+    monkeypatch.setattr(runner_module.platform, "system", lambda: "Windows")
+
+    config = make_config(tmp_path)
+    runner = LlamaCppProcessRunner(config, profile_id="aliases")
+    monkeypatch.setattr(runner, "_is_port_free", lambda _host, _port: True)
+    existing_aliases = {
+        "rope_scaling": "yarn",
+        "typical": 0.95,
+        "dry_multiplier": 1.0,
+        "dry_base": 1.75,
+        "dry_allowed_length": 2,
+        "cnv": True,
+        "no_cnv": True,
+        "in_prefix_bos": True,
+        "r": "User:",
+        "j": "{\"type\":\"object\"}",
+    }
+
+    await runner.start(make_model(config), profile=profile("aliases", server_args=existing_aliases))
+
+    command = commands[0]
+    assert "--rope-scaling" in command
+    assert "--typical" in command
+    assert "--dry-multiplier" in command
+    assert "--conversation" in command
+    assert "--no-conversation" in command
+    assert "--in-prefix-bos" in command
+    assert "-j" in command
+
+
+@pytest.mark.asyncio
+async def test_runner_drains_pipe_streams_when_no_log_file_is_configured(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as runner_module
+
+    stdout = FakeStream([b"stdout line\n"])
+    stderr = FakeStream([b"stderr line\n"])
+
+    async def fake_create_subprocess_exec(*_command: str, **_kwargs: Any) -> FakeProcess:
+        return FakeProcess(1008, stdout=stdout, stderr=stderr)
+
+    async def fake_ready(*_args: Any, **_kwargs: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(runner_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(runner_module, "wait_for_http_ready", fake_ready)
+    monkeypatch.setattr(runner_module.platform, "system", lambda: "Windows")
+
+    config = make_config(tmp_path)
+    runner = LlamaCppProcessRunner(config, profile_id="drain")
+    monkeypatch.setattr(runner, "_is_port_free", lambda _host, _port: True)
+
+    await runner.start(make_model(config), profile=profile("drain"))
+    await asyncio.sleep(0)
+
+    assert stdout.read_count >= 2
+    assert stderr.read_count >= 2
+
+    await runner.stop()
 
 
 @pytest.mark.asyncio
@@ -201,6 +398,7 @@ async def test_runner_tails_only_owned_log_file(monkeypatch: pytest.MonkeyPatch,
     config = make_config(tmp_path, log_output_file=log_path)
     model_path = make_model(config)
     runner = LlamaCppProcessRunner(config, profile_id="logs")
+    monkeypatch.setattr(runner, "_is_port_free", lambda _host, _port: True)
 
     await runner.start(model_path, profile=profile("logs"))
     log_path.write_text("one\napi_key=secret-value\ntwo\n", encoding="utf-8")
