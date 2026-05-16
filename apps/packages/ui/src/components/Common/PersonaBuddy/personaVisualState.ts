@@ -109,7 +109,7 @@ const runtimeOverrideStateAllowed = (
     return true
   }
   for (const candidate of runtimeStateIds || []) {
-    if (String(candidate) === state) {
+    if (candidate === state) {
       return true
     }
   }

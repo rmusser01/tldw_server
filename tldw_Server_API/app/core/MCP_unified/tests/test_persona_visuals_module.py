@@ -305,6 +305,16 @@ async def test_trigger_state_requires_context_rejects_unknown_states_and_clamps_
     )
     assert minimum["duration_ms"] == 100
 
+    long_reason = "  " + ("reason detail " * 30) + "\nextra"
+    long_reason_payload = await module.execute_tool(
+        "persona_visuals.trigger_state",
+        {"state": "speaking", "reason": long_reason},
+        context=_context(db_path, persona_id),
+    )
+    assert long_reason_payload["reason"] == " ".join(long_reason.split())[:200]
+    assert len(long_reason_payload["reason"]) == 200
+    assert "\n" not in long_reason_payload["reason"]
+
     with pytest.raises(ValueError, match="not available in the active Persona Visual pack"):
         await module.execute_tool(
             "persona_visuals.trigger_state",

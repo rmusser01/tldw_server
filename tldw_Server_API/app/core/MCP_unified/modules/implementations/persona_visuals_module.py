@@ -225,8 +225,8 @@ class PersonaVisualsModule(BaseModule):
             if arguments.get("duration_ms") is not None:
                 int(arguments["duration_ms"])
             self._validate_optional_string(arguments, "reason")
-            if len(str(arguments.get("reason") or "")) > _MAX_TRIGGER_REASON_LENGTH:
-                raise ValueError(f"reason must be <= {_MAX_TRIGGER_REASON_LENGTH} chars")
+            if "reason" in arguments:
+                arguments["reason"] = self._safe_trigger_reason(arguments.get("reason"))
             return
         if tool_name == "persona_visuals.create_draft_pack":
             self._validate_optional_string(arguments, "persona_id")
@@ -688,6 +688,8 @@ class PersonaVisualsModule(BaseModule):
         active_pack: dict[str, Any] | None,
         state: str,
     ) -> bool:
+        if state in VISUAL_STATE_IDS:
+            return True
         return state in PersonaVisualsModule._runtime_visual_state_ids(active_pack)
 
     @staticmethod

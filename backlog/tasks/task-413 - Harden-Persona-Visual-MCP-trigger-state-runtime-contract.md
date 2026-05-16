@@ -56,13 +56,13 @@ Acceptance criteria:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Hardened the Persona Visual MCP trigger-state runtime contract for the Buddy animation pipeline. Direct MCP triggers can now target safe custom state IDs declared by the active visual pack, capabilities exposes active custom runtime states, and the WebUI resolves custom runtime overrides only when the currently loaded active pack exposes the state. Added backend/frontend regression coverage and documented the contract.
+Hardened the Persona Visual MCP trigger-state runtime contract for the Buddy animation pipeline. Direct MCP triggers can now target safe custom state IDs declared by the active visual pack, capabilities expose active custom runtime states, and the WebUI resolves custom runtime overrides only when the currently loaded active pack exposes the state. Added backend/frontend regression coverage and documented the contract.
 
 Verification:
 - Red tests first: backend custom trigger tests failed on built-in-only behavior; frontend custom override tests failed on rejected custom state/resolver fallback.
-- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_persona_visuals_module.py -q` -> 13 passed, 3 warnings.
+- `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_persona_visuals_module.py -q` -> 13 passed, 3 warnings.
 - `bunx vitest run -c vitest.config.ts src/components/Common/PersonaBuddy/__tests__/personaVisualState.test.ts src/routes/hooks/__tests__/usePersonaIncomingPayload.visuals.test.tsx src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx` -> 3 files passed, 38 tests passed; existing i18next warning only.
-- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m py_compile` on touched Python files -> passed.
+- `python -m py_compile` on touched Python files -> passed.
 - `git diff --check` -> passed.
 - Bandit on touched Python paths -> 0 findings in `/tmp/bandit_persona_visual_mcp_trigger.json`.
 - `bunx tsc --noEmit -p tsconfig.json` in `apps/packages/ui` remains blocked by unrelated repo baseline errors outside touched Persona Visual files.
@@ -70,10 +70,10 @@ Verification:
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
