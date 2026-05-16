@@ -130,8 +130,10 @@ Current limitations:
   low-level diagnostics collection remains app-agnostic.
 - `vz_linux` admin diagnostics include a read-only `observability` block with
   helper stdout/stderr log pointers, per-VM serial log pointers, guest readiness
-  details, and helper-provided resource counters when available. Diagnostics
-  report file existence and byte sizes only; they do not read log contents.
+  details, and helper-provided resource counters when available. Current helper
+  resource snapshots are configured VM facts plus uptime, not live CPU/RSS/I/O
+  utilization telemetry. Diagnostics report file existence and byte sizes only;
+  they do not read log contents.
 - `vz_linux` admin diagnostics include a read-only `recovery_summary` block
   derived from reconciliation, image-store, and observability diagnostics. It
   reports recovery posture, issue codes, counts, and existing dry-run-first

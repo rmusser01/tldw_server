@@ -3,16 +3,23 @@ import Foundation
 
 final class RecordingBootDriver: VZBootDriving {
     private let onBoot: (String) -> Void
+    private let resourceSnapshot: VMResourceSnapshot
     private(set) var lastReadinessTimeoutSeconds: TimeInterval?
     private(set) var stoppedVMIDs: [String] = []
 
-    init(onBoot: @escaping (String) -> Void = { _ in }) {
+    init(
+        resourceSnapshot: VMResourceSnapshot = VMResourceSnapshot(cpuCount: 2, memorySizeBytes: 1_073_741_824),
+        onBoot: @escaping (String) -> Void = { _ in }
+    ) {
+        self.resourceSnapshot = resourceSnapshot
         self.onBoot = onBoot
     }
 
-    func boot(vmID: String, templatePath: String, workspacePath: String, startupTimeoutSeconds: TimeInterval) throws {
+    @discardableResult
+    func boot(vmID: String, templatePath: String, workspacePath: String, startupTimeoutSeconds: TimeInterval) throws -> VMResourceSnapshot {
         lastReadinessTimeoutSeconds = startupTimeoutSeconds
         onBoot(vmID)
+        return resourceSnapshot
     }
 
     func stop(vmID: String) throws {

@@ -374,6 +374,13 @@ final class HelperService {
             "transport": "vsock",
             "network_policy": record.metadata.networkPolicy.isEmpty ? "deny_all" : record.metadata.networkPolicy,
         ]
+        if let resourceSnapshot = record.resourceSnapshot {
+            details["cpu_count"] = "\(resourceSnapshot.cpuCount)"
+            details["memory_size_mb"] = "\(resourceSnapshot.memorySizeMB)"
+        }
+        if let wallTimeSeconds = wallTimeSeconds(since: record.metadata.createdAt) {
+            details["wall_time_sec"] = "\(wallTimeSeconds)"
+        }
         if let guestInfo = record.guestInfo {
             details["guest_capabilities_known"] = guestInfo.capabilitiesKnown ? "true" : "false"
             if let guestVersion = guestInfo.guestVersion {
@@ -387,6 +394,14 @@ final class HelperService {
             }
         }
         return withHelperGeneration(details)
+    }
+
+    private func wallTimeSeconds(since createdAt: String) -> Int? {
+        guard !createdAt.isEmpty,
+              let createdAtDate = metadataDateFormatter.date(from: createdAt) else {
+            return nil
+        }
+        return max(0, Int(Date().timeIntervalSince(createdAtDate)))
     }
 
     private func helperGenerationDetails() -> [String: String] {

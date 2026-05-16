@@ -46,6 +46,54 @@ import Testing
     #expect(status?.healthy == true)
 }
 
+@Test func createVMPreservesBootResourceSnapshotWhenRunning() throws {
+    let registry = VMRegistry()
+    let resourceSnapshot = VMResourceSnapshot(cpuCount: 4, memorySizeBytes: 2_147_483_648)
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(resourceSnapshot: resourceSnapshot),
+        guestBridge: ReadyGuestBridge()
+    )
+
+    let result = try manager.createVM(
+        vmID: "vm-resource-snapshot",
+        templatePath: "/tmp/template.img",
+        workspacePath: "/tmp/workspace",
+        readinessTimeoutSeconds: 5
+    )
+    let status = registry.status(vmID: "vm-resource-snapshot")
+
+    #expect(result.resourceSnapshot == resourceSnapshot)
+    #expect(status?.resourceSnapshot == resourceSnapshot)
+}
+
+@Test func createVMClearsStaleResourceSnapshotWhileBootingReusedVMID() throws {
+    let registry = VMRegistry()
+    registry.upsert(
+        vmID: "vm-reused-resource-snapshot",
+        state: "running",
+        healthy: true,
+        resourceSnapshot: VMResourceSnapshot(cpuCount: 8, memorySizeBytes: 4_294_967_296)
+    )
+    let bootDriver = RecordingBootDriver { vmID in
+        let status = registry.status(vmID: vmID)
+        #expect(status?.state == "booting")
+        #expect(status?.resourceSnapshot == nil)
+    }
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: bootDriver,
+        guestBridge: ReadyGuestBridge()
+    )
+
+    _ = try manager.createVM(
+        vmID: "vm-reused-resource-snapshot",
+        templatePath: "/tmp/template.img",
+        workspacePath: "/tmp/workspace",
+        readinessTimeoutSeconds: 5
+    )
+}
+
 @Test func createVMPassesReadinessTimeoutToBootDriver() throws {
     let bootDriver = RecordingBootDriver()
     let manager = VZLinuxVMManager(
