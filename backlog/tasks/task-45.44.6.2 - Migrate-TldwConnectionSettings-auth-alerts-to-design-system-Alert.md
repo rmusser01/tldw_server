@@ -59,6 +59,8 @@ Verification: focused red test failed on missing data-ds-component marker before
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Migrated TldwConnectionSettings login-required and logged-in auth notices to the shared design-system Alert primitive, preserved logout behavior and danger action styling through a small Alert action variant extension, and removed the two resolved product-state baseline exceptions.
+
+PR #1781 review follow-up moved info/success polite status-region defaults into the Alert primitive, removed duplicate role/aria-live props from TldwConnectionSettings, renamed the local import to Alert, and verified that the logout action's danger variant is valid for the existing Button API.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

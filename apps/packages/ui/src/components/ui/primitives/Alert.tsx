@@ -99,7 +99,7 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
       dismissible = false,
       onDismiss,
       dismissLabel = "Dismiss",
-      role = "alert",
+      role,
       "aria-live": ariaLive,
       className,
       "data-testid": dataTestId,
@@ -109,6 +109,10 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
     const config = variantConfig[variant]
     const DefaultIcon = config.icon
     const hasContent = React.Children.toArray(children).some((child) => child !== "")
+    const defaultsToStatus = variant === "info" || variant === "success"
+    const resolvedRole = role ?? (defaultsToStatus ? "status" : "alert")
+    const resolvedAriaLive =
+      ariaLive ?? (resolvedRole === "status" ? "polite" : undefined)
 
     return (
       <div
@@ -118,8 +122,8 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
           config.container,
           className
         )}
-        role={role}
-        aria-live={ariaLive}
+        role={resolvedRole}
+        aria-live={resolvedAriaLive}
         data-testid={dataTestId}
         data-ds-component="Alert"
       >

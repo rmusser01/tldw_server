@@ -177,15 +177,13 @@ export const TldwConnectionSettings = ({
 
       {authMode === 'multi-user' && !isLoggedIn && (
         <>
-          <DesignSystemAlert
+          <Alert
             title={t('settings:tldw.loginRequired.title', 'Login Required')}
             variant="info"
-            role="status"
-            aria-live="polite"
             className="mb-4"
           >
             {t('settings:tldw.loginRequired.description', 'Please login with your tldw_server credentials')}
-          </DesignSystemAlert>
+          </Alert>
           <Form.Item
             label={t('settings:tldw.loginMethod.label', 'Login Method')}
           >
@@ -267,11 +265,9 @@ export const TldwConnectionSettings = ({
       )}
 
       {authMode === 'multi-user' && isLoggedIn && (
-        <DesignSystemAlert
+        <Alert
           title={t('settings:tldw.loggedIn.title', 'Logged In')}
           variant="success"
-          role="status"
-          aria-live="polite"
           action={
             {
               label: t('settings:tldw.buttons.logout', 'Logout'),
@@ -282,7 +278,7 @@ export const TldwConnectionSettings = ({
           className="mb-4"
         >
           {t('settings:tldw.loggedIn.description', 'You are currently logged in to tldw_server')}
-        </DesignSystemAlert>
+        </Alert>
       )}
 
       <Space className="w-full justify-between">

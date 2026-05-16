@@ -321,9 +321,10 @@ describe("settings PR review fixes", () => {
     )
 
     const loginRequiredTitle = screen.getByText(/Login Required/)
-    expect(
-      loginRequiredTitle.closest('[data-ds-component="Alert"]')
-    ).toBeInTheDocument()
+    const alert = loginRequiredTitle.closest('[data-ds-component="Alert"]')
+    expect(alert).toBeInTheDocument()
+    expect(alert).toHaveAttribute("role", "status")
+    expect(alert).toHaveAttribute("aria-live", "polite")
   })
 
   it("renders the logged-in notice through the design-system alert primitive and preserves logout", () => {
@@ -340,9 +341,10 @@ describe("settings PR review fixes", () => {
     )
 
     const loggedInTitle = screen.getByText(/Logged In/)
-    expect(
-      loggedInTitle.closest('[data-ds-component="Alert"]')
-    ).toBeInTheDocument()
+    const alert = loggedInTitle.closest('[data-ds-component="Alert"]')
+    expect(alert).toBeInTheDocument()
+    expect(alert).toHaveAttribute("role", "status")
+    expect(alert).toHaveAttribute("aria-live", "polite")
 
     fireEvent.click(screen.getByRole("button", { name: "Logout" }))
     expect(onLogout).toHaveBeenCalledTimes(1)
