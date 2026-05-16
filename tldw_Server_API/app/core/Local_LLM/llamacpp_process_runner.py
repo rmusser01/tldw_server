@@ -8,6 +8,7 @@ import os
 import platform
 import signal
 import subprocess  # nosec B404 - used without shell for llama-server process control
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -500,7 +501,7 @@ class LlamaCppProcessRunner:
             candidate = int(profile.port) + offset
             if self._is_port_free(host, candidate):
                 return candidate
-        return int(profile.port)
+        raise ServerError(f"No available llama.cpp port found for {host} starting at {profile.port}.")
 
     def _build_command(
         self,
@@ -510,9 +511,17 @@ class LlamaCppProcessRunner:
         port: int,
         args: dict[str, Any],
     ) -> list[str]:
-        ctx_size = int(args.get("ctx_size", args.get("c", args.get("n_ctx", self.config.default_ctx_size))))
-        n_gpu_layers = int(
-            args.get("n_gpu_layers", args.get("ngl", args.get("gpu_layers", self.config.default_n_gpu_layers)))
+        ctx_size = self._resolve_int_arg(
+            args,
+            ("ctx_size", "c", "n_ctx"),
+            self.config.default_ctx_size,
+            "ctx_size",
+        )
+        n_gpu_layers = self._resolve_int_arg(
+            args,
+            ("n_gpu_layers", "ngl", "gpu_layers"),
+            self.config.default_n_gpu_layers,
+            "n_gpu_layers",
         )
         command = [
             str(executable_path),
@@ -555,19 +564,50 @@ class LlamaCppProcessRunner:
                     command.extend([flag, str(value)])
         return command
 
+    @staticmethod
+    def _resolve_int_arg(
+        args: dict[str, Any],
+        keys: tuple[str, ...],
+        default: Any,
+        label: str,
+    ) -> int:
+        value = None
+        for key in keys:
+            candidate = args.get(key)
+            if candidate is not None and candidate != "":
+                value = candidate
+                break
+        if value is None:
+            value = default
+        if value is None or value == "":
+            raise ServerError(f"{label} must be set in the profile or llama.cpp defaults.")
+        try:
+            return int(value)
+        except (TypeError, ValueError) as exc:
+            raise ServerError(f"{label} must be an integer.") from exc
+
     def _validate_arg_path(self, key: str, value: Any) -> None:
-        if key in _PATH_ARG_KEYS and not self._is_path_allowed(Path(value)):
+        if key in _PATH_ARG_KEYS and not self._is_path_allowed(self._coerce_path_arg(key, value)):
             raise ServerError(f"File path for '{key}' must be under allowed directories.")
         if key == "lora":
             values = value if isinstance(value, (list, tuple)) else [value]
             for item in values:
-                if not self._is_path_allowed(Path(item)):
+                if not self._is_path_allowed(self._coerce_path_arg(key, item)):
                     raise ServerError("LoRA path must be under allowed directories.")
         if key == "lora_scaled":
             paths = [value[0]] if isinstance(value, (list, tuple)) and value else [value]
             for item in paths:
-                if item is not None and not self._is_path_allowed(Path(item)):
+                if item is not None and not self._is_path_allowed(self._coerce_path_arg(key, item)):
                     raise ServerError("LoRA path must be under allowed directories.")
+
+    @staticmethod
+    def _coerce_path_arg(key: str, value: Any) -> Path:
+        if not isinstance(value, (str, os.PathLike)):
+            raise ServerError(f"File path for '{key}' must be a string or path-like value.")
+        try:
+            return Path(value)
+        except (TypeError, ValueError) as exc:
+            raise ServerError(f"File path for '{key}' could not be resolved.") from exc
 
     def _open_log_targets(self) -> tuple[Any, Any, Any | None, Path | None]:
         log_file = getattr(self.config, "log_output_file", None)
@@ -582,6 +622,8 @@ class LlamaCppProcessRunner:
         create_kwargs: dict[str, Any] = {"stdout": stdout_target, "stderr": stderr_target}
         if platform.system() == "Windows":
             create_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        elif sys.version_info >= (3, 11):
+            create_kwargs["process_group"] = 0
         else:
             create_kwargs["preexec_fn"] = os.setsid
         return await asyncio.create_subprocess_exec(*command, **create_kwargs)

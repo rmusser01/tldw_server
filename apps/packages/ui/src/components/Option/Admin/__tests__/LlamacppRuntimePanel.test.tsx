@@ -109,4 +109,32 @@ describe("LlamacppRuntimePanel", () => {
     expect(onPause).not.toHaveBeenCalled()
     expect(onResume).not.toHaveBeenCalled()
   })
+
+  it("does not offer a duplicate start action while a runtime is starting", () => {
+    const onStart = vi.fn()
+
+    render(
+      <LlamacppRuntimePanel
+        profiles={profiles}
+        runtimes={[
+          {
+            ...runtimes[1],
+            state: "starting" as const
+          }
+        ]}
+        loading={false}
+        actionProfileId={null}
+        onRefresh={vi.fn()}
+        onStart={onStart}
+        onStop={vi.fn()}
+        onPause={vi.fn()}
+        onResume={vi.fn()}
+        onUseInChat={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByLabelText("Start Vision draft")).toBeNull()
+    expect(screen.getByLabelText("Vision draft is starting")).toBeDisabled()
+    expect(onStart).not.toHaveBeenCalled()
+  })
 })

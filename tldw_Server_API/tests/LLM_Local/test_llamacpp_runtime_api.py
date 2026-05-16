@@ -3,8 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
@@ -133,7 +134,7 @@ class _SupervisorStub:
         return runtime
 
     async def resume_profile(self, profile_id: str) -> LlamaCppRuntime:
-        runtime = LlamaCppRuntime(profile_id=profile_id, state=LlamaCppRuntimeState.STOPPED, message="Resumed")
+        runtime = LlamaCppRuntime(profile_id=profile_id, state=LlamaCppRuntimeState.RUNNING, message="Resumed")
         self.runtimes[profile_id] = runtime
         return runtime
 
@@ -283,12 +284,19 @@ def test_profiles_crud_returns_profiles():
         listed = client.get("/api/v1/llamacpp/profiles")
         updated = client.put("/api/v1/llamacpp/profiles/qwen", json={"name": "Qwen updated"})
         deleted = client.delete("/api/v1/llamacpp/profiles/qwen")
+        delete_operation = client.get("/openapi.json").json()["paths"]["/api/v1/llamacpp/profiles/{profile_id}"][
+            "delete"
+        ]
 
     assert created.status_code == 200, created.text
     assert created.json()["name"] == "Qwen fixed port"
     assert any(profile["profile_id"] == "qwen" for profile in listed.json()["profiles"])
     assert updated.json()["name"] == "Qwen updated"
     assert deleted.json() == {"profile_id": "qwen", "deleted": True}
+
+    assert delete_operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "LlamaCppProfileDeleteResponse"
+    )
 
 
 @pytest.mark.unit
@@ -311,7 +319,7 @@ def test_instances_and_lifecycle_actions_use_supervisor():
     assert started.json()["action"] == "start"
     assert started.json()["state"] == "running"
     assert paused.json()["state"] == "paused"
-    assert resumed.json()["state"] == "stopped"
+    assert resumed.json()["state"] == "running"
     assert stopped.json()["state"] == "stopped"
     assert logs.json()["lines"] == ["first", "second"]
     assert supervisor.tail_requests == [("one", 2)]
@@ -492,6 +500,105 @@ def test_v1_inference_uses_running_supervisor_default_after_start_by_model(monke
     assert calls[0][0].profile_id == DEFAULT_PROFILE_ID
     assert calls[0][1]["messages"] == [{"role": "user", "content": "hello"}]
     assert handler.inference_calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_supervisor_runtime_inference_preserves_upstream_http_status(monkeypatch: pytest.MonkeyPatch):
+    class FakeClient:
+        async def __aenter__(self) -> "FakeClient":
+            return self
+
+        async def __aexit__(self, *_exc: Any) -> None:
+            return None
+
+    request = httpx.Request("POST", "http://127.0.0.1:8181/v1/chat/completions")
+    response = httpx.Response(429, request=request, text="rate limited")
+
+    async def fake_request_json(*_args: Any, **_kwargs: Any) -> dict[str, object]:
+        raise httpx.HTTPStatusError("rate limited", request=request, response=response)
+
+    monkeypatch.setattr(lp.http_utils, "create_async_client", lambda **_kwargs: FakeClient())
+    monkeypatch.setattr(lp.http_utils, "request_json", fake_request_json)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await lp._post_supervisor_runtime_inference(
+            LlamaCppRuntime(
+                profile_id=DEFAULT_PROFILE_ID,
+                state=LlamaCppRuntimeState.RUNNING,
+                host="127.0.0.1",
+                port=8181,
+            ),
+            lp.LlamaCppInferenceRequest(messages=[{"role": "user", "content": "hello"}]),
+        )
+
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.detail == "rate limited"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_supervisor_runtime_inference_maps_network_error_to_bad_gateway(monkeypatch: pytest.MonkeyPatch):
+    class FakeClient:
+        async def __aenter__(self) -> "FakeClient":
+            return self
+
+        async def __aexit__(self, *_exc: Any) -> None:
+            return None
+
+    request = httpx.Request("POST", "http://127.0.0.1:8181/v1/chat/completions")
+
+    async def fake_request_json(*_args: Any, **_kwargs: Any) -> dict[str, object]:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    monkeypatch.setattr(lp.http_utils, "create_async_client", lambda **_kwargs: FakeClient())
+    monkeypatch.setattr(lp.http_utils, "request_json", fake_request_json)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await lp._post_supervisor_runtime_inference(
+            LlamaCppRuntime(
+                profile_id=DEFAULT_PROFILE_ID,
+                state=LlamaCppRuntimeState.RUNNING,
+                host="127.0.0.1",
+                port=8181,
+            ),
+            lp.LlamaCppInferenceRequest(messages=[{"role": "user", "content": "hello"}]),
+        )
+
+    assert exc_info.value.status_code == 502
+    assert "http://127.0.0.1:8181/v1/chat/completions" in exc_info.value.detail
+    assert "connection refused" in exc_info.value.detail
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_supervisor_runtime_inference_maps_unexpected_errors_to_500(monkeypatch: pytest.MonkeyPatch):
+    class FakeClient:
+        async def __aenter__(self) -> "FakeClient":
+            return self
+
+        async def __aexit__(self, *_exc: Any) -> None:
+            return None
+
+    async def fake_request_json(*_args: Any, **_kwargs: Any) -> dict[str, object]:
+        raise RuntimeError("bad response shape")
+
+    monkeypatch.setattr(lp.http_utils, "create_async_client", lambda **_kwargs: FakeClient())
+    monkeypatch.setattr(lp.http_utils, "request_json", fake_request_json)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await lp._post_supervisor_runtime_inference(
+            LlamaCppRuntime(
+                profile_id=DEFAULT_PROFILE_ID,
+                state=LlamaCppRuntimeState.RUNNING,
+                host="127.0.0.1",
+                port=8181,
+            ),
+            lp.LlamaCppInferenceRequest(messages=[{"role": "user", "content": "hello"}]),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert "bad response shape" in exc_info.value.detail
 
 
 @pytest.mark.unit

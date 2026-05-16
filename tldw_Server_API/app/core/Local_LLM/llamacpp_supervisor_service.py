@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import weakref
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -86,7 +87,7 @@ class LlamaCppSupervisor:
         self.store = store
         self.runner_factory = runner_factory
         self._runners: dict[str, Any] = {}
-        self._locks: dict[str, asyncio.Lock] = {}
+        self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
         self._store_lock = asyncio.Lock()
         self._start_lock = asyncio.Lock()
         self._paused: set[str] = set()
@@ -212,13 +213,7 @@ class LlamaCppSupervisor:
             if not profile.enabled:
                 await self._store_upsert(profile.model_copy(update={"enabled": True}))
             self._paused.discard(profile_id)
-            runner = self._runners.get(profile_id)
-            if runner is None:
-                return LlamaCppRuntime(profile_id=profile_id, state=LlamaCppRuntimeState.STOPPED, message="Resumed")
-            status = runner.status()
-            if status.state == LlamaCppRuntimeState.PAUSED:
-                return status.model_copy(update={"state": LlamaCppRuntimeState.STOPPED, "message": "Resumed"})
-            return status
+            return await self._start_profile_unlocked(profile_id)
 
     def list_runtimes(self) -> list[LlamaCppRuntime]:
         return [self.get_runtime(profile.profile_id) for profile in self.list_profiles()]
@@ -266,8 +261,7 @@ class LlamaCppSupervisor:
     ) -> LlamaCppProfile:
         model_path = llamacpp_inventory_service.resolve_model_id(model_id)
         existing = self.store.get(DEFAULT_PROFILE_ID)
-        host = str(server_args.get("host") or self.config.default_host or "127.0.0.1")
-        port = int(server_args.get("port") or self.config.default_port)
+        host, port = self._resolve_default_host_port(server_args)
         if existing is None:
             profile = LlamaCppProfile(
                 profile_id=DEFAULT_PROFILE_ID,
@@ -322,8 +316,7 @@ class LlamaCppSupervisor:
         except (OSError, RuntimeError, ValueError) as exc:
             raise ServerError("Model path could not be resolved.") from exc
         existing = self.store.get(DEFAULT_PROFILE_ID)
-        host = str(server_args.get("host") or self.config.default_host or "127.0.0.1")
-        port = int(server_args.get("port") or self.config.default_port)
+        host, port = self._resolve_default_host_port(server_args)
         if existing is None:
             profile = LlamaCppProfile(
                 profile_id=DEFAULT_PROFILE_ID,
@@ -407,11 +400,23 @@ class LlamaCppSupervisor:
 
     async def _store_upsert(self, profile: LlamaCppProfile) -> LlamaCppProfile:
         async with self._store_lock:
-            return self.store.upsert(profile)
+            return await asyncio.to_thread(self.store.upsert, profile)
 
     async def _store_delete(self, profile_id: str) -> bool:
         async with self._store_lock:
-            return self.store.delete(profile_id)
+            return await asyncio.to_thread(self.store.delete, profile_id)
+
+    def _resolve_default_host_port(self, server_args: dict[str, object]) -> tuple[str, int]:
+        host = str(server_args.get("host") or self.config.default_host or "127.0.0.1")
+        raw_port = server_args.get("port")
+        if raw_port is None or raw_port == "":
+            raw_port = self.config.default_port
+        if raw_port is None or raw_port == "":
+            raise ServerError("Llama.cpp default port is not configured.")
+        try:
+            return host, int(raw_port)
+        except (TypeError, ValueError) as exc:
+            raise ServerError("Llama.cpp default port must be an integer.") from exc
 
     def _require_profile(self, profile_id: str) -> LlamaCppProfile:
         profile = self.store.get(profile_id)

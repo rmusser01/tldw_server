@@ -279,6 +279,13 @@ class LlamaCppProfileListResponse(BaseModel):
     profiles: list[LlamaCppProfileResponse] = Field(default_factory=list)
 
 
+class LlamaCppProfileDeleteResponse(BaseModel):
+    """Response returned after deleting a managed llama.cpp runtime profile."""
+
+    profile_id: str
+    deleted: bool = True
+
+
 class LlamaCppRuntimeResponse(BaseModel):
     """Observed runtime state for one managed llama.cpp profile."""
 

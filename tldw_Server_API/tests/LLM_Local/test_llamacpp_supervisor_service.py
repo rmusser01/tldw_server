@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
     LlamaCppProfileCreateRequest,
     LlamaCppProfileUpdateRequest,
 )
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_store import JsonLlamaCppProfileStore
 from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
@@ -325,6 +327,44 @@ async def test_supervisor_delete_running_profile_awaits_stop_before_removing(tmp
 
 
 @pytest.mark.asyncio
+async def test_supervisor_releases_deleted_profile_lock(tmp_path: Path):
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+
+    deleted = await supervisor.delete_profile("one")
+    gc.collect()
+
+    assert deleted is True
+    assert "one" not in supervisor._locks
+
+
+@pytest.mark.asyncio
+async def test_supervisor_store_writes_run_off_event_loop(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_supervisor_service as supervisor_module
+
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    calls: list[str] = []
+
+    async def fake_to_thread(func: Any, *args: Any, **kwargs: Any) -> Any:
+        calls.append(getattr(func, "__name__", repr(func)))
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(supervisor_module.asyncio, "to_thread", fake_to_thread)
+
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+    await supervisor.delete_profile("one")
+
+    assert "upsert" in calls
+    assert "delete" in calls
+
+
+@pytest.mark.asyncio
 async def test_supervisor_stop_pause_resume_and_cleanup(tmp_path: Path):
     supervisor, config, factory = make_supervisor(tmp_path)
     model_path = make_model(config)
@@ -344,8 +384,30 @@ async def test_supervisor_stop_pause_resume_and_cleanup(tmp_path: Path):
     assert deleted is True
     assert supervisor.list_profiles() == []
     assert paused.state == LlamaCppRuntimeState.PAUSED
-    assert resumed.state == LlamaCppRuntimeState.STOPPED
+    assert resumed.state == LlamaCppRuntimeState.RUNNING
+    assert factory.calls == {"one": 2}
     assert factory.runners["one"].cleaned is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("start_kind", ["model", "path"])
+async def test_supervisor_default_profile_requires_configured_port(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    start_kind: str,
+):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_supervisor_service as supervisor_module
+
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    config.default_port = None
+    model_path = make_model(config)
+    monkeypatch.setattr(supervisor_module.llamacpp_inventory_service, "resolve_model_id", lambda _model_id: model_path)
+
+    with pytest.raises(ServerError, match="default port"):
+        if start_kind == "model":
+            await supervisor.ensure_default_profile_from_model("gguf:default", {})
+        else:
+            await supervisor.ensure_default_profile_from_path(model_path, {})
 
 
 @pytest.mark.asyncio

@@ -135,6 +135,7 @@ export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
               const endpoint = formatEndpoint(row.profile, row.runtime)
               const port = row.runtime?.port ?? row.profile?.port
               const isRunning = state === "running"
+              const isStarting = state === "starting"
               const isPaused = state === "paused"
               const isBusy = actionProfileId === row.profileId
               const warnings = row.runtime?.warnings || []
@@ -186,6 +187,19 @@ export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
                     aria-label={`Resume ${label}`}
                   >
                     Resume
+                  </Button>
+                )
+              } else if (isStarting) {
+                actions.push(
+                  <Button
+                    key="starting"
+                    size="small"
+                    icon={<RefreshCw size={14} />}
+                    loading={isBusy}
+                    disabled
+                    aria-label={`${label} is starting`}
+                  >
+                    Starting...
                   </Button>
                 )
               } else {

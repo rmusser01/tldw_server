@@ -21,6 +21,7 @@ from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
     LlamaCppLifecycleActionResponse,
     LlamaCppLogTailResponse,
     LlamaCppProfileCreateRequest,
+    LlamaCppProfileDeleteResponse,
     LlamaCppProfileListResponse,
     LlamaCppProfileResponse,
     LlamaCppProfileUpdateRequest,
@@ -161,7 +162,7 @@ def _supervisor_error_to_http(exc: Exception, llm_manager: LLMInferenceManager, 
         return HTTPException(status_code=404, detail=str(exc))
     if isinstance(exc, LlamaCppProfileConflictError):
         return HTTPException(status_code=409, detail=str(exc))
-    if isinstance(exc, ValidationError | ValueError | ModelNotFoundError | ServerError):
+    if isinstance(exc, (ValidationError, ValueError, ModelNotFoundError, ServerError)):
         return HTTPException(status_code=400, detail=str(exc))
     if isinstance(exc, InferenceError):
         return _llamacpp_unavailable(str(exc))
@@ -312,11 +313,17 @@ async def _post_supervisor_runtime_inference(
             status = http_utils.get_http_status_from_exception(exc)
             if status is not None:
                 error_text = http_utils.get_http_error_text(exc)
-                raise InferenceError(f"Llama.cpp API error ({status}): {error_text}") from exc
+                raise HTTPException(status_code=status, detail=error_text or "Llama.cpp API request failed.") from exc
             if http_utils.is_network_error(exc):
-                raise ServerError(f"Could not connect/communicate with Llama.cpp server at {target_url}: {exc}") from exc
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Could not communicate with managed llama.cpp server at {target_url}: {exc}",
+                ) from exc
             error_text = http_utils.get_http_error_text(exc)
-            raise InferenceError(f"Unexpected error during Llama.cpp inference: {error_text}") from exc
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error during Llama.cpp inference: {error_text}",
+            ) from exc
 
 
 # --- Llama.cpp Specific Endpoints ---
@@ -459,18 +466,19 @@ async def update_llamacpp_profile_endpoint(
 @router.delete(
     "/llamacpp/profiles/{profile_id}",
     summary="Delete llama.cpp Runtime Profile",
+    response_model=LlamaCppProfileDeleteResponse,
     dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
 )
 async def delete_llamacpp_profile_endpoint(
     profile_id: str,
     llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
-):
+) -> LlamaCppProfileDeleteResponse:
     supervisor = _resolve_llamacpp_supervisor(llm_manager)
     try:
         deleted = await supervisor.delete_profile(profile_id)
         if not deleted:
             raise HTTPException(status_code=404, detail=f"Llama.cpp profile '{profile_id}' was not found.")
-        return {"profile_id": profile_id, "deleted": True}
+        return LlamaCppProfileDeleteResponse(profile_id=profile_id, deleted=True)
     except Exception as e:
         raise _supervisor_error_to_http(e, llm_manager, "Unexpected error deleting Llama.cpp profile") from e
 

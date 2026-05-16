@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -222,6 +223,23 @@ async def test_runner_autoselects_port_when_profile_policy_requests_it(
 
 
 @pytest.mark.asyncio
+async def test_runner_autoselect_raises_when_no_probe_port_is_available(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    config = make_config(tmp_path)
+    model_path = make_model(config)
+    runner = LlamaCppProcessRunner(config, profile_id="auto-full")
+    monkeypatch.setattr(runner, "_is_port_free", lambda _host, _port: False)
+
+    with pytest.raises(ServerError, match="No available llama.cpp port"):
+        await runner.start(
+            model_path,
+            profile=profile("auto-full", port=8181, port_policy=LlamaCppPortPolicy.AUTOSELECT),
+        )
+
+
+@pytest.mark.asyncio
 async def test_runner_retains_failed_runtime_details_after_start_failure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -299,6 +317,42 @@ async def test_runner_rejects_path_bearing_args_outside_allowed_paths(
 
     with pytest.raises(ServerError, match=match):
         await runner.start(make_model(config), profile=profile("arg-path", server_args=resolved_args))
+
+
+@pytest.mark.asyncio
+async def test_runner_rejects_non_path_values_for_path_bearing_args(tmp_path: Path):
+    config = make_config(tmp_path)
+    runner = LlamaCppProcessRunner(config, profile_id="bad-path-type")
+    runner._is_port_free = lambda _host, _port: True
+
+    with pytest.raises(ServerError, match="model_draft"):
+        await runner.start(
+            make_model(config),
+            profile=profile("bad-path-type", server_args={"model_draft": {"not": "a path"}}),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field_name", "server_args", "match"),
+    [
+        ("default_ctx_size", {"n_gpu_layers": 0}, "ctx_size"),
+        ("default_n_gpu_layers", {"ctx_size": 2048}, "n_gpu_layers"),
+    ],
+)
+async def test_runner_rejects_missing_numeric_defaults_before_command_build(
+    tmp_path: Path,
+    field_name: str,
+    server_args: dict[str, Any],
+    match: str,
+):
+    config = make_config(tmp_path)
+    setattr(config, field_name, None)
+    runner = LlamaCppProcessRunner(config, profile_id="missing-default")
+    runner._is_port_free = lambda _host, _port: True
+
+    with pytest.raises(ServerError, match=match):
+        await runner.start(make_model(config), profile=profile("missing-default", server_args=server_args))
 
 
 @pytest.mark.asyncio
@@ -428,6 +482,35 @@ async def test_runner_drains_pipe_streams_when_no_log_file_is_configured(
     assert max(stderr.read_sizes) <= 1024
 
     await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_runner_uses_process_group_on_python_311_posix(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    if sys.version_info < (3, 11):
+        pytest.skip("process_group is available on Python 3.11+")
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as runner_module
+
+    spawn_kwargs: dict[str, Any] = {}
+
+    async def fake_create_subprocess_exec(*_command: str, **kwargs: Any) -> FakeProcess:
+        spawn_kwargs.update(kwargs)
+        return FakeProcess(1010)
+
+    async def fake_ready(*_args: Any, **_kwargs: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(runner_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(runner_module, "wait_for_http_ready", fake_ready)
+    monkeypatch.setattr(runner_module.platform, "system", lambda: "Linux")
+
+    config = make_config(tmp_path)
+    runner = LlamaCppProcessRunner(config, profile_id="process-group")
+    monkeypatch.setattr(runner, "_is_port_free", lambda _host, _port: True)
+
+    await runner.start(make_model(config), profile=profile("process-group"))
+
+    assert spawn_kwargs["process_group"] == 0
+    assert "preexec_fn" not in spawn_kwargs
 
 
 @pytest.mark.asyncio
