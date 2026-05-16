@@ -779,7 +779,7 @@ git commit -m "Add llama.cpp asset API client types"
 - Create: `apps/packages/ui/src/components/Option/Admin/LlamacppAssetsPanel.tsx`
 - Create: `apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppAssetsPanel.test.tsx`
 
-- [ ] **Step 1: Write failing component tests**
+- [x] **Step 1: Write failing component tests**
 
 Create tests that render:
 
@@ -849,7 +849,7 @@ it("renders asset groups warnings and inferred projector candidates", async () =
 })
 ```
 
-- [ ] **Step 2: Run test to verify failure**
+- [x] **Step 2: Run test to verify failure**
 
 Run:
 
@@ -859,7 +859,9 @@ bunx vitest run apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppA
 
 Expected: FAIL because component does not exist.
 
-- [ ] **Step 3: Implement minimal panel**
+Verification note: `bunx vitest run packages/ui/src/components/Option/Admin/__tests__/LlamacppAssetsPanel.test.tsx` from `apps/` failed red because `../LlamacppAssetsPanel` did not exist. Earlier root/package attempts exposed missing worktree dependency links; `bun install` in `apps/` repaired local test dependencies, and the unrelated tracked dependency-link pruning was restored before continuing.
+
+- [x] **Step 3: Implement minimal panel**
 
 Use existing local conventions from `LlamacppInventoryPanel.tsx`:
 
@@ -874,7 +876,7 @@ Use existing local conventions from `LlamacppInventoryPanel.tsx`:
 - show candidate IDs as labels, not as automatic "paired" state;
 - keep text compact and avoid redesigning the whole Admin page.
 
-- [ ] **Step 4: Run panel tests**
+- [x] **Step 4: Run panel tests**
 
 Run:
 
@@ -884,7 +886,9 @@ bunx vitest run apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppA
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+Verification note: `./node_modules/.bin/vitest run src/components/Option/Admin/__tests__/LlamacppAssetsPanel.test.tsx` passed from `apps/packages/ui`.
+
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Admin/LlamacppAssetsPanel.tsx \
