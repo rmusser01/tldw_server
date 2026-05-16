@@ -1,10 +1,10 @@
 ---
 id: TASK-396
 title: Implement /knowledge source health and evidence controls
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-16 00:51'
-updated_date: '2026-05-16 02:45'
+updated_date: '2026-05-16 02:59'
 labels:
   - webui
   - knowledge
@@ -21,10 +21,10 @@ priority: high
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 GET /api/v1/rag/source-health returns safe pre-query health for canonical Knowledge QA sources without altering search-response metadata.source_status.
-- [ ] #2 Knowledge QA shows source health before search and keeps search usable when health loading fails.
-- [ ] #3 Knowledge QA answer and evidence surfaces show compact trust/evidence controls without adding durable evidence persistence.
-- [ ] #4 Focused backend, frontend, extension parity, diff-check, and Bandit verification are recorded.
+- [x] #1 GET /api/v1/rag/source-health returns safe pre-query health for canonical Knowledge QA sources without altering search-response metadata.source_status.
+- [x] #2 Knowledge QA shows source health before search and keeps search usable when health loading fails.
+- [x] #3 Knowledge QA answer and evidence surfaces show compact trust/evidence controls without adding durable evidence persistence.
+- [x] #4 Focused backend, frontend, extension parity, diff-check, and Bandit verification are recorded.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -45,14 +45,22 @@ Task 3 quality-review fixes: ready-state source-health notice now prioritizes un
 Task 4 evidence/trust UI slice implemented. Added deterministic answer trust-summary helper, AnswerPanel trust note outside markdown body, clearer SourceCard Copy citation/Copy excerpt accessible names without duplicate actions, EvidenceRail source-action hint, and SourceList regression expectation for the citation accessible name. Save-to-note remains deferred because a backlink-preserving note handoff contract was not verified in this slice. Verification: red Task 4 tests failed before implementation; updated focused Vitest passed 63 tests across trustSummary, AnswerPanel.states, SourceCard.behavior, SourceList.behavior, and EvidenceRail.motion. git diff --check passed. Full UI tsc --noEmit remains blocked by existing unrelated baseline errors; filtered compiler diagnostics produced no KnowledgeQA/trustSummary/AnswerPanel/SourceCard/SourceList/EvidenceRail matches. Bandit is not applicable to this frontend-only slice.
 
 Task 5 recovery/parity slice implemented. No-results recovery now separates pre-query Source readiness from post-query Search diagnostics, uses concrete handoff labels (Open Quick Ingest, Open source page), and hides Show nearest matches unless evidence exists. Low-quality recovery uses limited-evidence copy and receives selected source-health caveat counts from AnswerPanel without implying automatic web fallback. KnowledgeQALayout passes sourceHealth and selected sources into recovery, and extension /knowledge route parity was rechecked. Verification: red Task 5 tests failed before implementation; focused Vitest passed 23 tests across NoResultsRecovery.source-status, LowQualityRecoveryBanner, and KnowledgeQALayout.behavior. Extension parity passed 4 tests in apps/tldw-frontend. git diff --check passed. Full UI tsc remains blocked by unrelated baseline errors; filtered compiler diagnostics produced no KnowledgeQA/NoResultsRecovery/LowQualityRecoveryBanner/KnowledgeQALayout/AnswerPanel matches. Bandit is not applicable to this frontend-only slice.
+
+Task 6 final verification completed after rebasing onto origin/dev. Backend focused pytest passed: 8 passed, 4 warnings. KnowledgeQA focused Vitest passed: 14 files, 117 tests. Extension parity passed: 1 file, 4 tests. Browser smoke passed after rerunning Playwright outside the macOS sandbox: /knowledge navigation/search-bar test passed against frontend localhost:18001 and backend 127.0.0.1:8000. git diff --check passed. Bandit touched backend files passed with 0 findings at /tmp/bandit_knowledge_source_health.json. Opened PR https://github.com/rmusser01/tldw_server/pull/1745.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented /knowledge source health and evidence controls. Source health is pre-query and read-only, post-query metadata.source_status remains backward compatible, evidence actions reuse existing handoffs, recovery copy separates source readiness from search diagnostics, and /knowledge remains QA-only. PR: https://github.com/rmusser01/tldw_server/pull/1745.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

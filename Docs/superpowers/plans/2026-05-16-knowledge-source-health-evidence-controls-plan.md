@@ -110,7 +110,7 @@ Docs/backlog:
 - Test: `tldw_Server_API/tests/RAG_NEW/integration/test_rag_source_health_endpoint.py`
 - Test: `tldw_Server_API/tests/RAG_NEW/unit/test_source_contract.py`
 
-- [ ] **Step 1: Create the implementation Backlog task**
+- [x] **Step 1: Create the implementation Backlog task**
 
 Use Backlog before code edits:
 
@@ -129,7 +129,7 @@ backlog task create "Implement /knowledge source health and evidence controls" \
 
 Expected: a new task id is created. Record it in commit/PR notes.
 
-- [ ] **Step 2: Write failing source-health unit tests**
+- [x] **Step 2: Write failing source-health unit tests**
 
 Create `tldw_Server_API/tests/RAG_NEW/unit/test_source_health.py`:
 
@@ -180,7 +180,7 @@ def test_source_health_does_not_expose_content_or_arbitrary_metadata() -> None:
 
 Expected: FAIL because `source_health.py` does not exist yet.
 
-- [ ] **Step 3: Run the failing unit test**
+- [x] **Step 3: Run the failing unit test**
 
 Run:
 
@@ -191,7 +191,7 @@ python -m pytest -q tldw_Server_API/tests/RAG_NEW/unit/test_source_health.py
 
 Expected: FAIL with import/module error.
 
-- [ ] **Step 4: Add Pydantic source-health response models**
+- [x] **Step 4: Add Pydantic source-health response models**
 
 Modify `tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py` near the existing RAG response models:
 
@@ -239,7 +239,7 @@ class KnowledgeSourceHealthResponse(BaseModel):
 
 Keep this model separate from search response metadata and do not change `UnifiedRAGResponse`.
 
-- [ ] **Step 5: Implement the source-health helper**
+- [x] **Step 5: Implement the source-health helper**
 
 Create `tldw_Server_API/app/core/RAG/rag_service/source_health.py`:
 
@@ -315,7 +315,7 @@ def build_source_health_entries(
 
 V1 intentionally leaves counts/timestamps null unless cheap, safe source-specific counts are added later.
 
-- [ ] **Step 6: Run source-health unit tests**
+- [x] **Step 6: Run source-health unit tests**
 
 Run:
 
@@ -326,7 +326,7 @@ python -m pytest -q tldw_Server_API/tests/RAG_NEW/unit/test_source_health.py
 
 Expected: PASS.
 
-- [ ] **Step 7: Write failing endpoint test**
+- [x] **Step 7: Write failing endpoint test**
 
 Create `tldw_Server_API/tests/RAG_NEW/integration/test_rag_source_health_endpoint.py`:
 
@@ -412,7 +412,7 @@ Use existing auth-override patterns from `tldw_Server_API/tests/RAG_NEW/integrat
 
 Expected: FAIL because endpoint does not exist.
 
-- [ ] **Step 8: Add `GET /api/v1/rag/source-health` endpoint**
+- [x] **Step 8: Add `GET /api/v1/rag/source-health` endpoint**
 
 Modify `tldw_Server_API/app/api/v1/endpoints/rag_unified.py`:
 
@@ -444,7 +444,7 @@ async def source_health_endpoint(
 
 Do not instantiate `MultiDatabaseRetriever` or source-specific databases in the source-health endpoint. Do not use request-scoped source DB dependencies such as `get_media_db_for_user`, `get_chacha_db_for_user`, or `get_prompts_db_for_user`. Derive source availability from existing files or metadata that can be checked without creating directories, schema, indexes, vector stores, records, or request-scoped database handles. Do not record RAG query usage and do not call search.
 
-- [ ] **Step 9: Add compatibility regression for post-query `metadata.source_status`**
+- [x] **Step 9: Add compatibility regression for post-query `metadata.source_status`**
 
 Add or extend a focused test around `_build_source_status` in `tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline.py`:
 
@@ -470,7 +470,7 @@ def test_search_source_status_semantics_remain_backward_compatible() -> None:
 
 Expected: PASS after implementation. This protects the old search-response contract.
 
-- [ ] **Step 10: Run backend focused tests**
+- [x] **Step 10: Run backend focused tests**
 
 Run:
 
@@ -485,7 +485,7 @@ python -m pytest -q \
 
 Expected: PASS. If unrelated tests in `test_unified_pipeline.py` are selected accidentally, narrow the `-k` expression to the new regression.
 
-- [ ] **Step 11: Commit backend contract**
+- [x] **Step 11: Commit backend contract**
 
 ```bash
 git add \
@@ -509,7 +509,7 @@ git commit -m "feat: add knowledge source health contract"
 - Test: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/sourceHealth.test.ts`
 - Test: `apps/packages/ui/src/services/__tests__/tldw-api-client.rag-source-health.test.ts`
 
-- [ ] **Step 1: Write failing client path test**
+- [x] **Step 1: Write failing client path test**
 
 Create `apps/packages/ui/src/services/__tests__/tldw-api-client.rag-source-health.test.ts` using the existing API-client test style:
 
@@ -533,7 +533,7 @@ describe("ragSourceHealth client", () => {
 
 Expected: FAIL because `ragSourceHealth` does not exist.
 
-- [ ] **Step 2: Write failing source health normalization tests**
+- [x] **Step 2: Write failing source health normalization tests**
 
 Create `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/sourceHealth.test.ts`:
 
@@ -580,7 +580,7 @@ describe("Knowledge QA source health normalization", () => {
 
 Expected: FAIL because `sourceHealth.ts` does not exist.
 
-- [ ] **Step 3: Add API client method**
+- [x] **Step 3: Add API client method**
 
 Modify `apps/packages/ui/src/services/tldw/domains/chat-rag.ts`:
 
@@ -604,7 +604,7 @@ async ragSourceHealth(): Promise<any> {
 }
 ```
 
-- [ ] **Step 4: Add source-health frontend types**
+- [x] **Step 4: Add source-health frontend types**
 
 Modify `apps/packages/ui/src/components/Option/KnowledgeQA/types.ts`:
 
@@ -662,7 +662,7 @@ refreshSourceHealth: () => Promise<void>
 
 Keep `KnowledgeSourceStatus` unchanged.
 
-- [ ] **Step 5: Implement normalization utilities**
+- [x] **Step 5: Implement normalization utilities**
 
 Create `apps/packages/ui/src/components/Option/KnowledgeQA/sourceHealth.ts`:
 
@@ -719,7 +719,7 @@ export function normalizeKnowledgeSourceHealth(payload: unknown): KnowledgeSourc
 
 Add small `normalizeIndexStatus`, `normalizeEmbeddingStatus`, `getSourceHealthStatusLabel`, and `buildSourceHealthSummary` helpers. Keep all copy in this helper or shared constants to avoid divergent labels.
 
-- [ ] **Step 6: Run frontend normalization/client tests**
+- [x] **Step 6: Run frontend normalization/client tests**
 
 Run:
 
@@ -732,7 +732,7 @@ cd apps/packages/ui
 
 Expected: PASS. If service tests live outside `apps/packages/ui`, run the equivalent from repo root with `bunx vitest run`.
 
-- [ ] **Step 7: Commit frontend client/normalization**
+- [x] **Step 7: Commit frontend client/normalization**
 
 ```bash
 git add \
@@ -1155,7 +1155,7 @@ git commit -m "feat: improve knowledge recovery diagnostics"
 - Modify: implementation Backlog task created in Task 1.
 - Optional Modify: `Docs/superpowers/specs/2026-05-16-knowledge-source-health-evidence-controls-design.md` only if implementation required design corrections.
 
-- [ ] **Step 1: Run backend focused verification**
+- [x] **Step 1: Run backend focused verification**
 
 Run:
 
@@ -1169,7 +1169,7 @@ python -m pytest -q \
 
 Expected: PASS.
 
-- [ ] **Step 2: Run frontend focused verification**
+- [x] **Step 2: Run frontend focused verification**
 
 Run:
 
@@ -1188,7 +1188,7 @@ cd apps/packages/ui
 
 Expected: PASS.
 
-- [ ] **Step 3: Run extension parity verification**
+- [x] **Step 3: Run extension parity verification**
 
 Run:
 
@@ -1199,7 +1199,7 @@ bunx vitest run __tests__/extension/knowledge-route-parity.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 4: Run browser smoke when local app is viable**
+- [x] **Step 4: Run browser smoke when local app is viable**
 
 If a frontend dev server and backend are already running:
 
@@ -1211,7 +1211,7 @@ TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://localhost:3000 \
 
 If the local server is not viable, record the blocker in the Backlog task instead of fabricating browser evidence.
 
-- [ ] **Step 5: Run diff and security checks**
+- [x] **Step 5: Run diff and security checks**
 
 Run:
 
@@ -1234,7 +1234,7 @@ python -m bandit -r \
 
 Expected: exit 0 with no new findings in touched code.
 
-- [ ] **Step 6: Update Backlog task**
+- [x] **Step 6: Update Backlog task**
 
 Use the implementation task id from Task 1:
 
@@ -1247,7 +1247,7 @@ backlog task edit TASK-ID \
   --status Done
 ```
 
-- [ ] **Step 7: Create or update PR**
+- [x] **Step 7: Create or update PR**
 
 Push branch:
 
@@ -1274,16 +1274,19 @@ gh pr create \
 - Existing post-query metadata.source_status remains backward compatible.
 
 ## Verification
-- [ ] Backend focused pytest
-- [ ] KnowledgeQA focused Vitest
-- [ ] Extension parity test
-- [ ] git diff --check
-- [ ] Bandit on touched backend files
+- [x] Backend focused pytest
+- [x] KnowledgeQA focused Vitest
+- [x] Extension parity test
+- [x] Browser smoke: `/knowledge` navigation/search-bar test against `localhost:18001` and backend `127.0.0.1:8000`
+- [x] git diff --check
+- [x] Bandit on touched backend files
 
 Change summary:
 <human-written summary required before merge>
 EOF
 )"
 ```
+
+Created PR: https://github.com/rmusser01/tldw_server/pull/1745
 
 Leave the human-owned `Change summary` placeholder for the requester.
