@@ -7,7 +7,6 @@ import {
   RefreshCw,
   ExternalLink,
   MessageSquare,
-  Trash2,
   Search,
   BookOpen,
 } from "lucide-react"
@@ -16,6 +15,13 @@ import { shouldKeepOriginalFile } from "@/services/tldw/media-routing"
 import { useIngestWizard } from "./IngestWizardContext"
 import { classifyError } from "./ErrorClassification"
 import type { ErrorCategory } from "./ErrorClassification"
+import {
+  canOpenMedia,
+  GENERIC_SKIPPED_MESSAGE,
+  LIBRARY_DUPLICATE_SKIP_MESSAGE,
+  LOCAL_QUEUE_DUPLICATE_SKIP_MESSAGE,
+  resolveSkippedResultReason,
+} from "./result-actions"
 
 // ---------------------------------------------------------------------------
 // Props
@@ -69,6 +75,7 @@ const SuccessRow: React.FC<SuccessRowProps> = React.memo(
   ({ item, qi, onOpenMedia, onDiscussInChat }) => {
     const label = item.title || item.fileName || item.url || item.id
     const duration = formatDuration(item.durationMs)
+    const showOpenMedia = Boolean(onOpenMedia) && canOpenMedia(item)
 
     const handleOpen = useCallback(() => onOpenMedia?.(item), [item, onOpenMedia])
     const handleChat = useCallback(() => onDiscussInChat?.(item), [item, onDiscussInChat])
@@ -85,15 +92,15 @@ const SuccessRow: React.FC<SuccessRowProps> = React.memo(
           </span>
         )}
         <div className="flex flex-shrink-0 items-center gap-1">
-          {onOpenMedia && (
+          {showOpenMedia && (
             <button
               type="button"
               onClick={handleOpen}
               className="rounded px-1.5 py-0.5 text-xs text-primary hover:bg-primary/10 transition-colors"
-              aria-label={qi("wizard.results.openAria", "Open {{name}}", { name: label })}
+              aria-label={qi("wizard.results.openAria", "Open {{name}} in Media", { name: label })}
             >
               <ExternalLink className="mr-0.5 inline h-3 w-3" aria-hidden="true" />
-              {qi("wizard.results.open", "Open")}
+              {qi("wizard.results.open", "Open in Media")}
             </button>
           )}
           {onDiscussInChat && (
@@ -126,6 +133,14 @@ type SkippedRowProps = {
 const SkippedRow: React.FC<SkippedRowProps> = React.memo(
   ({ item, qi, onOpenMedia, onDiscussInChat }) => {
     const label = item.title || item.fileName || item.url || item.id
+    const showOpenMedia = Boolean(onOpenMedia) && canOpenMedia(item)
+    const skippedReason = resolveSkippedResultReason(item)
+    const skippedMessage =
+      skippedReason === "local-queue-duplicate"
+        ? qi("wizard.results.skippedAlreadyQueued", LOCAL_QUEUE_DUPLICATE_SKIP_MESSAGE)
+        : skippedReason === "library-duplicate"
+          ? qi("wizard.results.skippedAlreadyInLibrary", LIBRARY_DUPLICATE_SKIP_MESSAGE)
+          : item.message || qi("wizard.results.skippedDefaultMessage", GENERIC_SKIPPED_MESSAGE)
 
     const handleOpen = useCallback(() => onOpenMedia?.(item), [item, onOpenMedia])
     const handleChat = useCallback(() => onDiscussInChat?.(item), [item, onDiscussInChat])
@@ -138,22 +153,19 @@ const SkippedRow: React.FC<SkippedRowProps> = React.memo(
             {label}
           </span>
           <p className="mt-0.5 text-xs text-text-subtle">
-            {item.message || qi(
-              "wizard.results.skippedDefaultMessage",
-              "This item already exists in your library. Use the \u2018Deep\u2019 preset to overwrite."
-            )}
+            {skippedMessage}
           </p>
         </div>
         <div className="flex flex-shrink-0 items-center gap-1">
-          {onOpenMedia && (
+          {showOpenMedia && (
             <button
               type="button"
               onClick={handleOpen}
               className="rounded px-1.5 py-0.5 text-xs text-primary hover:bg-primary/10 transition-colors"
-              aria-label={qi("wizard.results.openAria", "Open {{name}}", { name: label })}
+              aria-label={qi("wizard.results.openAria", "Open {{name}} in Media", { name: label })}
             >
               <ExternalLink className="mr-0.5 inline h-3 w-3" aria-hidden="true" />
-              {qi("wizard.results.open", "Open")}
+              {qi("wizard.results.open", "Open in Media")}
             </button>
           )}
           {onDiscussInChat && (
@@ -181,15 +193,13 @@ type ErrorRowProps = {
   category: ErrorCategory
   qi: (key: string, defaultValue: string, options?: Record<string, unknown>) => string
   onRetry?: (id: string) => void
-  onRemove?: (id: string) => void
 }
 
 const ErrorRow: React.FC<ErrorRowProps> = React.memo(
-  ({ item, category, qi, onRetry, onRemove }) => {
+  ({ item, category, qi, onRetry }) => {
     const label = item.title || item.fileName || item.url || item.id
 
     const handleRetry = useCallback(() => onRetry?.(item.id), [item.id, onRetry])
-    const handleRemove = useCallback(() => onRemove?.(item.id), [item.id, onRemove])
 
     return (
       <div className="rounded-md border border-danger/20 bg-danger/5 px-3 py-2">
@@ -226,17 +236,6 @@ const ErrorRow: React.FC<ErrorRowProps> = React.memo(
               >
                 <RefreshCw className="h-3 w-3" aria-hidden="true" />
                 {qi("wizard.results.retry", "Retry")}
-              </button>
-            )}
-            {onRemove && (
-              <button
-                type="button"
-                onClick={handleRemove}
-                className="flex items-center gap-1 rounded px-2 py-1 text-xs text-text-muted hover:bg-danger/10 hover:text-danger transition-colors"
-                aria-label={qi("wizard.results.removeItemAria", "Remove {{name}}", { name: label })}
-              >
-                <Trash2 className="h-3 w-3" aria-hidden="true" />
-                {qi("wizard.results.remove", "Remove")}
               </button>
             )}
           </div>
@@ -319,14 +318,6 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
       onRetryItems?.([id])
     },
     [onRetryItems]
-  )
-
-  const handleRemoveSingle = useCallback(
-    (_id: string) => {
-      // Remove is a no-op placeholder; parent will handle via onRetryItems
-      // or a future onRemoveItems callback.
-    },
-    []
   )
 
   const handleIngestMore = useCallback(() => {
@@ -470,7 +461,6 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
                   category={errorCategories.get(item.id) ?? classifyError(item.error)}
                   qi={qi}
                   onRetry={onRetryItems ? handleRetrySingle : undefined}
-                  onRemove={handleRemoveSingle}
                 />
               ))}
             </div>

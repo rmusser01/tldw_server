@@ -120,7 +120,7 @@ const validateQueueItem = (
       (other) => other.id !== item.id && other.url && other.url === item.url
     )
     if (isDuplicate) {
-      warnings.push("Duplicate URL")
+      warnings.push("Already queued")
     }
   }
 
@@ -136,7 +136,7 @@ const validateQueueItem = (
         other.fileSize === item.fileSize
     )
     if (isDuplicate) {
-      warnings.push("Duplicate file")
+      warnings.push("Already queued")
     }
   }
 

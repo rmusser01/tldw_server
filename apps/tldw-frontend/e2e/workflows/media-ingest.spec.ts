@@ -642,6 +642,19 @@ test.describe("Media Ingestion Workflow", () => {
         title,
       })
 
+      const openInMediaButton = dialog
+        .getByRole("button", { name: /open .* media/i })
+        .first()
+      await expect(openInMediaButton).toBeVisible({ timeout: 15_000 })
+      await openInMediaButton.click()
+      await authedPage.waitForURL(
+        (url) =>
+          url.pathname === "/media" &&
+          url.searchParams.get("id") === expectedMediaId,
+        { timeout: 15_000 }
+      )
+      await expect(dialog).toBeHidden({ timeout: 15_000 })
+
       await assertNoCriticalErrors(diagnostics)
     })
 

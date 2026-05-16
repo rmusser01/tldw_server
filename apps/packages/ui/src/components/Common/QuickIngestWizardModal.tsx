@@ -210,6 +210,7 @@ const normalizeWizardResult = (
     mediaId:
       item.mediaId ??
       extractCompletedIngestJobMediaId(item.data),
+    persisted: item.persisted,
     message: isDuplicate
       ? DUPLICATE_SKIP_MESSAGE
       : typeof item.message === "string" ? item.message : undefined,
@@ -1461,26 +1462,33 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   // Navigation callbacks for WizardResultsStep CTAs
   const navigate = useNavigate()
-  const mountedRef = useRef(true)
-  useEffect(() => () => { mountedRef.current = false }, [])
 
   const handleSearchKnowledge = useCallback(() => {
+    navigate("/knowledge")
     onClose()
-    window.setTimeout(() => { if (mountedRef.current) navigate("/knowledge") }, 150)
   }, [navigate, onClose])
 
   const handleOpenWorkspace = useCallback(
     (item: WizardResultItem) => {
-      onClose()
       const mediaId = item.mediaId
       if (mediaId != null) {
-        window.setTimeout(
-          () => { if (mountedRef.current) navigate(`${DOCUMENT_WORKSPACE_PATH}?open=${mediaId}`) },
-          150
-        )
+        navigate(`${DOCUMENT_WORKSPACE_PATH}?open=${mediaId}`)
       } else {
-        window.setTimeout(() => { if (mountedRef.current) navigate(DOCUMENT_WORKSPACE_PATH) }, 150)
+        navigate(DOCUMENT_WORKSPACE_PATH)
       }
+      onClose()
+    },
+    [navigate, onClose]
+  )
+
+  const handleOpenMedia = useCallback(
+    (item: WizardResultItem) => {
+      const mediaId = item.mediaId
+      const mediaPath = mediaId != null
+        ? `/media?id=${encodeURIComponent(String(mediaId))}`
+        : "/media"
+      navigate(mediaPath)
+      onClose()
     },
     [navigate, onClose]
   )
@@ -1504,6 +1512,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         return (
           <WizardResultsStep
             onClose={onClose}
+            onOpenMedia={handleOpenMedia}
             onSearchKnowledge={handleSearchKnowledge}
             onOpenWorkspace={handleOpenWorkspace}
           />
@@ -1511,7 +1520,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       default:
         return null
     }
-  }, [currentStep, handleQuickProcess, handleSearchKnowledge, handleOpenWorkspace, onClose, open, state.isMinimized])
+  }, [currentStep, handleOpenMedia, handleQuickProcess, handleSearchKnowledge, handleOpenWorkspace, onClose, open, state.isMinimized])
 
   return (
     <>
