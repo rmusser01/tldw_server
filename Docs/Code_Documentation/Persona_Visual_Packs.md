@@ -33,6 +33,21 @@ it. Generated or imported assets do not become live just because a job finished.
 Deactivation clears the active visual pack for that persona while leaving
 available packs in place for later editing or activation.
 
+## Generated Candidate Provenance
+
+Generated candidates are review artifacts. Their persisted
+`generation_provenance` metadata is intentionally bounded and trace-safe so a
+review surface can explain why a candidate exists without echoing raw prompts,
+provider secrets, local paths, or arbitrary job payloads.
+
+The V1 provenance shape stores `schema_version`, `generation_mode`,
+`request_id`, `job_id`, `backend`, and `target_state` when present. Recipe-backed
+jobs may also include a `recipe` summary with `starter_pack_id`,
+`recipe_output`, `correlation_id`, `identity_brief`, `neutral_anchor`,
+`static_sheet`, bounded `review_checks`, and a boolean
+`user_prompt_included`. The raw effective prompt remains outside provenance, and
+unknown provenance keys are dropped during candidate row normalization.
+
 ## Manifest-Backed Pack Format
 
 Packs are stored as manifests with referenced assets. The V1 renderer uses

@@ -581,7 +581,7 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 46  # Schema v46 adds persona visual library items
+    _CURRENT_SCHEMA_VERSION = 47  # Schema v47 adds persona visual candidate provenance
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _ALLOWED_CONVERSATION_STATES: tuple[str, ...] = ("in-progress", "resolved", "backlog", "non-viable")
     _ALLOWED_CONVERSATION_CHARACTER_SCOPES: tuple[str, ...] = ("all", "character", "non_character")
@@ -5254,6 +5254,7 @@ CREATE TABLE IF NOT EXISTS persona_visual_candidates (
                                CHECK(status IN ('review','accepted','rejected','failed')),
   proposed_manifest_patch_json TEXT NOT NULL DEFAULT '{}',
   generated_asset_ids_json     TEXT NOT NULL DEFAULT '[]',
+  generation_provenance_json   TEXT NOT NULL DEFAULT '{}',
   prompt                       TEXT,
   failure_reason               TEXT,
   created_at                   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -5336,6 +5337,20 @@ UPDATE db_schema_version
    SET version = 46
  WHERE schema_name = 'rag_char_chat_schema'
    AND version < 46;
+"""
+
+    _MIGRATION_SQL_V46_TO_V47_POSTGRES = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 47 — Persona visual candidate provenance (2026-05-16) [Postgres]
+───────────────────────────────────────────────────────────────*/
+
+ALTER TABLE persona_visual_candidates
+  ADD COLUMN IF NOT EXISTS generation_provenance_json TEXT NOT NULL DEFAULT '{}';
+
+UPDATE db_schema_version
+   SET version = 47
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 47;
 """
 
     _MIGRATION_SQL_V10_TO_V11_POSTGRES = """
@@ -7440,6 +7455,39 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V45->V46: {e}", exc_info=True)
             raise SchemaError(f"Unexpected error migrating to V46 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
 
+    def _migrate_from_v46_to_v47(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema from V46 to V47 (persona visual candidate provenance)."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V46 to V47 for DB: {self.db_path_str}...")
+        try:
+            candidate_cols = {
+                str(row[1])
+                for row in conn.execute("PRAGMA table_info('persona_visual_candidates')").fetchall()
+            }
+            if "generation_provenance_json" not in candidate_cols:
+                conn.execute(
+                    "ALTER TABLE persona_visual_candidates "
+                    "ADD COLUMN generation_provenance_json TEXT NOT NULL DEFAULT '{}'"
+                )
+            conn.execute(
+                "UPDATE db_schema_version SET version = 47 "
+                "WHERE schema_name = ? AND version < 47",
+                (self._SCHEMA_NAME,),
+            )
+            final_version = self._get_db_version(conn)
+            if final_version != 47:
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"[{self._SCHEMA_NAME}] Migration V46->V47 failed version check. Expected 47, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V47 completed.")
+        except sqlite3.Error as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V46->V47 failed: {e}", exc_info=True)
+            raise SchemaError(f"Migration V46->V47 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+        except SchemaError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V46->V47: {e}", exc_info=True)
+            raise SchemaError(f"Unexpected error migrating to V47 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+
     def _ensure_recent_persona_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Backfill recent persona schema columns after version-number collisions."""
         profile_cols = {row[1] for row in conn.execute("PRAGMA table_info('persona_profiles')").fetchall()}
@@ -8924,6 +8972,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 46 and current_db_version == 45:
                         self._migrate_from_v45_to_v46(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 47 and current_db_version == 46:
+                        self._migrate_from_v46_to_v47(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -9271,6 +9322,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                                 self._migrate_from_v44_to_v45(conn)
                             elif fallback_version == 45:
                                 self._migrate_from_v45_to_v46(conn)
+                            elif fallback_version == 46:
+                                self._migrate_from_v46_to_v47(conn)
                             else:
                                 raise SchemaError(  # noqa: TRY003, TRY301
                                     f"Migration path undefined for '{self._SCHEMA_NAME}' from version {current_initial_version} to {target_version}. "
@@ -9384,6 +9437,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 46 and current_db_version == 45:
                     self._migrate_from_v45_to_v46(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 47 and current_db_version == 46:
+                    self._migrate_from_v46_to_v47(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -13204,6 +13260,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if current_version < 46:
                 self._apply_postgres_migration_script(self._MIGRATION_SQL_V45_TO_V46_POSTGRES, conn, expected_version=46)
                 current_version = 46
+            if current_version < 47:
+                self._apply_postgres_migration_script(self._MIGRATION_SQL_V46_TO_V47_POSTGRES, conn, expected_version=47)
+                current_version = 47
 
             if current_version > target_version:
                 raise SchemaError(  # noqa: TRY003

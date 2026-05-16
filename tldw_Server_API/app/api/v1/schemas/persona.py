@@ -522,6 +522,7 @@ class PersonaVisualCandidateResponse(BaseModel):
     proposed_manifest_patch: dict[str, Any] = Field(default_factory=dict)
     generated_asset_ids: list[str] = Field(default_factory=list)
     generated_assets: list[PersonaVisualAssetResponse] = Field(default_factory=list)
+    generation_provenance: dict[str, Any] = Field(default_factory=dict)
     prompt: str | None = None
     failure_reason: str | None = None
     created_at: str
