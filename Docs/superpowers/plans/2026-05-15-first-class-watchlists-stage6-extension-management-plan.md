@@ -410,10 +410,12 @@ git commit -m "feat: adapt watchlist activity reports and templates for constrai
 - Modify: `apps/packages/ui/src/components/Option/Watchlists/JobsTab/JobPreviewModal.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Watchlists/TemplatesTab/TemplateEditor.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Watchlists/SettingsTab/SettingsTab.tsx`
+- Create: `apps/packages/ui/src/components/Option/Watchlists/shared/watchlists-modal-layout.ts`
+- Modify: `apps/packages/ui/src/components/Option/Watchlists/shared/index.ts`
 - Modify if needed: `apps/packages/ui/src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx`
 - Test: focused modal/drawer accessibility tests under existing tab test folders.
 
-- [ ] **Step 1: Write failing modal width/focus tests**
+- [x] **Step 1: Write failing modal width/focus tests**
 
 Cover at least:
 
@@ -431,11 +433,11 @@ At constrained width, each test should verify:
 - The modal/drawer is full-width or internally stacked.
 - Escape/cancel closes without leaving focus trapped in a removed node.
 
-- [ ] **Step 2: Implement constrained modal/drawer behavior**
+- [x] **Step 2: Implement constrained modal/drawer behavior**
 
 Prefer existing Ant Design modal/drawer APIs and utility classes. Do not build a custom modal system. Use full-width drawers for dense editors if Ant modal footers become cramped.
 
-- [ ] **Step 3: Add keyboard navigation checks**
+- [x] **Step 3: Add keyboard navigation checks**
 
 Extend existing keyboard/focus tests where practical:
 
@@ -444,7 +446,7 @@ Extend existing keyboard/focus tests where practical:
 - Escape closes constrained drawers.
 - The active tab/content has a stable accessible label.
 
-- [ ] **Step 4: Run focused accessibility tests**
+- [x] **Step 4: Run focused accessibility tests**
 
 Run:
 
@@ -464,7 +466,9 @@ bunx vitest run \
 
 Expected: all selected tests pass.
 
-- [ ] **Step 5: Commit Stage 6D**
+Recorded on Stage 6D closeout: the focused modal/accessibility suite first failed on fixed-width modal chrome and table-only nested content, then passed with 9 files and 67 tests. The Watchlists static guard passed with 1 file and 3 tests. `git diff --check` passed. Bandit was not applicable because Stage 6D changed only frontend TypeScript/tests, documentation, and Backlog files.
+
+- [x] **Step 5: Commit Stage 6D**
 
 ```bash
 git add \

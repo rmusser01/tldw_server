@@ -14,3 +14,8 @@ export {
   useWatchlistsViewport,
   WATCHLISTS_CONSTRAINED_BREAKPOINT
 } from "./useWatchlistsViewport"
+export {
+  buildWatchlistsModalChrome,
+  WATCHLISTS_CONSTRAINED_MODAL_BODY_MAX_HEIGHT,
+  WATCHLISTS_CONSTRAINED_MODAL_WIDTH
+} from "./watchlists-modal-layout"

@@ -20,7 +20,12 @@ import type {
   WatchlistJob,
   WatchlistJobCreate
 } from "@/types/watchlists"
-import { CronDisplay, WatchlistsHelpTooltip } from "../shared"
+import {
+  buildWatchlistsModalChrome,
+  CronDisplay,
+  useWatchlistsViewport,
+  WatchlistsHelpTooltip
+} from "../shared"
 import { mapWatchlistsError } from "../shared/watchlists-error"
 import {
   getFocusableActiveElement,
@@ -250,6 +255,11 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
   const isEditing = !!initialValues
   const restoreFocusTargetRef = useRef<HTMLElement | null>(null)
   const wasOpenRef = useRef(false)
+  const { isConstrained } = useWatchlistsViewport()
+  const modalChrome = buildWatchlistsModalChrome(isConstrained, 700, {
+    maxHeight: "70vh",
+    overflowY: "auto"
+  })
 
   useLayoutEffect(() => {
     if (open) {
@@ -1992,8 +2002,10 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
       cancelText={t("common:cancel", "Cancel")}
       confirmLoading={submitting}
       destroyOnHidden
-      width={700}
-      styles={{ body: { maxHeight: "70vh", overflowY: "auto" } }}
+      data-testid="job-form-modal"
+      width={modalChrome.width}
+      style={modalChrome.style}
+      styles={modalChrome.styles}
     >
       <Form form={form} layout="vertical" className="mt-4">
         <div className="mb-4 rounded-lg border border-border bg-surface p-3">

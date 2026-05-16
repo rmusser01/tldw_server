@@ -57,6 +57,27 @@ const translationMock = vi.hoisted(() => ({
 const mockMessageHandle = (): ReturnType<typeof message.error> =>
   undefined as unknown as ReturnType<typeof message.error>
 
+const setViewport = (width: number) => {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    value: width
+  })
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: width < 768,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn()
+    }))
+  })
+}
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: translationMock.t
@@ -163,6 +184,7 @@ describe("JobFormModal live summary", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    setViewport(1024)
     telemetryMock.trackWatchlistsPreventionTelemetry.mockResolvedValue(undefined)
     vi.spyOn(Modal, "confirm").mockImplementation((config: any) => {
       config?.onOk?.()
@@ -235,6 +257,24 @@ describe("JobFormModal live summary", () => {
       createObjectUrlMock
     ;(URL as unknown as { revokeObjectURL?: (url: string) => void }).revokeObjectURL =
       revokeObjectUrlMock
+  })
+
+  it("uses full-width constrained modal chrome with visible create and cancel actions", async () => {
+    setViewport(420)
+
+    render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(servicesMock.fetchWatchlistSources).toHaveBeenCalled()
+      expect(servicesMock.fetchWatchlistGroups).toHaveBeenCalled()
+    })
+
+    const modal = document.querySelector(".ant-modal") as HTMLElement | null
+    expect(modal).not.toBeNull()
+    expect(modal?.style.width).toBe("100vw")
+    expect(modal?.style.maxWidth).toBe("100vw")
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Create" })).toBeInTheDocument()
   })
 
   it("updates the live summary as authoring fields change", async () => {

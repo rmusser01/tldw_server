@@ -24,7 +24,7 @@ vi.mock("@/services/watchlists", () => ({
 }))
 
 vi.mock("antd", () => {
-  const Modal = ({ open, title, children, onCancel }: any) => {
+  const Modal = ({ open, title, children, onCancel, width, styles, ...rest }: any) => {
     const closeRef = React.useRef<HTMLButtonElement | null>(null)
 
     React.useEffect(() => {
@@ -36,7 +36,11 @@ vi.mock("antd", () => {
     if (!open) return null
 
     return (
-      <div>
+      <div
+        data-testid={rest["data-testid"]}
+        data-width={String(width ?? "")}
+        data-body-max-height={String(styles?.body?.maxHeight ?? "")}
+      >
         <h2>{title}</h2>
         <button type="button" ref={closeRef} onClick={() => onCancel?.()}>
           Close
@@ -49,7 +53,7 @@ vi.mock("antd", () => {
   const Spin = () => <div>Loading...</div>
   const Tag = ({ children }: any) => <span>{children}</span>
   const Table = ({ dataSource = [] }: any) => (
-    <div>
+    <div data-testid="job-preview-table">
       {dataSource.map((item: any, index: number) => (
         <div key={`${item.url || "item"}-${index}`}>{item.title || item.url || "-"}</div>
       ))}
@@ -76,9 +80,31 @@ const buildJob = () => ({
   created_at: "2026-02-18T00:00:00Z"
 })
 
+const setViewport = (width: number) => {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    value: width
+  })
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: width < 768,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn()
+    }))
+  })
+}
+
 describe("JobPreviewModal focus restoration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setViewport(1024)
     mocks.previewWatchlistJobMock.mockResolvedValue({
       items: [],
       total: 0,
@@ -119,5 +145,43 @@ describe("JobPreviewModal focus restoration", () => {
     })
 
     trigger.remove()
+  })
+
+  it("renders preview candidates as constrained cards in a full-width dialog", async () => {
+    setViewport(420)
+    mocks.previewWatchlistJobMock.mockResolvedValue({
+      items: [
+        {
+          title: "CVE briefing",
+          url: "https://example.com/cve",
+          source_id: 5,
+          decision: "ingest",
+          matched_action: "alert",
+          matched_filter_key: "cve",
+          matched_filter_type: "keyword",
+          matched_filter_id: 9
+        }
+      ],
+      total: 1,
+      ingestable: 1,
+      filtered: 0
+    })
+
+    render(
+      <JobPreviewModal
+        job={buildJob() as any}
+        open
+        onClose={vi.fn()}
+      />
+    )
+
+    await waitFor(() => {
+      const modal = screen.getByTestId("job-preview-modal")
+      expect(modal).toHaveAttribute("data-width", "100vw")
+      expect(modal.getAttribute("data-body-max-height")).toContain("calc(100vh")
+      expect(screen.getByTestId("job-preview-constrained-list")).toBeInTheDocument()
+      expect(screen.queryByTestId("job-preview-table")).not.toBeInTheDocument()
+      expect(screen.getByText("CVE briefing")).toBeInTheDocument()
+    })
   })
 })

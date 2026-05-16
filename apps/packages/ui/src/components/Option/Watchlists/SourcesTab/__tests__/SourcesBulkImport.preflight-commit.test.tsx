@@ -36,9 +36,13 @@ vi.mock("antd", () => {
     </button>
   )
 
-  const Modal = ({ open, title, footer, children }: any) =>
+  const Modal = ({ open, title, footer, children, width, styles, ...rest }: any) =>
     open ? (
-      <div>
+      <div
+        data-testid={rest["data-testid"]}
+        data-width={String(width ?? "")}
+        data-body-max-height={String(styles?.body?.maxHeight ?? "")}
+      >
         <h2>{title}</h2>
         {children}
         <div>{footer}</div>
@@ -97,8 +101,8 @@ vi.mock("antd", () => {
     )
   }
 
-  const Table = ({ dataSource = [] }: any) => (
-    <div data-testid="preflight-table-rows">{dataSource.length}</div>
+  const Table = ({ dataSource = [], ...rest }: any) => (
+    <div data-testid={rest["data-testid"] || "preflight-table-rows"}>{dataSource.length}</div>
   )
 
   const Tag = ({ children }: any) => <span>{children}</span>
@@ -140,9 +144,31 @@ vi.mock("@/services/watchlists", () => ({
   importOpml: (...args: any[]) => mocks.importOpmlMock(...args)
 }))
 
+const setViewport = (width: number) => {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    value: width
+  })
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: width < 768,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn()
+    }))
+  })
+}
+
 describe("SourcesBulkImport preflight and commit", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setViewport(1024)
     mocks.tMock.mockImplementation(
       (_key: string, defaultValue?: unknown, options?: Record<string, unknown>) => {
         if (typeof defaultValue === "string") {
@@ -348,6 +374,42 @@ describe("SourcesBulkImport preflight and commit", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Retry failed only" })).toBeDisabled()
+    })
+  })
+
+  it("uses constrained cards for OPML preflight and keeps footer actions reachable", async () => {
+    setViewport(420)
+
+    render(
+      <SourcesBulkImport
+        open
+        onClose={vi.fn()}
+        groups={[]}
+        tags={[]}
+        defaultGroupId={null}
+        onImported={vi.fn()}
+      />
+    )
+
+    const modal = screen.getByTestId("sources-bulk-import-modal")
+    expect(modal).toHaveAttribute("data-width", "100vw")
+    expect(modal.getAttribute("data-body-max-height")).toContain("calc(100vh")
+
+    const opml = `<?xml version="1.0"?>
+<opml version="2.0">
+  <body>
+    <outline text="Fresh Feed" xmlUrl="https://new.example.com/rss.xml"/>
+  </body>
+</opml>`
+    const file = new File([opml], "feeds.opml", { type: "text/xml" })
+
+    fireEvent.change(screen.getByTestId("opml-upload-input"), { target: { files: [file] } })
+
+    await waitFor(() => {
+      expect(screen.getByTestId("opml-preflight-constrained-list")).toBeInTheDocument()
+      expect(screen.queryByTestId("preflight-table-rows")).not.toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /Import 1 feed/i })).toBeEnabled()
+      expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument()
     })
   })
 })

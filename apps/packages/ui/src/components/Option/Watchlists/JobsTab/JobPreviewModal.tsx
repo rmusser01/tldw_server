@@ -4,6 +4,7 @@ import type { ColumnsType } from "antd/es/table"
 import { useTranslation } from "react-i18next"
 import { previewWatchlistJob } from "@/services/watchlists"
 import type { JobPreviewResult, PreviewItem, WatchlistJob } from "@/types/watchlists"
+import { buildWatchlistsModalChrome, useWatchlistsViewport } from "../shared"
 import {
   getFocusableActiveElement,
   restoreFocusToElement
@@ -25,6 +26,8 @@ export const JobPreviewModal: React.FC<JobPreviewModalProps> = ({
   const [preview, setPreview] = useState<JobPreviewResult | null>(null)
   const restoreFocusTargetRef = useRef<HTMLElement | null>(null)
   const wasOpenRef = useRef(false)
+  const { isConstrained } = useWatchlistsViewport()
+  const modalChrome = buildWatchlistsModalChrome(isConstrained, 800)
 
   useLayoutEffect(() => {
     if (open) {
@@ -102,13 +105,70 @@ export const JobPreviewModal: React.FC<JobPreviewModalProps> = ({
     }
   ]
 
+  const renderPreviewItems = () => {
+    const items = preview?.items || []
+    if (isConstrained) {
+      return (
+        <div className="space-y-2" data-testid="job-preview-constrained-list">
+          {items.map((item, index) => {
+            const title = item.title || item.url || "-"
+            const reasonType = item.matched_filter_type
+              ? String(item.matched_filter_type)
+              : "filter"
+            const reasonId = item.matched_filter_id != null ? `#${item.matched_filter_id}` : ""
+            const reasonKey = item.matched_filter_key ?? ""
+            const reason = [reasonType, reasonId, reasonKey].filter(Boolean).join(" ")
+            return (
+              <div
+                key={`${item.source_id}-${item.url ?? index}`}
+                className="rounded-md border border-border bg-surface p-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="line-clamp-2 text-sm font-medium">{title}</div>
+                    {item.url ? (
+                      <div className="mt-1 break-all text-xs text-text-muted">
+                        {item.url}
+                      </div>
+                    ) : null}
+                  </div>
+                  <Tag color={item.decision === "ingest" ? "green" : "red"}>
+                    {item.decision}
+                  </Tag>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs text-text-muted">
+                  <span>{t("watchlists:jobs.preview.columns.source", "Source")}: #{item.source_id}</span>
+                  {item.matched_action ? <Tag>{item.matched_action}</Tag> : null}
+                  {reason ? <span>{reason}</span> : null}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )
+    }
+
+    return (
+      <Table
+        dataSource={items}
+        columns={columns}
+        rowKey={(item) => `${item.source_id}-${item.url ?? ""}`}
+        pagination={false}
+        size="small"
+      />
+    )
+  }
+
   return (
     <Modal
       title={t("watchlists:jobs.preview.title", "Monitor Preview")}
       open={open}
       onCancel={onClose}
       footer={null}
-      width={800}
+      data-testid="job-preview-modal"
+      width={modalChrome.width}
+      style={modalChrome.style}
+      styles={modalChrome.styles}
     >
       {loading ? (
         <div className="flex items-center justify-center py-12">
@@ -127,13 +187,7 @@ export const JobPreviewModal: React.FC<JobPreviewModalProps> = ({
               }
             )}
           </div>
-          <Table
-            dataSource={preview.items || []}
-            columns={columns}
-            rowKey={(item) => `${item.source_id}-${item.url ?? ""}`}
-            pagination={false}
-            size="small"
-          />
+          {renderPreviewItems()}
         </div>
       ) : (
         <div className="text-center text-sm text-text-muted py-8">

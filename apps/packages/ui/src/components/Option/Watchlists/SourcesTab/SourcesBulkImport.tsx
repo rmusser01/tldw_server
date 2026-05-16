@@ -5,7 +5,11 @@ import { UploadCloud } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { fetchWatchlistSources, importOpml } from "@/services/watchlists"
 import type { SourcesImportResponse, WatchlistGroup, WatchlistTag } from "@/types/watchlists"
-import { WatchlistsHelpTooltip } from "../shared"
+import {
+  buildWatchlistsModalChrome,
+  useWatchlistsViewport,
+  WatchlistsHelpTooltip
+} from "../shared"
 import { buildOpmlPreflightSummary, type OpmlPreflightItem, type OpmlPreflightStatus } from "./opml-preflight"
 
 const EXISTING_URL_LOOKUP_PAGE_SIZE = 200
@@ -136,6 +140,8 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
   const [existingUrlsLoaded, setExistingUrlsLoaded] = useState(false)
   const [result, setResult] = useState<SourcesImportResponse | null>(null)
   const [retryingFailedOnly, setRetryingFailedOnly] = useState(false)
+  const { isConstrained } = useWatchlistsViewport()
+  const modalChrome = buildWatchlistsModalChrome(isConstrained, 900)
 
   const resetState = useCallback(() => {
     setActive(true)
@@ -395,13 +401,193 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
     </Tag>
   )
 
+  const renderPreflightPreview = () => {
+    if (!preflight || preflight.items.length === 0) return null
+    const items = preflight.items.slice(0, PREVIEW_ROW_LIMIT)
+
+    if (isConstrained) {
+      return (
+        <div
+          className="space-y-2"
+          data-testid="opml-preflight-constrained-list"
+        >
+          {items.map((item, idx) => (
+            <div
+              key={`${item.url}-${idx}`}
+              className="rounded-md border border-border bg-surface p-3"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">
+                    {item.name || item.url || "-"}
+                  </div>
+                  <div className="break-all text-xs text-text-muted">
+                    {item.url || "-"}
+                  </div>
+                </div>
+                <div className="shrink-0">
+                  {renderPreflightStatus(item.status)}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )
+    }
+
+    return (
+      <Table<OpmlPreflightItem>
+        dataSource={items}
+        rowKey={(item, idx) => `${item.url}-${idx}`}
+        pagination={false}
+        size="small"
+        columns={[
+          {
+            title: t("watchlists:sources.columns.name", "Name"),
+            dataIndex: "name",
+            key: "name",
+            render: (name: string, record) => name || record.url || "-"
+          },
+          {
+            title: t("watchlists:sources.columns.url", "URL"),
+            dataIndex: "url",
+            key: "url",
+            ellipsis: true,
+            render: (url: string) => url || "-"
+          },
+          {
+            title: t("watchlists:sources.importPreviewStatusTitle", "Preflight Status"),
+            dataIndex: "status",
+            key: "status",
+            width: 180,
+            render: (status: OpmlPreflightStatus) => renderPreflightStatus(status)
+          }
+        ]}
+      />
+    )
+  }
+
+  const renderFailedItems = () => {
+    if (failedItems.length === 0) return null
+
+    return (
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-sm text-text-muted">
+            {t(
+              "watchlists:sources.importFailedCount",
+              "{{count}} failed feed{{plural}} ready for recovery actions.",
+              {
+                count: failedItems.length,
+                plural: failedItems.length === 1 ? "" : "s"
+              }
+            )}
+          </div>
+          <Space wrap>
+            <Button
+              onClick={handleRetryFailedOnly}
+              disabled={retryableFailedItems.length === 0}
+              loading={retryingFailedOnly}
+            >
+              {t("watchlists:sources.importRetryFailed", "Retry failed only")}
+            </Button>
+            <Button onClick={handleExportFailedCsv}>
+              {t("watchlists:sources.importExportFailedCsv", "Export failed CSV")}
+            </Button>
+            <Button onClick={handleExportFailedJson}>
+              {t("watchlists:sources.importExportFailedJson", "Export failed JSON")}
+            </Button>
+          </Space>
+        </div>
+        {isConstrained ? (
+          <div
+            className="space-y-2"
+            data-testid="opml-failed-constrained-list"
+          >
+            {failedItems.map((item, idx) => (
+              <div
+                key={`${item.url}-${idx}`}
+                className="rounded-md border border-border bg-surface p-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">
+                      {item.name || item.url}
+                    </div>
+                    <div className="break-all text-xs text-text-muted">
+                      {item.url}
+                    </div>
+                    {item.error ? (
+                      <div className="mt-1 text-xs text-danger">
+                        {item.error}
+                      </div>
+                    ) : null}
+                  </div>
+                  <Tag color={isRetryableFailure(item.reasonCode) ? "orange" : "default"}>
+                    {item.reasonCode}
+                  </Tag>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <Table
+            dataSource={failedItems}
+            rowKey={(item, idx) => `${item.url}-${idx}`}
+            pagination={false}
+            size="small"
+            columns={[
+              {
+                title: t("watchlists:sources.columns.name", "Name"),
+                dataIndex: "name",
+                key: "name",
+                render: (name: string | null, record) => name || record.url
+              },
+              {
+                title: t("watchlists:sources.columns.url", "URL"),
+                dataIndex: "url",
+                key: "url",
+                ellipsis: true
+              },
+              {
+                title: t("watchlists:sources.columns.status", "Status"),
+                dataIndex: "status",
+                key: "status"
+              },
+              {
+                title: t("watchlists:sources.importReasonCode", "Reason code"),
+                dataIndex: "reasonCode",
+                key: "reasonCode",
+                render: (reasonCode: ImportFailureReasonCode) => (
+                  <Tag color={isRetryableFailure(reasonCode) ? "orange" : "default"}>
+                    {reasonCode}
+                  </Tag>
+                )
+              },
+              {
+                title: t("watchlists:sources.columns.error", "Error"),
+                dataIndex: "error",
+                key: "error",
+                ellipsis: true
+              }
+            ]}
+          />
+        )}
+      </div>
+    )
+  }
+
   return (
     <Modal
       title={t("watchlists:sources.importTitle", "Import OPML")}
       open={open}
       onCancel={onClose}
       footer={(
-        <Space>
+        <Space
+          wrap
+          className={isConstrained ? "w-full justify-end" : undefined}
+          data-testid="sources-bulk-import-footer"
+        >
           <Button onClick={onClose}>
             {t("common:close", "Close")}
           </Button>
@@ -422,7 +608,10 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
           </Button>
         </Space>
       )}
-      width={900}
+      data-testid="sources-bulk-import-modal"
+      width={modalChrome.width}
+      style={modalChrome.style}
+      styles={modalChrome.styles}
     >
       <div className="space-y-4">
         <Upload.Dragger {...uploadProps} disabled={importing}>
@@ -518,36 +707,7 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
           />
         )}
 
-        {preflight && preflight.items.length > 0 && (
-          <Table<OpmlPreflightItem>
-            dataSource={preflight.items.slice(0, PREVIEW_ROW_LIMIT)}
-            rowKey={(item, idx) => `${item.url}-${idx}`}
-            pagination={false}
-            size="small"
-            columns={[
-              {
-                title: t("watchlists:sources.columns.name", "Name"),
-                dataIndex: "name",
-                key: "name",
-                render: (name: string, record) => name || record.url || "-"
-              },
-              {
-                title: t("watchlists:sources.columns.url", "URL"),
-                dataIndex: "url",
-                key: "url",
-                ellipsis: true,
-                render: (url: string) => url || "-"
-              },
-              {
-                title: t("watchlists:sources.importPreviewStatusTitle", "Preflight Status"),
-                dataIndex: "status",
-                key: "status",
-                width: 180,
-                render: (status: OpmlPreflightStatus) => renderPreflightStatus(status)
-              }
-            ]}
-          />
-        )}
+        {renderPreflightPreview()}
 
         {summary && (
           <Alert
@@ -562,78 +722,7 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
           />
         )}
 
-        {failedItems.length > 0 && (
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-sm text-text-muted">
-                {t(
-                  "watchlists:sources.importFailedCount",
-                  "{{count}} failed feed{{plural}} ready for recovery actions.",
-                  {
-                    count: failedItems.length,
-                    plural: failedItems.length === 1 ? "" : "s"
-                  }
-                )}
-              </div>
-              <Space>
-                <Button
-                  onClick={handleRetryFailedOnly}
-                  disabled={retryableFailedItems.length === 0}
-                  loading={retryingFailedOnly}
-                >
-                  {t("watchlists:sources.importRetryFailed", "Retry failed only")}
-                </Button>
-                <Button onClick={handleExportFailedCsv}>
-                  {t("watchlists:sources.importExportFailedCsv", "Export failed CSV")}
-                </Button>
-                <Button onClick={handleExportFailedJson}>
-                  {t("watchlists:sources.importExportFailedJson", "Export failed JSON")}
-                </Button>
-              </Space>
-            </div>
-            <Table
-              dataSource={failedItems}
-              rowKey={(item, idx) => `${item.url}-${idx}`}
-              pagination={false}
-              size="small"
-              columns={[
-                {
-                  title: t("watchlists:sources.columns.name", "Name"),
-                  dataIndex: "name",
-                  key: "name",
-                  render: (name: string | null, record) => name || record.url
-                },
-                {
-                  title: t("watchlists:sources.columns.url", "URL"),
-                  dataIndex: "url",
-                  key: "url",
-                  ellipsis: true
-                },
-                {
-                  title: t("watchlists:sources.columns.status", "Status"),
-                  dataIndex: "status",
-                  key: "status"
-                },
-                {
-                  title: t("watchlists:sources.importReasonCode", "Reason code"),
-                  dataIndex: "reasonCode",
-                  key: "reasonCode",
-                  render: (reasonCode: ImportFailureReasonCode) => (
-                    <Tag color={isRetryableFailure(reasonCode) ? "orange" : "default"}>
-                      {reasonCode}
-                    </Tag>
-                  )
-                },
-                {
-                  title: t("watchlists:sources.columns.error", "Error"),
-                  dataIndex: "error",
-                  key: "error",
-                  ellipsis: true
-                }
-              ]}
-            />
-          </div>
-        )}
+        {renderFailedItems()}
       </div>
     </Modal>
   )
