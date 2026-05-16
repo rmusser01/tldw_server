@@ -210,6 +210,24 @@ def test_get_persona_visual_starter_pack_detail(persona_db: CharactersRAGDB) -> 
     assert payload["assets"][0]["mime_type"] == "image/png"
 
 
+def test_get_persona_visual_starter_pack_detail_exposes_static_sheet_source_group(
+    persona_db: CharactersRAGDB,
+) -> None:
+    with _client_for_user(1, persona_db) as client:
+        response = client.get(
+            "/api/v1/persona/visual-starter-packs/study-desk-intermediate"
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "static_talking_reaction_sheet" in payload["expected_asset_groups"]
+    assert "static" in payload["production_recipe"]["static_sheet"].lower()
+    assert (
+        "static_talking_reaction_sheet"
+        not in payload["production_recipe"]["animation_outputs"]
+    )
+
+
 def _upload_png(client: TestClient, persona_id: str, pack_id: str) -> dict:
     response = client.post(
         f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/assets",
@@ -392,6 +410,20 @@ def test_list_persona_visual_starter_packs(persona_db: CharactersRAGDB) -> None:
     assert "neutral_anchor" in starter["expected_asset_groups"]
     assert starter["production_recipe"]["identity_brief"]
     assert "required_state_loops" in starter["production_recipe"]["animation_outputs"]
+    static_sheet_starter = next(
+        item
+        for item in payload["starter_packs"]
+        if item["id"] == "study-desk-intermediate"
+    )
+    assert (
+        "static_talking_reaction_sheet"
+        in static_sheet_starter["expected_asset_groups"]
+    )
+    assert "static" in static_sheet_starter["production_recipe"]["static_sheet"].lower()
+    assert (
+        "static_talking_reaction_sheet"
+        not in static_sheet_starter["production_recipe"]["animation_outputs"]
+    )
     assert {"idle", "listening", "thinking", "speaking", "error"}.issubset(
         set(starter["states_offered"])
     )
