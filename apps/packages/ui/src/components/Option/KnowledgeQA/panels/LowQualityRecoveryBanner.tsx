@@ -14,6 +14,7 @@ type LowQualityRecoveryBannerProps = {
   enableWebLabel?: string
   selectSourcesLabel?: string
   sourceStatus?: Record<string, KnowledgeSourceStatus>
+  sourceHealthCaveatCount?: number
 }
 
 type ActionLabelProps = {
@@ -52,24 +53,37 @@ export function LowQualityRecoveryBanner({
   onEnableWeb,
   onSelectSources,
   onDismiss,
-  title = "These sources may not closely match your question.",
-  description = "Try refining your search:",
+  title = "This answer has limited evidence.",
+  description = "Try expanding sources, checking source status, or enabling web fallback.",
   refineLabel = "Use more specific terms",
   enableWebLabel = "Include web sources",
   selectSourcesLabel = "Select different sources",
   sourceStatus,
+  sourceHealthCaveatCount = 0,
 }: LowQualityRecoveryBannerProps) {
   const sourceDiagnosticsSummary = formatSourceDiagnosticsSummary(sourceStatus)
+  const sourceHealthSummary =
+    sourceHealthCaveatCount > 0
+      ? `${sourceHealthCaveatCount} selected source${
+          sourceHealthCaveatCount === 1 ? "" : "s"
+        } ${sourceHealthCaveatCount === 1 ? "needs" : "need"} attention before search.`
+      : null
+  const hasRecoveryDetails = Boolean(sourceDiagnosticsSummary || sourceHealthSummary)
 
   return (
     <RecoveryCallout
       state="degraded"
       title={title}
       message={
-        sourceDiagnosticsSummary ? (
+        hasRecoveryDetails ? (
           <>
             <p>{description}</p>
-            <p className="mt-1">{sourceDiagnosticsSummary}</p>
+            {sourceHealthSummary ? (
+              <p className="mt-1">{sourceHealthSummary}</p>
+            ) : null}
+            {sourceDiagnosticsSummary ? (
+              <p className="mt-1">{sourceDiagnosticsSummary}</p>
+            ) : null}
           </>
         ) : (
           description

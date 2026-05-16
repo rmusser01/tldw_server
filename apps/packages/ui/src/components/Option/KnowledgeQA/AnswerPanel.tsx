@@ -758,6 +758,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
             enableWebLabel="Include web sources"
             selectSourcesLabel="Adjust sources"
             sourceStatus={searchDetails?.sourceStatus}
+            sourceHealthCaveatCount={sourceHealthCaveatCount}
             onRefine={() => {
               const input = document.getElementById("knowledge-search-input")
               input?.focus()

@@ -356,11 +356,6 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
     })
   }
 
-  const handleBroadenScope = () => {
-    updateSetting("top_k", Math.min(50, Math.max(settings.top_k + 5, 10)))
-    setSettingsPanelOpen(true)
-  }
-
   const handleEnableWeb = () => {
     if (!settings.enable_web_fallback) {
       updateSetting("enable_web_fallback", true)
@@ -566,11 +561,14 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                 {showNoResultsState ? (
                   <React.Suspense fallback={null}>
                     <LazyNoResultsRecovery
-                      onBroadenScope={handleBroadenScope}
+                      onOpenQuickIngest={handleAddSources}
                       onEnableWeb={handleEnableWeb}
                       onShowNearestMatches={handleShowNearestMatches}
                       webEnabled={settings.enable_web_fallback}
+                      selectedSources={settings.sources}
+                      sourceHealth={sourceHealth}
                       sourceStatus={knowledgeQa.searchDetails?.sourceStatus}
+                      showNearestMatchesAvailable={results.length > 0}
                     />
                   </React.Suspense>
                 ) : null}

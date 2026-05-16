@@ -4,7 +4,7 @@ title: Implement /knowledge source health and evidence controls
 status: In Progress
 assignee: []
 created_date: '2026-05-16 00:51'
-updated_date: '2026-05-16 02:37'
+updated_date: '2026-05-16 02:45'
 labels:
   - webui
   - knowledge
@@ -43,6 +43,8 @@ Task 3 source-picker UI slice complete: provider now loads /api/v1/rag/source-he
 Task 3 quality-review fixes: ready-state source-health notice now prioritizes unavailable/error selected sources over empty-source guidance and only treats sources as empty when available with explicit index_status=empty. CompactToolbar now wires onRefreshSourceHealth to a real one-line source-health retry button instead of carrying an unused prop. Verification: targeted Vitest passed CompactToolbar + KnowledgeReadyState activation (23 tests), broader Task 3 focused Vitest passed 40 tests, git diff --check passed.
 
 Task 4 evidence/trust UI slice implemented. Added deterministic answer trust-summary helper, AnswerPanel trust note outside markdown body, clearer SourceCard Copy citation/Copy excerpt accessible names without duplicate actions, EvidenceRail source-action hint, and SourceList regression expectation for the citation accessible name. Save-to-note remains deferred because a backlink-preserving note handoff contract was not verified in this slice. Verification: red Task 4 tests failed before implementation; updated focused Vitest passed 63 tests across trustSummary, AnswerPanel.states, SourceCard.behavior, SourceList.behavior, and EvidenceRail.motion. git diff --check passed. Full UI tsc --noEmit remains blocked by existing unrelated baseline errors; filtered compiler diagnostics produced no KnowledgeQA/trustSummary/AnswerPanel/SourceCard/SourceList/EvidenceRail matches. Bandit is not applicable to this frontend-only slice.
+
+Task 5 recovery/parity slice implemented. No-results recovery now separates pre-query Source readiness from post-query Search diagnostics, uses concrete handoff labels (Open Quick Ingest, Open source page), and hides Show nearest matches unless evidence exists. Low-quality recovery uses limited-evidence copy and receives selected source-health caveat counts from AnswerPanel without implying automatic web fallback. KnowledgeQALayout passes sourceHealth and selected sources into recovery, and extension /knowledge route parity was rechecked. Verification: red Task 5 tests failed before implementation; focused Vitest passed 23 tests across NoResultsRecovery.source-status, LowQualityRecoveryBanner, and KnowledgeQALayout.behavior. Extension parity passed 4 tests in apps/tldw-frontend. git diff --check passed. Full UI tsc remains blocked by unrelated baseline errors; filtered compiler diagnostics produced no KnowledgeQA/NoResultsRecovery/LowQualityRecoveryBanner/KnowledgeQALayout/AnswerPanel matches. Bandit is not applicable to this frontend-only slice.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

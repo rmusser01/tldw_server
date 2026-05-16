@@ -168,7 +168,23 @@ vi.mock("../panels/AnswerWorkspace", () => ({
 }))
 
 vi.mock("../panels/NoResultsRecovery", () => ({
-  NoResultsRecovery: () => <div data-testid="knowledge-no-results-recovery" />,
+  NoResultsRecovery: ({
+    sourceHealth,
+    selectedSources,
+    onOpenQuickIngest,
+  }: {
+    sourceHealth?: { loadedAt: string | null }
+    selectedSources?: string[]
+    onOpenQuickIngest?: () => void
+  }) => (
+    <div data-testid="knowledge-no-results-recovery">
+      <span>{sourceHealth?.loadedAt ?? "No source health"}</span>
+      <span>{selectedSources?.join(",") ?? "No selected sources"}</span>
+      <button type="button" onClick={onOpenQuickIngest}>
+        Open Quick Ingest
+      </button>
+    </div>
+  ),
 }))
 
 vi.mock("../evidence/EvidenceRail", () => ({
@@ -219,6 +235,8 @@ describe("KnowledgeQALayout evidence-rail transitions", () => {
     state.sourceHealth.loadedAt = "2026-05-16T00:00:00Z"
     state.sourceHealth.error = null
     state.refreshSourceHealth.mockClear()
+    delete (window as Window & { __tldwPendingQuickIngestOpen?: unknown })
+      .__tldwPendingQuickIngestOpen
     layoutModeState.mode = "simple"
     layoutModeState.isSimple = true
     layoutModeState.isResearch = false
@@ -419,5 +437,24 @@ describe("KnowledgeQALayout evidence-rail transitions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Refresh detailed source health" }))
 
     expect(state.refreshSourceHealth).toHaveBeenCalledOnce()
+  })
+
+  it("passes source health and selected scope into no-results recovery", async () => {
+    state.hasSearched = true
+    state.settings.sources = ["media_db"]
+
+    renderLayout()
+
+    const recovery = await screen.findByTestId("knowledge-no-results-recovery")
+    expect(recovery).toHaveTextContent("2026-05-16T00:00:00Z")
+    expect(recovery).toHaveTextContent("media_db")
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Quick Ingest" }))
+    expect(
+      (window as Window & { __tldwPendingQuickIngestOpen?: unknown })
+        .__tldwPendingQuickIngestOpen
+    ).toMatchObject({
+      detail: { source: "knowledge_qa" },
+    })
   })
 })

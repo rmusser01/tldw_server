@@ -1055,9 +1055,10 @@ git commit -m "feat: clarify knowledge evidence trust controls"
 - Modify: `apps/packages/ui/src/components/Option/KnowledgeQA/layout/KnowledgeQALayout.tsx`
 - Test: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/NoResultsRecovery.source-status.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/LowQualityRecoveryBanner.test.tsx`
+- Test: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeQALayout.behavior.test.tsx`
 - Test: `apps/tldw-frontend/__tests__/extension/knowledge-route-parity.test.ts`
 
-- [ ] **Step 1: Write failing recovery copy tests**
+- [x] **Step 1: Write failing recovery copy tests**
 
 Extend `NoResultsRecovery.source-status.test.tsx`:
 
@@ -1078,7 +1079,7 @@ it("distinguishes pre-query health from post-query source diagnostics", () => {
 
 Expected: FAIL until props/UI are added.
 
-- [ ] **Step 2: Update NoResultsRecovery**
+- [x] **Step 2: Update NoResultsRecovery**
 
 Modify `NoResultsRecovery.tsx`:
 
@@ -1090,7 +1091,7 @@ Modify `NoResultsRecovery.tsx`:
   - no ambiguous `Add sources`
 - Keep `Show nearest matches` only if current metadata/UI already supports it.
 
-- [ ] **Step 3: Update LowQualityRecoveryBanner**
+- [x] **Step 3: Update LowQualityRecoveryBanner**
 
 Modify `LowQualityRecoveryBanner.tsx`:
 
@@ -1103,7 +1104,7 @@ This answer has limited evidence. Try expanding sources, checking source status,
 
 - Do not imply web fallback will be enabled automatically.
 
-- [ ] **Step 4: Run recovery tests**
+- [x] **Step 4: Run recovery tests**
 
 Run:
 
@@ -1117,7 +1118,7 @@ cd apps/packages/ui
 
 Expected: PASS.
 
-- [ ] **Step 5: Run extension parity/static tests**
+- [x] **Step 5: Run extension parity/static tests**
 
 Run:
 
@@ -1136,7 +1137,7 @@ bunx vitest run __tests__/extension/entry-shell-performance.test.ts
 
 Expected: PASS or document unrelated baseline failure with exact output.
 
-- [ ] **Step 6: Commit recovery/parity work**
+- [x] **Step 6: Commit recovery/parity work**
 
 ```bash
 git add \

@@ -17,7 +17,10 @@ describe("LowQualityRecoveryBanner", () => {
   it("renders the recovery message", () => {
     render(<LowQualityRecoveryBanner {...defaultProps} />)
     expect(
-      screen.getByText(/sources may not closely match/i)
+      screen.getByText(/This answer has limited evidence/i)
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/checking source status, or enabling web fallback/i)
     ).toBeInTheDocument()
   })
 
@@ -25,7 +28,7 @@ describe("LowQualityRecoveryBanner", () => {
     render(<LowQualityRecoveryBanner {...defaultProps} />)
     expect(
       screen
-        .getByText(/sources may not closely match/i)
+        .getByText(/limited evidence/i)
         .closest("[data-ds-component]")
     ).toHaveAttribute("data-ds-component", "RecoveryCallout")
   })
@@ -36,7 +39,7 @@ describe("LowQualityRecoveryBanner", () => {
 
     expect(status).toHaveAttribute("aria-live", "polite")
     expect(status).toHaveAttribute("aria-atomic", "true")
-    expect(status).toHaveTextContent(/sources may not closely match/i)
+    expect(status).toHaveTextContent(/limited evidence/i)
   })
 
   it("calls onEnableWeb when web button clicked", () => {
@@ -83,5 +86,14 @@ describe("LowQualityRecoveryBanner", () => {
     expect(
       screen.getByText("Source diagnostics: 1 searched, 1 empty, 1 unavailable.")
     ).toBeInTheDocument()
+  })
+
+  it("surfaces selected source-health caveats without implying automatic web fallback", () => {
+    render(<LowQualityRecoveryBanner {...defaultProps} sourceHealthCaveatCount={2} />)
+
+    expect(
+      screen.getByText("2 selected sources need attention before search.")
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/will enable web fallback/i)).not.toBeInTheDocument()
   })
 })
