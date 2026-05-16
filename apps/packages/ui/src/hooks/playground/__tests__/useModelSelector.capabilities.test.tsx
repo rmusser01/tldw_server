@@ -210,4 +210,89 @@ describe("useModelSelector capability rendering", () => {
 
     expect(setSelectedModel).toHaveBeenCalledWith("anthropic:shared-model")
   })
+
+  it("keeps tldw server transport prefixes out of selected provider:model keys", () => {
+    const setSelectedModel = vi.fn()
+
+    const { result } = renderHook(() =>
+      useModelSelector({
+        composerModels: [
+          {
+            id: "gpt-4o-mini",
+            model: "tldw:gpt-4o-mini",
+            nickname: "GPT-4o mini",
+            provider: "openai",
+            is_configured: true
+          }
+        ],
+        selectedModel: "openai:gpt-4o-mini",
+        setSelectedModel,
+        navigate: vi.fn()
+      })
+    )
+
+    const firstItem = unwrapFirstMenuItem(result.current.modelDropdownMenuItems)
+
+    expect(result.current.selectedModelKey).toBe("openai:gpt-4o-mini")
+    expect(firstItem?.key).toBe("openai:gpt-4o-mini")
+
+    render(<>{firstItem?.label}</>)
+    expect(screen.getByTestId("model-selector-option")).toHaveAttribute(
+      "data-model-key",
+      "openai:gpt-4o-mini"
+    )
+
+    act(() => {
+      firstItem?.onClick?.()
+    })
+
+    expect(setSelectedModel).toHaveBeenCalledWith("openai:gpt-4o-mini")
+  })
+
+  it("promotes current and recent configured models ahead of provider groups", () => {
+    storageSeed.values.set("chatModelUsageByProviderModel", {
+      "google:gemini-1.5-pro": {
+        selectedCount: 2,
+        lastSelectedAt: 200
+      }
+    })
+
+    const { result } = renderHook(() =>
+      useModelSelector({
+        composerModels: [
+          {
+            model: "gpt-4o-mini",
+            nickname: "Current",
+            provider: "openai",
+            is_configured: true
+          },
+          {
+            model: "gemini-1.5-pro",
+            nickname: "Recent",
+            provider: "google",
+            is_configured: true
+          },
+          {
+            model: "claude-3-5-sonnet",
+            nickname: "Provider grouped",
+            provider: "anthropic",
+            is_configured: true
+          }
+        ],
+        selectedModel: "openai:gpt-4o-mini",
+        setSelectedModel: vi.fn(),
+        navigate: vi.fn()
+      })
+    )
+
+    const groups = result.current.modelDropdownMenuItems.filter(
+      (item: any) => item?.type === "group"
+    )
+
+    expect(groups[0]?.key).toBe("current-model")
+    expect(groups[0]?.children?.[0]?.key).toBe("openai:gpt-4o-mini")
+    expect(groups[1]?.key).toBe("recent-models")
+    expect(groups[1]?.children?.[0]?.key).toBe("google:gemini-1.5-pro")
+    expect(groups.some((group: any) => group.key === "group-anthropic")).toBe(true)
+  })
 })

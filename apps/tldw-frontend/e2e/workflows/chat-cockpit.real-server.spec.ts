@@ -528,6 +528,50 @@ const assertProviderQualifiedPayload = async (page: Page, response: Response) =>
   }
 };
 
+const escapeCssAttrValue = (value: string): string =>
+  value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+const normalizeCockpitProviderKey = (provider: string): string => {
+  const normalized = provider.trim().toLowerCase();
+  if (normalized === 'llama.cpp') return 'llamacpp';
+  if (normalized === 'local-llm') return 'local';
+  return normalized;
+};
+
+const selectConfiguredCockpitModel = async (
+  page: Page,
+  selection: RealChatModelSelection
+): Promise<string> => {
+  await ensureComposerOptionsVisible(page);
+  await page.getByTestId('model-selector').first().click();
+
+  const scopeToggle = page.getByTestId('model-list-scope-toggle');
+  await expect(scopeToggle).toBeVisible();
+  await expect(scopeToggle).toHaveText(/Search all models/);
+  await expect(page.getByText('Usable configured models')).toBeVisible();
+
+  await scopeToggle.click();
+  await expect(scopeToggle).toHaveText(/Configured/);
+  await expect(page.getByText('All known models')).toBeVisible();
+
+  await scopeToggle.click();
+  await expect(scopeToggle).toHaveText(/Search all models/);
+  await expect(page.getByText('Usable configured models')).toBeVisible();
+
+  await page.getByLabel('Search models').fill(selection.model);
+
+  const modelKey = `${normalizeCockpitProviderKey(selection.provider)}:${selection.model}`;
+  const option = page
+    .locator(
+      `[data-testid="model-selector-option"][data-model-key="${escapeCssAttrValue(modelKey)}"]`
+    )
+    .first();
+  await expect(option).toBeVisible({ timeout: 30_000 });
+  await option.click();
+
+  return modelKey;
+};
+
 const getTemperatureInput = async (modelSettingsDialog: Locator): Promise<Locator> => {
   const byLabel = modelSettingsDialog.getByLabel(/temperature/i).first();
   if (await byLabel.isVisible().catch(() => false)) return byLabel;
@@ -1326,5 +1370,59 @@ test.describe('/chat cockpit real-server parity', () => {
         ).catch(() => ({ status: 0 }));
       }
     }
+  });
+
+  test('proves model provider confidence through a real cockpit selection and conversation', async ({
+    page,
+    request,
+  }, testInfo) => {
+    test.setTimeout(120_000);
+
+    const health = await apiGet<any>(request, '/api/v1/health');
+    assertHealthResponse(health);
+    const chatModelSelection = await getConfiguredChatModelSelection(request);
+
+    const apiTracker = trackRealApiHits(page);
+    await seedRealServerConfig(page);
+    await page.setViewportSize({ width: 1440, height: 960 });
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+
+    await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
+      timeout: 60_000,
+    });
+    await assertNoBlockingServerDialog(page);
+
+    const modelKey = await selectConfiguredCockpitModel(page, chatModelSelection);
+    const runtimeInspector = getDesktopRuntimeInspector(page);
+    const compositionPreview = getDesktopCompositionPreview(page);
+
+    await expect(compositionPreview).toContainText(`Scope: ${modelKey}`);
+    await expect(compositionPreview).not.toContainText(`Scope: ${chatModelSelection.key}`);
+    await expect(runtimeInspector.getByText('Provider route')).toBeVisible();
+    await expect(runtimeInspector.getByText(modelKey, { exact: true })).toBeVisible();
+
+    const prompt = `Cockpit model provider proof ${Date.now()}: answer in one short sentence.`;
+    await page.getByTestId('chat-input').fill(prompt);
+    const chatCompletionAttempt = waitForChatCompletionAttempt(page).catch(() => null);
+    await page.getByRole('button', { name: /send message/i }).click();
+    const chatCompletionResponse = await chatCompletionAttempt;
+
+    await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(prompt);
+    expect(chatCompletionResponse).toBeTruthy();
+    if (chatCompletionResponse) {
+      await assertProviderQualifiedPayload(page, chatCompletionResponse);
+      expect(chatCompletionResponse.request().postDataJSON()).toMatchObject({
+        model: chatModelSelection.model,
+      });
+    }
+    await assertChatCompletionRenderedOrRecoverable(page, chatCompletionResponse);
+    await page.screenshot({
+      path: testInfo.outputPath('chat-cockpit-model-provider-conversation.png'),
+      fullPage: true,
+    });
+
+    const failingApiHits = apiTracker.hits.filter((hit) => hit.status >= 400);
+    expect(failingApiHits).toEqual([]);
+    apiTracker.dispose();
   });
 });

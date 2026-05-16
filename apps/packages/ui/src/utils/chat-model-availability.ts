@@ -1,8 +1,24 @@
-import { isAutoModelId } from "./resolve-api-provider"
+import {
+  isAutoModelId,
+  parseProviderQualifiedModelSelection
+} from "./resolve-api-provider"
 
 type ModelDescriptor = {
+  id?: unknown
   model?: unknown
   name?: unknown
+  provider?: unknown
+  provider_key?: unknown
+  providerKey?: unknown
+  api_provider?: unknown
+  apiProvider?: unknown
+  details?: {
+    provider?: unknown
+    provider_key?: unknown
+  }
+  metadata?: {
+    provider?: unknown
+  }
 }
 
 export const AUTO_CHAT_MODEL_ID = "auto"
@@ -84,16 +100,57 @@ export function normalizeChatModelId(value: string | null | undefined): string {
   return trimmed.replace(/^tldw:/i, "")
 }
 
+function normalizeAvailableModelId(model: ModelDescriptor): string {
+  const modelValue = String(model?.model ?? "").trim()
+  const idValue = String(model?.id ?? "").trim()
+  const nameValue = String(model?.name ?? "").trim()
+
+  if (modelValue.toLowerCase().startsWith("tldw:") && idValue) {
+    return normalizeChatModelId(idValue)
+  }
+
+  return normalizeChatModelId(modelValue || idValue || nameValue)
+}
+
+function normalizeProviderKey(model: ModelDescriptor): string | null {
+  const provider = String(
+    model?.provider ??
+      model?.provider_key ??
+      model?.providerKey ??
+      model?.api_provider ??
+      model?.apiProvider ??
+      model?.details?.provider ??
+      model?.details?.provider_key ??
+      model?.metadata?.provider ??
+      ""
+  )
+    .trim()
+    .toLowerCase()
+
+  return provider && provider !== "unknown" ? provider : null
+}
+
+function normalizeProviderQualifiedChatModelId(
+  value: string | null | undefined
+): string | null {
+  const parsed = parseProviderQualifiedModelSelection(value)
+  if (!parsed.isProviderQualified || !parsed.provider) return null
+  const modelId = normalizeChatModelId(parsed.modelId)
+  return modelId ? `${parsed.provider}:${modelId}` : null
+}
+
 export function buildAvailableChatModelIds(
   models: ModelDescriptor[] | null | undefined
 ): Set<string> {
   const ids = new Set<string>()
   for (const model of models || []) {
-    const modelId = normalizeChatModelId(
-      String(model?.model ?? model?.name ?? "")
-    )
+    const modelId = normalizeAvailableModelId(model)
     if (modelId) {
       ids.add(modelId)
+      const provider = normalizeProviderKey(model)
+      if (provider) {
+        ids.add(`${provider}:${modelId}`)
+      }
     }
   }
   return ids
@@ -109,10 +166,17 @@ export function findUnavailableChatModel(
 
   for (const selectedModelId of selectedModelIds) {
     const normalized = normalizeChatModelId(selectedModelId)
+    const providerQualified = normalizeProviderQualifiedChatModelId(
+      selectedModelId
+    )
     if (isAutoModelId(normalized)) {
       continue
     }
-    if (normalized && !availableModelIds.has(normalized)) {
+    if (
+      normalized &&
+      !availableModelIds.has(normalized) &&
+      (!providerQualified || !availableModelIds.has(providerQualified))
+    ) {
       return normalized
     }
   }

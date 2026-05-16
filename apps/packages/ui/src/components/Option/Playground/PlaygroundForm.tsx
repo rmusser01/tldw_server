@@ -2039,6 +2039,12 @@ export const PlaygroundForm = ({
           aria-haspopup="listbox"
           aria-expanded={modelDropdownOpen}
           data-testid="model-selector"
+          onClick={() => {
+            if (!modelDropdownOpen) {
+              closeComposerPopoversExcept("model");
+              setModelDropdownOpen(true);
+            }
+          }}
           className={`inline-flex min-w-0 items-center gap-1 rounded-full border px-2 min-h-[44px] text-[10px] cursor-pointer transition-colors ${
             modelSelectorWarning
               ? "border-warn/50 bg-warn/10 text-warn hover:bg-warn/20"

@@ -22,6 +22,26 @@ describe("chat model availability utilities", () => {
     expect([...ids]).toEqual(["gpt-4o-mini", "claude-3-5-sonnet"])
   })
 
+  it("includes provider-qualified IDs for cockpit model selections", () => {
+    const ids = buildAvailableChatModelIds([
+      {
+        id: "gpt-4o-mini",
+        model: "tldw:gpt-4o-mini",
+        provider: "openai"
+      },
+      {
+        id: "gpt-4o-mini",
+        model: "tldw:gpt-4o-mini",
+        provider: "anthropic"
+      }
+    ])
+
+    expect(ids.has("gpt-4o-mini")).toBe(true)
+    expect(ids.has("openai:gpt-4o-mini")).toBe(true)
+    expect(ids.has("anthropic:gpt-4o-mini")).toBe(true)
+    expect(findUnavailableChatModel(["openai:gpt-4o-mini"], ids)).toBeNull()
+  })
+
   it("does not flag unavailable model when catalog is empty", () => {
     const unavailable = findUnavailableChatModel(["gpt-4o-mini"], new Set())
     expect(unavailable).toBeNull()
