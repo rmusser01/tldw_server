@@ -1,6 +1,5 @@
 import React from "react"
 import {
-  Alert,
   Button,
   Card,
   Empty,
@@ -16,6 +15,7 @@ import type {
   LlamacppRuntime,
   LlamacppRuntimeState
 } from "@/types/llamacpp-admin"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 
 const { Text } = Typography
 
@@ -117,7 +117,14 @@ export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
       aria-label="Runtime instances"
     >
       <Space orientation="vertical" size="middle" className="w-full">
-        {error && <Alert type="warning" showIcon title={error} />}
+        {error && (
+          <DesignSystemAlert
+            variant="warning"
+            title={error}
+            role="status"
+            aria-live="polite"
+          />
+        )}
 
         {rows.length === 0 ? (
           <Empty
