@@ -1,9 +1,10 @@
 ---
 id: TASK-45.44.6
 title: 'Migrate design-system product state: Settings and account/security'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-14 03:19'
+updated_date: '2026-05-16 16:29'
 labels:
   - design-system
   - webui
@@ -15,6 +16,7 @@ references:
   - >-
     Docs/superpowers/specs/2026-05-14-design-system-remaining-work-tracker-design.md
   - apps/packages/ui/scripts/design-system-product-state-baseline.json
+  - 'https://github.com/rmusser01/tldw_server/pull/1781'
 parent_task_id: TASK-45.44
 priority: medium
 ---
@@ -31,6 +33,12 @@ Mirror the linked GitHub product-area migration issue. Closure requires zero cur
 - [ ] #2 Implementation PR tasks are created under this child when the area is too broad for one PR.
 - [ ] #3 Backlog notes record PR links and before/after count evidence.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TASK-45.44.6.2 completed on codex/design-system-next-slice-8: migrated TldwConnectionSettings auth notices from AntD Alert to DesignSystemAlert. Baseline evidence: total product-state exceptions 400 -> 398; Settings/account-security exceptions 49 -> 47. PR: https://github.com/rmusser01/tldw_server/pull/1781.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
