@@ -54,7 +54,7 @@ Quick wins:
 
 - Add empty assistant response messaging and retry affordance. Implemented in this branch: blank assistant turns now render explicit message-card recovery actions and a runtime sidechannel warning with regenerate available for both `role: "assistant"` and real-server `isBot: true` message shapes.
 - Add tooltips to sidechannel collapse/restore controls.
-- Show compact composition summary while rails are collapsed.
+- Show compact composition summary while rails are collapsed. Implemented in this branch: when either main `/chat` cockpit rail is hidden, the composer area now keeps model, assistant/persona, prompt, context count, and MCP/tool state visible with restore actions for hidden rails.
 - De-duplicate prompt empty-state copy in the Context rail.
 
 Larger design opportunities:
@@ -68,6 +68,14 @@ Verification for implemented empty-response quick win:
 - `bunx vitest run src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx --config vitest.config.ts` passed with 32 tests.
 - `TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://127.0.0.1:18002 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --grep "uses the running server"` passed against the real local server and branch WebUI.
 - Updated screenshot: `apps/tldw-frontend/test-results/workflows-chat-cockpit.rea-eebf0-kpit-focus-controls-working-chromium/chat-cockpit-desktop-conversation.png` shows the message-card recovery and runtime sidechannel warning.
+
+Verification for implemented collapsed composition summary quick win:
+
+- `bunx vitest run src/components/Option/Playground/__tests__/PlaygroundCollapsedCompositionSummary.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx --config vitest.config.ts` passed with 35 tests.
+- `TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://127.0.0.1:18002 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --grep "uses the running server"` passed against the real local server and branch WebUI.
+- Updated screenshot: `apps/tldw-frontend/test-results/workflows-chat-cockpit.rea-eebf0-kpit-focus-controls-working-chromium/chat-cockpit-desktop-collapsed-summary.png` shows the collapsed cockpit summary above the composer.
+- `bunx tsc --noEmit -p tsconfig.json --pretty false` still fails on existing package-wide baseline errors; filtered output contains no touched cockpit files after the narrow type cleanup.
+- Bandit skipped because this slice changes frontend TypeScript and E2E coverage only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

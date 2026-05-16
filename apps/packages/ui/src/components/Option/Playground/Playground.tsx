@@ -5,6 +5,7 @@ import {
   PlaygroundCockpitShell,
   type PlaygroundCockpitMode,
 } from "./PlaygroundCockpitShell";
+import { PlaygroundCollapsedCompositionSummary } from "./PlaygroundCollapsedCompositionSummary";
 import {
   PlaygroundContextRail,
   type PlaygroundContextSource,
@@ -1739,7 +1740,8 @@ export const Playground = () => {
         : "";
     if (messageText.length > 0) return false;
     const messageType =
-      latestAssistantMessage.messageType ?? latestAssistantMessage.message_type;
+      latestAssistantMessage.messageType ??
+      (latestAssistantMessage as { message_type?: string }).message_type;
     if (messageType === IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE) return false;
     const images = Array.isArray(latestAssistantMessage.images)
       ? latestAssistantMessage.images
@@ -2045,13 +2047,15 @@ export const Playground = () => {
     activeSettingsScope && scopedSettingsByModelKey
       ? scopedSettingsByModelKey[activeSettingsScope]
       : undefined;
-  const getRuntimeSettingSource = (key: keyof ChatModelSettings) =>
+  const getRuntimeSettingSource = (
+    key: keyof ChatModelSettings,
+  ): RuntimeSettingSummary["source"] =>
     activeSettingsScope
       ? Object.prototype.hasOwnProperty.call(activeScopedModelSettings || {}, key)
         ? "override"
         : "default"
       : undefined;
-  const runtimeSettingSummaries: RuntimeSettingSummary[] = [
+  const runtimeSettingSummaryItems: Array<RuntimeSettingSummary | null> = [
     typeof temperature === "number"
       ? {
           label: toText(t("playground:cockpit.temperature", "Temperature")),
@@ -2094,7 +2098,11 @@ export const Playground = () => {
           source: getRuntimeSettingSource("reasoningEffort"),
         }
       : null,
-  ].filter((item): item is RuntimeSettingSummary => Boolean(item));
+  ];
+  const runtimeSettingSummaries: RuntimeSettingSummary[] =
+    runtimeSettingSummaryItems.filter(
+      (item): item is RuntimeSettingSummary => Boolean(item),
+    );
   const cockpitToolSummary = buildCockpitMcpSummary({
     hasMcp: mcpHealthState !== "unavailable",
     healthState: mcpHealthState,
@@ -2182,6 +2190,10 @@ export const Playground = () => {
     compositionStatus,
     composition: null,
   });
+  const showCollapsedCompositionSummary =
+    normalizedChatLayoutMode === "cockpit" &&
+    (!normalizedCockpitContextRailVisible ||
+      !normalizedCockpitRuntimeRailVisible);
   const openModelSettingsFromCockpit = React.useCallback(() => {
     if (typeof setActiveSettingsScope === "function") {
       setActiveSettingsScope(providerRouteSummary.providerRouteLabel ?? null);
@@ -2773,6 +2785,15 @@ export const Playground = () => {
                 : ""
             }`}
           >
+            {showCollapsedCompositionSummary ? (
+              <PlaygroundCollapsedCompositionSummary
+                summary={compositionPreviewSummary}
+                contextRailVisible={normalizedCockpitContextRailVisible}
+                runtimeRailVisible={normalizedCockpitRuntimeRailVisible}
+                onRestoreContextRail={() => setCockpitContextRailVisible(true)}
+                onRestoreRuntimeRail={() => setCockpitRuntimeRailVisible(true)}
+              />
+            ) : null}
             <div className="mx-auto w-full max-w-[64rem] px-4 pt-2 text-[11px] text-text-muted">
               <span className="inline-flex items-center rounded-full border border-border bg-surface2 px-2 py-0.5">
                 {t("playground:regions.composer", "Composer")}

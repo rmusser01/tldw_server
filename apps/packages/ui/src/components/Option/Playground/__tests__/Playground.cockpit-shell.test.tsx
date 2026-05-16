@@ -22,15 +22,26 @@ const messageOptionState = vi.hoisted(() => ({
     setHistory: vi.fn(),
     setMessages: vi.fn(),
     regenerateLastMessage: vi.fn(),
+    selectedSystemPrompt: "" as string | null,
     setSelectedSystemPrompt: vi.fn(),
+    selectedQuickPrompt: null as string | null,
+    setSelectedQuickPrompt: vi.fn(),
     setSelectedModel: vi.fn(),
     setServerChatId: vi.fn(),
+    contextFiles: [] as Array<{ id: string; name: string }>,
     setContextFiles: vi.fn(),
     createChatBranch: vi.fn(),
     streaming: false,
     selectedModel: "openai:gpt-4.1-mini",
     selectedCharacter: null,
     setSelectedCharacter: vi.fn(),
+    selectedAssistant: null as {
+      kind: "character" | "persona";
+      id: string;
+      name: string;
+    } | null,
+    serverChatPersonaMemoryMode: null as "read_only" | "read_write" | null,
+    setSelectedAssistant: vi.fn(),
     compareMode: false,
     compareFeatureEnabled: false,
     temporaryChat: false,
@@ -211,6 +222,11 @@ describe("Playground cockpit shell", () => {
     messageOptionState.value.serverChatId = null;
     messageOptionState.value.streaming = false;
     messageOptionState.value.selectedModel = "openai:gpt-4.1-mini";
+    messageOptionState.value.selectedSystemPrompt = "";
+    messageOptionState.value.selectedQuickPrompt = null;
+    messageOptionState.value.selectedAssistant = null;
+    messageOptionState.value.selectedCharacter = null;
+    messageOptionState.value.contextFiles = [];
     messageOptionState.value.regenerateLastMessage = vi.fn();
     sessionPersistenceState.value.sessionScopeReady = true;
   });
@@ -406,6 +422,54 @@ describe("Playground cockpit shell", () => {
     expect(storageState.values.get("playgroundChatRuntimeRailVisible")).toBe(
       true,
     );
+  });
+
+  it("keeps composition state near the composer when sidechannels are collapsed", async () => {
+    messageOptionState.value.selectedQuickPrompt = "Research brief";
+    messageOptionState.value.selectedAssistant = {
+      kind: "persona",
+      id: "persona-1",
+      name: "Research Persona",
+    };
+    messageOptionState.value.serverChatPersonaMemoryMode = "read_write";
+    messageOptionState.value.contextFiles = [
+      { id: "file-1", name: "brief.pdf" },
+    ];
+
+    render(<Playground />);
+
+    fireEvent.click(screen.getByRole("button", { name: /hide context rail/i }));
+
+    const summary = await screen.findByRole("region", {
+      name: "Collapsed cockpit summary",
+    });
+    expect(within(summary).getByText("Context hidden")).toBeInTheDocument();
+    expect(
+      within(summary).getByLabelText("Model: openai:gpt-4.1-mini. openai"),
+    ).toBeInTheDocument();
+    expect(
+      within(summary).getByLabelText("Prompt: Quick prompt. Research brief"),
+    ).toBeInTheDocument();
+    expect(
+      within(summary).getByLabelText(
+        "Assistant: Research Persona. Persona selected - memory read/write",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(summary).getByLabelText(
+        "Context: 3 active sources. 3 configured sources",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      within(summary).getByRole("button", { name: "Restore context rail" }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("playground-cockpit-left-rail"),
+      ).toBeInTheDocument();
+    });
   });
 
   it("surfaces empty assistant response recovery in the runtime sidechannel", async () => {
