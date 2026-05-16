@@ -164,8 +164,8 @@ export const buildPlaygroundCompositionPreviewSummary = ({
   const settingsEntry: PlaygroundCompositionPreviewEntry = {
     id: "settings",
     kind: "settings",
-    label: "Settings",
-    title: settingsScopeLabel || "Using default settings",
+    label: "Model settings",
+    title: settingsScopeLabel || "Default model settings",
     detail:
       settingSummaries.length > 0
         ? settingSummaries
@@ -204,7 +204,7 @@ export const buildPlaygroundCompositionPreviewSummary = ({
     ? {
         id: "tools",
         kind: "tools",
-        label: "Tools",
+        label: "MCP tools",
         title: toolSummary.label,
         detail: toolSummary.detail,
         state: mapToolState(toolSummary.state),
@@ -212,8 +212,8 @@ export const buildPlaygroundCompositionPreviewSummary = ({
     : {
         id: "tools",
         kind: "tools",
-        label: "Tools",
-        title: "Tools managed from composer",
+        label: "MCP tools",
+        title: "MCP tools managed from composer",
         detail: null,
         state: "disabled",
       };

@@ -439,7 +439,7 @@ const assertRuntimeMcpRailState = async (runtimeInspector: Locator) => {
     return;
   }
 
-  await expect(runtimeInspector.getByRole('region', { name: 'Tools' })).toContainText(
+  await expect(runtimeInspector.getByRole('region', { name: 'MCP tools' })).toContainText(
     /No MCP tools available|MCP tools unavailable|MCP tools are offline|Loading MCP tools|Loading tools|MCP unavailable|Not checked yet/i
   );
 };
@@ -698,9 +698,9 @@ test.describe('/chat cockpit real-server parity', () => {
     const contextRail = getDesktopContextRail(page);
     const runtimeInspector = getDesktopRuntimeInspector(page);
     await assertRuntimeProviderSummary(runtimeInspector);
-    await expect(runtimeInspector.getByText('Scoped settings')).toBeVisible();
-    await expect(runtimeInspector.getByRole('heading', { name: 'Tools' })).toBeVisible();
-    await expect(runtimeInspector.getByRole('button', { name: 'Open Model & Chat settings' })).toBeVisible();
+    await expect(runtimeInspector.getByText('Provider:model settings')).toBeVisible();
+    await expect(runtimeInspector.getByRole('heading', { name: 'MCP tools' })).toBeVisible();
+    await expect(runtimeInspector.getByRole('button', { name: 'Open model settings' })).toBeVisible();
     await expect(runtimeInspector.getByRole('button', { name: 'Select character or persona' })).toBeVisible();
     await assertRuntimeMcpRailState(runtimeInspector);
     const webSearchControl = contextRail.getByRole('button', { name: 'Web search', exact: true });
@@ -760,7 +760,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(page.getByText(/Clear conversation|More tools/i).first()).toBeVisible();
     await page.keyboard.press('Escape');
 
-    await runtimeInspector.getByRole('button', { name: 'Open Model & Chat settings' }).click();
+    await runtimeInspector.getByRole('button', { name: 'Open model settings' }).click();
     const modelSettingsDialog = page.getByRole('dialog', {
       name: 'Current Chat Model Settings',
     });
@@ -918,7 +918,7 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(compositionPreview).toContainText(promptName);
       await expect(compositionPreview).toContainText(/Scope: [^:]+:.+/);
       await expect(compositionPreview).toContainText(
-        /MCP tools|MCP unavailable|Tools managed from composer/
+        /MCP tools|MCP unavailable|MCP tools managed from composer/
       );
       const sourceList = contextRail.getByRole('list', { name: 'Context sources' });
       const promptSource = sourceList.getByRole('listitem').filter({ hasText: promptName });
@@ -1145,10 +1145,10 @@ test.describe('/chat cockpit real-server parity', () => {
     await expectMobileDraftPreserved();
     const runtimePanel = mobileRails.getByRole('tabpanel', { name: 'Runtime' });
     await assertRuntimeProviderSummary(runtimePanel);
-    await expect(runtimePanel.getByText('Scoped settings')).toBeVisible();
-    await expect(runtimePanel.getByRole('heading', { name: 'Tools' })).toBeVisible();
+    await expect(runtimePanel.getByText('Provider:model settings')).toBeVisible();
+    await expect(runtimePanel.getByRole('heading', { name: 'MCP tools' })).toBeVisible();
     const mobileModelSettingsTrigger = runtimePanel.getByRole('button', {
-      name: 'Open Model & Chat settings',
+      name: 'Open model settings',
     });
     await expect(mobileModelSettingsTrigger).toBeVisible();
     await expect(runtimePanel.getByRole('button', { name: 'Select character or persona' })).toBeVisible();

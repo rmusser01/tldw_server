@@ -40,9 +40,9 @@ describe("playground composition preview summary", () => {
       ["prompt", "disabled", "No prompt selected"],
       ["assistant", "disabled", "No assistant selected"],
       ["model", "unavailable", "No model selected"],
-      ["settings", "disabled", "Using default settings"],
+      ["settings", "disabled", "Default model settings"],
       ["context", "disabled", "No extra context"],
-      ["tools", "disabled", "Tools managed from composer"],
+      ["tools", "disabled", "MCP tools managed from composer"],
     ]);
     expect(summary.settingsScopeLabel).toBeNull();
     expect(summary.contextStack).toEqual([]);

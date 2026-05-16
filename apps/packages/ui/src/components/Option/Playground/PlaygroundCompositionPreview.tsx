@@ -2,6 +2,7 @@ import React from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getDesignSystemState, type DesignSystemStateKey } from "@/design-system";
+import { cockpitRailStyles } from "./playground-cockpit-rail-styles";
 import type {
   PlaygroundCompositionPreviewEntry,
   PlaygroundCompositionPreviewEntryState,
@@ -52,7 +53,7 @@ const entryStateLabel = (
   if (state === "degraded") return t("cockpit.degraded", stateDefinition.label);
   if (state === "unavailable") return t("cockpit.unavailable", stateDefinition.label);
   if (state === "loading") return t("cockpit.loading", stateDefinition.label);
-  return t("cockpit.disabled", "Disabled");
+  return t("cockpit.empty", stateDefinition.label);
 };
 
 const pluralize = (count: number, singular: string, plural: string) =>
@@ -152,7 +153,7 @@ export const PlaygroundCompositionPreview = ({
 
       <button
         type="button"
-        className="mt-2 inline-flex min-h-[30px] items-center gap-1 rounded-md border border-border bg-surface2 px-2.5 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        className={`mt-2 gap-1 ${cockpitRailStyles.action}`}
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => setOpen((value) => !value)}
@@ -191,7 +192,7 @@ export const PlaygroundCompositionPreview = ({
               {footprintItems.map((item) => (
                 <li
                   key={item}
-                  className="rounded border border-border bg-surface2 px-2 py-0.5"
+                  className={cockpitRailStyles.tag}
                 >
                   {item}
                 </li>

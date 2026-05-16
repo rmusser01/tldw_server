@@ -311,8 +311,8 @@ export const PlaygroundStatusStrip = ({
             className={actionClass}
             onClick={onOpenModelSettings}
             aria-label={t(
-              "cockpit.reviewModelChatSettings",
-              "Review Model & Chat settings",
+              "cockpit.reviewModelSettings",
+              "Review model settings",
             )}
           >
             <Settings2 className="h-3 w-3" aria-hidden="true" />

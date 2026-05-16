@@ -158,10 +158,10 @@ describe("Playground mature cockpit surfaces", () => {
 
     expect(screen.getByText("Provider route")).toBeInTheDocument()
     expect(screen.getByText("openai:gpt-4.1-mini")).toBeInTheDocument()
-    expect(screen.getByText("Scoped settings")).toBeInTheDocument()
+    expect(screen.getByText("Provider:model settings")).toBeInTheDocument()
     expect(screen.getByText("Temperature")).toBeInTheDocument()
     expect(screen.getByText("0.7")).toBeInTheDocument()
-    expect(screen.getByText("Tools")).toBeInTheDocument()
+    expect(screen.getByText("MCP tools")).toBeInTheDocument()
     expect(screen.getByText("Chat tool access")).toBeInTheDocument()
     expect(screen.getByText("3 chat tools available")).toBeInTheDocument()
 

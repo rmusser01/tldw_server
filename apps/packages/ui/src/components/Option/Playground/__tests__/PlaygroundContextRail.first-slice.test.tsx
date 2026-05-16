@@ -73,7 +73,7 @@ const compositionSummary = (): PlaygroundCompositionPreviewSummary => ({
     {
       id: "tools",
       kind: "tools",
-      label: "Tools",
+      label: "MCP tools",
       title: "MCP tools",
       detail: "2 chat tools available",
       state: "active",

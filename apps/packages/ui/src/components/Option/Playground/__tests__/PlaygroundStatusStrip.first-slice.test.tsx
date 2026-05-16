@@ -194,7 +194,7 @@ describe("PlaygroundStatusStrip first-slice state", () => {
     const status = screen.getByRole("status", { name: "Chat status" });
     expect(status).toHaveTextContent("Error");
     expect(status).toHaveTextContent("Provider failed");
-    fireEvent.click(screen.getByRole("button", { name: "Review Model & Chat settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Review model settings" }));
     expect(openModelSettings).toHaveBeenCalledTimes(1);
   });
 

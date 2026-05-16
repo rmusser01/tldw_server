@@ -73,9 +73,9 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
       screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent),
     ).toEqual([
       "Runtime",
-      "Model & Chat",
+      "Model route",
       "Assistant",
-      "Tools",
+      "MCP tools",
       "Run controls",
     ]);
   });
@@ -102,18 +102,21 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     expect(screen.getByText("No provider selected")).toBeInTheDocument();
     expect(screen.getByText("No model selected")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Open Model & Chat settings" }),
+      screen.getByRole("button", { name: "Open model settings" }),
     ).toBeInTheDocument();
 
     const assistant = screen.getByRole("region", { name: "Assistant" });
     expect(within(assistant).getByText("No assistant selected")).toBeInTheDocument();
+    expect(
+      within(assistant).getByText("No persona or character will shape replies."),
+    ).toBeInTheDocument();
     expect(
       within(assistant).getByRole("button", {
         name: "Select character or persona",
       }),
     ).toBeInTheDocument();
 
-    const tools = screen.getByRole("region", { name: "Tools" });
+    const tools = screen.getByRole("region", { name: "MCP tools" });
     expect(within(tools).getByText("MCP unavailable")).toBeInTheDocument();
     expect(within(tools).getByText("MCP tools unavailable")).toBeInTheDocument();
     expect(
@@ -149,7 +152,7 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     });
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Open Model & Chat settings" }),
+      screen.getByRole("button", { name: "Open model settings" }),
     );
 
     const assistant = screen.getByRole("region", { name: "Assistant" });
@@ -168,7 +171,7 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
       within(assistant).getByRole("button", { name: "Clear assistant" }),
     );
 
-    const tools = screen.getByRole("region", { name: "Tools" });
+    const tools = screen.getByRole("region", { name: "MCP tools" });
     fireEvent.click(
       within(tools).getByRole("button", { name: "MCP tool choice Required" }),
     );
@@ -210,7 +213,7 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     const props = renderInspector();
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Open Model & Chat settings" }),
+      screen.getByRole("button", { name: "Open model settings" }),
     );
     fireEvent.click(
       screen.getByRole("button", { name: "Select character or persona" }),

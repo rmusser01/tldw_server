@@ -357,7 +357,7 @@ describe("Playground cockpit controls", () => {
       expect(
         within(compositionPreview).getAllByText("openai:gpt-4.1-mini").length,
       ).toBeGreaterThan(0);
-      expect(within(compositionPreview).getByText("MCP tools")).toBeInTheDocument();
+      expect(within(compositionPreview).getAllByText("MCP tools").length).toBeGreaterThan(0);
       expect(
         within(compositionPreview).getByText("Scope: openai:gpt-4.1-mini"),
       ).toBeInTheDocument();
@@ -498,7 +498,7 @@ describe("Playground cockpit controls", () => {
 
       fireEvent.click(
         within(runtimeInspector).getByRole("button", {
-          name: /open model & chat settings/i,
+          name: /open model settings/i,
         }),
       );
       fireEvent.click(

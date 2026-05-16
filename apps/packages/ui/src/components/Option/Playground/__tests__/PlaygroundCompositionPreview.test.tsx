@@ -45,7 +45,7 @@ const summary = (
     {
       id: "settings",
       kind: "settings",
-      label: "Settings",
+      label: "Model settings",
       title: "openai:gpt-4.1-mini",
       detail: "Temperature: 0.31",
       state: "active",
@@ -61,7 +61,7 @@ const summary = (
     {
       id: "tools",
       kind: "tools",
-      label: "Tools",
+      label: "MCP tools",
       title: "MCP tools",
       detail: "2 chat tools available",
       state: "active",
@@ -95,7 +95,7 @@ const summary = (
     {
       id: "tools",
       kind: "tools",
-      label: "Tools",
+      label: "MCP tools",
       title: "MCP tools",
       detail: "2 chat tools available",
       state: "active",
@@ -123,7 +123,7 @@ describe("PlaygroundCompositionPreview", () => {
     expect(within(region).getByText("Research brief")).toBeInTheDocument();
     expect(within(region).getByText("Research Persona")).toBeInTheDocument();
     expect(within(region).getAllByText("openai:gpt-4.1-mini")).toHaveLength(2);
-    expect(within(region).getByText("MCP tools")).toBeInTheDocument();
+    expect(within(region).getAllByText("MCP tools").length).toBeGreaterThanOrEqual(1);
     expect(within(region).getByText("Scope: openai:gpt-4.1-mini")).toBeInTheDocument();
   });
 
@@ -165,7 +165,7 @@ describe("PlaygroundCompositionPreview", () => {
             {
               id: "tools",
               kind: "tools",
-              label: "Tools",
+              label: "MCP tools",
               title: "MCP unavailable",
               detail: "MCP tools unavailable",
               state: "unavailable",
@@ -175,7 +175,7 @@ describe("PlaygroundCompositionPreview", () => {
             {
               id: "tools",
               kind: "tools",
-              label: "Tools",
+              label: "MCP tools",
               title: "MCP unavailable",
               detail: "MCP tools unavailable",
               state: "unavailable",
@@ -189,5 +189,46 @@ describe("PlaygroundCompositionPreview", () => {
     expect(screen.getByText("MCP unavailable")).toBeInTheDocument();
     expect(screen.getByText("Unavailable")).toBeInTheDocument();
     expect(screen.queryByText("Ready")).not.toBeInTheDocument();
+  });
+
+  it("uses the design-system empty state label for absent composition rows", () => {
+    render(
+      <PlaygroundCompositionPreview
+        summary={summary({
+          overallState: "unavailable",
+          settingsScopeLabel: null,
+          entries: [
+            {
+              id: "prompt",
+              kind: "prompt",
+              label: "Prompt",
+              title: "No prompt selected",
+              detail: "No system prompt will be added.",
+              state: "disabled",
+            },
+            {
+              id: "assistant",
+              kind: "assistant",
+              label: "Assistant",
+              title: "No assistant selected",
+              detail: "No persona or character will shape replies.",
+              state: "disabled",
+            },
+            {
+              id: "settings",
+              kind: "settings",
+              label: "Model settings",
+              title: "Default model settings",
+              detail: null,
+              state: "disabled",
+            },
+          ],
+          contextStack: [],
+        })}
+      />,
+    );
+
+    expect(screen.getAllByText("Empty")).toHaveLength(3);
+    expect(screen.queryByText("Disabled")).not.toBeInTheDocument();
   });
 });
