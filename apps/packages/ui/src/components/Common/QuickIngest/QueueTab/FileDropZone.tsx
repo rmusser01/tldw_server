@@ -4,6 +4,7 @@ import React, { useCallback } from "react"
 import { useTranslation } from "react-i18next"
 import {
   QUICK_INGEST_ACCEPT_STRING,
+  QUICK_INGEST_MAX_FILE_SIZE_LABEL,
   QUICK_INGEST_MAX_FILE_SIZE
 } from "../constants"
 
@@ -81,7 +82,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
     (file: File): string | null => {
       // Size check
       if (file.size > QUICK_INGEST_MAX_FILE_SIZE) {
-        return `${file.name} exceeds 500 MB limit`
+        return `${file.name} exceeds ${QUICK_INGEST_MAX_FILE_SIZE_LABEL} quick-ingest limit`
       }
 
       // Type check - allow if extension matches OR MIME type matches
@@ -322,7 +323,9 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
               {qi("dropzoneRejectTitle", "Some files not supported")}
             </p>
             <p className="text-xs text-text-subtle">
-              {qi("dropzoneRejectHint", "Check file type and size (max 500 MB)")}
+              {qi("dropzoneRejectHint", "Check file type and size (max {{maxSize}})", {
+                maxSize: QUICK_INGEST_MAX_FILE_SIZE_LABEL
+              })}
             </p>
           </>
         ) : isDragging ? (
@@ -333,7 +336,10 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
               {qi("dragAndDrop", "Drag and drop files")}
             </p>
             <p className="text-xs text-text-subtle">
-              {qi("dragAndDropHint", "Docs, PDFs, audio, and video are all welcome.")}
+              {qi(
+                "dragAndDropHint",
+                "Docs, PDFs, HTML/XML/JSON, audio, and video are all welcome."
+              )}
             </p>
           </>
         )}

@@ -546,6 +546,36 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     expect(onQuickProcess).not.toHaveBeenCalled()
   })
 
+  it("Step 1 — warns when pasted URLs are duplicates after normalization", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={onClose} />)
+
+    const textarea = screen.getByPlaceholderText(/https:\/\/example\.com/i)
+    await user.type(
+      textarea,
+      "https://EXAMPLE.com/article/?utm_source=newsletter#comments\nhttps://example.com/article"
+    )
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+
+    expect(
+      screen.getByText("https://EXAMPLE.com/article/?utm_source=newsletter#comments")
+    ).toBeTruthy()
+    expect(screen.getByText("https://example.com/article")).toBeTruthy()
+    expect(screen.getAllByText(/Already queued/i).length).toBeGreaterThanOrEqual(1)
+  })
+
+  it("Step 1 — summarizes mixed valid and invalid URL paste results", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={onClose} />)
+
+    const textarea = screen.getByPlaceholderText(/https:\/\/example\.com/i)
+    await user.type(textarea, "https://example.com/valid\nnot-a-url")
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+
+    expect(screen.getByText(/1 valid \/ 1 invalid/i)).toBeInTheDocument()
+    expect(screen.getByText(/Invalid URL format/i)).toBeInTheDocument()
+  })
+
   // -------------------------------------------------------------------------
   // Step 1 -> Step 2: Advance to Configure
   // -------------------------------------------------------------------------
