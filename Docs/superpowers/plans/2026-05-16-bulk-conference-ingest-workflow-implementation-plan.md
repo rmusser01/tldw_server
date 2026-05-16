@@ -168,7 +168,7 @@
 - Read: `apps/packages/ui/src/services/tldw/domains/collections.ts`
 - Read: `apps/packages/ui/src/services/tldw/domains/media.ts`
 
-- [x] **Step 1: Write the inventory artifact**
+- [ ] **Step 1: Write the inventory artifact**
 
 Create `Docs/superpowers/plans/2026-05-16-bulk-conference-contract-inventory.md` with:
 
@@ -192,7 +192,7 @@ Backlog: TASK-399
 ## Migration/Bridge Notes
 ```
 
-- [x] **Step 2: Verify the artifact names a selected source of truth**
+- [ ] **Step 2: Verify the artifact names a selected source of truth**
 
 Run:
 
@@ -202,7 +202,7 @@ rg -n "Selected Contract|Rejected Alternatives|API Placement" Docs/superpowers/p
 
 Expected: all headings present, with a concrete selection before Task 2 starts.
 
-- [x] **Step 3: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 git add Docs/superpowers/plans/2026-05-16-bulk-conference-contract-inventory.md
@@ -229,7 +229,7 @@ git commit -m "docs: inventory bulk conference collection contracts"
 - Test: `apps/packages/ui/src/services/tldw/__tests__/playlist-preflight.test.ts`
 - Test: `apps/packages/ui/src/components/Common/QuickIngest/__tests__/AddContentStep.url-detection.test.ts`
 
-- [x] **Step 1: Write failing backend classification tests**
+- [ ] **Step 1: Write failing backend classification tests**
 
 Add tests like:
 
@@ -259,7 +259,7 @@ def test_preflight_duplicate_in_batch_uses_normalized_source_id():
     ]
 ```
 
-- [x] **Step 2: Run failing backend tests**
+- [ ] **Step 2: Run failing backend tests**
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -269,7 +269,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: FAIL because the new module does not exist.
 
-- [x] **Step 3: Implement pure preflight helpers**
+- [ ] **Step 3: Implement pure preflight helpers**
 
 Implement `playlist_preflight.py` with small pure functions first:
 
@@ -292,7 +292,7 @@ def normalize_preflight_items(raw_items: list[dict[str, Any]]) -> list[PlaylistP
 
 Keep yt-dlp access behind an injectable function so tests can mock metadata extraction without network.
 
-- [x] **Step 4: Write failing endpoint read-only tests**
+- [ ] **Step 4: Write failing endpoint read-only tests**
 
 Use dependency overrides and a fake extractor. Assert:
 
@@ -311,7 +311,7 @@ def test_playlist_preflight_does_not_create_jobs_or_media(client, monkeypatch):
 
 Add explicit tests for partial/timeout/unsupported URL responses.
 
-- [x] **Step 5: Implement endpoint and schemas**
+- [ ] **Step 5: Implement endpoint and schemas**
 
 Add request/response models:
 
@@ -339,7 +339,7 @@ class PlaylistPreflightItem(BaseModel):
 
 Wire the router in `media/__init__.py`.
 
-- [x] **Step 6: Add granular capabilities**
+- [ ] **Step 6: Add granular capabilities**
 
 In `config_info.py`, expose at least:
 
@@ -357,7 +357,7 @@ caps["hasMediaIngestWorker"] = worker_path_enabled(
 
 In `server-capabilities.ts`, add matching fields, fallback spec paths, OpenAPI detection, and docs-info gate application.
 
-- [x] **Step 7: Add frontend normalizer and preflight client**
+- [ ] **Step 7: Add frontend normalizer and preflight client**
 
 Add `preflightPlaylist` to `domains/media.ts` and normalize payloads in `playlist-preflight.ts`:
 
@@ -373,11 +373,11 @@ export const normalizePlaylistPreflight = (payload: unknown): PlaylistPreflight 
 })
 ```
 
-- [x] **Step 8: Add Quick Ingest preflight UI**
+- [ ] **Step 8: Add Quick Ingest preflight UI**
 
 In `AddContentStep.tsx`, when a URL is playlist-capable and `hasMediaPlaylistPreflight` is true, call preflight and render `PlaylistPreflightPanel`. The panel must support loading, ready, partial, failed, and expired states, plus deselection.
 
-- [x] **Step 9: Run focused verification**
+- [ ] **Step 9: Run focused verification**
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -395,7 +395,7 @@ git diff --check
 
 Expected: all focused tests pass; diff check has no whitespace errors.
 
-- [x] **Step 10: Run Bandit on touched backend scope**
+- [ ] **Step 10: Run Bandit on touched backend scope**
 
 ```bash
 source .venv/bin/activate && python -m bandit \
@@ -406,7 +406,7 @@ source .venv/bin/activate && python -m bandit \
 
 Expected: no new high/medium findings in touched code.
 
-- [x] **Step 11: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add \
@@ -443,7 +443,7 @@ git commit -m "feat: add playlist preflight for quick ingest"
 - Test: `tldw_Server_API/tests/Collections/test_conference_media_collections.py`
 - Test: `apps/packages/ui/src/services/tldw/__tests__/conference-collections.test.ts`
 
-- [x] **Step 1: Write failing collection contract tests**
+- [ ] **Step 1: Write failing collection contract tests**
 
 Start from the selected contract in Task 0. Minimum backend tests:
 
@@ -471,7 +471,7 @@ def test_conference_collection_persists_planned_and_resolved_items(collections_d
 
 Add tests that planned/source items do not overwrite unrelated `content_items` with matching URL/hash unless the selected contract intentionally reuses those rows with a safe namespace.
 
-- [x] **Step 2: Run failing collection tests**
+- [ ] **Step 2: Run failing collection tests**
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -481,7 +481,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: FAIL due missing collection APIs/storage helpers.
 
-- [x] **Step 3: Implement the selected durable storage contract**
+- [ ] **Step 3: Implement the selected durable storage contract**
 
 If reusing `CollectionsDatabase`, prefer narrow methods rather than exposing raw SQL:
 
@@ -557,7 +557,7 @@ CONFERENCE_ITEM_STATUSES = {
 }
 ```
 
-- [x] **Step 4: Implement API and frontend client**
+- [ ] **Step 4: Implement API and frontend client**
 
 Expose stable collection operations. If using `/api/v1/media/collections`, add:
 
@@ -572,7 +572,7 @@ PATCH /api/v1/media/collections/{collection_id}/items/{item_id}
 
 Add typed client wrappers and normalize collection item status/counts in `conference-collections.ts`.
 
-- [x] **Step 5: Preserve localStorage collection boundary**
+- [ ] **Step 5: Preserve localStorage collection boundary**
 
 Read `useMediaSelection.ts` and make one explicit choice:
 
@@ -582,7 +582,7 @@ Read `useMediaSelection.ts` and make one explicit choice:
 
 Record the choice in the inventory artifact.
 
-- [x] **Step 6: Run focused verification**
+- [ ] **Step 6: Run focused verification**
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -596,7 +596,7 @@ bunx vitest run \
 git diff --check
 ```
 
-- [x] **Step 7: Run Bandit**
+- [ ] **Step 7: Run Bandit**
 
 ```bash
 source .venv/bin/activate && python -m bandit \
@@ -607,7 +607,7 @@ source .venv/bin/activate && python -m bandit \
 
 Expected: no new high/medium findings in touched code.
 
-- [x] **Step 8: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add \
@@ -639,7 +639,7 @@ git commit -m "feat: add durable conference media collections"
 - Test: `apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx`
 - Test: `apps/packages/ui/src/services/__tests__/quick-ingest-batch.test.ts`
 
-- [x] **Step 1: Write failing UI tests for inherited metadata**
+- [ ] **Step 1: Write failing UI tests for inherited metadata**
 
 Add a Quick Ingest integration test:
 
@@ -656,7 +656,7 @@ expect(screen.getByText(/34 selected/i)).toBeInTheDocument()
 
 Add an item override test for one speaker/title.
 
-- [x] **Step 2: Run failing UI tests**
+- [ ] **Step 2: Run failing UI tests**
 
 ```bash
 bunx vitest run \
@@ -666,7 +666,7 @@ bunx vitest run \
 
 Expected: FAIL because batch metadata controls and persisted session fields do not exist.
 
-- [x] **Step 3: Add metadata types and helpers**
+- [ ] **Step 3: Add metadata types and helpers**
 
 Add types:
 
@@ -692,11 +692,11 @@ export type ConferenceItemMetadataOverride = {
 
 Add pure merge helpers in `conference-collections.ts`.
 
-- [x] **Step 4: Implement batch metadata panel and item table**
+- [ ] **Step 4: Implement batch metadata panel and item table**
 
 Use compact forms and progressive disclosure. Batch fields are visible; per-item overrides live in a table/drawer and are optional.
 
-- [x] **Step 5: Submit metadata before or atomically with jobs**
+- [ ] **Step 5: Submit metadata before or atomically with jobs**
 
 Update quick-ingest submission so selected preflight items create planned collection items before jobs are submitted. If the API supports atomic create+submit, use that. Otherwise:
 
@@ -705,11 +705,11 @@ Update quick-ingest submission so selected preflight items create planned collec
 3. Submit jobs with planned item IDs/idempotency keys.
 4. Mark item `submit_failed` if submission fails.
 
-- [x] **Step 6: Mirror extension runtime payload**
+- [ ] **Step 6: Mirror extension runtime payload**
 
 Apply the same fields in `apps/packages/ui/src/entries/background.ts` so extension-runtime Quick Ingest does not drop collection metadata.
 
-- [x] **Step 7: Run verification**
+- [ ] **Step 7: Run verification**
 
 ```bash
 bunx vitest run \
@@ -721,7 +721,7 @@ bunx vitest run \
 git diff --check
 ```
 
-- [x] **Step 8: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add \
@@ -757,7 +757,7 @@ git commit -m "feat: add conference metadata to quick ingest"
 - Test: `apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx`
 - Test: `apps/packages/ui/src/services/__tests__/quick-ingest-batch.test.ts`
 
-- [x] **Step 1: Write failing backend tests for planned item binding**
+- [ ] **Step 1: Write failing backend tests for planned item binding**
 
 Test that job payload/status includes planned item ID:
 
@@ -780,7 +780,7 @@ def test_submit_jobs_preserves_collection_item_binding(client):
 
 Then fetch job and assert payload-derived `collection_id` and `planned_item_id` appear in status.
 
-- [x] **Step 2: Run failing backend tests**
+- [ ] **Step 2: Run failing backend tests**
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -789,7 +789,7 @@ source .venv/bin/activate && python -m pytest \
   -v
 ```
 
-- [x] **Step 3: Extend job payload contract**
+- [ ] **Step 3: Extend job payload contract**
 
 Accept optional collection/run form fields in `AddMediaForm` or endpoint-specific parsing, validate lengths match URL count, and write:
 
@@ -803,7 +803,7 @@ payload.update({
 
 Do not put secrets or cookies in the job payload.
 
-- [x] **Step 4: Resolve item statuses in worker**
+- [ ] **Step 4: Resolve item statuses in worker**
 
 On terminal result:
 
@@ -814,7 +814,7 @@ On terminal result:
 
 For job creation failures in the submit endpoint, mark planned item `submit_failed` with source URL/error.
 
-- [x] **Step 5: Update frontend tracking**
+- [ ] **Step 5: Update frontend tracking**
 
 Extend `PersistedQuickIngestTracking` with collection/run IDs and planned item mapping. Ensure refresh restore can show:
 
@@ -823,7 +823,7 @@ Extend `PersistedQuickIngestTracking` with collection/run IDs and planned item m
 - retry all retryable failures
 - export failed URLs
 
-- [x] **Step 6: Run verification**
+- [ ] **Step 6: Run verification**
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -839,7 +839,7 @@ bunx vitest run \
 git diff --check
 ```
 
-- [x] **Step 7: Bandit**
+- [ ] **Step 7: Bandit**
 
 ```bash
 source .venv/bin/activate && python -m bandit \
@@ -849,7 +849,7 @@ source .venv/bin/activate && python -m bandit \
   -f json -o /tmp/bandit_bulk_conference_jobs.json
 ```
 
-- [x] **Step 8: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add \
@@ -869,13 +869,6 @@ git add \
 git commit -m "feat: track conference ingest runs through media jobs"
 ```
 
-Completion notes:
-
-- Implemented planned item binding through `/api/v1/media/ingest/jobs`, worker terminal status sync, synchronous fallback resolution, persisted Quick Ingest run tracking, and Processing Step durable tracking/export affordances.
-- Submit-time job creation failures now mark planned items `submit_failed`; terminal job results without a media id fail closed instead of leaving planned items stuck in `processing`.
-- `ingest-jobs-orchestrator.ts`, `ingest-job-results.ts`, and `FloatingProgressWidget.tsx` were left unchanged after review because the active direct-job path for this slice is handled by `quick-ingest-batch.ts`, the persisted session store, `ProcessingStep.tsx`, and the existing Results Panel retry/export controls.
-- Verification run: focused backend pytest `33 passed`, focused frontend Vitest `73 passed`, `git diff --check` passed, and Bandit reported zero findings for touched backend files.
-
 ## Task 5: Results And Collection Handoff
 
 **Files:**
@@ -884,10 +877,9 @@ Completion notes:
 - Modify: `apps/packages/ui/src/components/Common/QuickIngest/types.ts`
 - Modify: `apps/packages/ui/src/services/tldw/conference-collections.ts`
 - Test: `apps/packages/ui/src/components/Common/QuickIngest/__tests__/WizardResultsStep.navigation.test.tsx`
-- Test: `apps/packages/ui/src/components/Common/QuickIngest/__tests__/ResultsListItem.status.test.tsx`
 - Test: `apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx`
 
-- [x] **Step 1: Write failing grouped-results test**
+- [ ] **Step 1: Write failing grouped-results test**
 
 ```tsx
 render(<WizardResultsStep results={[
@@ -904,7 +896,7 @@ expect(screen.getByText(/Submit failed/i)).toBeInTheDocument()
 expect(screen.getByRole("button", { name: /Open collection/i })).toBeEnabled()
 ```
 
-- [x] **Step 2: Run failing UI tests**
+- [ ] **Step 2: Run failing UI tests**
 
 ```bash
 bunx vitest run \
@@ -912,7 +904,7 @@ bunx vitest run \
   apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx
 ```
 
-- [x] **Step 3: Implement grouped result model and CTAs**
+- [ ] **Step 3: Implement grouped result model and CTAs**
 
 Primary CTA: open conference collection.
 
@@ -924,7 +916,7 @@ Secondary CTAs:
 - ingest more
 - ask this collection only when `hasKnowledgeQaMediaScope` is true and collection readiness is nonzero
 
-- [x] **Step 4: Separate submit failures from processing failures**
+- [ ] **Step 4: Separate submit failures from processing failures**
 
 Use distinct outcome/status copy:
 
@@ -937,13 +929,12 @@ const RESULT_GROUP_LABELS = {
 
 Export should include source URL, title, collection item ID, status, error summary, and retry attempt.
 
-- [x] **Step 5: Run verification**
+- [ ] **Step 5: Run verification**
 
 ```bash
 bunx vitest run \
   apps/packages/ui/src/components/Common/QuickIngest/__tests__/WizardResultsStep.navigation.test.tsx \
   apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx \
-  apps/packages/ui/src/components/Common/QuickIngest/__tests__/ResultsListItem.status.test.tsx \
   apps/packages/ui/src/services/tldw/__tests__/conference-collections.test.ts
 
 git diff --check
@@ -958,17 +949,9 @@ git add \
   apps/packages/ui/src/components/Common/QuickIngest/types.ts \
   apps/packages/ui/src/services/tldw/conference-collections.ts \
   apps/packages/ui/src/components/Common/QuickIngest/__tests__/WizardResultsStep.navigation.test.tsx \
-  apps/packages/ui/src/components/Common/QuickIngest/__tests__/ResultsListItem.status.test.tsx \
   apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx
 git commit -m "feat: hand off bulk ingest results to collections"
 ```
-
-Completion notes:
-
-- Results now group succeeded, skipped existing, not submitted, failed during processing, and cancelled items separately.
-- Durable conference collections now remain the primary handoff CTA even when all items fail, and collection-scoped QA is gated on `hasKnowledgeQaMediaScope` plus at least one ready completed/skipped media item.
-- Failed export rows now include source URL, title, collection item ID, status, error summary, and retry attempt where available.
-- Verification run: focused Vitest suite `40 passed`, `git diff --check` passed. Frontend `tsc --noEmit` remains blocked by pre-existing unrelated type errors in `EmbeddingsModelSelectionConfig.tsx`, `persona-visuals.ts`, and `lib/api/vnPlay.ts`.
 
 ## Task 6: Conference Collection Review And Scoped QA
 
@@ -981,7 +964,7 @@ Completion notes:
 - Test: `tldw_Server_API/tests/RAG/test_conference_collection_scope.py`
 - Test: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/conference-scope.test.tsx`
 
-- [x] **Step 1: Inventory current Knowledge QA/RAG scope contract**
+- [ ] **Step 1: Inventory current Knowledge QA/RAG scope contract**
 
 Search:
 
@@ -995,7 +978,7 @@ rg -n "media_ids|source_ids|filters|selection|rag/search|KnowledgeQA" \
 
 Record the actual contract in Task 0's inventory or a new short note before modifying RAG.
 
-- [x] **Step 2: Write failing backend scoped retrieval test**
+- [ ] **Step 2: Write failing backend scoped retrieval test**
 
 ```python
 def test_conference_collection_scope_limits_rag_to_ready_media(client, seeded_collection):
@@ -1011,15 +994,15 @@ def test_conference_collection_scope_limits_rag_to_ready_media(client, seeded_co
     assert {hit["media_id"] for hit in response.json()["results"]} <= seeded_collection.ready_media_ids
 ```
 
-- [x] **Step 3: Implement or reuse backend-enforced scope**
+- [ ] **Step 3: Implement or reuse backend-enforced scope**
 
 If existing RAG selection filters support media IDs, map collection ID to ready media IDs server-side. If not, add a minimal request field and retrieval filter. Do not rely on client-only filtering.
 
-- [x] **Step 4: Write failing review UI test**
+- [ ] **Step 4: Write failing review UI test**
 
 Assert talk list, transcript readiness counts, next/previous navigation, compare selected, and disabled QA when no items are ready.
 
-- [x] **Step 5: Implement collection review UI**
+- [ ] **Step 5: Implement collection review UI**
 
 Minimum V1:
 
@@ -1030,7 +1013,7 @@ Minimum V1:
 - selected-talk comparison using metadata plus available summaries/excerpts
 - scoped QA CTA with readiness copy
 
-- [x] **Step 6: Run verification**
+- [ ] **Step 6: Run verification**
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -1044,7 +1027,7 @@ bunx vitest run \
 git diff --check
 ```
 
-- [x] **Step 7: Bandit**
+- [ ] **Step 7: Bandit**
 
 ```bash
 source .venv/bin/activate && python -m bandit \
@@ -1055,7 +1038,7 @@ source .venv/bin/activate && python -m bandit \
 
 Review only findings in touched RAG/API files.
 
-- [x] **Step 8: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add \
@@ -1079,7 +1062,7 @@ git commit -m "feat: review conference collections with scoped qa"
 - Test: `apps/packages/ui/src/routes/__tests__/route-registry.sidepanel-chat.test.ts`
 - Test as available: `apps/tldw-frontend/extension/__tests__/*`
 
-- [x] **Step 1: Write failing context-handoff tests**
+- [ ] **Step 1: Write failing context-handoff tests**
 
 Add a test that `requestQuickIngestOpen` accepts:
 
@@ -1094,7 +1077,7 @@ requestQuickIngestOpen({
 
 And that Sidepanel passes this detail to the modal/open request.
 
-- [x] **Step 2: Run failing tests**
+- [ ] **Step 2: Run failing tests**
 
 ```bash
 bunx vitest run \
@@ -1102,7 +1085,7 @@ bunx vitest run \
   apps/packages/ui/src/routes/__tests__/route-registry.sidepanel-chat.test.ts
 ```
 
-- [x] **Step 3: Add typed Quick Ingest open detail**
+- [ ] **Step 3: Add typed Quick Ingest open detail**
 
 In `quick-ingest-open.ts`:
 
@@ -1117,15 +1100,15 @@ export type QuickIngestOpenDetail =
     }
 ```
 
-- [x] **Step 4: Detect active-tab playlist context**
+- [ ] **Step 4: Detect active-tab playlist context**
 
 Use active-tab URL or existing sidepanel context, not content-script parsing. Show "Import playlist to tldw" only when the URL has a YouTube playlist/list context and extension readiness allows it.
 
-- [x] **Step 5: Seed shared preflight**
+- [ ] **Step 5: Seed shared preflight**
 
 Quick Ingest should consume the open detail and start the same preflight path as paste-from-WebUI.
 
-- [x] **Step 6: Run verification**
+- [ ] **Step 6: Run verification**
 
 ```bash
 bunx vitest run \
@@ -1135,14 +1118,7 @@ bunx vitest run \
 git diff --check
 ```
 
-- Verification run:
-  - `./node_modules/.bin/vitest run -c vitest.config.ts ../../apps/packages/ui/src/utils/__tests__/quick-ingest-open.test.ts ../../apps/packages/ui/src/components/Sidepanel/Chat/__tests__/form.queue.contract.test.tsx ../../apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx`
-  - `./node_modules/.bin/vitest run -c vitest.config.ts ../../apps/packages/ui/src/routes/__tests__/route-registry.sidepanel-chat.test.ts`
-  - `./node_modules/.bin/tsc --noEmit -p tsconfig.json --pretty false` still fails only on unrelated baseline files: `EmbeddingsModelSelectionConfig.tsx`, `persona-visuals.ts`, and `lib/api/vnPlay.ts`.
-  - `git diff --check`
-- Implementation note: `background.ts` did not need changes for this slice because the active-tab URL is resolved in `ControlRow.tsx` at the point of user action, and the existing background quick-ingest runtime already carries playlist metadata from prior tasks.
-
-- [x] **Step 7: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add \
@@ -1169,7 +1145,7 @@ git commit -m "feat: add extension playlist quick ingest handoff"
 - Test: `apps/packages/ui/src/services/tldw/__tests__/conference-collections.test.ts`
 - Test: `apps/packages/ui/src/components/Common/QuickIngest/__tests__/WizardResultsStep.navigation.test.tsx`
 
-- [x] **Step 1: Write failing duplicate policy tests**
+- [ ] **Step 1: Write failing duplicate policy tests**
 
 Policies:
 
@@ -1180,7 +1156,7 @@ Policies:
 
 Assert each policy produces expected planned item status and job submission behavior.
 
-- [x] **Step 2: Write failing failure taxonomy tests**
+- [ ] **Step 2: Write failing failure taxonomy tests**
 
 Classify conservative failure types:
 
@@ -1190,15 +1166,15 @@ expect(classifyConferenceIngestFailure("HTTP Error 404")).toBe("unavailable")
 expect(classifyConferenceIngestFailure("timed out")).toBe("timeout")
 ```
 
-- [x] **Step 3: Implement duplicate policy UI and payloads**
+- [ ] **Step 3: Implement duplicate policy UI and payloads**
 
 Expose policy choice in preflight/results only when duplicates exist. Default should avoid surprise overwrite.
 
-- [x] **Step 4: Implement selected-subset retry**
+- [ ] **Step 4: Implement selected-subset retry**
 
 Retry selected applies only to retryable `submit_failed`, `failed`, or `cancelled` items. It must use collection item ID plus retry attempt/idempotency key and must skip completed items.
 
-- [x] **Step 5: Run verification**
+- [ ] **Step 5: Run verification**
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -1213,7 +1189,7 @@ bunx vitest run \
 git diff --check
 ```
 
-- [x] **Step 6: Bandit**
+- [ ] **Step 6: Bandit**
 
 ```bash
 source .venv/bin/activate && python -m bandit \
@@ -1223,17 +1199,7 @@ source .venv/bin/activate && python -m bandit \
   -f json -o /tmp/bandit_bulk_conference_recovery.json
 ```
 
-Task 8 verification note: focused backend tests passed for
-`test_playlist_preflight.py` and `test_media_ingest_jobs_worker.py`; focused
-Vitest passed for conference collection helpers, playlist preflight panel,
-wizard results retry/navigation, and direct quick-ingest batch orchestration.
-`git diff --check` passed. Bandit on the touched backend playlist preflight
-module produced zero findings in `/tmp/bandit_task408.json`. Full frontend
-`tsc --noEmit` still fails only on the existing baseline files outside this
-slice: `EmbeddingsModelSelectionConfig.tsx`, `persona-visuals.ts`, and
-`lib/api/vnPlay.ts`.
-
-- [x] **Step 7: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add \
@@ -1251,8 +1217,6 @@ git add \
 git commit -m "feat: recover duplicate and failed playlist items"
 ```
 
-Committed as `60f40c127 feat: recover duplicate and failed playlist items`.
-
 ## Task 9: Notifications, Full-Path QA, And Documentation
 
 **Files:**
@@ -1263,11 +1227,11 @@ Committed as `60f40c127 feat: recover duplicate and failed playlist items`.
 - Modify if needed: `Docs/API-related/Media_Ingest_Jobs_API.md`
 - Test fixtures as needed under existing frontend/backend test fixture directories.
 
-- [x] **Step 1: Add mocked 34-item playlist fixture**
+- [ ] **Step 1: Add mocked 34-item playlist fixture**
 
 Create a deterministic fixture with 34 metadata-only items, duplicates, and failure permutations. Do not depend on real YouTube or downloads in automated tests.
 
-- [x] **Step 2: Write full-path WebUI test**
+- [ ] **Step 2: Write full-path WebUI test**
 
 Test:
 
@@ -1280,15 +1244,15 @@ Test:
 7. open collection
 8. see readiness counts
 
-- [x] **Step 3: Write extension handoff test**
+- [ ] **Step 3: Write extension handoff test**
 
 Assert active-tab playlist context opens the same preflight state as WebUI paste.
 
-- [x] **Step 4: Add completion notification**
+- [ ] **Step 4: Add completion notification**
 
 Use existing WebUI/extension notification/message patterns. Notification should include collection name and mixed success counts; it should not claim all searchable until readiness counts confirm it.
 
-- [x] **Step 5: Write user documentation**
+- [ ] **Step 5: Write user documentation**
 
 Document:
 
@@ -1299,7 +1263,7 @@ Document:
 - collection review
 - scoped Knowledge QA readiness
 
-- [x] **Step 6: Run full verification**
+- [ ] **Step 6: Run full verification**
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -1322,16 +1286,7 @@ npx playwright test apps/tldw-frontend/e2e/workflows/media-ingest.spec.ts
 git diff --check
 ```
 
-Task 9 verification note:
-
-- Backend focused pytest passed: `46 passed, 9 warnings`.
-- Frontend focused Vitest passed: `7 files passed`, `68 tests passed`.
-- Focused Playwright conference workflow passed: `2 passed` for the mocked 34-talk WebUI flow and extension handoff using the webpack dev server.
-- Full `media-ingest.spec.ts` Playwright file was run with the webpack dev server and ended with `15 passed`, `12 skipped`, `3 failed`; the failures were existing broader-file drift outside the new conference workflow: missing legacy media search textbox, missing legacy empty-state "open quick ingest" trigger, and an unstable legacy review-route link click.
-- `./node_modules/.bin/tsc --noEmit` still fails only on known baseline files outside this slice: `EmbeddingsModelSelectionConfig.tsx`, `persona-visuals.ts`, and `lib/api/vnPlay.ts`.
-- `git diff --check` passed.
-
-- [x] **Step 7: Final Bandit touched backend sweep**
+- [ ] **Step 7: Final Bandit touched backend sweep**
 
 ```bash
 source .venv/bin/activate && python -m bandit \
@@ -1342,9 +1297,7 @@ source .venv/bin/activate && python -m bandit \
   -f json -o /tmp/bandit_bulk_conference_final.json
 ```
 
-Bandit reported zero findings in `/tmp/bandit_bulk_conference_final.json`.
-
-- [x] **Step 8: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add \
@@ -1358,16 +1311,16 @@ git commit -m "test: verify bulk conference ingest workflow"
 
 ## Cross-Stage Review Checklist
 
-- [x] Preflight remains read-only: no jobs, no media rows, no collection mutation.
-- [x] Server capabilities distinguish endpoint presence, worker availability, SSE, durable collection support, playlist preflight, and scoped QA.
-- [x] Collection identity is stable and not tag-only.
-- [x] Planned, processing, completed, skipped_existing, `submit_failed`, failed, and cancelled item states are represented.
-- [x] Submit failures keep source URL, metadata, error, and export/retry path.
-- [x] Retry is idempotent by collection item and retry attempt.
-- [x] Synchronous fallback preserves metadata and clearly communicates weaker recovery.
-- [x] Extension capture hands off to shared preflight and does not duplicate playlist parsing.
-- [x] Scoped QA is backend-enforced and shows ready/not-ready counts.
-- [x] One-off Quick Ingest remains unchanged.
+- [ ] Preflight remains read-only: no jobs, no media rows, no collection mutation.
+- [ ] Server capabilities distinguish endpoint presence, worker availability, SSE, durable collection support, playlist preflight, and scoped QA.
+- [ ] Collection identity is stable and not tag-only.
+- [ ] Planned, processing, completed, skipped_existing, `submit_failed`, failed, and cancelled item states are represented.
+- [ ] Submit failures keep source URL, metadata, error, and export/retry path.
+- [ ] Retry is idempotent by collection item and retry attempt.
+- [ ] Synchronous fallback preserves metadata and clearly communicates weaker recovery.
+- [ ] Extension capture hands off to shared preflight and does not duplicate playlist parsing.
+- [ ] Scoped QA is backend-enforced and shows ready/not-ready counts.
+- [ ] One-off Quick Ingest remains unchanged.
 
 ## Execution Notes
 
