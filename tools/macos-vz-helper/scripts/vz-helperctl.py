@@ -487,6 +487,11 @@ def sign_helper(
     identity: str = "-",
     command_runner: Callable[..., int] | None = None,
 ) -> CheckResult:
+    """Codesign the helper with explicit entitlements for operator-managed runs.
+
+    `command_runner` exists so tests and JSON-mode callers can capture the
+    subprocess without changing the public failure reasons.
+    """
     if entitlements_path is None:
         return CheckResult(ok=False, reason="helper_entitlements_missing")
     helper_result = validate_helper_binary(helper_path)
@@ -510,6 +515,8 @@ def sign_helper(
         ],
         dry_run=dry_run,
     )
+    if code == 127:
+        return CheckResult(ok=False, reason="helper_codesign_unavailable")
     if code != 0:
         return CheckResult(ok=False, reason="helper_codesign_failed")
     return CheckResult(ok=True)

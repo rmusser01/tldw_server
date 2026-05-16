@@ -57,7 +57,7 @@ def test_default_entitlements_template_includes_virtualization():
     entitlements = plistlib.loads(entitlements_path.read_bytes())
 
     CASE.assertIs(entitlements["com.apple.security.virtualization"], True)
-    CASE.assertIs(entitlements["com.apple.security.get-task-allow"], True)
+    CASE.assertNotIn("com.apple.security.get-task-allow", entitlements)
 
 
 def test_protocol_version_loads_from_helper_client():
@@ -2019,6 +2019,23 @@ def test_sign_reports_missing_codesign(monkeypatch, tmp_path, capsys):
     captured = capsys.readouterr()
     CASE.assertEqual(code, 1)
     CASE.assertIn("helper_codesign_unavailable", captured.err)
+
+
+def test_sign_helper_maps_injected_runner_127_to_codesign_unavailable(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    entitlements = tmp_path / "helper.entitlements"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    entitlements.write_text("<plist/>", encoding="utf-8")
+
+    result = helperctl.sign_helper(
+        helper,
+        entitlements,
+        command_runner=lambda argv, **kwargs: 127,
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(False, "helper_codesign_unavailable"))
 
 
 def test_compare_entitlements_without_expected_path_checks_signed_binary(monkeypatch, tmp_path):
