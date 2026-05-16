@@ -243,6 +243,56 @@ def test_inventory_model_ids_are_stable_for_canonical_path(monkeypatch, tmp_path
 
 
 @pytest.mark.unit
+def test_assets_endpoint_lists_gguf_and_mmproj(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    (models_dir / "chat.Q4_K_M.gguf").write_text("base")
+    (models_dir / "mmproj-chat-f16.gguf").write_text("projector")
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(models_dir),
+    )
+    monkeypatch.setattr(lp.llamacpp_config_service, "get_config_state", lambda llm_manager: _config_state(models_dir))
+    app = _make_app_with_manager(_Manager())
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/llamacpp/assets")
+
+    assert response.status_code == 200, response.text
+    kinds = {asset["kind"] for asset in response.json()["assets"]}
+    assert {"gguf", "mmproj"} <= kinds
+
+
+@pytest.mark.unit
+def test_import_folder_persists_allowlisted_folder_and_returns_folder_asset(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+
+    models_dir = tmp_path / "models"
+    imported = tmp_path / "imported"
+    models_dir.mkdir()
+    imported.mkdir()
+    updates: list[dict[str, dict[str, str]]] = []
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(models_dir, allowed_paths=str(imported), imported_asset_folders=""),
+    )
+    monkeypatch.setattr(llamacpp_inventory_service.setup_manager, "update_config", updates.append)
+    monkeypatch.setattr(llamacpp_inventory_service, "refresh_config_cache", lambda: None)
+    app = _make_app_with_manager(_Manager())
+
+    with TestClient(app) as client:
+        response = client.post("/api/v1/llamacpp/assets/import-folder", json={"path": str(imported)})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["kind"] == "folder"
+    assert updates[-1]["LlamaCpp"]["imported_asset_folders"] == str(imported)
+
+
+@pytest.mark.unit
 def test_register_path_persists_and_returns_inventory_item(monkeypatch, tmp_path: Path):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
 

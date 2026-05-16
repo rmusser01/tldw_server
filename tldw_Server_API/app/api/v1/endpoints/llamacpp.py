@@ -13,9 +13,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, RequireRole, User
 from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
+    LlamaCppAsset,
+    LlamaCppAssetsResponse,
     LlamaCppConfigResponse,
     LlamaCppConfigUpdateRequest,
     LlamaCppHardwareSnapshotResponse,
+    LlamaCppImportAssetFolderRequest,
     LlamaCppInventoryItem,
     LlamaCppInventoryResponse,
     LlamaCppLifecycleActionResponse,
@@ -25,6 +28,7 @@ from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
     LlamaCppProfileListResponse,
     LlamaCppProfileResponse,
     LlamaCppProfileUpdateRequest,
+    LlamaCppRegisterAssetPathRequest,
     LlamaCppRegisterModelPathRequest,
     LlamaCppRuntimeListResponse,
     LlamaCppRuntimeResponse,
@@ -369,6 +373,53 @@ async def validate_llamacpp_binary_endpoint(
         llm_manager=llm_manager,
         run_probe=payload.run_probe,
     )
+
+
+@router.get(
+    "/llamacpp/assets",
+    summary="List llama.cpp Local Assets",
+    response_model=LlamaCppAssetsResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def get_llamacpp_assets_endpoint(
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+) -> LlamaCppAssetsResponse:
+    config_state = llamacpp_config_service.get_config_state(llm_manager)
+    return llamacpp_inventory_service.scan_assets(config_state)
+
+
+@router.post(
+    "/llamacpp/assets/register-path",
+    summary="Register a llama.cpp Asset Path",
+    response_model=LlamaCppAsset,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def register_llamacpp_asset_path_endpoint(
+    payload: LlamaCppRegisterAssetPathRequest,
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+) -> LlamaCppAsset:
+    _ = llm_manager
+    try:
+        return llamacpp_inventory_service.register_asset_path(Path(payload.path))
+    except ServerError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post(
+    "/llamacpp/assets/import-folder",
+    summary="Import a llama.cpp Asset Folder",
+    response_model=LlamaCppAsset,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def import_llamacpp_asset_folder_endpoint(
+    payload: LlamaCppImportAssetFolderRequest,
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+) -> LlamaCppAsset:
+    _ = llm_manager
+    try:
+        return llamacpp_inventory_service.import_asset_folder(Path(payload.path))
+    except ServerError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get(

@@ -460,7 +460,7 @@ git commit -m "Infer llama.cpp mmproj asset candidates"
 - Modify: `tldw_Server_API/app/api/v1/endpoints/llamacpp.py`
 - Modify: `tldw_Server_API/tests/LLM_Local/test_llamacpp_inventory_api.py`
 
-- [ ] **Step 1: Write failing API tests**
+- [x] **Step 1: Write failing API tests**
 
 Append tests to `test_llamacpp_inventory_api.py`:
 
@@ -515,7 +515,7 @@ def test_import_folder_persists_allowlisted_folder_and_returns_folder_asset(monk
     assert updates[-1]["LlamaCpp"]["imported_asset_folders"] == str(imported)
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run:
 
@@ -527,7 +527,7 @@ Run:
 
 Expected: FAIL because routes/service methods do not exist.
 
-- [ ] **Step 3: Add service mutation methods**
+- [x] **Step 3: Add service mutation methods**
 
 In `llamacpp_inventory_service.py`:
 
@@ -541,7 +541,7 @@ In `llamacpp_inventory_service.py`:
 - persist folders to `imported_asset_folders`;
 - preserve existing registered paths/folders by stable ID and unresolved-path fallback.
 
-- [ ] **Step 4: Add endpoints**
+- [x] **Step 4: Add endpoints**
 
 In `llamacpp.py`, add routes near the legacy inventory routes:
 
@@ -561,7 +561,7 @@ async def get_llamacpp_assets_endpoint(
 
 Add `POST /llamacpp/assets/register-path` and `POST /llamacpp/assets/import-folder` with `ServerError` mapped to HTTP 400 and `from e` exception chaining.
 
-- [ ] **Step 5: Run API tests**
+- [x] **Step 5: Run API tests**
 
 Run:
 
@@ -572,7 +572,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Local_LLM/llamacpp_inventory_service.py \

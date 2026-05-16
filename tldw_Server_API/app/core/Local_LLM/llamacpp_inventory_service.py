@@ -217,14 +217,98 @@ def register_model_path(path: Path) -> LlamaCppInventoryItem:
     return item
 
 
+def register_asset_path(path: Path) -> LlamaCppAsset:
+    """Persist a local registered asset path and return its asset representation."""
+    canonical = _canonical_path(path, "Registered asset")
+    _validate_path_for_config(canonical, "registered_model_paths", "Registered asset path")
+    try:
+        with llamacpp_config_write_lock():
+            saved_config = _read_saved_config()
+            allowed_bases = _allowed_bases_for_config(saved_config)
+            if not allowed_bases or not handler_utils.is_path_allowed(canonical, allowed_bases):
+                raise ServerError("Registered asset path is outside allowed llama.cpp paths.")
+            existing = _path_list(saved_config.get("registered_model_paths"))
+            existing_by_id: dict[str, Path] = {}
+            for item in existing:
+                try:
+                    existing_canonical = _canonical_path(item, "Registered asset")
+                    existing_by_id[asset_id_for_path(existing_canonical, _asset_kind_for_path(existing_canonical))] = (
+                        existing_canonical
+                    )
+                except ServerError:
+                    existing_by_id[_unresolved_path_key(item)] = item.expanduser()
+            existing_by_id.setdefault(asset_id_for_path(canonical, _asset_kind_for_path(canonical)), canonical)
+
+            registered_value = ", ".join(str(item) for item in existing_by_id.values())
+            setup_manager.update_config({"LlamaCpp": {"registered_model_paths": registered_value}})
+            refresh_config_cache()
+    except Exception as exc:
+        if isinstance(exc, LockAcquisitionError):
+            raise ServerError("Failed to acquire the llama.cpp config write lock.") from exc
+        if isinstance(exc, ServerError):
+            raise
+        raise ServerError("Failed to persist registered llama.cpp asset path.") from exc
+
+    saved_config["registered_model_paths"] = [registered_value]
+    allowed_bases = _allowed_bases_for_config(saved_config)
+    asset = _asset_for_path(canonical, source="registered_path", allowed_bases=allowed_bases)
+    if asset is None:
+        raise ServerError("Registered asset path could not be resolved.")
+    return asset
+
+
+def import_asset_folder(path: Path) -> LlamaCppAsset:
+    """Register an existing allowlisted local folder for asset scanning."""
+    canonical = _canonical_path(path, "Imported asset folder")
+    _validate_path_for_config(canonical, "imported_asset_folders", "Imported asset folder")
+    if not canonical.exists():
+        raise ServerError("Imported asset folder does not exist.")
+    if not canonical.is_dir():
+        raise ServerError("Imported asset path is not a folder.")
+
+    try:
+        with llamacpp_config_write_lock():
+            saved_config = _read_saved_config()
+            allowed_bases = _allowed_bases_for_config(saved_config)
+            if not allowed_bases or not handler_utils.is_path_allowed(canonical, allowed_bases):
+                raise ServerError("Imported asset folder is outside allowed llama.cpp paths.")
+            existing = _path_list(saved_config.get("imported_asset_folders"))
+            existing_by_id: dict[str, Path] = {}
+            for item in existing:
+                try:
+                    existing_canonical = _canonical_path(item, "Imported asset folder")
+                    existing_by_id[asset_id_for_path(existing_canonical, "folder")] = existing_canonical
+                except ServerError:
+                    existing_by_id[_unresolved_path_key(item)] = item.expanduser()
+            existing_by_id.setdefault(asset_id_for_path(canonical, "folder"), canonical)
+
+            imported_value = ", ".join(str(item) for item in existing_by_id.values())
+            setup_manager.update_config({"LlamaCpp": {"imported_asset_folders": imported_value}})
+            refresh_config_cache()
+    except Exception as exc:
+        if isinstance(exc, LockAcquisitionError):
+            raise ServerError("Failed to acquire the llama.cpp config write lock.") from exc
+        if isinstance(exc, ServerError):
+            raise
+        raise ServerError("Failed to persist imported llama.cpp asset folder.") from exc
+
+    saved_config["imported_asset_folders"] = [imported_value]
+    allowed_bases = _allowed_bases_for_config(saved_config)
+    return _folder_asset_for_path(canonical, allowed_bases=allowed_bases)
+
+
 def _validate_registered_path_for_config(path: Path) -> None:
+    _validate_path_for_config(path, "registered_model_paths", "Registered model path")
+
+
+def _validate_path_for_config(path: Path, field: str, label: str) -> None:
     text = str(path)
     try:
-        setup_manager.validate_config_value_single_line("LlamaCpp", "registered_model_paths", text)
+        setup_manager.validate_config_value_single_line("LlamaCpp", field, text)
     except ValueError as exc:
-        raise ServerError("Registered model path contains unsupported config characters.") from exc
+        raise ServerError(f"{label} contains unsupported config characters.") from exc
     if any(delimiter in text for delimiter in _REGISTERED_PATH_DELIMITERS):
-        raise ServerError("Registered model path contains unsupported list delimiter characters.")
+        raise ServerError(f"{label} contains unsupported list delimiter characters.")
 
 
 def resolve_model_id(model_id: str) -> Path:
