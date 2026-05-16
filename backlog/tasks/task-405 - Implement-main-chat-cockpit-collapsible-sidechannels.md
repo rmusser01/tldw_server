@@ -32,7 +32,7 @@ Plan: add tests first around rail-local collapse and edge restore affordances, i
 Verification:
 - RED: focused cockpit tests failed for missing "Collapse context sidechannel" and restore handles before implementation.
 - GREEN: `bunx vitest run src/components/Option/Playground/__tests__/Playground.cockpit-a11y.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-maturity.test.tsx --config vitest.config.ts` passed, 19 tests.
-- Real-server proof: `TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://127.0.0.1:18002 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --grep "uses the running server"` passed, 1 test.
+- Real-server proof: `TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://127.0.0.1:18002 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY="$TLDW_E2E_API_KEY" bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --grep "uses the running server"` passed, 1 test.
 - `git diff --check` passed.
 - `bunx prettier --check ...` passed on touched TS files after formatting.
 - `bunx eslint ...` reported warning-only existing `any` usage in the real-server spec and ignored the UI package paths from the frontend base path; no errors.

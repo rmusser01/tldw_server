@@ -161,7 +161,7 @@ const EmptyAssistantResponseNotice: React.FC<{
   <div
     role="status"
     aria-live="polite"
-    aria-label="Empty assistant response"
+    aria-label={summary}
     className="rounded-md border border-warn/30 bg-warn/10 p-3 text-sm text-warn">
     <p className="font-semibold">{summary}</p>
     <p className="mt-1 text-xs text-warn">{detail}</p>

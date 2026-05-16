@@ -371,37 +371,38 @@ describe("PlaygroundMessage error recovery integration", () => {
       "tldw:open-model-settings",
       settingsEventSpy as EventListener
     )
+    try {
+      render(
+        <PlaygroundMessage
+          {...baseProps}
+          message=""
+          onRegenerate={onRegenerate}
+        />
+      )
 
-    render(
-      <PlaygroundMessage
-        {...baseProps}
-        message=""
-        onRegenerate={onRegenerate}
-      />
-    )
+      const status = screen.getByRole("status", {
+        name: "No response text was returned."
+      })
+      expect(status).toHaveTextContent("No response text was returned.")
+      expect(status).toHaveTextContent(
+        "The request completed, but the assistant did not return visible content."
+      )
 
-    const status = screen.getByRole("status", {
-      name: "Empty assistant response"
-    })
-    expect(status).toHaveTextContent("No response text was returned.")
-    expect(status).toHaveTextContent(
-      "The request completed, but the assistant did not return visible content."
-    )
+      await user.click(screen.getByRole("button", { name: "Retry same model" }))
+      expect(onRegenerate).toHaveBeenCalledTimes(1)
 
-    await user.click(screen.getByRole("button", { name: "Retry same model" }))
-    expect(onRegenerate).toHaveBeenCalledTimes(1)
+      await user.click(screen.getByRole("button", { name: "Switch model" }))
+      expect(settingsEventSpy).toHaveBeenCalledTimes(1)
 
-    await user.click(screen.getByRole("button", { name: "Switch model" }))
-    expect(settingsEventSpy).toHaveBeenCalledTimes(1)
-
-    await user.click(screen.getByRole("button", { name: "Try provider fallback" }))
-    expect(updateChatModelSettingMock).toHaveBeenCalledWith("apiProvider", undefined)
-    expect(onRegenerate).toHaveBeenCalledTimes(2)
-
-    window.removeEventListener(
-      "tldw:open-model-settings",
-      settingsEventSpy as EventListener
-    )
+      await user.click(screen.getByRole("button", { name: "Try provider fallback" }))
+      expect(updateChatModelSettingMock).toHaveBeenCalledWith("apiProvider", undefined)
+      expect(onRegenerate).toHaveBeenCalledTimes(2)
+    } finally {
+      window.removeEventListener(
+        "tldw:open-model-settings",
+        settingsEventSpy as EventListener
+      )
+    }
   })
 
   it("renders a compact partial-save marker when stream transport drops after partial output", () => {

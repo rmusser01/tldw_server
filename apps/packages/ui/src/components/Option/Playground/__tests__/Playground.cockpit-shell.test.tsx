@@ -364,7 +364,6 @@ describe("Playground cockpit shell", () => {
     const contextRail = await screen.findByTestId(
       "playground-cockpit-left-rail",
     );
-    const runtimeRail = screen.getByTestId("playground-cockpit-right-rail");
 
     fireEvent.click(
       within(contextRail).getByRole("button", {
@@ -397,8 +396,11 @@ describe("Playground cockpit shell", () => {
       true,
     );
 
+    const runtimeRailAfterRestore = screen.getByTestId(
+      "playground-cockpit-right-rail",
+    );
     fireEvent.click(
-      within(runtimeRail).getByRole("button", {
+      within(runtimeRailAfterRestore).getByRole("button", {
         name: /collapse runtime sidechannel/i,
       }),
     );

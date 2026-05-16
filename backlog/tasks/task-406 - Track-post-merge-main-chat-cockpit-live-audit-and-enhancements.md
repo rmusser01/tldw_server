@@ -66,7 +66,7 @@ Larger design opportunities:
 Verification for implemented empty-response quick win:
 
 - `bunx vitest run src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx --config vitest.config.ts` passed with 32 tests.
-- `TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://127.0.0.1:18002 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --grep "uses the running server"` passed against the real local server and branch WebUI.
+- `TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://127.0.0.1:18002 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY="$TLDW_E2E_API_KEY" bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --grep "uses the running server"` passed against the real local server and branch WebUI.
 - Updated screenshot: `apps/tldw-frontend/test-results/workflows-chat-cockpit.rea-eebf0-kpit-focus-controls-working-chromium/chat-cockpit-desktop-conversation.png` shows the message-card recovery and runtime sidechannel warning.
 
 Verification for implemented prompt empty-state de-duplication:
@@ -79,7 +79,7 @@ Verification for side-only collapsed rail correction:
 - Removed the rejected bottom collapsed composition summary component and its dedicated tests.
 - Added regression assertions that `playground-collapsed-composition-summary` is absent after either cockpit rail is collapsed.
 - `bunx vitest run src/components/Option/Playground/__tests__/PlaygroundContextRail.first-slice.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx --config vitest.config.ts` passed with 48 focused tests.
-- `TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://127.0.0.1:18002 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --grep "uses the running server"` passed against the real local server and branch WebUI.
+- `TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://127.0.0.1:18002 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY="$TLDW_E2E_API_KEY" bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --grep "uses the running server"` passed against the real local server and branch WebUI.
 - Side-only screenshot: `apps/tldw-frontend/test-results/workflows-chat-cockpit.rea-eebf0-kpit-focus-controls-working-chromium/chat-cockpit-desktop-context-collapsed-side-only.png`.
 - `bunx prettier --check e2e/workflows/chat-cockpit.real-server.spec.ts --config .prettierrc` passed from `apps/tldw-frontend`.
 - `git diff --check` passed.
