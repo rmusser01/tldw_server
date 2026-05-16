@@ -203,4 +203,74 @@ describe("LlamacppProfilesPanel", () => {
     expect(await screen.findByText("Invalid server args JSON.")).toBeTruthy()
     expect(onCreate).not.toHaveBeenCalled()
   })
+
+  it("blocks saving when no model asset or model path is available", async () => {
+    const { onCreate } = renderPanel({
+      assets: { assets: [], warnings: [], scan_limited: false }
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "New profile" }))
+    fireEvent.change(screen.getByLabelText("Profile name"), {
+      target: { value: "No model" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save profile" }))
+
+    expect(await screen.findByText("Model asset or model path is required.")).toBeTruthy()
+    expect(onCreate).not.toHaveBeenCalled()
+  })
+
+  it("blocks conflicting mmproj asset and server args projector settings", async () => {
+    const { onUpdate } = renderPanel({
+      profiles: [
+        {
+          ...profiles[0],
+          profile_id: "vision",
+          name: "Vision runtime",
+          mmproj_model_id: "mmproj:toy"
+        }
+      ]
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Vision runtime" }))
+    fireEvent.change(screen.getByLabelText("Profile server args JSON"), {
+      target: { value: '{ "mmproj": "/models/other-projector.gguf" }' }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save profile" }))
+
+    expect(
+      await screen.findByText("mmproj asset conflicts with server args mmproj path.")
+    ).toBeTruthy()
+    expect(onUpdate).not.toHaveBeenCalled()
+  })
+
+  it("surfaces unserializable saved server args instead of silently replacing them", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const circularArgs: Record<string, unknown> = {}
+    circularArgs.self = circularArgs
+    const { onUpdate } = renderPanel({
+      profiles: [
+        {
+          ...profiles[0],
+          profile_id: "circular",
+          name: "Circular args",
+          server_args: circularArgs
+        }
+      ]
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Circular args" }))
+
+    expect(
+      await screen.findByText("Saved server args could not be displayed. Re-enter server args before saving.")
+    ).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "Save profile" }))
+
+    expect(onUpdate).not.toHaveBeenCalled()
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[LlamacppProfilesPanel] Failed to serialize saved server_args",
+      expect.any(TypeError)
+    )
+    warnSpy.mockRestore()
+  })
 })

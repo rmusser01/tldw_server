@@ -37,6 +37,8 @@ const PROFILE_MODES: LlamacppProfileMode[] = [
 ]
 
 const PORT_POLICIES: LlamacppPortPolicy[] = ["explicit", "autoselect"]
+const SERVER_ARGS_SERIALIZATION_ERROR =
+  "Saved server args could not be displayed. Re-enter server args before saving."
 
 type FormMode = "create" | "edit" | "duplicate"
 
@@ -69,6 +71,7 @@ interface ProfileFormState {
   providerAlias: string
   tagsText: string
   serverArgsText: string
+  serverArgsSerializationError: string | null
   restartPolicy: Record<string, unknown>
 }
 
@@ -77,11 +80,18 @@ interface ActiveForm {
   profile?: LlamacppProfile
 }
 
-const safeJsonStringify = (value: unknown) => {
+const serializeServerArgsForForm = (value: unknown) => {
   try {
-    return JSON.stringify(value || {}, null, 2)
-  } catch {
-    return "{}"
+    return {
+      text: JSON.stringify(value ?? {}, null, 2),
+      error: null
+    }
+  } catch (error) {
+    console.warn("[LlamacppProfilesPanel] Failed to serialize saved server_args", error)
+    return {
+      text: "{}",
+      error: SERVER_ARGS_SERIALIZATION_ERROR
+    }
   }
 }
 
@@ -92,25 +102,30 @@ const formFromProfile = (
   profile: LlamacppProfile | undefined,
   assets: LlamacppAsset[],
   mode: FormMode
-): ProfileFormState => ({
-  name:
-    mode === "duplicate" && profile
-      ? `${profile.name} copy`
-      : profile?.name || "",
-  enabled: profile?.enabled ?? true,
-  mode: profile?.mode || "chat",
-  modelId: profile?.model_id || firstAssetId(assets, "gguf"),
-  modelPath: profile?.model_path || "",
-  mmprojModelId: profile?.mmproj_model_id || "",
-  host: profile?.host || "127.0.0.1",
-  port: profile?.port || 8080,
-  portPolicy: profile?.port_policy || "explicit",
-  autostart: profile?.autostart ?? false,
-  providerAlias: profile?.provider_alias || "",
-  tagsText: (profile?.tags || []).join(", "),
-  serverArgsText: safeJsonStringify(profile?.server_args),
-  restartPolicy: profile?.restart_policy || {}
-})
+): ProfileFormState => {
+  const serializedServerArgs = serializeServerArgsForForm(profile?.server_args)
+
+  return {
+    name:
+      mode === "duplicate" && profile
+        ? `${profile.name} copy`
+        : profile?.name || "",
+    enabled: profile?.enabled ?? true,
+    mode: profile?.mode || "chat",
+    modelId: profile?.model_id || firstAssetId(assets, "gguf"),
+    modelPath: profile?.model_path || "",
+    mmprojModelId: profile?.mmproj_model_id || "",
+    host: profile?.host || "127.0.0.1",
+    port: profile?.port || 8080,
+    portPolicy: profile?.port_policy || "explicit",
+    autostart: profile?.autostart ?? false,
+    providerAlias: profile?.provider_alias || "",
+    tagsText: (profile?.tags || []).join(", "),
+    serverArgsText: serializedServerArgs.text,
+    serverArgsSerializationError: serializedServerArgs.error,
+    restartPolicy: profile?.restart_policy || {}
+  }
+}
 
 const parseTags = (value: string) =>
   value
@@ -175,10 +190,31 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
     setForm((current) => ({ ...current, [key]: value }))
   }
 
+  const updateServerArgsText = (value: string) => {
+    setFormError(null)
+    setForm((current) => ({
+      ...current,
+      serverArgsText: value,
+      serverArgsSerializationError: null
+    }))
+  }
+
   const buildPayload = () => {
     const name = form.name.trim()
     if (!name) {
       setFormError("Profile name is required.")
+      return null
+    }
+
+    const modelId = form.modelId.trim()
+    const modelPath = form.modelPath.trim()
+    if (!modelId && !modelPath) {
+      setFormError("Model asset or model path is required.")
+      return null
+    }
+
+    if (form.serverArgsSerializationError) {
+      setFormError(form.serverArgsSerializationError)
       return null
     }
 
@@ -194,13 +230,33 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
       return null
     }
 
+    const mmprojModelId = form.mmprojModelId.trim()
+    const manualMmproj = serverArgs.mmproj
+    if (
+      mmprojModelId &&
+      manualMmproj !== undefined &&
+      manualMmproj !== null &&
+      manualMmproj !== ""
+    ) {
+      const selectedMmproj = assetList.find(
+        (asset) => asset.kind === "mmproj" && asset.asset_id === mmprojModelId
+      )
+      const selectedPaths = [selectedMmproj?.resolved_path, selectedMmproj?.path].filter(
+        Boolean
+      )
+      if (selectedPaths.length > 0 && !selectedPaths.includes(String(manualMmproj))) {
+        setFormError("mmproj asset conflicts with server args mmproj path.")
+        return null
+      }
+    }
+
     return {
       name,
       enabled: form.enabled,
       mode: form.mode,
-      model_id: form.modelId.trim() || null,
-      model_path: form.modelPath.trim() || null,
-      mmproj_model_id: form.mmprojModelId.trim() || null,
+      model_id: modelId || null,
+      model_path: modelPath || null,
+      mmproj_model_id: mmprojModelId || null,
       host: form.host.trim() || "127.0.0.1",
       port: form.port,
       port_policy: form.portPolicy,
@@ -359,6 +415,9 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
       >
         <Space orientation="vertical" size="middle" className="w-full">
           {formError && <DesignSystemAlert variant="error" title={formError} />}
+          {form.serverArgsSerializationError && (
+            <DesignSystemAlert variant="error" title={form.serverArgsSerializationError} />
+          )}
 
           <div>
             <Text>Name</Text>
@@ -490,7 +549,7 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
             <TextArea
               aria-label="Profile server args JSON"
               value={form.serverArgsText}
-              onChange={(event) => updateForm("serverArgsText", event.target.value)}
+              onChange={(event) => updateServerArgsText(event.target.value)}
               rows={5}
             />
           </div>

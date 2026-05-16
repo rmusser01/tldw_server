@@ -4,7 +4,7 @@ title: Implement llama.cpp Admin saved profile editor
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-16 22:17'
+updated_date: '2026-05-16 22:29'
 labels:
   - llamacpp
   - webui
@@ -12,6 +12,9 @@ labels:
 dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/pull/1804'
+  - 'https://github.com/rmusser01/tldw_server/pull/1804#discussion_r3253657615'
+  - 'https://github.com/rmusser01/tldw_server/pull/1804#discussion_r3253657616'
+  - 'https://github.com/rmusser01/tldw_server/pull/1804#discussion_r3253657617'
 documentation:
   - Docs/superpowers/specs/2026-05-16-llamacpp-managed-runtime-roadmap-design.md
 parent_task_id: TASK-397
@@ -44,7 +47,7 @@ Started from fresh origin/dev worktree codex/llamacpp-admin-profile-editor. Curr
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented a UI-only saved profile editor on /admin/llamacpp. Added LlamacppProfilesPanel for create/edit/duplicate/delete flows, model/mmproj selection, tags, port policy, autostart, provider alias, and server_args JSON validation. Reordered the Admin console to Assets -> Profiles -> Runtime, wired profile mutations to existing tldwClient profile APIs, and refreshes profiles/runtimes without auto-starting or auto-wiring Chat. Focused Vitest suite passes: LlamacppProfilesPanel, LlamacppRuntimePanel, LlamacppAssetsPanel, and LlamacppAdminPage: 30 tests. Full UI TypeScript check still fails on existing repo-wide baseline errors outside the touched llama.cpp profile editor files. Diff whitespace checks passed during closeout. Bandit is not applicable because no Python code was touched. Draft PR: https://github.com/rmusser01/tldw_server/pull/1804
+Addressed PR #1804 Qodo inline review feedback. Verified all three findings against current code: safeJsonStringify silently hid serialization failures, model-less profile saves were possible when no GGUF asset/model path was present, and mmproj_model_id could conflict with server_args.mmproj. Added focused regressions and patched LlamacppProfilesPanel to surface unserializable saved server args, block model-less saves, and block known mmproj path conflicts before save. Focused Admin llama.cpp Vitest suite now passes: LlamacppProfilesPanel, LlamacppRuntimePanel, LlamacppAssetsPanel, and LlamacppAdminPage: 33 tests. Full UI TypeScript check still fails on existing repo-wide baseline errors outside touched llama.cpp profile editor files. Diff whitespace checks passed. Bandit is not applicable because no Python code was touched.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
