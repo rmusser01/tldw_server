@@ -4,6 +4,7 @@ title: Implement llama.cpp managed runtime stage 1
 status: In Progress
 assignee: []
 created_date: '2026-05-16 01:43'
+updated_date: '2026-05-16 01:52'
 labels:
   - llamacpp
   - local-llm
@@ -35,6 +36,14 @@ Implement the approved Stage 1 llama.cpp managed runtime plan: backend profile p
 - [ ] #6 Focused backend/frontend tests, diff checks, and Bandit for touched Python code are run or documented with clear blockers.
 <!-- AC:END -->
 
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Task 1: added LlamaCppProfile runtime models, profile store exceptions, JSON profile persistence, default profile bootstrap, enabled explicit host/port conflict validation, and API schemas for profile/runtime/lifecycle payloads. Verification: profile-store pytest initially 4 passed; Bandit on Task 1 Python paths reported no findings; git diff --check passed.
+
+Task 1 quality review fixes: malformed dict-shaped profile stores now fail closed without overwrite, wildcard bind host/port conflicts are rejected, and profile-store tests now cover persistence round-trip, update replacement, get miss, delete true/false, corrupt structure, and wildcard conflicts. Verification: profile-store pytest 9 passed; Bandit profile-store review fix output has no findings; git diff --check passed.
+<!-- SECTION:NOTES:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
@@ -44,13 +53,3 @@ Implement the approved Stage 1 llama.cpp managed runtime plan: backend profile p
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Task 1 Notes
-
-- Added `LlamaCppProfile` runtime models, profile store exceptions, and JSON profile persistence.
-- Added default profile bootstrap plus enabled explicit host/port conflict validation.
-- Added API schemas for profile, runtime, and lifecycle response payloads.
-- Verification:
-  - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/LLM_Local/test_llamacpp_profile_store.py -v` -> 4 passed, 5 warnings.
-  - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Local_LLM/llamacpp_runtime_models.py tldw_Server_API/app/core/Local_LLM/llamacpp_profile_store.py tldw_Server_API/app/api/v1/schemas/llamacpp_admin_schemas.py -f json -o /tmp/bandit_llamacpp_profile_store.json` -> exit 0, results empty.
-  - `git diff --check` -> exit 0.

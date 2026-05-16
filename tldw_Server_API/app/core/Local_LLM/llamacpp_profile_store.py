@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from ipaddress import ip_address
 from pathlib import Path
 from uuid import uuid4
 
@@ -24,6 +25,18 @@ DEFAULT_PROFILE_NAME = "Default llama.cpp server"
 
 def default_profile_store_path() -> Path:
     return setup_manager.get_config_file_path().expanduser().resolve().with_name("llamacpp_profiles.json")
+
+
+def _normalize_host_for_conflict(host: str) -> str:
+    return host.strip().lower()
+
+
+def _is_wildcard_host(host: str) -> bool:
+    normalized = _normalize_host_for_conflict(host)
+    try:
+        return ip_address(normalized).is_unspecified
+    except ValueError:
+        return normalized in {"*", "all"}
 
 
 class JsonLlamaCppProfileStore:
@@ -101,7 +114,9 @@ class JsonLlamaCppProfileStore:
             raise LlamaCppProfileStoreError(f"Invalid llama.cpp profile store JSON: {exc}") from exc
 
         if isinstance(raw, dict):
-            raw_profiles = raw.get("profiles", [])
+            if "profiles" not in raw:
+                raise LlamaCppProfileStoreError("Invalid llama.cpp profile store: missing profiles list.")
+            raw_profiles = raw["profiles"]
         else:
             raw_profiles = raw
         if not isinstance(raw_profiles, list):
@@ -126,18 +141,41 @@ class JsonLlamaCppProfileStore:
 
     @staticmethod
     def _validate_unique_explicit_ports(profiles: list[LlamaCppProfile]) -> None:
-        seen: dict[tuple[str, int], str] = {}
+        seen_exact: dict[tuple[str, int], str] = {}
+        seen_wildcard: dict[int, str] = {}
         for profile in profiles:
             if not profile.enabled or profile.port_policy != LlamaCppPortPolicy.EXPLICIT:
                 continue
-            key = (profile.host, profile.port)
-            other_profile_id = seen.get(key)
+            host = _normalize_host_for_conflict(profile.host)
+            wildcard = _is_wildcard_host(host)
+            other_profile_id = seen_wildcard.get(profile.port)
             if other_profile_id is not None:
                 raise LlamaCppProfileConflictError(
                     f"Enabled explicit llama.cpp profiles have a duplicate host/port: "
                     f"{profile.host}:{profile.port} ({other_profile_id}, {profile.profile_id})."
                 )
-            seen[key] = profile.profile_id
+            if wildcard:
+                exact_conflicts = [
+                    other_id
+                    for (_other_host, other_port), other_id in seen_exact.items()
+                    if other_port == profile.port
+                ]
+                if exact_conflicts:
+                    raise LlamaCppProfileConflictError(
+                        f"Enabled explicit llama.cpp profiles have a duplicate host/port: "
+                        f"{profile.host}:{profile.port} ({exact_conflicts[0]}, {profile.profile_id})."
+                    )
+                seen_wildcard[profile.port] = profile.profile_id
+                continue
+
+            key = (host, profile.port)
+            other_profile_id = seen_exact.get(key)
+            if other_profile_id is not None:
+                raise LlamaCppProfileConflictError(
+                    f"Enabled explicit llama.cpp profiles have a duplicate host/port: "
+                    f"{profile.host}:{profile.port} ({other_profile_id}, {profile.profile_id})."
+                )
+            seen_exact[key] = profile.profile_id
 
 
 __all__ = [

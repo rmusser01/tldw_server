@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
     LlamaCppProfile,
     LlamaCppProfileConflictError,
     LlamaCppProfileMode,
+    LlamaCppProfileStoreError,
 )
 
 
@@ -90,3 +92,49 @@ def test_profile_store_allows_autoselect_profile_on_duplicate_port(tmp_path: Pat
 
     assert autoselect.profile_id == "two"
     assert {item.profile_id for item in store.list_profiles()} == {"one", "two"}
+
+
+def test_profile_store_round_trips_updates_and_deletes(tmp_path: Path):
+    store_path = tmp_path / "profiles.json"
+    store = JsonLlamaCppProfileStore(store_path)
+    store.upsert(profile("one", port=8181))
+
+    reloaded = JsonLlamaCppProfileStore(store_path)
+    assert reloaded.get("one") == profile("one", port=8181)
+    assert reloaded.get("missing") is None
+
+    reloaded.upsert(profile("one", port=8282))
+    assert JsonLlamaCppProfileStore(store_path).get("one") == profile("one", port=8282)
+
+    assert reloaded.delete("one") is True
+    assert reloaded.delete("one") is False
+    assert JsonLlamaCppProfileStore(store_path).list_profiles() == []
+
+
+def test_profile_store_rejects_invalid_dict_store_without_overwriting(tmp_path: Path):
+    store_path = tmp_path / "profiles.json"
+    original_payload = {"unexpected": "preserve me"}
+    store_path.write_text(json.dumps(original_payload), encoding="utf-8")
+    store = JsonLlamaCppProfileStore(store_path)
+
+    with pytest.raises(LlamaCppProfileStoreError, match="profiles"):
+        store.upsert(profile("one"))
+
+    assert json.loads(store_path.read_text(encoding="utf-8")) == original_payload
+
+
+@pytest.mark.parametrize("wildcard_host", ["0.0.0.0", "::"])
+def test_profile_store_rejects_wildcard_host_port_conflicts(tmp_path: Path, wildcard_host: str):
+    store = JsonLlamaCppProfileStore(tmp_path / "profiles.json")
+    store.upsert(profile("one", host=wildcard_host, port=8181, enabled=True))
+
+    with pytest.raises(LlamaCppProfileConflictError, match="host/port"):
+        store.upsert(profile("two", host="127.0.0.1", port=8181, enabled=True))
+
+
+def test_profile_store_rejects_concrete_host_when_wildcard_port_already_exists(tmp_path: Path):
+    store = JsonLlamaCppProfileStore(tmp_path / "profiles.json")
+    store.upsert(profile("one", host="127.0.0.1", port=8181, enabled=True))
+
+    with pytest.raises(LlamaCppProfileConflictError, match="host/port"):
+        store.upsert(profile("two", host="0.0.0.0", port=8181, enabled=True))
