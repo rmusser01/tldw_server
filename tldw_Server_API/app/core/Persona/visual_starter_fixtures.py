@@ -4,7 +4,8 @@ The fixtures in this module are immutable server-owned source material. Runtime
 code must copy their assets and manifests into normal user-owned draft visual
 packs before a persona can use them. The fixture artwork is intentionally
 lightweight; it establishes catalog contracts and copy semantics rather than a
-production image-generation pipeline.
+production image-generation pipeline. These are catalog scaffolds, not claims
+that final default buddy art or character animation packs have been authored.
 """
 
 from __future__ import annotations
@@ -100,7 +101,7 @@ def _asset(
 
 
 def _animation(asset_key: str, *, duration_ms: int = 250) -> dict[str, Any]:
-    """Create a single-frame sprite animation for a fixture asset key."""
+    """Create single-frame sprite animation metadata for a fixture asset key."""
     return {
         "frames": [{"asset_id": asset_key, "duration_ms": duration_ms}],
         "frame_rate": 1,
@@ -114,7 +115,7 @@ def _atlas_animation(
     y: int,
     duration_ms: int = 160,
 ) -> dict[str, Any]:
-    """Create a two-frame atlas animation using bounded sprite-sheet regions."""
+    """Create two-frame atlas animation metadata with bounded sheet regions."""
     return {
         "frames": [
             {
@@ -229,11 +230,14 @@ def _basic_pack(
     return PersonaVisualStarterPack(
         id=starter_id,
         title=title,
-        description=description,
+        description=(
+            "Catalog scaffold fixture, not final character art or animation: "
+            f"{description}"
+        ),
         renderer_type="sprite_frames",
         manifest=_sprite_manifest(base_asset_key=asset.asset_key),
         assets=(asset,),
-        tags=("starter", "sprite_frames", "tier:basic", *tags),
+        tags=("starter", "sprite_frames", "catalog:scaffold", "tier:basic", *tags),
     )
 
 
@@ -269,7 +273,10 @@ def _multi_asset_pack(
     return PersonaVisualStarterPack(
         id=starter_id,
         title=title,
-        description=description,
+        description=(
+            "Catalog scaffold fixture, not final character art or animation: "
+            f"{description}"
+        ),
         renderer_type="sprite_frames",
         manifest=_sprite_manifest(
             base_asset_key="idle",
@@ -280,7 +287,7 @@ def _multi_asset_pack(
             fallbacks=fallbacks,
         ),
         assets=assets,
-        tags=("starter", "sprite_frames", *tags),
+        tags=("starter", "sprite_frames", "catalog:scaffold", *tags),
     )
 
 
@@ -297,11 +304,21 @@ def _atlas_pack(
     return PersonaVisualStarterPack(
         id=starter_id,
         title=title,
-        description=description,
+        description=(
+            "Catalog scaffold fixture, not final character art or animation: "
+            f"{description}"
+        ),
         renderer_type="sprite_frames",
         manifest=_atlas_manifest(asset.asset_key),
         assets=(asset,),
-        tags=("starter", "sprite_frames", "tier:intricate", "atlas", *tags),
+        tags=(
+            "starter",
+            "sprite_frames",
+            "catalog:scaffold",
+            "tier:intricate",
+            "atlas",
+            *tags,
+        ),
     )
 
 

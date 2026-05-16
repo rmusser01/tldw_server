@@ -1,10 +1,10 @@
 ---
 id: TASK-394
-title: Expand bundled Persona Visual starter catalog to nine defaults
+title: Expand bundled Persona Visual starter catalog scaffolds
 status: Done
 assignee: []
 created_date: '2026-05-16 00:36'
-updated_date: '2026-05-16 01:25'
+updated_date: '2026-05-16 01:37'
 labels:
   - persona
   - buddy
@@ -21,7 +21,7 @@ priority: medium
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Implement issue #1732 by expanding the server-owned Persona Visual starter fixture catalog from the single Research Buddy starter to the approved nine default buddy starter packs. Preserve copy-to-user-owned-inactive-draft behavior and avoid runtime renderer expansion.
+Implement issue #1732 by adding nine server-owned Persona Visual starter catalog scaffold fixtures. Preserve copy-to-user-owned-inactive-draft behavior, avoid runtime renderer expansion, and make clear this slice does not ship finished buddy artwork or completed animation packs.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -51,12 +51,18 @@ Implemented nine bundled Persona Visual starter fixture packs with stable IDs, r
 Verification: focused starter catalog pytest passed with 20 tests; broader persona visual slice passed with 84 tests across starter catalog, visual API, and visual service; git diff --check passed; Bandit JSON report for touched Persona backend starter modules reported zero findings.
 
 Post-docstring verification refreshed: persona visual starter catalog, visual API, and visual service pytest passed with 84 tests; git diff --check passed; Bandit JSON report still has zero findings.
+
+Reopened for wording correction after review: clarify that this PR adds backend catalog scaffold fixtures, not finished animated buddy art or completed default animation packs.
+
+Clarified fixture descriptions, tags, tests, docs, and task language so the PR represents backend catalog scaffolds only. The real default buddy art/animation pipeline remains future work.
+
+Wording-correction verification: focused starter catalog/API pytest passed with 23 tests; git diff --check passed; Bandit JSON report for touched Persona starter backend modules reported zero findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Expanded the bundled Persona Visual starter catalog to nine default sprite_frames packs across basic, intermediate, and intricate tiers. Added deterministic fixture PNG generation, custom-state and atlas examples, legacy research-buddy-starter alias handling, updated API/service coverage, and documented the nine-default catalog and non-goals. Verification: pytest tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py tldw_Server_API/tests/Persona/test_persona_visual_service.py -q passed with 84 tests; git diff --check passed; Bandit on touched Persona starter backend modules reported zero findings. Known skips/blockers: none.
+Added nine bundled Persona Visual starter catalog scaffold fixtures across basic, intermediate, and intricate tiers. Added deterministic fixture PNG generation, custom-state and atlas metadata examples, legacy research-buddy-starter alias handling, updated API/service coverage, and documented that these are backend scaffolds rather than finished buddy art or completed animation packs. Verification: focused starter catalog/API pytest passed with 23 tests after the wording correction; prior broader persona visual slice passed with 84 tests; git diff --check passed; Bandit on touched Persona starter backend modules reported zero findings. Known skips/blockers: real default buddy art and neutral-pose-to-animation asset creation remain future work.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

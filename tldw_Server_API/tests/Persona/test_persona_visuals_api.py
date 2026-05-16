@@ -195,6 +195,8 @@ def test_get_persona_visual_starter_pack_detail(persona_db: CharactersRAGDB) -> 
     payload = response.json()
     assert payload["id"] == DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID
     assert payload["manifest"]["renderer_type"] == "sprite_frames"
+    assert "catalog:scaffold" in payload["tags"]
+    assert "scaffold" in payload["description"].lower()
     assert payload["assets"][0]["mime_type"] == "image/png"
 
 
@@ -366,6 +368,8 @@ def test_list_persona_visual_starter_packs(persona_db: CharactersRAGDB) -> None:
     assert starter["title"] == "Research Buddy Basic"
     assert starter["renderer_type"] == "sprite_frames"
     assert starter["asset_count"] == 1
+    assert "catalog:scaffold" in starter["tags"]
+    assert "scaffold" in starter["description"].lower()
     assert {"idle", "listening", "thinking", "speaking", "error"}.issubset(
         set(starter["states_offered"])
     )

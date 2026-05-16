@@ -67,7 +67,7 @@ def visual_storage_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     return root
 
 
-def test_starter_catalog_lists_bundled_sprite_pack(
+def test_starter_catalog_lists_bundled_scaffold_packs(
     db_instance: CharactersRAGDB,
 ) -> None:
     service = PersonaVisualStarterCatalogService(db_instance)
@@ -85,6 +85,8 @@ def test_starter_catalog_lists_bundled_sprite_pack(
     assert starter["asset_count"] >= 1
     assert starter["total_bytes"] > 0
     assert {"idle", "listening", "thinking", "speaking", "error"}.issubset(set(starter["states_offered"]))
+    assert all("catalog:scaffold" in starter["tags"] for starter in starters)
+    assert all("scaffold" in starter["description"].lower() for starter in starters)
     assert any("tier:intricate" in starter["tags"] for starter in starters)
     assert any("tool.notes_search" in starter["states_offered"] for starter in starters)
 
@@ -167,7 +169,7 @@ def test_copy_starter_pack_to_persona_creates_inactive_user_owned_draft(
 
 
 @pytest.mark.parametrize("starter_pack_id", DEFAULT_PERSONA_VISUAL_STARTER_PACK_IDS)
-def test_copy_every_default_starter_creates_inactive_user_owned_draft(
+def test_copy_every_default_scaffold_creates_inactive_user_owned_draft(
     db_instance: CharactersRAGDB,
     starter_pack_id: str,
 ) -> None:
