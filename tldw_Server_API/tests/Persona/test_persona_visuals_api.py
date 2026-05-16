@@ -202,6 +202,10 @@ def test_get_persona_visual_starter_pack_detail(persona_db: CharactersRAGDB) -> 
     assert payload["neutral_anchor_required"] is True
     assert "neutral_anchor" in payload["expected_asset_groups"]
     assert payload["animation_coverage_notes"]
+    assert payload["production_recipe"]["identity_brief"]
+    assert "neutral" in payload["production_recipe"]["neutral_anchor"].lower()
+    assert "required_state_loops" in payload["production_recipe"]["animation_outputs"]
+    assert "neutral_identity_consistency" in payload["production_recipe"]["review_checks"]
     assert payload["assets"][0]["mime_type"] == "image/png"
 
 
@@ -379,6 +383,8 @@ def test_list_persona_visual_starter_packs(persona_db: CharactersRAGDB) -> None:
     assert starter["complexity_tier"] == "basic"
     assert starter["neutral_anchor_required"] is True
     assert "neutral_anchor" in starter["expected_asset_groups"]
+    assert starter["production_recipe"]["identity_brief"]
+    assert "required_state_loops" in starter["production_recipe"]["animation_outputs"]
     assert {"idle", "listening", "thinking", "speaking", "error"}.issubset(
         set(starter["states_offered"])
     )

@@ -31,6 +31,7 @@ from tldw_Server_API.app.core.Persona.visual_starter_fixtures import (
     DEFAULT_PERSONA_VISUAL_STARTER_PACKS,
     LEGACY_PERSONA_VISUAL_STARTER_PACK_ID,
     PersonaVisualStarterPack,
+    PersonaVisualStarterProductionRecipe,
 )
 from tldw_Server_API.app.core.Persona.visuals import (
     PersonaVisualManifestError,
@@ -52,6 +53,8 @@ _ALLOWED_STARTER_RESPONSE_ASSET_ROLES = frozenset(
 )
 _ALLOWED_STARTER_COMPLEXITY_TIERS = frozenset({"basic", "intermediate", "intricate"})
 _ALLOWED_STARTER_PRODUCTION_STATUSES = frozenset({"scaffold", "art_ready"})
+_MAX_STARTER_RECIPE_TEXT_LENGTH = 320
+_MAX_STARTER_RECIPE_ITEMS = 12
 
 
 class PersonaVisualStarterCatalogError(Exception):
@@ -315,6 +318,10 @@ class PersonaVisualStarterCatalogService:
             field_name="neutral_anchor_required",
             starter_id=starter.id,
         )
+        production_recipe = PersonaVisualStarterCatalogService._starter_production_recipe(
+            starter.production_recipe,
+            starter_id=starter.id,
+        )
         return {
             "id": starter.id,
             "title": starter.title,
@@ -331,6 +338,7 @@ class PersonaVisualStarterCatalogService:
             "neutral_anchor_required": neutral_anchor_required,
             "expected_asset_groups": list(expected_asset_groups),
             "animation_coverage_notes": list(animation_coverage_notes),
+            "production_recipe": production_recipe,
         }
 
     @staticmethod
@@ -419,6 +427,10 @@ class PersonaVisualStarterCatalogService:
                 "Bundled starter animation coverage notes are required.",
                 details={"starter_pack_id": starter.id},
             )
+        PersonaVisualStarterCatalogService._starter_production_recipe(
+            starter.production_recipe,
+            starter_id=starter.id,
+        )
 
         asset_keys: set[str] = set()
         for asset in starter.assets:
@@ -538,6 +550,105 @@ class PersonaVisualStarterCatalogService:
                 )
             items.append(normalized)
         return tuple(items)
+
+    @staticmethod
+    def _starter_production_recipe(
+        value: object,
+        *,
+        starter_id: str,
+    ) -> dict[str, Any]:
+        """Return validated starter production-recipe metadata for API output."""
+        if not isinstance(value, PersonaVisualStarterProductionRecipe):
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter production_recipe must be immutable recipe metadata.",
+                details={"starter_pack_id": starter_id, "field_name": "production_recipe"},
+            )
+
+        identity_brief = PersonaVisualStarterCatalogService._starter_recipe_text(
+            value.identity_brief,
+            field_name="production_recipe.identity_brief",
+            starter_id=starter_id,
+        )
+        neutral_anchor = PersonaVisualStarterCatalogService._starter_recipe_text(
+            value.neutral_anchor,
+            field_name="production_recipe.neutral_anchor",
+            starter_id=starter_id,
+        )
+        static_sheet = PersonaVisualStarterCatalogService._starter_recipe_text(
+            value.static_sheet,
+            field_name="production_recipe.static_sheet",
+            starter_id=starter_id,
+        )
+        animation_outputs = PersonaVisualStarterCatalogService._starter_recipe_tuple(
+            value.animation_outputs,
+            field_name="production_recipe.animation_outputs",
+            starter_id=starter_id,
+        )
+        review_checks = PersonaVisualStarterCatalogService._starter_recipe_tuple(
+            value.review_checks,
+            field_name="production_recipe.review_checks",
+            starter_id=starter_id,
+        )
+        if "neutral_identity_consistency" not in review_checks:
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter production recipe must review neutral identity consistency.",
+                details={
+                    "starter_pack_id": starter_id,
+                    "field_name": "production_recipe.review_checks",
+                },
+            )
+        return {
+            "identity_brief": identity_brief,
+            "neutral_anchor": neutral_anchor,
+            "static_sheet": static_sheet,
+            "animation_outputs": list(animation_outputs),
+            "review_checks": list(review_checks),
+        }
+
+    @staticmethod
+    def _starter_recipe_text(value: object, *, field_name: str, starter_id: str) -> str:
+        """Return bounded production-recipe text or fail fixture validation."""
+        text = PersonaVisualStarterCatalogService._starter_metadata_text(
+            value,
+            field_name=field_name,
+            starter_id=starter_id,
+        )
+        if len(text) > _MAX_STARTER_RECIPE_TEXT_LENGTH:
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter production recipe text is too long.",
+                details={"starter_pack_id": starter_id, "field_name": field_name},
+            )
+        return text
+
+    @staticmethod
+    def _starter_recipe_tuple(
+        value: object,
+        *,
+        field_name: str,
+        starter_id: str,
+    ) -> tuple[str, ...]:
+        """Return bounded production-recipe entries or fail fixture validation."""
+        items = PersonaVisualStarterCatalogService._starter_metadata_tuple(
+            value,
+            field_name=field_name,
+            starter_id=starter_id,
+        )
+        if not items or len(items) > _MAX_STARTER_RECIPE_ITEMS:
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter production recipe entries must be bounded and non-empty.",
+                details={"starter_pack_id": starter_id, "field_name": field_name},
+            )
+        if any(len(item) > _MAX_STARTER_RECIPE_TEXT_LENGTH for item in items):
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter production recipe entry text is too long.",
+                details={"starter_pack_id": starter_id, "field_name": field_name},
+            )
+        return items
 
     def _cleanup_partial_pack(
         self,

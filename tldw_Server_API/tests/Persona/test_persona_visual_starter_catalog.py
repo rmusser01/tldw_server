@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.Persona.visual_starter_fixtures import (
     LEGACY_PERSONA_VISUAL_STARTER_PACK_ID,
     PersonaVisualStarterAsset,
     PersonaVisualStarterPack,
+    PersonaVisualStarterProductionRecipe,
 )
 
 
@@ -52,6 +53,24 @@ def _state_frame_asset_id(manifest: dict[str, Any], state: str) -> str:
     animation_id = manifest["states"][state]["animation_id"]
     frame = manifest["animations"][animation_id]["frames"][0]
     return str(frame["asset_id"])
+
+
+def _assert_recipe_shape(recipe: dict[str, Any], *, expected_output: str) -> None:
+    assert set(recipe) == {
+        "identity_brief",
+        "neutral_anchor",
+        "static_sheet",
+        "animation_outputs",
+        "review_checks",
+    }
+    assert isinstance(recipe["identity_brief"], str)
+    assert recipe["identity_brief"].strip()
+    assert isinstance(recipe["neutral_anchor"], str)
+    assert "neutral" in recipe["neutral_anchor"].lower()
+    assert isinstance(recipe["static_sheet"], str)
+    assert recipe["static_sheet"].strip()
+    assert expected_output in recipe["animation_outputs"]
+    assert "neutral_identity_consistency" in recipe["review_checks"]
 
 
 @pytest.fixture()
@@ -115,6 +134,7 @@ def test_starter_catalog_lists_bundled_scaffold_packs(
     assert all(starter["neutral_anchor_required"] for starter in starters)
     assert all("neutral_anchor" in starter["expected_asset_groups"] for starter in starters)
     assert all(starter["animation_coverage_notes"] for starter in starters)
+    assert all(starter["production_recipe"] for starter in starters)
 
 
 def test_get_starter_pack_returns_isolated_manifest_preview(
@@ -124,11 +144,13 @@ def test_get_starter_pack_returns_isolated_manifest_preview(
     first = service.get_starter_pack(DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID)
     first["manifest"]["states"]["idle"]["animation_id"] = "mutated"
     first["expected_asset_groups"].append("mutated")
+    first["production_recipe"]["animation_outputs"].append("mutated")
 
     second = service.get_starter_pack(DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID)
 
     assert second["manifest"]["states"]["idle"]["animation_id"] == "idle-loop"
     assert "mutated" not in second["expected_asset_groups"]
+    assert "mutated" not in second["production_recipe"]["animation_outputs"]
 
 
 @pytest.mark.parametrize(
@@ -154,6 +176,7 @@ def test_starter_pack_reports_production_readiness_metadata(
     assert detail["neutral_anchor_required"] is True
     assert required_group in detail["expected_asset_groups"]
     assert all("scaffold" in note.lower() for note in detail["animation_coverage_notes"])
+    _assert_recipe_shape(detail["production_recipe"], expected_output=required_group)
 
 
 @pytest.mark.parametrize(
@@ -169,6 +192,26 @@ def test_starter_pack_reports_production_readiness_metadata(
         ("animation_coverage_notes", ("Scaffold fixture only.", "")),
         ("neutral_anchor_required", "false"),
         ("neutral_anchor_required", 1),
+        ("production_recipe", {"identity_brief": "not immutable"}),
+        (
+            "production_recipe",
+            PersonaVisualStarterProductionRecipe(
+                identity_brief="Identity",
+                neutral_anchor="Neutral anchor",
+                static_sheet="Static sheet",
+                animation_outputs=(),
+            ),
+        ),
+        (
+            "production_recipe",
+            PersonaVisualStarterProductionRecipe(
+                identity_brief="Identity",
+                neutral_anchor="Neutral anchor",
+                static_sheet="Static sheet",
+                animation_outputs=("required_state_loops",),
+                review_checks=("transparent_background",),
+            ),
+        ),
     ),
 )
 def test_list_starter_packs_rejects_malformed_production_metadata(

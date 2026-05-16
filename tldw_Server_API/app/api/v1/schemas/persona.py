@@ -292,6 +292,14 @@ class PersonaVisualStarterAssetResponse(BaseModel):
     byte_size: int
 
 
+class PersonaVisualStarterProductionRecipeResponse(BaseModel):
+    identity_brief: str
+    neutral_anchor: str
+    static_sheet: str
+    animation_outputs: list[str] = Field(default_factory=list)
+    review_checks: list[str] = Field(default_factory=list)
+
+
 class PersonaVisualStarterPackResponse(BaseModel):
     id: str
     title: str
@@ -308,6 +316,7 @@ class PersonaVisualStarterPackResponse(BaseModel):
     neutral_anchor_required: bool = True
     expected_asset_groups: list[str] = Field(default_factory=list)
     animation_coverage_notes: list[str] = Field(default_factory=list)
+    production_recipe: PersonaVisualStarterProductionRecipeResponse
 
 
 class PersonaVisualStarterPackDetailResponse(PersonaVisualStarterPackResponse):
