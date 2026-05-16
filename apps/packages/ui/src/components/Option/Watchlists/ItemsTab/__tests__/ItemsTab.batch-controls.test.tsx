@@ -213,6 +213,30 @@ const setupFetchScrapedItemsMock = (listItems = makeItems()) => {
   })
 }
 
+const expectAllFilteredBatchPayload = (expectedScope: Record<string, unknown>) => {
+  const countPayload = [...serviceMocks.fetchScrapedItems.mock.calls]
+    .reverse()
+    .find(([params]) => {
+      const request = params as Record<string, unknown> | undefined
+      return request?.page === 1 && request?.size === 1
+    })?.[0] as Record<string, unknown> | undefined
+  const payload = serviceMocks.batchUpdateScrapedItems.mock.calls.at(-1)?.[0] as {
+    watchlist_id?: number
+    reviewed?: boolean
+    scope?: Record<string, unknown>
+  }
+  expect(countPayload).toEqual(expect.objectContaining({
+    watchlist_id: 42,
+    ...expectedScope
+  }))
+  expect(payload).toMatchObject({
+    watchlist_id: 42,
+    reviewed: true
+  })
+  expect(payload.scope).toEqual(expect.objectContaining(expectedScope))
+  expect(payload.scope).not.toHaveProperty("watchlist_id")
+}
+
 describe("ItemsTab batch throughput controls", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -460,15 +484,9 @@ describe("ItemsTab batch throughput controls", () => {
     )
 
     await waitFor(() => {
-      expect(serviceMocks.batchUpdateScrapedItems).toHaveBeenCalledWith({
-        watchlist_id: 42,
-        scope: expect.objectContaining({
-          watchlist_id: 42,
-          reviewed: false
-        }),
-        reviewed: true
-      })
+      expect(serviceMocks.batchUpdateScrapedItems).toHaveBeenCalled()
     })
+    expectAllFilteredBatchPayload({ reviewed: false })
     expect(serviceMocks.updateScrapedItem).not.toHaveBeenCalled()
     expect(uiMocks.messageSuccess).toHaveBeenCalledWith(
       "Marked 2 all filtered updates as reviewed."
@@ -1011,15 +1029,9 @@ describe("ItemsTab batch throughput controls", () => {
     })
 
     await waitFor(() => {
-      expect(serviceMocks.batchUpdateScrapedItems).toHaveBeenCalledWith({
-        watchlist_id: 42,
-        scope: expect.objectContaining({
-          watchlist_id: 42,
-          reviewed: false
-        }),
-        reviewed: true
-      })
+      expect(serviceMocks.batchUpdateScrapedItems).toHaveBeenCalled()
     })
+    expectAllFilteredBatchPayload({ reviewed: false })
     expect(serviceMocks.updateScrapedItem).not.toHaveBeenCalled()
     expect(uiMocks.messageSuccess).toHaveBeenCalledWith("Marked 1200 all filtered updates as reviewed.")
   })
@@ -1240,15 +1252,9 @@ describe("ItemsTab batch throughput controls", () => {
     )
 
     await waitFor(() => {
-      expect(serviceMocks.batchUpdateScrapedItems).toHaveBeenCalledWith({
-        watchlist_id: 42,
-        scope: expect.objectContaining({
-          watchlist_id: 42,
-          reviewed: false
-        }),
-        reviewed: true
-      })
+      expect(serviceMocks.batchUpdateScrapedItems).toHaveBeenCalled()
     })
+    expectAllFilteredBatchPayload({ reviewed: false })
     expect(uiMocks.messageSuccess).toHaveBeenCalledWith(
       "Marked 45 all filtered updates as reviewed."
     )
@@ -1334,16 +1340,12 @@ describe("ItemsTab batch throughput controls", () => {
     )
 
     await waitFor(() => {
-      expect(serviceMocks.batchUpdateScrapedItems).toHaveBeenCalledWith({
-        watchlist_id: 42,
-        scope: expect.objectContaining({
-          watchlist_id: 42,
-          queued_for_briefing: true,
-          run_id: 1,
-          reviewed: false
-        }),
-        reviewed: true
-      })
+      expect(serviceMocks.batchUpdateScrapedItems).toHaveBeenCalled()
+    })
+    expectAllFilteredBatchPayload({
+      queued_for_briefing: true,
+      run_id: 1,
+      reviewed: false
     })
   })
 

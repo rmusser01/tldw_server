@@ -4472,7 +4472,8 @@ async def stream_run(
     last_status = run.status
     last_stats_raw = run.stats_json
     last_error = run.error_msg
-    log_text, log_offset, log_inode, log_truncated = _read_log_tail(
+    log_text, log_offset, log_inode, log_truncated = await run_in_threadpool(
+        _read_log_tail,
         log_path=run.log_path,
         user_id=user_id,
         max_bytes=log_tail_max,
@@ -4517,7 +4518,8 @@ async def stream_run(
                 last_stats_raw = stats_raw
                 last_error = run.error_msg
 
-            chunk, log_offset, log_inode = _read_log_chunk(
+            chunk, log_offset, log_inode = await run_in_threadpool(
+                _read_log_chunk,
                 log_path=run.log_path,
                 user_id=user_id,
                 offset=log_offset,

@@ -135,6 +135,19 @@ interface BatchReviewProgress {
   failedItemIds: number[]
 }
 
+type BatchScopeDraft = ScrapedItemBatchScope & {
+  watchlist_id?: number
+  include_alert_summary?: boolean
+  page?: number
+  size?: number
+  sort?: FetchItemsParams["sort"]
+}
+
+interface AllFilteredBatchParams {
+  countParams: FetchItemsParams
+  batchScope: ScrapedItemBatchScope
+}
+
 const normalizeSmartFilter = (value: string): SmartFeedFilter => {
   if (value === "today_unread") return "todayUnread"
   if (
@@ -1274,20 +1287,31 @@ export const ItemsTab: React.FC = () => {
     })
   }, [pageItemIds])
 
-  const buildAllFilteredBatchScope = useCallback((): ScrapedItemBatchScope | null => {
+  const buildAllFilteredBatchParams = useCallback((): AllFilteredBatchParams | null => {
     if (smartFilter === "reviewed") {
       return null
     }
-    const scope = { ...buildBaseFilterParams({}, searchQuery), reviewed: false }
-    delete scope.include_alert_summary
-    delete scope.page
-    delete scope.size
-    delete scope.sort
-    return scope
+    const countParams = { ...buildBaseFilterParams({}, searchQuery), reviewed: false }
+    delete countParams.include_alert_summary
+    delete countParams.page
+    delete countParams.size
+    delete countParams.sort
+
+    const batchScope: BatchScopeDraft = { ...countParams }
+    delete batchScope.watchlist_id
+    delete batchScope.include_alert_summary
+    delete batchScope.page
+    delete batchScope.size
+    delete batchScope.sort
+
+    return {
+      countParams,
+      batchScope
+    }
   }, [buildBaseFilterParams, searchQuery, smartFilter])
 
   const countAllFilteredBatchScope = useCallback(async (
-    scope: ScrapedItemBatchScope
+    scope: FetchItemsParams
   ): Promise<number> => {
     const response = await fetchScrapedItems({
       ...scope,
@@ -1328,7 +1352,9 @@ export const ItemsTab: React.FC = () => {
     }
 
     const uniqueIds = Array.from(new Set(itemIds || []))
-    const resolvedBatchScope = itemIds ? null : (batchScopeParams ?? buildAllFilteredBatchScope())
+    const resolvedBatchScope = itemIds
+      ? null
+      : (batchScopeParams ?? buildAllFilteredBatchParams()?.batchScope ?? null)
     const totalEstimate = itemIds ? uniqueIds.length : Number(estimatedCount || 0)
     if (totalEstimate === 0) return
     if (!itemIds && !resolvedBatchScope) {
@@ -1472,7 +1498,7 @@ export const ItemsTab: React.FC = () => {
     }
   }, [
     applyBatchReviewResult,
-    buildAllFilteredBatchScope,
+    buildAllFilteredBatchParams,
     getBatchScopeLabel,
     invalidateSmartCountsCache,
     loadItems,
@@ -1541,8 +1567,8 @@ export const ItemsTab: React.FC = () => {
   }, [openBatchConfirm, pageUnreviewedItemIds, t])
 
   const handleMarkAllFilteredReviewed = useCallback(async () => {
-    const batchScopeParams = buildAllFilteredBatchScope()
-    if (!batchScopeParams) {
+    const batchParams = buildAllFilteredBatchParams()
+    if (!batchParams) {
       message.info(
         t(
           "watchlists:items.batch.noFiltered",
@@ -1554,7 +1580,7 @@ export const ItemsTab: React.FC = () => {
 
     setCollectingAllFiltered(true)
     try {
-      const totalEstimate = await countAllFilteredBatchScope(batchScopeParams)
+      const totalEstimate = await countAllFilteredBatchScope(batchParams.countParams)
       if (totalEstimate === 0) {
         message.info(
           t(
@@ -1570,7 +1596,7 @@ export const ItemsTab: React.FC = () => {
         null,
         totalEstimate,
         t("watchlists:items.batch.confirmAllFilteredTitle", "Mark all filtered updates as reviewed?"),
-        batchScopeParams
+        batchParams.batchScope
       )
     } catch (error) {
       console.error("Failed to count filtered items for batch review:", error)
@@ -1578,7 +1604,7 @@ export const ItemsTab: React.FC = () => {
     } finally {
       setCollectingAllFiltered(false)
     }
-  }, [buildAllFilteredBatchScope, countAllFilteredBatchScope, openBatchConfirm, t])
+  }, [buildAllFilteredBatchParams, countAllFilteredBatchScope, openBatchConfirm, t])
 
   const batchProgressPercent = useMemo(() => {
     if (!batchReviewProgress) return 0
