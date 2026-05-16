@@ -1,3 +1,4 @@
+import json
 from io import BytesIO
 from pathlib import Path
 
@@ -846,6 +847,15 @@ def test_list_generated_candidates_returns_preview_asset_urls(persona_db: Charac
             proposed_manifest_patch={},
             generated_asset_ids=[asset["id"]],
             prompt="make preview",
+            generation_provenance={
+                "schema_version": 1,
+                "generation_mode": "prompt_only",
+                "request_id": "request-api-1",
+                "job_id": "job-preview",
+                "backend": "fake",
+                "target_state": "idle",
+                "recipe": {"user_prompt": "raw prompt should not be serialized"},
+            },
         )
 
         response = client.get(
@@ -855,6 +865,7 @@ def test_list_generated_candidates_returns_preview_asset_urls(persona_db: Charac
         assert response.status_code == 200, response.text
         payload = response.json()
         assert payload["candidates"][0]["id"] == candidate["id"]
+        assert payload["candidates"][0]["generation_provenance"]["request_id"] == "request-api-1"
         assert payload["candidates"][0]["generated_assets"][0]["id"] == asset["id"]
         assert payload["candidates"][0]["generated_assets"][0]["url"].endswith(
             f"/visual-packs/{pack['id']}/assets/{asset['id']}/content"
@@ -864,6 +875,10 @@ def test_list_generated_candidates_returns_preview_asset_urls(persona_db: Charac
         )
         assert detail.status_code == 200, detail.text
         assert detail.json()["generated_assets"][0]["id"] == asset["id"]
+        assert detail.json()["generation_provenance"]["target_state"] == "idle"
+        assert "raw prompt should not be serialized" not in json.dumps(
+            detail.json()["generation_provenance"]
+        )
 
 
 def test_create_generation_job_for_visual_pack(persona_db: CharactersRAGDB) -> None:

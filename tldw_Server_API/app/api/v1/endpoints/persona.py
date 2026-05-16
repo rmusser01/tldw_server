@@ -2212,6 +2212,11 @@ def _persona_visual_candidate_to_response(
             _persona_visual_asset_to_response(asset)
             for asset in (generated_assets or [])
         ],
+        generation_provenance=(
+            candidate.get("generation_provenance")
+            if isinstance(candidate.get("generation_provenance"), dict)
+            else {}
+        ),
         prompt=candidate.get("prompt"),
         failure_reason=candidate.get("failure_reason"),
         created_at=str(candidate.get("created_at") or _utc_now_iso()),

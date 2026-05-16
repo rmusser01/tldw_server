@@ -28,6 +28,9 @@ from tldw_Server_API.app.core.Persona.visual_jobs import (
     persona_visual_generation_queue,
     persona_visual_portability_queue,
 )
+from tldw_Server_API.app.core.Persona.visual_candidate_provenance import (
+    build_persona_visual_candidate_provenance,
+)
 from tldw_Server_API.app.core.Persona.visual_portability.exporter import (
     PersonaVisualPackExporter,
 )
@@ -105,6 +108,13 @@ class PersonaVisualGenerationWorker:
             request_id=f"persona_visuals:{persona_id}:{pack_id}:{request_id or job_id}",
         )
         result = await asyncio.to_thread(adapter.generate, request)
+        generation_provenance = build_persona_visual_candidate_provenance(
+            request_id=request_id or None,
+            job_id=job_id or None,
+            backend=backend,
+            target_state=target_state,
+            recipe_intent=recipe_intent,
+        )
 
         asset, candidate = await asyncio.to_thread(
             self._persist_generated_candidate,
@@ -117,6 +127,7 @@ class PersonaVisualGenerationWorker:
             target_state=target_state,
             job_id=job_id,
             prompt=prompt,
+            generation_provenance=generation_provenance,
         )
         asset_id = str(asset["id"])
         if recipe_intent:
@@ -148,6 +159,7 @@ class PersonaVisualGenerationWorker:
         target_state: str | None,
         job_id: str,
         prompt: str,
+        generation_provenance: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         service = PersonaVisualService(self._db)
         asset = service.create_generated_asset(
@@ -183,6 +195,7 @@ class PersonaVisualGenerationWorker:
             job_id=job_id,
             proposed_manifest_patch=proposed_patch,
             generated_asset_ids=[asset_id],
+            generation_provenance=generation_provenance,
             prompt=prompt,
         )
         return asset, candidate

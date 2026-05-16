@@ -18,6 +18,9 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
 )
 from tldw_Server_API.app.core.DB_Management.chacha import exemplar_normalization
 from tldw_Server_API.app.core.Persona.buddy import resolve_persona_buddy_profile
+from tldw_Server_API.app.core.Persona.visual_candidate_provenance import (
+    normalize_persona_visual_candidate_provenance,
+)
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -956,6 +959,13 @@ class PersonaStateStore:
             item.get("generated_asset_ids_json"),
             field_name="generated_asset_ids_json",
             context_label=f"persona visual candidate {candidate_label}",
+        )
+        item["generation_provenance"] = normalize_persona_visual_candidate_provenance(
+            self._decode_persona_json_object(
+                item.get("generation_provenance_json"),
+                field_name="generation_provenance_json",
+                context_label=f"persona visual candidate {candidate_label}",
+            )
         )
         item["deleted"] = self._as_bool(item.get("deleted"))
         return item
@@ -3210,6 +3220,7 @@ class PersonaStateStore:
         job_id: str | None,
         proposed_manifest_patch: dict[str, Any] | None,
         generated_asset_ids: list[str] | None,
+        generation_provenance: dict[str, Any] | None = None,
         prompt: str | None = None,
         status: str = "review",
         candidate_id: str | None = None,
@@ -3226,14 +3237,18 @@ class PersonaStateStore:
             for asset_id in (generated_asset_ids or [])
             if str(asset_id).strip()
         ]
+        generation_provenance_value = normalize_persona_visual_candidate_provenance(
+            generation_provenance
+        )
         candidate_id_value = str(candidate_id or self._generate_uuid()).strip()
         now = self._get_current_utc_timestamp_iso()
         bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
         query = (
             "INSERT INTO persona_visual_candidates("
             "id, pack_id, persona_id, user_id, job_id, status, proposed_manifest_patch_json, "
-            "generated_asset_ids_json, prompt, failure_reason, created_at, last_modified, deleted, version"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "generated_asset_ids_json, generation_provenance_json, prompt, failure_reason, "
+            "created_at, last_modified, deleted, version"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         params = (
             candidate_id_value,
@@ -3244,6 +3259,7 @@ class PersonaStateStore:
             status_value,
             self._ensure_json_string(manifest_patch_value) or "{}",
             self._ensure_json_string(generated_asset_ids_value) or "[]",
+            self._ensure_json_string(generation_provenance_value) or "{}",
             self._normalize_nullable_text(prompt),
             None,
             now,

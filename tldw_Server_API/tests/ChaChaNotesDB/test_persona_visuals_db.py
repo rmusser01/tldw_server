@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
@@ -80,6 +81,11 @@ def test_migration_v44_to_latest_creates_persona_visual_tables(db_path: Path) ->
     assert "idx_persona_visual_packs_persona" in pack_indexes
     assert "idx_persona_visual_assets_pack" in asset_indexes
     migrated.close_connection()
+
+
+def test_postgres_v45_migration_does_not_define_candidate_provenance_column() -> None:
+    assert "generation_provenance_json" not in CharactersRAGDB._MIGRATION_SQL_V44_TO_V45_POSTGRES
+    assert "generation_provenance_json" in CharactersRAGDB._MIGRATION_SQL_V46_TO_V47_POSTGRES
 
 
 def test_create_and_list_visual_pack_for_persona(db_instance: CharactersRAGDB) -> None:
@@ -309,3 +315,72 @@ def test_candidate_accept_reject_round_trip(db_instance: CharactersRAGDB) -> Non
     assert rejected_after is not None
     assert rejected_after["status"] == "rejected"
     assert rejected_after["failure_reason"] == "not useful"
+
+
+def test_candidate_generation_provenance_round_trip(db_instance: CharactersRAGDB) -> None:
+    persona_id = db_instance.create_persona_profile(
+        {"user_id": "user-1", "name": "Candidate Provenance Persona"}
+    )
+    pack = db_instance.create_persona_visual_pack(
+        persona_id=persona_id,
+        user_id="user-1",
+        title="Generated Provenance Pack",
+        manifest={"manifest_version": 1, "renderer_type": "sprite_frames"},
+    )
+
+    candidate = db_instance.create_persona_visual_candidate(
+        pack_id=pack["id"],
+        persona_id=persona_id,
+        user_id="user-1",
+        job_id="job-1",
+        proposed_manifest_patch={"states": {"thinking": {"animation_id": "think"}}},
+        generated_asset_ids=["asset-1"],
+        prompt="make a thinking pose",
+        generation_provenance={
+            "schema_version": 999,
+            "generation_mode": "recipe_backed",
+            "request_id": "request-1",
+            "job_id": "job-1",
+            "backend": "fake\nprovider",
+            "target_state": "thinking",
+            "recipe": {
+                "starter_pack_id": "starter-basic",
+                "recipe_output": "static_sheet",
+                "correlation_id": "corr-1",
+                "identity_brief": "friendly buddy",
+                "neutral_anchor": "api_key=secret\n/Users/macbook-dev/private",
+                "static_sheet": "x" * 400,
+                "review_checks": ["consistent silhouette", "token secret leak"],
+                "user_prompt_included": True,
+                "user_prompt": "raw user prompt should not be returned",
+            },
+            "prompt": "raw generation prompt should not be returned",
+        },
+    )
+
+    listed = db_instance.list_persona_visual_candidates(
+        pack_id=pack["id"],
+        persona_id=persona_id,
+        user_id="user-1",
+    )
+    listed_candidate = next(item for item in listed if item["id"] == candidate["id"])
+    provenance = listed_candidate["generation_provenance"]
+
+    assert provenance["schema_version"] == 1
+    assert provenance["generation_mode"] == "recipe_backed"
+    assert provenance["request_id"] == "request-1"
+    assert provenance["job_id"] == "job-1"
+    assert provenance["backend"] == "fake provider"
+    assert provenance["target_state"] == "thinking"
+    assert provenance["recipe"]["starter_pack_id"] == "starter-basic"
+    assert provenance["recipe"]["recipe_output"] == "static_sheet"
+    assert provenance["recipe"]["correlation_id"] == "corr-1"
+    assert provenance["recipe"]["identity_brief"] == "friendly buddy"
+    assert provenance["recipe"]["neutral_anchor"] == "[redacted]"
+    assert len(provenance["recipe"]["static_sheet"]) <= 240
+    assert provenance["recipe"]["user_prompt_included"] is True
+    serialized = json.dumps(provenance)
+    assert "api_key" not in serialized
+    assert "/Users/macbook-dev/private" not in serialized
+    assert "raw user prompt should not be returned" not in serialized
+    assert "raw generation prompt should not be returned" not in serialized

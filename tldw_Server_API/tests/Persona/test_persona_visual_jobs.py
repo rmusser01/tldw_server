@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -483,6 +484,17 @@ async def test_generation_worker_stores_generated_asset_and_candidate(
                 "prompt": "make a thinking pose",
                 "target_state": "thinking",
                 "backend": "fake",
+                "request_id": "request-worker-1",
+                "recipe_intent": {
+                    "starter_pack_id": "starter-basic",
+                    "recipe_output": "static_sheet",
+                    "correlation_id": "corr-worker-1",
+                    "identity_brief": "small helpful buddy",
+                    "neutral_anchor": "front-facing neutral pose",
+                    "static_sheet": "static talking variants",
+                    "review_checks": ["consistent silhouette", "transparent background"],
+                    "user_prompt": "raw user direction should not be copied",
+                },
             },
         }
     )
@@ -506,5 +518,23 @@ async def test_generation_worker_stores_generated_asset_and_candidate(
     assert candidates[0]["job_id"] == "101"
     assert candidates[0]["generated_asset_ids"] == [assets[0]["id"]]
     assert candidates[0]["proposed_manifest_patch"]["states"]["thinking"]["animation_id"]
+    provenance = candidates[0]["generation_provenance"]
+    assert provenance["schema_version"] == 1
+    assert provenance["generation_mode"] == "recipe_backed"
+    assert provenance["request_id"] == "request-worker-1"
+    assert provenance["job_id"] == "101"
+    assert provenance["backend"] == "fake"
+    assert provenance["target_state"] == "thinking"
+    assert provenance["recipe"]["starter_pack_id"] == "starter-basic"
+    assert provenance["recipe"]["recipe_output"] == "static_sheet"
+    assert provenance["recipe"]["correlation_id"] == "corr-worker-1"
+    assert provenance["recipe"]["review_checks"] == [
+        "consistent silhouette",
+        "transparent background",
+    ]
+    assert provenance["recipe"]["user_prompt_included"] is True
+    serialized_provenance = json.dumps(provenance)
+    assert "make a thinking pose" not in serialized_provenance
+    assert "raw user direction should not be copied" not in serialized_provenance
     assert {"get_persona_visual_pack", "generate"} <= set(offloaded_call_names)
     assert any(name == "_persist_generated_candidate" for name in offloaded_call_names)
