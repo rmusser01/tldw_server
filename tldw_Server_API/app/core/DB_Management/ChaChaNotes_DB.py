@@ -5254,7 +5254,6 @@ CREATE TABLE IF NOT EXISTS persona_visual_candidates (
                                CHECK(status IN ('review','accepted','rejected','failed')),
   proposed_manifest_patch_json TEXT NOT NULL DEFAULT '{}',
   generated_asset_ids_json     TEXT NOT NULL DEFAULT '[]',
-  generation_provenance_json   TEXT NOT NULL DEFAULT '{}',
   prompt                       TEXT,
   failure_reason               TEXT,
   created_at                   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

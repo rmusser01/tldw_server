@@ -83,6 +83,11 @@ def test_migration_v44_to_latest_creates_persona_visual_tables(db_path: Path) ->
     migrated.close_connection()
 
 
+def test_postgres_v45_migration_does_not_define_candidate_provenance_column() -> None:
+    assert "generation_provenance_json" not in CharactersRAGDB._MIGRATION_SQL_V44_TO_V45_POSTGRES
+    assert "generation_provenance_json" in CharactersRAGDB._MIGRATION_SQL_V46_TO_V47_POSTGRES
+
+
 def test_create_and_list_visual_pack_for_persona(db_instance: CharactersRAGDB) -> None:
     persona_id = db_instance.create_persona_profile(
         {"user_id": "user-1", "name": "Visual Persona"}

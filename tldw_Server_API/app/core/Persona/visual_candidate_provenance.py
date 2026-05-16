@@ -9,6 +9,7 @@ unknown keys are intentionally excluded.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -20,23 +21,23 @@ PERSONA_VISUAL_CANDIDATE_PROVENANCE_REVIEW_CHECK_LIMIT = 12
 PERSONA_VISUAL_CANDIDATE_PROVENANCE_REVIEW_CHECK_TEXT_LIMIT = 120
 
 _ALLOWED_GENERATION_MODES = frozenset({"prompt_only", "recipe_backed"})
-_SECRET_MARKERS = (
-    "api_key",
-    "apikey",
-    "authorization",
-    "bearer ",
-    "password",
-    "secret",
-    "sk-",
-    "token",
-    "x-api-key",
+_SECRET_VALUE_PATTERNS = (
+    re.compile(r"\bBearer\b(?:\s*[:=]\s*\S+|\s+[A-Za-z0-9+/_=-]{12,})"),
+    re.compile(r"\bauthorization\b\s*[:=]\s*\S+", re.IGNORECASE),
+    re.compile(r"\bx\s*[-_ ]?\s*api\s*[-_ ]?\s*key\b\s*[:=]\s*\S+", re.IGNORECASE),
+    re.compile(r"\bapi\s*[-_ ]?\s*key\b\s*[:=]\s*\S+", re.IGNORECASE),
+    re.compile(r"\b(?:access|refresh|id|auth)\s*[-_ ]?\s*token\b\s*[:=]\s*\S+", re.IGNORECASE),
+    re.compile(r"\bclient\s*[-_ ]?\s*secret\b\s*[:=]\s*\S+", re.IGNORECASE),
+    re.compile(r"\bsecret\s*[-_ ]?\s*(?:key|token)\b\s*[:=]\s*\S+", re.IGNORECASE),
+    re.compile(r"\bpassword\b\s*[:=]\s*\S+", re.IGNORECASE),
+    re.compile(r"\bsk-[A-Za-z0-9][A-Za-z0-9_-]{7,}\b"),
 )
-_PATH_MARKERS = (
-    "/home/",
-    "/private/",
-    "/users/",
-    "\\",
+_PATH_PATTERNS = (
+    re.compile(r"(?:^|\s)/(?:home|private|users)/\S+", re.IGNORECASE),
+    re.compile(r"\b[A-Za-z]:\\\S+"),
+    re.compile(r"\\\\[^\s\\]+\\\S+"),
 )
+_TOKENISH_VALUE_PATTERN = re.compile(r"^[A-Za-z0-9+/_=-]{40,}$")
 _TOP_LEVEL_TEXT_FIELDS = {
     "request_id": PERSONA_VISUAL_CANDIDATE_PROVENANCE_ID_TEXT_LIMIT,
     "job_id": PERSONA_VISUAL_CANDIDATE_PROVENANCE_ID_TEXT_LIMIT,
@@ -158,12 +159,29 @@ def _safe_provenance_text(value: Any, *, max_length: int) -> str | None:
     text = str(value).strip()
     if not text:
         return None
-    lower_text = text.lower()
-    if any(marker in lower_text for marker in _SECRET_MARKERS):
-        return "[redacted]"
-    if any(marker in lower_text for marker in _PATH_MARKERS):
-        return "[redacted]"
     collapsed = " ".join(text.split())
+    if _contains_secret_value(text, collapsed):
+        return "[redacted]"
+    if any(pattern.search(collapsed) for pattern in _PATH_PATTERNS):
+        return "[redacted]"
     if len(collapsed) > max_length:
         return collapsed[:max_length]
     return collapsed
+
+
+def _contains_secret_value(text: str, collapsed: str) -> bool:
+    if any(pattern.search(text) or pattern.search(collapsed) for pattern in _SECRET_VALUE_PATTERNS):
+        return True
+    return _looks_like_single_token_secret(collapsed)
+
+
+def _looks_like_single_token_secret(value: str) -> bool:
+    if not _TOKENISH_VALUE_PATTERN.fullmatch(value):
+        return False
+    character_classes = (
+        any(char.islower() for char in value),
+        any(char.isupper() for char in value),
+        any(char.isdigit() for char in value),
+        any(char in "+/_=-" for char in value),
+    )
+    return sum(character_classes) >= 3 and len(set(value)) >= 16
