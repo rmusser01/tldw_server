@@ -37,7 +37,7 @@ Create a critique-hardened staged design for PR-sized improvements that take Qui
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Drafted and hardening-reviewed the staged bulk conference ingest workflow design. The latest pass added granular capability gates, Collections_DB/tag identity risk handling, owner/TTL-bounded preflight rules, backend-enforced scoped Knowledge QA, idempotent retry, submit-failure states, and conservative extension permission constraints. Awaiting user review before implementation planning.
+Drafted and repeatedly hardening-reviewed the staged bulk conference ingest workflow design. The latest review pass fixed PR 5/PR 6 sequencing around scoped Knowledge QA, separated server capability checks from extension client/platform readiness, normalized `submit_failed` collection states, and made retry actions target retryable failures. Awaiting user review before implementation planning.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -106,10 +106,10 @@ Rules:
 
 - A selected preflight item gets a stable planned item record or equivalent metadata binding before processing starts.
 - A collection item may be unresolved or resolved. Unresolved items are keyed by a stable planned/source item ID and retain source URL plus metadata. Resolved items also carry a stable media ID.
-- A collection may contain planned, processing, completed, skipped-existing, failed, and cancelled item states.
+- A collection may contain planned, processing, completed, skipped-existing, `submit_failed`, failed, and cancelled item states.
 - A successfully created media item resolves its planned item into a stable media ID without losing the original source-item history.
 - A skipped existing item may join the collection only when the user explicitly includes existing duplicates.
-- A failed or cancelled item keeps enough metadata and source URL for retry or export.
+- A `submit_failed`, failed, or cancelled item keeps enough metadata and source URL for retry or export.
 - Synchronous fallback must preserve the same collection metadata semantics even if status tracking is less durable.
 - Submit failures are distinct from processing failures. If job creation fails before processing starts, the item remains retryable as `submit_failed` or an equivalent planned-item state.
 - Retry actions must be idempotent by collection item and retry attempt. Retrying failed items must not duplicate completed items or silently overwrite successful media rows.
@@ -129,7 +129,7 @@ Rules:
 
 ### Capability and Degraded-Mode Contract
 
-The existing frontend `hasMedia` capability is not granular enough for this workflow. The UI needs separate capability signals, or an equivalent endpoint/method, for:
+The existing frontend `hasMedia` capability is not granular enough for this workflow. The UI needs separate server capability signals, or an equivalent endpoint/method, for:
 
 - metadata-only playlist preflight
 - media ingest job submission
@@ -137,9 +137,10 @@ The existing frontend `hasMedia` capability is not granular enough for this work
 - ingest job event streaming
 - durable media collection support
 - Knowledge QA collection or media-ID scoping
-- extension-side playlist capture handoff
 
-Endpoint existence alone is not enough for worker-backed durability. The UI must distinguish "endpoint exists but worker disabled" from "jobs are ready" and must keep destructive or misleading actions disabled when the required capability is absent.
+Extension capture is a separate client/platform readiness check, not a server capability. It depends on active-tab URL access, sidepanel availability, extension runtime state, and any required host permission state.
+
+Endpoint existence alone is not enough for worker-backed durability. The UI must distinguish "endpoint exists but worker disabled" from "jobs are ready" and must keep destructive or misleading actions disabled when the required server or platform capability is absent.
 
 ## Data Concepts
 
@@ -307,7 +308,7 @@ Scope:
 - Define or reuse the chosen media collection/grouping contract.
 - Document why tag-only grouping, localStorage grouping, vector-store collections, prompt collections, and unrelated keyword collections are accepted or rejected for this workflow.
 - Store collection name, conference name, source playlist URL, shared tags, event date/year, and membership.
-- Represent planned, processing, completed, skipped-existing, failed, and cancelled item states.
+- Represent planned, processing, completed, skipped-existing, `submit_failed`, failed, and cancelled item states.
 - Link collection items to media records as they are created or explicitly resolved from duplicates.
 - Provide list/get/update collection APIs or extend an existing media collection API if one exists.
 - Bridge current client-side Media collections where useful, without treating localStorage as authoritative.
@@ -323,8 +324,8 @@ Acceptance criteria:
 - The selected collection source of truth is documented with rejected alternatives.
 - A conference collection survives refresh and is visible across WebUI and extension contexts.
 - A collection can be fetched by stable collection ID with ordered membership and per-item status.
-- Completed collection membership is based on stable media IDs, while planned, failed, and cancelled items remain represented by durable planned/source item IDs.
-- Planned, failed, and cancelled items retain source URL and metadata needed for retry or export.
+- Completed collection membership is based on stable media IDs, while planned, `submit_failed`, failed, and cancelled items remain represented by durable planned/source item IDs.
+- Planned, `submit_failed`, failed, and cancelled items retain source URL and metadata needed for retry or export.
 - Planned collection items do not collide with or overwrite existing saved `content_items` or media rows.
 - Existing one-off Media usage is not forced into collections.
 - The plan for localStorage Media collections is explicit: migrate, ignore, or bridge.
@@ -389,7 +390,7 @@ Scope:
   - elapsed time
   - cancel job
   - cancel batch
-  - retry failed
+  - retry retryable failures
   - export failed URLs
 - Subscribe to SSE events when available and fall back to polling.
 - Detect worker disabled/unavailable state and show a clear degraded-mode message.
@@ -429,16 +430,18 @@ Scope:
   - cancelled
 - Primary action: open the created conference collection.
 - Secondary actions:
-  - ask this collection in Knowledge QA
   - review failed items
-  - retry failed
+  - retry retryable failures
   - export failed URLs
   - ingest more
+- Optional secondary action when scoped QA capability already exists:
+  - ask this collection in Knowledge QA
 - Link successful and skipped duplicate items to the collection when appropriate.
 
 Out of scope:
 
 - Full collection review redesign.
+- Adding the scoped Knowledge QA contract unless it already exists in the deployment.
 - Transcript editing.
 
 Acceptance criteria:
@@ -448,6 +451,7 @@ Acceptance criteria:
 - Duplicate/skipped items do not disappear from the user's mental model.
 - Results are understandable for mixed success/failure batches.
 - Submit failures are separated from processing failures so users know whether retry will create new jobs or rerun failed processing.
+- PR 5 does not expose scoped Knowledge QA as available unless the backend scoped-QA capability is already present.
 
 Risk:
 
@@ -504,6 +508,7 @@ Scope:
 - Show an "Import playlist to tldw" action in the extension sidepanel or relevant quick action surface.
 - Pass URL and detected context to the shared Quick Ingest preflight.
 - Keep expansion, metadata editing, and ingest submission in shared UI/services.
+- Gate the action on client/platform readiness: active tab URL access, sidepanel/runtime availability, and permission state.
 - Avoid new broad host permissions unless a separate permission review proves they are required.
 
 Out of scope:
@@ -518,6 +523,7 @@ Acceptance criteria:
 - Extension users can start the conference workflow without manually copying 34 URLs.
 - Unsupported pages do not show misleading playlist import actions.
 - Extension capture works from the active tab URL/context handoff without duplicating playlist expansion logic.
+- Extension readiness failures are shown as setup/runtime issues, not as server ingest failures.
 
 Risk:
 
@@ -596,7 +602,8 @@ Risk:
 - Preserve ordinary one-file and one-URL Quick Ingest behavior.
 - Keep shared implementation in `apps/packages/ui/src` unless platform-specific browser APIs are required.
 - Use existing backend/client API helpers and OpenAPI guard patterns.
-- Add granular capability checks before enabling playlist preflight, jobs-backed durability, durable collection actions, scoped Knowledge QA, or extension capture.
+- Add granular server capability checks before enabling playlist preflight, jobs-backed durability, durable collection actions, or scoped Knowledge QA.
+- Add separate client/platform readiness checks before enabling extension capture.
 - Prefer server-owned persistent state for anything that must survive refresh, device changes, or WebUI/extension transitions.
 - Keep localStorage-only state limited to temporary UI preferences or draft state.
 - Avoid hidden downloads during preflight.
