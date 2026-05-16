@@ -12,6 +12,12 @@ from typing import Any
 from tldw_Server_API.app.core.Persona.visual_import_preview_validators import (
     preview_renderer_import,
 )
+from tldw_Server_API.app.core.Persona.visual_manifest_assets import (
+    collect_visual_manifest_asset_ids,
+)
+from tldw_Server_API.app.core.Persona.visual_starter_recipe_taxonomy import (
+    BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS,
+)
 from tldw_Server_API.app.core.Persona.visuals import (
     PersonaVisualManifestError,
     validate_visual_manifest,
@@ -328,6 +334,10 @@ def _bundle_summary(
     asset_summary: Mapping[str, int],
     resolved_required_states: Mapping[str, str],
 ) -> dict[str, Any]:
+    visual_manifest = pack.get("visual_manifest")
+    if not isinstance(visual_manifest, Mapping):
+        visual_manifest = {}
+    manifest_asset_references = collect_visual_manifest_asset_ids(dict(visual_manifest))
     return {
         "pack_title": pack.get("title") or manifest.get("pack_title"),
         "renderer_type": pack.get("renderer_type") or manifest.get("renderer_type"),
@@ -335,21 +345,47 @@ def _bundle_summary(
         "asset_count": len(assets),
         "assets_with_bytes": asset_summary["present_asset_items"],
         "missing_asset_items": asset_summary["missing_asset_items"],
-        "state_count": len((pack.get("visual_manifest") or {}).get("states", {})),
-        "animation_count": len((pack.get("visual_manifest") or {}).get("animations", {})),
+        "state_count": len(visual_manifest.get("states", {})),
+        "animation_count": len(visual_manifest.get("animations", {})),
         "resolved_required_states": dict(resolved_required_states),
+        "manifest_asset_references": sorted(manifest_asset_references),
         "assets": [
-            {
-                "source_asset_id": asset.get("source_asset_id"),
-                "asset_role": asset.get("asset_role"),
-                "asset_bytes_status": asset.get("asset_bytes_status"),
-                "mime_type": asset.get("mime_type"),
-                "width": asset.get("width"),
-                "height": asset.get("height"),
-            }
+            _bundle_asset_summary(
+                asset,
+                manifest_asset_references=manifest_asset_references,
+            )
             for asset in assets
         ],
     }
+
+
+def _bundle_asset_summary(
+    asset: Mapping[str, Any],
+    *,
+    manifest_asset_references: set[str],
+) -> dict[str, Any]:
+    source_asset_id = str(asset.get("source_asset_id") or "").strip()
+    return {
+        "source_asset_id": asset.get("source_asset_id"),
+        "asset_role": asset.get("asset_role"),
+        "asset_group": _known_asset_group(asset.get("asset_group")),
+        "asset_bytes_status": asset.get("asset_bytes_status"),
+        "mime_type": asset.get("mime_type"),
+        "width": asset.get("width"),
+        "height": asset.get("height"),
+        "manifest_referenced": bool(
+            source_asset_id and source_asset_id in manifest_asset_references
+        ),
+    }
+
+
+def _known_asset_group(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if normalized in BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS:
+        return normalized
+    return None
 
 
 def _validation_warnings(assets: list[Mapping[str, Any]]) -> list[str]:

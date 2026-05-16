@@ -99,6 +99,157 @@ def _live2d_v2_manifest() -> dict[str, object]:
     }
 
 
+def _buddy_pipeline_manifest() -> dict[str, object]:
+    return {
+        "manifest_version": 1,
+        "renderer_type": "sprite_frames",
+        "state_catalog": {
+            "tool.notes_search": {
+                "label": "Notes search",
+                "kind": "tool_variant",
+                "description": "Used when the notes search tool is running.",
+                "tags": ["tool", "search"],
+            },
+            "reaction.cheer": {
+                "label": "Cheer",
+                "kind": "reaction",
+                "description": "Short positive response animation.",
+                "tags": ["reaction"],
+            },
+        },
+        "states": {
+            "idle": {"animation_id": "idle-loop"},
+            "listening": {"animation_id": "listening-loop"},
+            "thinking": {"animation_id": "thinking-loop"},
+            "speaking": {"animation_id": "speaking-loop"},
+            "error": {"animation_id": "error-loop"},
+            "tool.notes_search": {"animation_id": "tool-notes-search-loop"},
+            "reaction.cheer": {"animation_id": "reaction-cheer-loop"},
+        },
+        "fallbacks": {
+            "tool.notes_search": ["tool_running", "thinking", "idle"],
+            "reaction.cheer": ["speaking", "idle"],
+        },
+        "authored_triggers": [
+            {
+                "id": "notes-search-exact-tool",
+                "source": "tool_name",
+                "match": "notes.search",
+                "state": "tool.notes_search",
+                "duration_ms": 2400,
+                "priority": 80,
+            },
+            {
+                "id": "cheer-reaction",
+                "source": "live_state",
+                "match": "positive_response",
+                "state": "reaction.cheer",
+                "duration_ms": 1200,
+                "priority": 40,
+            },
+        ],
+        "animations": {
+            "idle-loop": {
+                "frames": [
+                    {
+                        "asset_id": "buddy-animation-atlas",
+                        "region": {"x": 0, "y": 0, "width": 4, "height": 4},
+                        "duration_ms": 180,
+                    },
+                    {
+                        "asset_id": "buddy-animation-atlas",
+                        "region": {"x": 4, "y": 0, "width": 4, "height": 4},
+                        "duration_ms": 180,
+                    },
+                ],
+                "frame_rate": 6,
+                "preview_frame": 0,
+            },
+            "listening-loop": {
+                "frames": [
+                    {
+                        "asset_id": "buddy-animation-atlas",
+                        "region": {"x": 0, "y": 4, "width": 4, "height": 4},
+                        "duration_ms": 120,
+                    },
+                ],
+                "frame_rate": 8,
+                "preview_frame": 0,
+            },
+            "thinking-loop": {
+                "frames": [
+                    {
+                        "asset_id": "buddy-strip-required",
+                        "region": {"x": 0, "y": 0, "width": 4, "height": 4},
+                        "duration_ms": 160,
+                    },
+                    {
+                        "asset_id": "buddy-strip-required",
+                        "region": {"x": 4, "y": 0, "width": 4, "height": 4},
+                        "duration_ms": 160,
+                    },
+                ],
+                "frame_rate": 6,
+                "preview_frame": 0,
+            },
+            "speaking-loop": {
+                "frames": [
+                    {
+                        "asset_id": "buddy-strip-required",
+                        "region": {"x": 0, "y": 0, "width": 4, "height": 4},
+                        "duration_ms": 90,
+                    },
+                    {
+                        "asset_id": "buddy-strip-required",
+                        "region": {"x": 4, "y": 0, "width": 4, "height": 4},
+                        "duration_ms": 90,
+                    },
+                ],
+                "frame_rate": 12,
+                "preview_frame": 1,
+            },
+            "error-loop": {
+                "frames": [
+                    {
+                        "asset_id": "buddy-animation-atlas",
+                        "region": {"x": 4, "y": 4, "width": 4, "height": 4},
+                        "duration_ms": 300,
+                    },
+                ],
+                "frame_rate": 4,
+                "preview_frame": 0,
+            },
+            "tool-notes-search-loop": {
+                "frames": [
+                    {
+                        "asset_id": "buddy-animation-atlas",
+                        "region": {"x": 0, "y": 4, "width": 4, "height": 4},
+                        "duration_ms": 140,
+                    },
+                    {
+                        "asset_id": "buddy-animation-atlas",
+                        "region": {"x": 4, "y": 4, "width": 4, "height": 4},
+                        "duration_ms": 140,
+                    },
+                ],
+                "frame_rate": 10,
+                "preview_frame": 0,
+            },
+            "reaction-cheer-loop": {
+                "frames": [
+                    {
+                        "asset_id": "buddy-animation-atlas",
+                        "region": {"x": 4, "y": 0, "width": 4, "height": 4},
+                        "duration_ms": 120,
+                    },
+                ],
+                "frame_rate": 8,
+                "preview_frame": 0,
+            },
+        },
+    }
+
+
 def _renderer_preview_archive(
     tmp_path: Path,
     *,
@@ -147,6 +298,68 @@ def _renderer_preview_archive(
         for member_path, member_bytes in entries.items():
             archive.writestr(member_path, member_bytes)
     return archive_path
+
+
+def _buddy_pipeline_assets() -> tuple[list[dict[str, object]], dict[str, bytes]]:
+    asset_specs = [
+        (
+            "buddy-neutral-anchor",
+            "still_pose",
+            "neutral_anchor",
+            "neutral.png",
+            _png_bytes(width=4, height=4),
+        ),
+        (
+            "buddy-static-talking-sheet",
+            "sprite_sheet",
+            "static_talking_sheet",
+            "static-talking.png",
+            _png_bytes(width=8, height=4),
+        ),
+        (
+            "buddy-static-reaction-sheet",
+            "sprite_sheet",
+            "static_reaction_sheet",
+            "static-reactions.png",
+            _png_bytes(width=8, height=4),
+        ),
+        (
+            "buddy-strip-required",
+            "sprite_sheet",
+            "animation_strips",
+            "required-state-strip.png",
+            _png_bytes(width=8, height=4),
+        ),
+        (
+            "buddy-animation-atlas",
+            "sprite_sheet",
+            "animation_atlas",
+            "animation-atlas.png",
+            _png_bytes(width=8, height=8),
+        ),
+    ]
+    assets: list[dict[str, object]] = []
+    asset_files: dict[str, bytes] = {}
+    for source_asset_id, asset_role, asset_group, filename, content in asset_specs:
+        asset_path = f"assets/persona_visuals/{filename}"
+        with Image.open(io.BytesIO(content)) as image:
+            width, height = image.size
+        assets.append(
+            {
+                "source_asset_id": source_asset_id,
+                "asset_role": asset_role,
+                "asset_group": asset_group,
+                "asset_bytes_status": ASSET_BYTES_STATUS_PRESENT,
+                "asset_path": asset_path,
+                "asset_sha256": sha256_bytes(content),
+                "mime_type": "image/png",
+                "width": width,
+                "height": height,
+                "original_filename": filename,
+            }
+        )
+        asset_files[asset_path] = content
+    return assets, asset_files
 
 
 def _live2d_preview_assets(
@@ -267,8 +480,8 @@ def test_validate_archive_members_allows_zip_directory_entries(tmp_path: Path) -
 
     members = validate_archive_members(archive_path)
 
-    assert REQUIRED_MEMBERS <= set(members)
-    assert "metadata/" not in members
+    assert REQUIRED_MEMBERS <= set(members)  # nosec B101
+    assert "metadata/" not in members  # nosec B101
 
 
 def test_export_pack_writes_manifest_metadata_checksums_and_asset_bytes(
@@ -505,6 +718,52 @@ def test_import_preview_reports_missing_asset_bytes_as_warning(
     ]
     exported_assets = preview["bundle_summary"]["assets"]
     assert exported_assets[0]["asset_bytes_status"] == ASSET_BYTES_STATUS_MISSING  # nosec B101
+
+
+def test_import_preview_accepts_buddy_pipeline_packet_with_source_sheet_diagnostics(
+    tmp_path: Path,
+) -> None:
+    assets, asset_files = _buddy_pipeline_assets()
+    archive_path = _renderer_preview_archive(
+        tmp_path,
+        title="Buddy Pipeline Packet",
+        visual_manifest=_buddy_pipeline_manifest(),
+        assets=assets,
+        asset_files=asset_files,
+    )
+
+    preview = PersonaVisualPackImportPreviewer().create_preview(
+        archive_path=archive_path,
+        owner_user_id="user-1",
+        target_persona_id="target-persona",
+    )
+
+    summary = preview["bundle_summary"]
+    assets_by_id = {
+        asset["source_asset_id"]: asset
+        for asset in summary["assets"]
+    }
+    assert preview["status"] == "completed"  # nosec B101
+    assert summary["renderer_type"] == "sprite_frames"  # nosec B101
+    assert summary["asset_count"] == 5  # nosec B101
+    assert summary["state_count"] == 7  # nosec B101
+    assert summary["animation_count"] == 7  # nosec B101
+    assert summary["manifest_asset_references"] == [  # nosec B101
+        "buddy-animation-atlas",
+        "buddy-strip-required",
+    ]
+    assert assets_by_id["buddy-neutral-anchor"]["asset_group"] == "neutral_anchor"  # nosec B101
+    assert assets_by_id["buddy-neutral-anchor"]["manifest_referenced"] is False  # nosec B101
+    assert assets_by_id["buddy-static-talking-sheet"]["asset_group"] == "static_talking_sheet"  # nosec B101
+    assert assets_by_id["buddy-static-talking-sheet"]["manifest_referenced"] is False  # nosec B101
+    assert assets_by_id["buddy-static-reaction-sheet"]["asset_group"] == "static_reaction_sheet"  # nosec B101
+    assert assets_by_id["buddy-static-reaction-sheet"]["manifest_referenced"] is False  # nosec B101
+    assert assets_by_id["buddy-strip-required"]["asset_group"] == "animation_strips"  # nosec B101
+    assert assets_by_id["buddy-strip-required"]["manifest_referenced"] is True  # nosec B101
+    assert assets_by_id["buddy-animation-atlas"]["asset_group"] == "animation_atlas"  # nosec B101
+    assert assets_by_id["buddy-animation-atlas"]["manifest_referenced"] is True  # nosec B101
+    assert preview["proposed_plan"]["review_before_commit"] is True  # nosec B101
+    assert preview["validation_warnings"] == []  # nosec B101
 
 
 def test_import_preview_reports_v2_live2d_renderer_diagnostics_without_activation(
