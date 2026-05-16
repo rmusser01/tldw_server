@@ -266,7 +266,9 @@ It is admin-only and returns:
   classification, and any matching reconciliation/helper VM records
 - read-only observability for `vz_linux` helper stdout/stderr log pointers,
   per-VM serial log pointers, guest readiness metadata, and helper-provided
-  resource counters when available
+  resource counters when available. Current `vz_linux` resource snapshots are
+  configured VM facts (`cpu_count`, `memory_size_mb`) plus diagnostic uptime
+  (`wall_time_sec`); they are not live CPU/RSS/I/O utilization telemetry.
 - read-only `recovery_summary` metadata derived from reconciliation,
   image-store, and observability blocks, including recovery posture, stable
   issue codes, counts, and existing dry-run-first admin endpoint pointers

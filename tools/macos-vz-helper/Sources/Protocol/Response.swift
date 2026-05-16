@@ -127,19 +127,31 @@ struct VMRecord {
     let healthy: Bool
     let metadata: VMOwnershipMetadata
     let guestInfo: GuestAgentInfo?
+    let resourceSnapshot: VMResourceSnapshot?
 
     init(
         vmID: String,
         state: String,
         healthy: Bool,
         metadata: VMOwnershipMetadata = .unknown,
-        guestInfo: GuestAgentInfo? = nil
+        guestInfo: GuestAgentInfo? = nil,
+        resourceSnapshot: VMResourceSnapshot? = nil
     ) {
         self.vmID = vmID
         self.state = state
         self.healthy = healthy
         self.metadata = metadata
         self.guestInfo = guestInfo
+        self.resourceSnapshot = resourceSnapshot
+    }
+}
+
+struct VMResourceSnapshot: Equatable {
+    let cpuCount: Int
+    let memorySizeBytes: UInt64
+
+    var memorySizeMB: UInt64 {
+        memorySizeBytes / 1_048_576
     }
 }
 

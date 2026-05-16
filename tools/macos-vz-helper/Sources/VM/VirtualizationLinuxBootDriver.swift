@@ -110,7 +110,8 @@ final class VirtualizationLinuxBootDriver: VZBootDriving {
         self.connectionTokenFactory = connectionTokenFactory
     }
 
-    func boot(vmID: String, templatePath: String, workspacePath: String, startupTimeoutSeconds: TimeInterval) throws {
+    @discardableResult
+    func boot(vmID: String, templatePath: String, workspacePath: String, startupTimeoutSeconds: TimeInterval) throws -> VMResourceSnapshot {
         let spec = try templateValidator.resolve(runtime: "vz_linux", templatePath: templatePath)
         let guestTransport = GuestTransportMetadata(
             vmID: vmID,
@@ -130,10 +131,15 @@ final class VirtualizationLinuxBootDriver: VZBootDriving {
             guestTransport: guestTransport
         )
         let machine = try machineProvider.makeVirtualMachine(configuration: configuration)
+        let resourceSnapshot = VMResourceSnapshot(
+            cpuCount: configuration.cpuCount,
+            memorySizeBytes: configuration.memorySize
+        )
         do {
             try machine.installSocketListener(listener.listener, port: spec.vsockPort)
             try machine.start(timeoutSeconds: startupTimeoutSeconds)
             machines[vmID] = machine
+            return resourceSnapshot
         } catch {
             try? machine.stop()
             sessionManager.removeSession(vmID: vmID)

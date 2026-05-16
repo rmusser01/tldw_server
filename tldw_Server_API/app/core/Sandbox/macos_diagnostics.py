@@ -37,8 +37,10 @@ _MACOS_IMAGE_STORE_CLEANUP_PLAN_ENDPOINT = "/api/v1/sandbox/admin/macos-image-st
 _HELPER_LOG_DIR_ENV = "TLDW_SANDBOX_MACOS_HELPER_LOG_DIR"
 _VZ_LINUX_SERIAL_LOG_DIR_ENV = "TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR"
 _VZ_LINUX_RESOURCE_DETAIL_KEYS = (
+    "cpu_count",
     "cpu_time_sec",
     "wall_time_sec",
+    "memory_size_mb",
     "peak_rss_mb",
     "memory_rss_mb",
     "disk_read_bytes",

@@ -1,7 +1,8 @@
 import Foundation
 
 protocol VZBootDriving {
-    func boot(vmID: String, templatePath: String, workspacePath: String, startupTimeoutSeconds: TimeInterval) throws
+    @discardableResult
+    func boot(vmID: String, templatePath: String, workspacePath: String, startupTimeoutSeconds: TimeInterval) throws -> VMResourceSnapshot
     func stop(vmID: String) throws
 }
 
@@ -10,7 +11,8 @@ enum VZLinuxVMManagerError: Error {
 }
 
 final class PlaceholderVZBootDriver: VZBootDriving {
-    func boot(vmID: String, templatePath: String, workspacePath: String, startupTimeoutSeconds: TimeInterval) throws {
+    @discardableResult
+    func boot(vmID: String, templatePath: String, workspacePath: String, startupTimeoutSeconds: TimeInterval) throws -> VMResourceSnapshot {
         throw VZLinuxVMManagerError.bootNotImplemented
     }
 
@@ -46,10 +48,11 @@ final class VZLinuxVMManager {
             state: "booting",
             healthy: false,
             metadata: metadata,
-            preserveGuestInfo: false
+            preserveGuestInfo: false,
+            preserveResourceSnapshot: false
         )
         do {
-            try bootDriver.boot(
+            let resourceSnapshot = try bootDriver.boot(
                 vmID: vmID,
                 templatePath: templatePath,
                 workspacePath: workspacePath,
@@ -62,6 +65,7 @@ final class VZLinuxVMManager {
                 state: "running",
                 healthy: true,
                 guestInfo: guestInfo,
+                resourceSnapshot: resourceSnapshot,
                 preserveGuestInfo: false
             )
             return registry.status(vmID: vmID) ?? VMRecord(
@@ -69,7 +73,8 @@ final class VZLinuxVMManager {
                 state: "running",
                 healthy: true,
                 metadata: metadata,
-                guestInfo: guestInfo
+                guestInfo: guestInfo,
+                resourceSnapshot: resourceSnapshot
             )
         } catch {
             try? bootDriver.stop(vmID: vmID)
