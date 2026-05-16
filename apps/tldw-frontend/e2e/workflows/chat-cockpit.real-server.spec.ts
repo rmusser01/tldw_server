@@ -744,23 +744,14 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(page.getByTestId('playground-cockpit-left-rail')).toHaveCount(0);
     await expect(page.getByTestId('playground-cockpit-left-rail-restore')).toBeVisible();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
-    const collapsedSummary = page.getByTestId('playground-collapsed-composition-summary');
-    await expect(collapsedSummary).toBeVisible();
-    await expect(collapsedSummary).toContainText('Context hidden');
-    await expect(collapsedSummary).toContainText('Model');
-    await expect(collapsedSummary).toContainText(chatModelSelection.key);
-    await expect(collapsedSummary).toContainText('Prompt');
-    await expect(collapsedSummary).toContainText('Assistant');
-    await expect(collapsedSummary).toContainText('Context');
-    await expect(collapsedSummary).toContainText('MCP tools');
+    await expect(page.getByTestId('playground-collapsed-composition-summary')).toHaveCount(0);
     await page.screenshot({
-      path: testInfo.outputPath('chat-cockpit-desktop-collapsed-summary.png'),
+      path: testInfo.outputPath('chat-cockpit-desktop-context-collapsed-side-only.png'),
       fullPage: true,
     });
     await page.getByTestId('playground-cockpit-left-rail-restore').click();
     await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
     await expect(modeSummary).toHaveText('Context and runtime rails visible.');
-    await expect(page.getByTestId('playground-collapsed-composition-summary')).toHaveCount(0);
 
     await page
       .getByTestId('playground-cockpit-right-rail')
@@ -769,9 +760,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(page.getByTestId('playground-cockpit-right-rail')).toHaveCount(0);
     await expect(page.getByTestId('playground-cockpit-right-rail-restore')).toBeVisible();
     await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
-    await expect(page.getByTestId('playground-collapsed-composition-summary')).toContainText(
-      'Runtime hidden'
-    );
+    await expect(page.getByTestId('playground-collapsed-composition-summary')).toHaveCount(0);
     await page.getByTestId('playground-cockpit-right-rail-restore').click();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
     await expect(modeSummary).toHaveText('Context and runtime rails visible.');

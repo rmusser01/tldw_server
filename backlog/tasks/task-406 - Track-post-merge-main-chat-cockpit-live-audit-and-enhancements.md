@@ -43,7 +43,7 @@ Scoped findings for main `/chat` only:
 | Priority | Area | Evidence | Follow-up |
 | --- | --- | --- | --- |
 | P1 | Empty assistant response recovery | The real-server conversation proof can show an assistant turn card with provider/model metadata but no visible response text while the page returns to `Ready`. | Add an explicit empty-response state in the message timeline and runtime panel, with a recoverable explanation and regenerate/retry path. |
-| P1 | Collapsed-rail context continuity | Collapsible sidechannels free the chat canvas, but a fully collapsed cockpit leaves the composer/status strip as the only persistent summary. | Add a compact, always-visible active composition summary near the composer when one or both rails are collapsed: model, assistant/persona, prompt, context count, MCP/tool state. |
+| P1 | Collapsed-rail context continuity | Collapsible sidechannels free the chat canvas, but the collapsed state must remain a side-rail behavior. A bottom or composer-adjacent replacement summary was rejected as an unapproved design change. | Keep collapse/restore side-local. Side restore controls are the collapsed state; do not add bottom, footer, or composer-adjacent replacement summaries unless explicitly approved. |
 | P2 | First-paint density | Initial cockpit view shows left rail, center mode chooser, right rail, global nav shortcuts, composer controls, and bottom status all at once. | Tighten first-use hierarchy by reducing duplicate labels and making the center mode chooser yield visual priority to the composer once the user starts typing or has an active conversation. |
 | P2 | Duplicate prompt/composition language | The left rail repeats `No prompt selected` in both the composition summary and the dedicated prompt card. | Consolidate prompt state copy so the rail reads as one clear prompt-management flow instead of two separate empty states. |
 | P2 | Rail control discoverability | New sidechannel collapse buttons are keyboard-accessible, but visually they are icon-only and rely on icon comprehension. | Add design-system tooltip/title treatment for rail-local collapse/restore controls and align icon meaning with existing header visibility controls. |
@@ -54,7 +54,7 @@ Quick wins:
 
 - Add empty assistant response messaging and retry affordance. Implemented in this branch: blank assistant turns now render explicit message-card recovery actions and a runtime sidechannel warning with regenerate available for both `role: "assistant"` and real-server `isBot: true` message shapes.
 - Add tooltips to sidechannel collapse/restore controls.
-- Show compact composition summary while rails are collapsed. Implemented in this branch: when either main `/chat` cockpit rail is hidden, the composer area now keeps model, assistant/persona, prompt, context count, and MCP/tool state visible with restore actions for hidden rails.
+- Keep collapsed cockpit rails as side affordances only. No bottom replacement summary should appear when a rail is hidden; side restore buttons are the collapsed state.
 - De-duplicate prompt empty-state copy in the Context rail. Implemented in this branch: when composition already states `No prompt selected`, Prompt management now uses actionable selection copy instead of repeating the same empty state.
 
 Larger design opportunities:
@@ -69,18 +69,21 @@ Verification for implemented empty-response quick win:
 - `TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://127.0.0.1:18002 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --grep "uses the running server"` passed against the real local server and branch WebUI.
 - Updated screenshot: `apps/tldw-frontend/test-results/workflows-chat-cockpit.rea-eebf0-kpit-focus-controls-working-chromium/chat-cockpit-desktop-conversation.png` shows the message-card recovery and runtime sidechannel warning.
 
-Verification for implemented collapsed composition summary quick win:
-
-- `bunx vitest run src/components/Option/Playground/__tests__/PlaygroundCollapsedCompositionSummary.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx --config vitest.config.ts` passed with 35 tests.
-- `TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://127.0.0.1:18002 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --grep "uses the running server"` passed against the real local server and branch WebUI.
-- Updated screenshot: `apps/tldw-frontend/test-results/workflows-chat-cockpit.rea-eebf0-kpit-focus-controls-working-chromium/chat-cockpit-desktop-collapsed-summary.png` shows the collapsed cockpit summary above the composer.
-- `bunx tsc --noEmit -p tsconfig.json --pretty false` still fails on existing package-wide baseline errors; filtered output contains no touched cockpit files after the narrow type cleanup.
-- Bandit skipped because this slice changes frontend TypeScript and E2E coverage only.
-
 Verification for implemented prompt empty-state de-duplication:
 
-- `bunx vitest run src/components/Option/Playground/__tests__/PlaygroundContextRail.first-slice.test.tsx src/components/Option/Playground/__tests__/PlaygroundCollapsedCompositionSummary.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx --config vitest.config.ts` passed with 51 tests.
+- `bunx vitest run src/components/Option/Playground/__tests__/PlaygroundContextRail.first-slice.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx --config vitest.config.ts` passed with focused tests.
 - Bandit skipped because this slice changes frontend TypeScript tests and UI copy only.
+
+Verification for side-only collapsed rail correction:
+
+- Removed the rejected bottom collapsed composition summary component and its dedicated tests.
+- Added regression assertions that `playground-collapsed-composition-summary` is absent after either cockpit rail is collapsed.
+- `bunx vitest run src/components/Option/Playground/__tests__/PlaygroundContextRail.first-slice.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx --config vitest.config.ts` passed with 48 focused tests.
+- `TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://127.0.0.1:18002 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --grep "uses the running server"` passed against the real local server and branch WebUI.
+- Side-only screenshot: `apps/tldw-frontend/test-results/workflows-chat-cockpit.rea-eebf0-kpit-focus-controls-working-chromium/chat-cockpit-desktop-context-collapsed-side-only.png`.
+- `bunx prettier --check e2e/workflows/chat-cockpit.real-server.spec.ts --config .prettierrc` passed from `apps/tldw-frontend`.
+- `git diff --check` passed.
+- `rg -n "PlaygroundCollapsedCompositionSummary|collapsed-composition-summary|chat-cockpit-desktop-collapsed-summary" apps/packages/ui/src/components/Option/Playground apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts backlog/tasks/task-406*` now only reports negative test assertions for the removed summary test id.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -380,6 +380,9 @@ describe("Playground cockpit shell", () => {
     );
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("playground-collapsed-composition-summary"),
+    ).toBeNull();
 
     fireEvent.click(
       screen.getByRole("button", { name: /restore context sidechannel/i }),
@@ -409,6 +412,9 @@ describe("Playground cockpit shell", () => {
     expect(
       screen.getByTestId("playground-cockpit-status-strip"),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("playground-collapsed-composition-summary"),
+    ).toBeNull();
 
     fireEvent.click(
       screen.getByRole("button", { name: /restore runtime sidechannel/i }),
@@ -422,54 +428,6 @@ describe("Playground cockpit shell", () => {
     expect(storageState.values.get("playgroundChatRuntimeRailVisible")).toBe(
       true,
     );
-  });
-
-  it("keeps composition state near the composer when sidechannels are collapsed", async () => {
-    messageOptionState.value.selectedQuickPrompt = "Research brief";
-    messageOptionState.value.selectedAssistant = {
-      kind: "persona",
-      id: "persona-1",
-      name: "Research Persona",
-    };
-    messageOptionState.value.serverChatPersonaMemoryMode = "read_write";
-    messageOptionState.value.contextFiles = [
-      { id: "file-1", name: "brief.pdf" },
-    ];
-
-    render(<Playground />);
-
-    fireEvent.click(screen.getByRole("button", { name: /hide context rail/i }));
-
-    const summary = await screen.findByRole("region", {
-      name: "Collapsed cockpit summary",
-    });
-    expect(within(summary).getByText("Context hidden")).toBeInTheDocument();
-    expect(
-      within(summary).getByLabelText("Model: openai:gpt-4.1-mini. openai"),
-    ).toBeInTheDocument();
-    expect(
-      within(summary).getByLabelText("Prompt: Quick prompt. Research brief"),
-    ).toBeInTheDocument();
-    expect(
-      within(summary).getByLabelText(
-        "Assistant: Research Persona. Persona selected - memory read/write",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(summary).getByLabelText(
-        "Context: 3 active sources. 3 configured sources",
-      ),
-    ).toBeInTheDocument();
-
-    fireEvent.click(
-      within(summary).getByRole("button", { name: "Restore context rail" }),
-    );
-
-    await waitFor(() => {
-      expect(
-        screen.getByTestId("playground-cockpit-left-rail"),
-      ).toBeInTheDocument();
-    });
   });
 
   it("surfaces empty assistant response recovery in the runtime sidechannel", async () => {
