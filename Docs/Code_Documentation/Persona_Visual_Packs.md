@@ -214,6 +214,27 @@ Bundled starter packs are immutable server fixtures for first-run or recovery
 flows. They are not global Persona Visual pack rows, shared library entries, or
 runtime assets. Listing the catalog returns safe fixture metadata only.
 
+The current bundled catalog exposes nine starter IDs in stable order:
+
+1. `research-buddy-basic`
+2. `migu-marker-basic`
+3. `minimal-helper-basic`
+4. `study-desk-intermediate`
+5. `tool-helper-intermediate`
+6. `object-creature-intermediate`
+7. `lofi-study-intricate`
+8. `action-guide-intricate`
+9. `elaborate-persona-intricate`
+
+These map to the approved basic, intermediate, and intricate tiers from the
+Persona Buddy default catalog design. The fixtures are lightweight catalog
+fixtures, not the full art-generation pipeline. They establish stable
+copy-to-draft behavior, required-state coverage, custom-state examples, and an
+atlas-backed example while preserving the same explicit activation rule as
+user-created packs. The legacy `research-buddy-starter` id remains accepted as a
+compatibility alias for the research buddy default, but it is not listed as a
+tenth catalog item.
+
 Copying a bundled starter pack creates a normal user-owned draft pack attached
 to the selected target persona. The copy path validates the fixture manifest and
 assets, writes new asset files through the existing Persona Visual storage
