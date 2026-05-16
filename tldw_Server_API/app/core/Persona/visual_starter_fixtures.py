@@ -109,6 +109,12 @@ def _animation(asset_key: str, *, duration_ms: int = 250) -> dict[str, Any]:
     }
 
 
+def _custom_state_asset_key(state: str) -> str:
+    """Return a stable fixture asset key for one custom state id."""
+    normalized_state = state.replace(".", "-").replace(":", "-")
+    return f"variant-{normalized_state}"
+
+
 def _atlas_animation(
     asset_key: str,
     *,
@@ -253,13 +259,17 @@ def _multi_asset_pack(
     fallbacks: dict[str, list[str]] | None = None,
 ) -> PersonaVisualStarterPack:
     """Create an intermediate starter with separate required-state assets."""
+    custom_state_asset_keys = tuple(
+        _custom_state_asset_key(state)
+        for state in (custom_states or {})
+    )
     asset_keys = (
         "idle",
         "listening",
         "thinking",
         "speaking",
         "error",
-        *(("variant",) if custom_states else ()),
+        *custom_state_asset_keys,
     )
     assets = tuple(
         _asset(starter_id, key, palette[index % len(palette)])
@@ -267,7 +277,7 @@ def _multi_asset_pack(
     )
     state_asset_keys = {state: state for state in _REQUIRED_STATE_IDS}
     custom_state_assets = {
-        state: "variant"
+        state: _custom_state_asset_key(state)
         for state in (custom_states or {})
     }
     return PersonaVisualStarterPack(
@@ -344,7 +354,9 @@ DEFAULT_PERSONA_VISUAL_STARTER_PACKS: tuple[PersonaVisualStarterPack, ...] = (
     _basic_pack(
         starter_id="minimal-helper-basic",
         title="Minimal Helper Basic",
-        description="Geometric low-complexity starter for quick custom Buddy setup.",
+        description=(
+            "Geometric low-complexity starter for quick custom Buddy setup."
+        ),
         rgba=(92, 118, 48, 255),
         tags=("minimal", "geometric"),
     ),
@@ -397,7 +409,8 @@ DEFAULT_PERSONA_VISUAL_STARTER_PACKS: tuple[PersonaVisualStarterPack, ...] = (
         starter_id="object-creature-intermediate",
         title="Object Creature Intermediate",
         description=(
-            "Non-human expressive object starter to show the format is not humanoid-only."
+            "Non-human expressive object starter to show the format is not "
+            "humanoid-only."
         ),
         palette=(
             (144, 92, 72, 255),
@@ -419,7 +432,8 @@ DEFAULT_PERSONA_VISUAL_STARTER_PACKS: tuple[PersonaVisualStarterPack, ...] = (
         starter_id="lofi-study-intricate",
         title="Lo-fi Study Intricate",
         description=(
-            "Original study companion starter with atlas-backed loops and tool variant metadata."
+            "Original study companion starter with atlas-backed loops and "
+            "tool variant metadata."
         ),
         rgba=(108, 84, 164, 255),
         tags=("lofi", "study"),

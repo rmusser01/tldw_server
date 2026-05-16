@@ -4,7 +4,7 @@ title: Expand bundled Persona Visual starter catalog scaffolds
 status: Done
 assignee: []
 created_date: '2026-05-16 00:36'
-updated_date: '2026-05-16 01:37'
+updated_date: '2026-05-16 02:23'
 labels:
   - persona
   - buddy
@@ -57,12 +57,14 @@ Reopened for wording correction after review: clarify that this PR adds backend 
 Clarified fixture descriptions, tags, tests, docs, and task language so the PR represents backend catalog scaffolds only. The real default buddy art/animation pipeline remains future work.
 
 Wording-correction verification: focused starter catalog/API pytest passed with 23 tests; git diff --check passed; Bandit JSON report for touched Persona starter backend modules reported zero findings.
+
+PR #1734 review fixes: wrapped the long fixture/test lines identified by Qodo and changed multi-custom-state scaffold generation so each custom state gets a distinct deterministic variant asset key. Added a regression test for action-guide and elaborate-persona custom-state asset separation.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added nine bundled Persona Visual starter catalog scaffold fixtures across basic, intermediate, and intricate tiers. Added deterministic fixture PNG generation, custom-state and atlas metadata examples, legacy research-buddy-starter alias handling, updated API/service coverage, and documented that these are backend scaffolds rather than finished buddy art or completed animation packs. Verification: focused starter catalog/API pytest passed with 23 tests after the wording correction; prior broader persona visual slice passed with 84 tests; git diff --check passed; Bandit on touched Persona starter backend modules reported zero findings. Known skips/blockers: real default buddy art and neutral-pose-to-animation asset creation remain future work.
+Added nine bundled Persona Visual starter catalog scaffold fixtures across basic, intermediate, and intricate tiers. Added deterministic fixture PNG generation, custom-state and atlas metadata examples, legacy research-buddy-starter alias handling, updated API/service coverage, and documented that these are backend scaffolds rather than finished buddy art or completed animation packs. PR review fixes also wrap newly touched long Python lines and ensure multi-custom-state scaffolds use distinct variant fixture assets. Verification: focused starter catalog/API pytest passed with 25 tests after review fixes; prior broader persona visual slice passed with 84 tests; git diff --check passed; Bandit on touched Persona starter backend modules reported zero findings. Known skips/blockers: real default buddy art and neutral-pose-to-animation asset creation remain future work.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

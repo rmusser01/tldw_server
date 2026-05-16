@@ -10,7 +10,9 @@ from PIL import Image
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.Persona.visual_manifest_assets import collect_visual_manifest_asset_ids
+from tldw_Server_API.app.core.Persona.visual_manifest_assets import (
+    collect_visual_manifest_asset_ids,
+)
 from tldw_Server_API.app.core.Persona.visual_starter_catalog import (
     PersonaVisualStarterCatalogError,
     PersonaVisualStarterCatalogService,
@@ -44,9 +46,18 @@ def _manifest_frame_asset_ids(manifest: dict[str, Any]) -> set[str]:
     return asset_ids
 
 
+def _state_frame_asset_id(manifest: dict[str, Any], state: str) -> str:
+    animation_id = manifest["states"][state]["animation_id"]
+    frame = manifest["animations"][animation_id]["frames"][0]
+    return str(frame["asset_id"])
+
+
 @pytest.fixture()
 def db_instance(tmp_path: Path) -> Iterator[CharactersRAGDB]:
-    db = CharactersRAGDB(tmp_path / "persona_visual_starter_catalog.sqlite", "persona-visual-starter-test")
+    db = CharactersRAGDB(
+        tmp_path / "persona_visual_starter_catalog.sqlite",
+        "persona-visual-starter-test",
+    )
     yield db
     db.close_connection()
 
@@ -74,7 +85,9 @@ def test_starter_catalog_lists_bundled_scaffold_packs(
 
     starters = service.list_starter_packs()
 
-    assert [starter["id"] for starter in starters] == list(DEFAULT_PERSONA_VISUAL_STARTER_PACK_IDS)
+    assert [starter["id"] for starter in starters] == list(
+        DEFAULT_PERSONA_VISUAL_STARTER_PACK_IDS
+    )
     assert LEGACY_PERSONA_VISUAL_STARTER_PACK_ID not in {
         starter["id"] for starter in starters
     }
@@ -84,7 +97,9 @@ def test_starter_catalog_lists_bundled_scaffold_packs(
     assert starter["manifest_version"] == 1
     assert starter["asset_count"] >= 1
     assert starter["total_bytes"] > 0
-    assert {"idle", "listening", "thinking", "speaking", "error"}.issubset(set(starter["states_offered"]))
+    assert {"idle", "listening", "thinking", "speaking", "error"}.issubset(
+        set(starter["states_offered"])
+    )
     assert all("catalog:scaffold" in starter["tags"] for starter in starters)
     assert all("scaffold" in starter["description"].lower() for starter in starters)
     assert any("tier:intricate" in starter["tags"] for starter in starters)
@@ -112,6 +127,35 @@ def test_get_starter_pack_accepts_legacy_research_buddy_alias(
 
     assert detail["id"] == DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID
     assert detail["title"] == "Research Buddy Basic"
+
+
+@pytest.mark.parametrize(
+    ("starter_pack_id", "custom_states"),
+    (
+        (
+            "action-guide-intricate",
+            ("reaction.anticipation", "reaction.success"),
+        ),
+        (
+            "elaborate-persona-intricate",
+            ("mood.focused", "tool.media_import"),
+        ),
+    ),
+)
+def test_multi_custom_state_scaffolds_use_distinct_variant_assets(
+    db_instance: CharactersRAGDB,
+    starter_pack_id: str,
+    custom_states: tuple[str, ...],
+) -> None:
+    service = PersonaVisualStarterCatalogService(db_instance)
+
+    detail = service.get_starter_pack(starter_pack_id)
+    state_asset_ids = {
+        _state_frame_asset_id(detail["manifest"], state)
+        for state in custom_states
+    }
+
+    assert len(state_asset_ids) == len(custom_states)
 
 
 def test_copy_starter_pack_to_persona_creates_inactive_user_owned_draft(
@@ -212,7 +256,9 @@ def test_copy_legacy_research_buddy_alias_creates_default_draft(
     db_instance: CharactersRAGDB,
 ) -> None:
     user_id = "user-1"
-    persona_id = db_instance.create_persona_profile({"user_id": user_id, "name": "Target"})
+    persona_id = db_instance.create_persona_profile(
+        {"user_id": user_id, "name": "Target"}
+    )
     service = PersonaVisualStarterCatalogService(db_instance)
 
     copied = service.copy_starter_pack_to_persona(
