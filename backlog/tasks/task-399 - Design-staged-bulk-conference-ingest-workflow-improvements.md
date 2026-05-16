@@ -1,7 +1,7 @@
 ---
 id: TASK-399
 title: Design staged bulk conference ingest workflow improvements
-status: In Progress
+status: Done
 labels:
 - ux
 - quick-ingest
@@ -10,8 +10,10 @@ labels:
 priority: Medium
 documentation:
 - Docs/superpowers/specs/2026-05-16-bulk-conference-ingest-workflow-design.md
+- Docs/superpowers/plans/2026-05-16-bulk-conference-ingest-workflow-implementation-plan.md
 modified_files:
 - Docs/superpowers/specs/2026-05-16-bulk-conference-ingest-workflow-design.md
+- Docs/superpowers/plans/2026-05-16-bulk-conference-ingest-workflow-implementation-plan.md
 ---
 
 ## Description
@@ -37,7 +39,7 @@ Create a critique-hardened staged design for PR-sized improvements that take Qui
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Drafted and repeatedly hardening-reviewed the staged bulk conference ingest workflow design. The final review pass clarified that planned collection items are created before job submission, completed media IDs resolve into those collection items, `submit_failed` carries metadata/error/export behavior consistently, PR 4/5 cover all-retry controls, and PR 8 owns selection-based retry. Awaiting user approval before implementation planning.
+Completed the critique-hardened design and implementation planning package for the bulk conference ingest workflow. The final plan covers playlist preflight, durable conference collections, batch metadata, jobs-backed run tracking, results handoff, collection review with scoped QA, extension playlist capture, duplicate/failure recovery, and full-path QA without making implementation code changes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
