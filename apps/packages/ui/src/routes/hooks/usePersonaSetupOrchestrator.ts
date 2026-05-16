@@ -1313,13 +1313,12 @@ export function usePersonaSetupOrchestrator(
       source: "wizard_optional_card",
       returnStep: personaSetupWizard.currentStep,
     })
-    setActiveTab("visuals")
     void emitSetupAnalyticsEvent({
       eventType: "detour_started",
       step: personaSetupWizard.currentStep,
       detourSource: "wizard_optional_visuals",
     })
-  }, [emitSetupAnalyticsEvent, personaSetupWizard.currentStep, setActiveTab])
+  }, [emitSetupAnalyticsEvent, personaSetupWizard.currentStep])
 
   const handleReturnToSetupFromVisualDetour = React.useCallback(() => {
     const returnStep = setupVisualDetour?.returnStep || personaSetupWizard.currentStep
