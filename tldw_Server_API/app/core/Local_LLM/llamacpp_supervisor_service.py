@@ -87,6 +87,7 @@ class LlamaCppSupervisor:
         self.runner_factory = runner_factory
         self._runners: dict[str, Any] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        self._store_lock = asyncio.Lock()
         self._start_lock = asyncio.Lock()
         self._paused: set[str] = set()
 
@@ -103,9 +104,9 @@ class LlamaCppSupervisor:
     async def create_profile(self, request: LlamaCppProfileCreateInput) -> LlamaCppProfile:
         profile_id = request.profile_id or uuid4().hex
         async with self._lock_for(profile_id):
-            return self._create_profile_unlocked(profile_id, request)
+            return await self._create_profile_unlocked(profile_id, request)
 
-    def _create_profile_unlocked(
+    async def _create_profile_unlocked(
         self,
         profile_id: str,
         request: LlamaCppProfileCreateInput,
@@ -128,13 +129,13 @@ class LlamaCppSupervisor:
             tags=list(request.tags),
         )
         self._validate_runtime_port_available(profile)
-        return self.store.upsert(profile)
+        return await self._store_upsert(profile)
 
     async def update_profile(self, profile_id: str, request: LlamaCppProfileUpdateInput) -> LlamaCppProfile:
         async with self._lock_for(profile_id):
-            return self._update_profile_unlocked(profile_id, request)
+            return await self._update_profile_unlocked(profile_id, request)
 
-    def _update_profile_unlocked(
+    async def _update_profile_unlocked(
         self,
         profile_id: str,
         request: LlamaCppProfileUpdateInput,
@@ -147,20 +148,21 @@ class LlamaCppSupervisor:
             updates["restart_policy"] = dict(updates["restart_policy"])
         if "tags" in updates and updates["tags"] is not None:
             updates["tags"] = list(updates["tags"])
-        profile = existing.model_copy(update=updates)
+        profile = LlamaCppProfile.model_validate(existing.model_dump(mode="python") | updates)
         self._validate_runtime_port_available(profile)
-        return self.store.upsert(profile)
+        return await self._store_upsert(profile)
 
     async def delete_profile(self, profile_id: str) -> bool:
         async with self._lock_for(profile_id):
-            return self._delete_profile_unlocked(profile_id)
+            return await self._delete_profile_unlocked(profile_id)
 
-    def _delete_profile_unlocked(self, profile_id: str) -> bool:
-        runner = self._runners.pop(profile_id, None)
+    async def _delete_profile_unlocked(self, profile_id: str) -> bool:
+        runner = self._runners.get(profile_id)
         if runner is not None:
-            runner.cleanup_sync()
+            await runner.stop()
+            self._runners.pop(profile_id, None)
         self._paused.discard(profile_id)
-        return self.store.delete(profile_id)
+        return await self._store_delete(profile_id)
 
     async def start_profile(self, profile_id: str) -> LlamaCppRuntime:
         async with self._lock_for(profile_id):
@@ -169,7 +171,7 @@ class LlamaCppSupervisor:
     async def _start_profile_unlocked(self, profile_id: str, *, restart: bool = False) -> LlamaCppRuntime:
         profile = self._require_profile(profile_id)
         if not profile.enabled:
-            profile = self.store.upsert(profile.model_copy(update={"enabled": True}))
+            profile = await self._store_upsert(profile.model_copy(update={"enabled": True}))
         self._paused.discard(profile_id)
         runner = self._runner_for(profile_id)
         async with self._start_lock:
@@ -186,7 +188,7 @@ class LlamaCppSupervisor:
         async with self._lock_for(profile_id):
             profile = self._require_profile(profile_id)
             if disable and profile.enabled:
-                self.store.upsert(profile.model_copy(update={"enabled": False}))
+                await self._store_upsert(profile.model_copy(update={"enabled": False}))
             self._paused.discard(profile_id)
             runner = self._runners.get(profile_id)
             if runner is None:
@@ -197,7 +199,7 @@ class LlamaCppSupervisor:
         async with self._lock_for(profile_id):
             profile = self._require_profile(profile_id)
             if profile.enabled:
-                self.store.upsert(profile.model_copy(update={"enabled": False}))
+                await self._store_upsert(profile.model_copy(update={"enabled": False}))
             runner = self._runners.get(profile_id)
             if runner is not None and runner.status().state == LlamaCppRuntimeState.RUNNING:
                 await runner.stop()
@@ -208,7 +210,7 @@ class LlamaCppSupervisor:
         async with self._lock_for(profile_id):
             profile = self._require_profile(profile_id)
             if not profile.enabled:
-                self.store.upsert(profile.model_copy(update={"enabled": True}))
+                await self._store_upsert(profile.model_copy(update={"enabled": True}))
             self._paused.discard(profile_id)
             runner = self._runners.get(profile_id)
             if runner is None:
@@ -248,9 +250,9 @@ class LlamaCppSupervisor:
         server_args: dict[str, object],
     ) -> LlamaCppProfile:
         async with self._lock_for(DEFAULT_PROFILE_ID):
-            return self._ensure_default_profile_from_model_unlocked(model_id, server_args)
+            return await self._ensure_default_profile_from_model_unlocked(model_id, server_args)
 
-    def _ensure_default_profile_from_model_unlocked(
+    async def _ensure_default_profile_from_model_unlocked(
         self,
         model_id: str,
         server_args: dict[str, object],
@@ -284,11 +286,11 @@ class LlamaCppSupervisor:
                 }
             )
         self._validate_runtime_port_available(profile)
-        return self.store.upsert(profile)
+        return await self._store_upsert(profile)
 
     async def start_default_by_model(self, model_id: str, server_args: dict[str, object]) -> LlamaCppRuntime:
         async with self._lock_for(DEFAULT_PROFILE_ID):
-            profile = self._ensure_default_profile_from_model_unlocked(model_id, server_args)
+            profile = await self._ensure_default_profile_from_model_unlocked(model_id, server_args)
             return await self._start_profile_unlocked(profile.profile_id, restart=True)
 
     async def stop_default(self) -> LlamaCppRuntime:
@@ -324,6 +326,14 @@ class LlamaCppSupervisor:
             runner = self.runner_factory(self.config, profile_id)
             self._runners[profile_id] = runner
         return runner
+
+    async def _store_upsert(self, profile: LlamaCppProfile) -> LlamaCppProfile:
+        async with self._store_lock:
+            return self.store.upsert(profile)
+
+    async def _store_delete(self, profile_id: str) -> bool:
+        async with self._store_lock:
+            return self.store.delete(profile_id)
 
     def _require_profile(self, profile_id: str) -> LlamaCppProfile:
         profile = self.store.get(profile_id)

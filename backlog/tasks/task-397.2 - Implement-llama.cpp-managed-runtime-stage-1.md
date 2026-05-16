@@ -4,7 +4,7 @@ title: Implement llama.cpp managed runtime stage 1
 status: In Progress
 assignee: []
 created_date: '2026-05-16 01:43'
-updated_date: '2026-05-16 03:18'
+updated_date: '2026-05-16 03:25'
 labels:
   - llamacpp
   - local-llm
@@ -52,6 +52,8 @@ Task 2 second review fixes: changed default pipe drainers from readline to bound
 Task 3: added LlamaCppSupervisor with profile CRUD, per-profile lifecycle locks, independent start/stop/pause/resume/shutdown/cleanup behavior, runtime listing, default-profile bridge helpers, and LLMInferenceManager cleanup integration. Verification: supervisor pytest passed; process runner/profile store/management/inventory regression suite reported 61 passed; py_compile passed; Bandit on supervisor/manager had no findings; git diff --check passed.
 
 Task 3 review fixes: made profile create/update/delete and default profile ensure asynchronous under the per-profile lock, held the default lock across default-profile update plus restart, added a supervisor-wide start lock for autoselect port selection, preserved legacy LlamaCppHandler cleanup while supervisor cleanup is enabled, and removed the core supervisor dependency on API request schemas. Verification: focused supervisor pytest reported 10 passed; touched llama.cpp regression slice reported 65 passed; py_compile passed; Bandit on supervisor/manager had no findings; git diff --check passed.
+
+Task 3 second quality review fixes: validated profile update payloads through LlamaCppProfile before persistence, added supervisor-wide store write serialization, and changed profile deletion to await runner.stop before removing runner/profile ownership. Verification: focused supervisor pytest reported 12 passed; touched llama.cpp regression slice reported 67 passed; py_compile passed; Bandit on supervisor/manager had no findings; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

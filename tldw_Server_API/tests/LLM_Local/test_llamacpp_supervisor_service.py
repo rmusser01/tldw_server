@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
     LlamaCppProfileCreateRequest,
@@ -78,6 +79,7 @@ class FakeRunner:
         self.calls = calls
         self.runtime = LlamaCppRuntime(profile_id=profile_id, state=LlamaCppRuntimeState.DEFINED)
         self.cleaned = False
+        self.stop_calls = 0
 
     async def start(self, model_path: Path, profile: LlamaCppProfile) -> LlamaCppRuntime:
         self.calls[self.profile_id] = self.calls.get(self.profile_id, 0) + 1
@@ -95,6 +97,7 @@ class FakeRunner:
         return self.runtime
 
     async def stop(self) -> LlamaCppRuntime:
+        self.stop_calls += 1
         self.runtime = self.runtime.model_copy(
             update={"state": LlamaCppRuntimeState.STOPPED, "pid": None, "message": "Stopped"}
         )
@@ -287,7 +290,38 @@ async def test_supervisor_serializes_profile_mutations_with_start(tmp_path: Path
     assert updated.name == "Updated"
     assert deleted is True
     assert supervisor.list_profiles() == []
-    assert factory.runners["one"].cleaned is True
+    assert factory.runners["one"].stop_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejects_null_update_for_non_nullable_profile_fields(tmp_path: Path):
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+
+    with pytest.raises(ValidationError):
+        await supervisor.update_profile("one", LlamaCppProfileUpdateRequest(host=None))
+
+    assert supervisor.store.get("one").host == "127.0.0.1"
+
+
+@pytest.mark.asyncio
+async def test_supervisor_delete_running_profile_awaits_stop_before_removing(tmp_path: Path):
+    supervisor, config, factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+    await supervisor.start_profile("one")
+
+    deleted = await supervisor.delete_profile("one")
+
+    assert deleted is True
+    assert supervisor.list_profiles() == []
+    assert factory.runners["one"].stop_calls == 1
+    assert factory.runners["one"].cleaned is False
 
 
 @pytest.mark.asyncio
