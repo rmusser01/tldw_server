@@ -1,7 +1,7 @@
 ---
 id: TASK-369
 title: Recertify issue 1646 main chat cockpit strict gaps
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-15 03:23'
 updated_date: '2026-05-15 08:02'
