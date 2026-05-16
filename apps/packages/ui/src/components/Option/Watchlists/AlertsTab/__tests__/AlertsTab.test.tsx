@@ -149,7 +149,7 @@ describe("AlertsTab", () => {
       size: 50
     })
     expect(screen.getByText("Alert inbox")).toBeInTheDocument()
-    expect(screen.getAllByText("Active exploitation").length).toBeGreaterThan(0)
+    expect((await screen.findAllByText("Active exploitation")).length).toBeGreaterThan(0)
     expect(screen.getByText("CVE-2026-9999 active exploitation observed")).toBeInTheDocument()
     expect(screen.getByText("Active exploitation is affecting healthcare providers.")).toBeInTheDocument()
     expect(screen.getByText("Advisory feed")).toBeInTheDocument()

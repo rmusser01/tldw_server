@@ -306,7 +306,7 @@ export const WatchlistSetupWizard: React.FC<WatchlistSetupWizardProps> = ({
   const renderCollectionStep = () => (
     <div className="space-y-4">
       <Alert
-        message={t("watchlists:setupWizard.boundaries.title", "Collection scope first")}
+        title={t("watchlists:setupWizard.boundaries.title", "Collection scope first")}
         description={t(
           "watchlists:setupWizard.boundaries.alerts",
           "Content-match alerts come later. This setup defines the Watchlist and its initial collection scope."
@@ -469,7 +469,7 @@ export const WatchlistSetupWizard: React.FC<WatchlistSetupWizardProps> = ({
     >
       <div className="space-y-4">
         {validationError ? (
-          <Alert message={validationError} type="error" showIcon />
+          <Alert title={validationError} type="error" showIcon />
         ) : null}
         {renderStep()}
       </div>

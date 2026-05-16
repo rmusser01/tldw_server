@@ -337,7 +337,7 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
             <Alert
               type={Number(testResult.total || 0) > 0 ? "success" : "warning"}
               showIcon
-              message={t("watchlists:sources.form.testSourceSummary", "Test Summary")}
+              title={t("watchlists:sources.form.testSourceSummary", "Test Summary")}
               description={t(
                 "watchlists:sources.form.testSourceSummaryDescription",
                 "{{total}} preview item{{plural}}, {{ingestable}} ingestable, {{filtered}} filtered.",
@@ -354,7 +354,7 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
             <Alert
               type="error"
               showIcon
-              message={testError}
+              title={testError}
               description={testErrorHint || testError}
               action={(
                 <Button

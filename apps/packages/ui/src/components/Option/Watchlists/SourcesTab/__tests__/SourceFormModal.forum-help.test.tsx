@@ -31,9 +31,9 @@ vi.mock("antd", () => {
     Form: FormComponent,
     Input: ({ placeholder }: any) => <input placeholder={placeholder} />,
     Modal: ({ open, title, children }: any) => (open ? <div><h2>{title}</h2>{children}</div> : null),
-    Alert: ({ message, description }: any) => (
+    Alert: ({ title, message, description }: any) => (
       <div>
-        {message ? <span>{message}</span> : null}
+        {title ?? message ? <span>{title ?? message}</span> : null}
         {description ? <span>{description}</span> : null}
       </div>
     ),

@@ -89,9 +89,9 @@ vi.mock("antd", () => {
     </table>
   )
   return {
-    Alert: ({ message, description, action }: any) => (
+    Alert: ({ title, message, description, action }: any) => (
       <div role="status">
-        <div>{message}</div>
+        <div>{title ?? message}</div>
         <div>{description}</div>
         {action}
       </div>

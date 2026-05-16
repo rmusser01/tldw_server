@@ -1890,7 +1890,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
           showIcon
           className="mb-4"
           data-testid="watchlists-container-loading"
-          message={t("watchlists:containers.loading", "Loading Watchlists")}
+          title={t("watchlists:containers.loading", "Loading Watchlists")}
           description={t(
             "watchlists:containers.loadingDescription",
             "Preparing your monitoring workspaces."
@@ -1906,7 +1906,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
           showIcon
           className="mb-4"
           data-testid="watchlists-container-error"
-          message={t("watchlists:containers.errorTitle", "Watchlists unavailable")}
+          title={t("watchlists:containers.errorTitle", "Watchlists unavailable")}
           description={watchlistsError}
           action={(
             <Button size="small" onClick={() => void loadWatchlists()}>

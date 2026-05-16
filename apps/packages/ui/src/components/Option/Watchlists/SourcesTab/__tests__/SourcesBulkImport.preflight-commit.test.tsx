@@ -113,9 +113,9 @@ vi.mock("antd", () => {
       {title}
     </div>
   )
-  const Alert = ({ message, description }: any) => (
+  const Alert = ({ title, message, description }: any) => (
     <div>
-      <div>{message}</div>
+      <div>{title ?? message}</div>
       <div>{description}</div>
     </div>
   )

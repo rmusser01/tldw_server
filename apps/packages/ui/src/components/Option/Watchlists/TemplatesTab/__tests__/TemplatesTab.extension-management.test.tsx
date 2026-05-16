@@ -56,11 +56,11 @@ vi.mock("antd", () => {
       {children}
     </button>
   )
-  const Table = ({ "aria-label": ariaLabel, dataSource = [], columns = [] }: any) => (
+  const Table = ({ "aria-label": ariaLabel, dataSource = [], columns = [], rowKey }: any) => (
     <table role="table" aria-label={ariaLabel || "Templates table"}>
       <tbody>
         {dataSource.map((record: any, rowIndex: number) => (
-          <tr key={record.name ?? rowIndex}>
+          <tr key={typeof rowKey === "function" ? rowKey(record) : record[rowKey] ?? record.name ?? rowIndex}>
             {columns.map((column: any, columnIndex: number) => {
               const value = column.dataIndex ? record[column.dataIndex] : undefined
               const content = column.render ? column.render(value, record, rowIndex) : value
@@ -154,7 +154,7 @@ describe("TemplatesTab constrained management", () => {
     expect(screen.getByRole("button", { name: "Create Template" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument()
 
-    const card = screen.getByTestId("watchlists-template-card-cti-mece-brief")
+    const card = screen.getByTestId("watchlists-template-card-cti-mece-brief-html")
     expect(within(card).getByText("cti-mece-brief")).toBeInTheDocument()
     expect(within(card).getByText("Structured CTI briefing")).toBeInTheDocument()
     expect(within(card).getByText("HTML")).toBeInTheDocument()
@@ -172,5 +172,27 @@ describe("TemplatesTab constrained management", () => {
       expect(screen.getByRole("table", { name: "Templates table" })).toBeInTheDocument()
     })
     expect(screen.queryByTestId("watchlists-templates-constrained-list")).not.toBeInTheDocument()
+  })
+
+  it("keeps duplicate template names distinct by format in constrained cards", async () => {
+    setViewport(420)
+    const markdownTemplate = buildTemplate({
+      name: "reading_digest_suggestions",
+      description: "Markdown digest",
+      format: "md"
+    })
+    const htmlTemplate = buildTemplate({
+      name: "reading_digest_suggestions",
+      description: "HTML digest",
+      format: "html"
+    })
+    mocks.storeStateRef.current = baseState({
+      templates: [markdownTemplate, htmlTemplate]
+    })
+
+    render(<TemplatesTab />)
+
+    expect(await screen.findByTestId("watchlists-template-card-reading_digest_suggestions-md")).toBeInTheDocument()
+    expect(screen.getByTestId("watchlists-template-card-reading_digest_suggestions-html")).toBeInTheDocument()
   })
 })

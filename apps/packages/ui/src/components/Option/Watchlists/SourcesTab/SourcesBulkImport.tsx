@@ -676,7 +676,7 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
           <Alert
             type="info"
             showIcon
-            message={t(
+            title={t(
               "watchlists:sources.importPreviewLoadingExisting",
               "Loading existing feeds for duplicate checks..."
             )}
@@ -687,7 +687,7 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
           <Alert
             type={preflight.parseError ? "error" : preflight.ready > 0 ? "info" : "warning"}
             showIcon
-            message={t("watchlists:sources.importPreviewSummaryTitle", "Preflight Summary")}
+            title={t("watchlists:sources.importPreviewSummaryTitle", "Preflight Summary")}
             description={preflight.parseError
               ? t(
                   "watchlists:sources.importPreviewParseError",
@@ -713,7 +713,7 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
           <Alert
             type={summary.errors > 0 ? "warning" : "success"}
             showIcon
-            message={t("watchlists:sources.importSummary", "Import Summary")}
+            title={t("watchlists:sources.importSummary", "Import Summary")}
             description={t(
               "watchlists:sources.importSummaryDesc",
               "{{created}} created, {{skipped}} skipped, {{errors}} errors",

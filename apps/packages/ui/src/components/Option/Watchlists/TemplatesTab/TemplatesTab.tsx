@@ -25,6 +25,8 @@ import { useWatchlistsViewport } from "../shared/useWatchlistsViewport"
 
 const TEMPLATE_USAGE_CHECK_PAGE_SIZE = 200
 const TEMPLATE_USAGE_CHECK_MAX_PAGES = 10
+const templateIdentity = (template: WatchlistTemplate) =>
+  `${template.name}:${String(template.format || "md").toLowerCase()}`
 
 export const TemplatesTab: React.FC = () => {
   const { t } = useTranslation(["watchlists", "common"])
@@ -276,9 +278,9 @@ export const TemplatesTab: React.FC = () => {
         const formatLabel = String(template.format || "md").toUpperCase()
         return (
           <article
-            key={template.name}
+            key={templateIdentity(template)}
             className="rounded-lg border border-border bg-surface p-3"
-            data-testid={`watchlists-template-card-${template.name}`}
+            data-testid={`watchlists-template-card-${template.name}-${String(template.format || "md").toLowerCase()}`}
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 space-y-1">
@@ -388,7 +390,7 @@ export const TemplatesTab: React.FC = () => {
           <Table
             dataSource={safeTemplates}
             columns={columns}
-            rowKey="name"
+            rowKey={templateIdentity}
             aria-label={t("watchlists:templates.tableAria", "Templates table")}
             loading={templatesLoading}
             pagination={false}

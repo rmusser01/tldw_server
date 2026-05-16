@@ -103,9 +103,9 @@ vi.mock("antd", () => {
         {children}
       </button>
     ),
-    Alert: ({ message, description, action }: any) => (
+    Alert: ({ title, message, description, action }: any) => (
       <div>
-        <span>{message}</span>
+        <span>{title ?? message}</span>
         <span>{description}</span>
         {action}
       </div>

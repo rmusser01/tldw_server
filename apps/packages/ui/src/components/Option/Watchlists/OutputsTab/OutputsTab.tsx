@@ -1069,7 +1069,7 @@ export const OutputsTab: React.FC = () => {
           type="warning"
           showIcon
           data-testid="watchlists-outputs-delivery-issues-banner"
-          message={t(
+          title={t(
             "watchlists:outputs.deliveryIssuesBannerTitle",
             "Delivery issues detected in {{count}} report{{plural}}.",
             {

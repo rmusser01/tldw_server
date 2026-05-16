@@ -308,7 +308,7 @@ export const AlertsTab: React.FC = () => {
       <Alert
         type="info"
         showIcon
-        message={t("watchlists:alerts.healthBoundary", "Run failures and source problems are health issues, not content alerts.")}
+        title={t("watchlists:alerts.healthBoundary", "Run failures and source problems are health issues, not content alerts.")}
         description={t(
           "watchlists:alerts.boundaryDescription",
           "Use content alert rules for newly collected items that match a descriptor, keyword, classification, entity, IOC, CVE, or source constraint."
@@ -319,7 +319,7 @@ export const AlertsTab: React.FC = () => {
         <Alert
           type="error"
           showIcon
-          message={error}
+          title={error}
           action={(
             <Button size="small" onClick={() => { void loadRules(); void loadAlerts() }}>
               {t("common:refresh", "Refresh")}

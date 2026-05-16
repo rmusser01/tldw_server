@@ -51,9 +51,9 @@ vi.mock("antd", () => {
         {onCancel ? <button type="button" onClick={() => onCancel()}>Cancel</button> : null}
       </div>
     ) : null
-  const Alert = ({ message, description }: any) => (
+  const Alert = ({ title, message, description }: any) => (
     <div role="note">
-      <strong>{message}</strong>
+      <strong>{title ?? message}</strong>
       <span>{description}</span>
     </div>
   )

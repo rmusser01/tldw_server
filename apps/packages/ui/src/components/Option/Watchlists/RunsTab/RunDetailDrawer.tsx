@@ -1048,7 +1048,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
                 <Alert
                   type="info"
                   showIcon
-                  message={t("watchlists:runs.detail.commonCausesTitle", "Common causes")}
+                  title={t("watchlists:runs.detail.commonCausesTitle", "Common causes")}
                   description={
                     <ul className="list-disc pl-4 text-sm space-y-1">
                       {(COMMON_CAUSES_BY_KIND[failureKind] ?? []).map(([key, fallback]) => (
@@ -1295,7 +1295,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
         <Alert
           type={error.severity}
           showIcon
-          message={error.title}
+          title={error.title}
           description={error.description}
           action={(
             <Button
