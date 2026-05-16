@@ -115,7 +115,7 @@ Only create these helpers if the implementation would otherwise duplicate logic 
 - Read: `apps/extension/tests/e2e/quick-ingest-ux-audit.spec.ts`
 - Read: `apps/extension/tests/e2e/quick-ingest-cancel.spec.ts`
 
-- [ ] **Step 1: Generate launcher and import evidence**
+- [x] **Step 1: Generate launcher and import evidence**
 
 Run:
 
@@ -125,7 +125,7 @@ rg -n "QuickIngestWizardModal|QuickIngestModal|tldw:open-quick-ingest|open-quick
 
 Expected: output shows current wizard imports and any stale legacy/test references.
 
-- [ ] **Step 2: Write the active-path map artifact**
+- [x] **Step 2: Write the active-path map artifact**
 
 Create `Docs/superpowers/plans/2026-05-16-quick-ingest-active-path-map.md` with these sections:
 
@@ -155,7 +155,7 @@ Backlog: TASK-393
 
 Use exact file paths and short evidence snippets.
 
-- [ ] **Step 3: Verify the map names every active surface**
+- [x] **Step 3: Verify the map names every active surface**
 
 Run:
 
@@ -165,7 +165,7 @@ rg -n "Active Launch Paths|Legacy Reachability Decision|Test Classification" Doc
 
 Expected: all three headings are present.
 
-- [ ] **Step 4: Commit the evidence artifact**
+- [x] **Step 4: Commit the evidence artifact**
 
 Run:
 
