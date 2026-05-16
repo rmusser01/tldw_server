@@ -137,4 +137,28 @@ describe("LlamacppRuntimePanel", () => {
     expect(screen.getByLabelText("Vision draft is starting")).toBeDisabled()
     expect(onStart).not.toHaveBeenCalled()
   })
+
+  it("renders runtime load errors through the design-system alert primitive", () => {
+    render(
+      <LlamacppRuntimePanel
+        profiles={profiles}
+        runtimes={[]}
+        loading={false}
+        error="Runtime inventory failed to load."
+        actionProfileId={null}
+        onRefresh={vi.fn()}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        onPause={vi.fn()}
+        onResume={vi.fn()}
+        onUseInChat={vi.fn()}
+      />
+    )
+
+    expect(
+      screen.getByText("Runtime inventory failed to load.").closest(
+        '[data-ds-component="Alert"]'
+      )
+    ).toHaveAttribute("role", "status")
+  })
 })

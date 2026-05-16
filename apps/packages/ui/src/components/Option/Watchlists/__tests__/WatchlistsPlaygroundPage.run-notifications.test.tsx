@@ -2,6 +2,7 @@
 
 import React from "react"
 import { render, waitFor } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WatchlistsPlaygroundPage } from "../WatchlistsPlaygroundPage"
 
@@ -182,6 +183,13 @@ vi.mock("../shared/WatchlistsHealthBar", () => ({
   WatchlistsHealthBar: () => <div data-testid="watchlists-health-bar" />
 }))
 
+const renderWatchlistsPlaygroundPage = () =>
+  render(
+    <MemoryRouter initialEntries={["/watchlists"]}>
+      <WatchlistsPlaygroundPage />
+    </MemoryRouter>
+  )
+
 describe("WatchlistsPlaygroundPage run notifications", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -253,7 +261,7 @@ describe("WatchlistsPlaygroundPage run notifications", () => {
   })
 
   it("groups repeat failures into one notification and deep-links to the newest run", async () => {
-    render(<WatchlistsPlaygroundPage />)
+    renderWatchlistsPlaygroundPage()
 
     await waitFor(() => {
       expect(mocks.notificationErrorMock).toHaveBeenCalledTimes(1)
@@ -278,7 +286,7 @@ describe("WatchlistsPlaygroundPage run notifications", () => {
     mocks.state.pollingActive = true
     mocks.fetchWatchlistRunsMock.mockReset()
 
-    render(<WatchlistsPlaygroundPage />)
+    renderWatchlistsPlaygroundPage()
 
     await new Promise((resolve) => {
       setTimeout(resolve, 250)
@@ -303,7 +311,7 @@ describe("WatchlistsPlaygroundPage run notifications", () => {
         has_more: false
       })
 
-    render(<WatchlistsPlaygroundPage />)
+    renderWatchlistsPlaygroundPage()
 
     await new Promise((resolve) => {
       setTimeout(resolve, 250)
@@ -340,7 +348,7 @@ describe("WatchlistsPlaygroundPage run notifications", () => {
       has_more: false
     })
 
-    render(<WatchlistsPlaygroundPage />)
+    renderWatchlistsPlaygroundPage()
 
     await waitFor(() => {
       expect(mocks.trackWatchlistsOnboardingTelemetryMock).toHaveBeenCalledWith({
