@@ -4,7 +4,7 @@ title: Add Persona Visual generated-candidate provenance review metadata
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-16 17:12'
+updated_date: '2026-05-16 17:18'
 labels:
   - persona
   - buddy
@@ -15,6 +15,7 @@ dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/1782'
   - 'https://github.com/rmusser01/tldw_server/issues/1510'
+  - 'https://github.com/rmusser01/tldw_server/pull/1784'
 documentation:
   - Docs/superpowers/plans/2026-05-16-persona-visual-candidate-provenance.md
 ---
@@ -43,9 +44,7 @@ Plan saved at Docs/superpowers/plans/2026-05-16-persona-visual-candidate-provena
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Verification recorded: focused Persona Visual DB/worker/API suite passed (78 passed); py_compile passed; git diff --check passed; Bandit passed with empty results array in `/tmp/bandit_persona_visual_candidate_provenance.json`.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+Verification recorded: focused Persona Visual DB/worker/API suite passed (78 passed); py_compile passed; git diff --check passed; Bandit passed with empty results array in /tmp/bandit_persona_visual_candidate_provenance.json. Draft PR: https://github.com/rmusser01/tldw_server/pull/1784
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
