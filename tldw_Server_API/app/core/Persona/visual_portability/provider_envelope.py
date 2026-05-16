@@ -45,7 +45,7 @@ _SECRET_VALUE_RE = re.compile(
     r"bearer\s+[A-Za-z0-9._-]{8,}|api[_-]?key|secret|token|session[_-]?cookie)",
     re.IGNORECASE,
 )
-_SHA256_RE = re.compile(r"^[a-fA-F0-9]{64}$")
+_SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 _UNSAFE_PATH_RE = re.compile(
     r"(^/|^[A-Za-z]:[\\/]|\.\.|~[/\\]|file://|localhost|127\.0\.0\.1|::1)",
     re.IGNORECASE,
@@ -165,7 +165,7 @@ def build_provider_archive_import_preview_handoff(
     """
     normalized = normalize_provider_result_envelope(raw)
     blockers = list(normalized["blockers"])
-    archive = _provider_archive_from_normalized_envelope(normalized, blockers)
+    archive = None
 
     if normalized.get("result_type") != "portable_archive":
         blockers.append(
@@ -174,12 +174,17 @@ def build_provider_archive_import_preview_handoff(
                 "Only portable archive provider output can be handed to import preview.",
             )
         )
-    if not normalized.get("commit_eligible"):
-        archive = None
+    else:
+        archive = _provider_archive_from_normalized_envelope(normalized, blockers)
     if blockers:
         archive = None
 
     normalized_blockers = _dedupe_diagnostics(blockers)
+    safe_target_persona_id = (
+        _safe_text(target_persona_id, max_length=128)
+        if target_persona_id
+        else None
+    )
     return {
         "ready": not normalized_blockers,
         "operation": "import_preview",
@@ -188,7 +193,7 @@ def build_provider_archive_import_preview_handoff(
             "user_id": _safe_text(user_id, max_length=128),
             "preview_id": _safe_text(preview_id, max_length=128),
             "request_id": _safe_text(request_id, max_length=128),
-            "target_persona_id": _safe_text(target_persona_id, max_length=128) if target_persona_id else None,
+            "target_persona_id": safe_target_persona_id,
         },
         "archive": archive,
         "provider": normalized.get("provider"),
@@ -249,9 +254,19 @@ def _provider_archive_from_normalized_envelope(
     media_type = _safe_text(archive.get("media_type"), max_length=120)
 
     if not resource_uri or not resource_uri.startswith(_ALLOWED_URI_SCHEME_PREFIXES):
-        blockers.append(_diagnostic("archive_resource_uri_missing", "Portable archive MCP resource URI is required."))
+        blockers.append(
+            _diagnostic(
+                "archive_resource_uri_missing",
+                "Portable archive MCP resource URI is required.",
+            )
+        )
     if not _SHA256_RE.fullmatch(archive_sha256):
-        blockers.append(_diagnostic("archive_sha256_invalid", "Portable archive SHA-256 checksum is required."))
+        blockers.append(
+            _diagnostic(
+                "archive_sha256_invalid",
+                "Portable archive SHA-256 checksum is required.",
+            )
+        )
     if media_type not in COMPATIBLE_PERSONA_VISUAL_ARCHIVE_MEDIA_TYPES:
         blockers.append(
             _diagnostic(

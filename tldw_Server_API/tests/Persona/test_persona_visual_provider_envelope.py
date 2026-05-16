@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
+from typing import Callable
 
 import pytest
 
+from tldw_Server_API.app.core.Persona.visual_jobs import (
+    PERSONA_VISUAL_PACK_IMPORT_PREVIEW_JOB_TYPE,
+)
 from tldw_Server_API.app.core.Persona.visual_portability.provider_envelope import (
     CANONICAL_PERSONA_VISUAL_ARCHIVE_MEDIA_TYPE,
     build_provider_archive_import_preview_handoff,
@@ -355,7 +359,7 @@ def test_build_provider_archive_import_preview_handoff_accepts_valid_portable_ar
 
     assert handoff["ready"] is True
     assert handoff["operation"] == "import_preview"
-    assert handoff["job_type"] == "persona_visual_pack_import_preview"
+    assert handoff["job_type"] == PERSONA_VISUAL_PACK_IMPORT_PREVIEW_JOB_TYPE
     assert handoff["request"] == {
         "user_id": "user-1",
         "preview_id": "preview-1",
@@ -368,7 +372,9 @@ def test_build_provider_archive_import_preview_handoff_accepts_valid_portable_ar
             "mcp://local-sprite-pose-maker/resources/"
             "expr-pack-2026-05-13.tldw-persona-vpack"
         ),
-        "sha256": "2f3a6c2c4b0b0c7f9f7ad3e2c0f9f95543e3013d6a45b69822ad0f01f54415be",
+        "sha256": (
+            "2f3a6c2c4b0b0c7f9f7ad3e2c0f9f95543e3013d6a45b69822ad0f01f54415be"
+        ),
         "media_type": CANONICAL_PERSONA_VISUAL_ARCHIVE_MEDIA_TYPE,
     }
     assert handoff["diagnostics"]["blockers"] == []
@@ -376,28 +382,49 @@ def test_build_provider_archive_import_preview_handoff_accepts_valid_portable_ar
     assert "activation_allowed" not in str(handoff["archive"])
 
 
+def _set_provider_result_type_generated_candidate(raw: dict[str, object]) -> None:
+    raw["result_type"] = "generated_candidate"
+
+
+def _allow_provider_activation(raw: dict[str, object]) -> None:
+    raw["activation_allowed"] = True
+
+
+def _remove_provider_archive_resource_uri(raw: dict[str, object]) -> None:
+    payload = raw["payload"]
+    assert isinstance(payload, dict)
+    archive = payload["archive"]
+    assert isinstance(archive, dict)
+    archive.pop("mcp_resource_uri")
+
+
+def _set_invalid_provider_archive_sha(raw: dict[str, object]) -> None:
+    payload = raw["payload"]
+    assert isinstance(payload, dict)
+    archive = payload["archive"]
+    assert isinstance(archive, dict)
+    archive["sha256"] = "not-a-sha"
+
+
 @pytest.mark.parametrize(
     ("mutator", "expected_code"),
     [
-        (lambda raw: raw.update({"result_type": "generated_candidate"}), "unsupported_archive_handoff_result_type"),
-        (lambda raw: raw.update({"activation_allowed": True}), "activation_not_allowed"),
         (
-            lambda raw: raw["payload"]["archive"].pop("mcp_resource_uri"),  # type: ignore[index]
-            "archive_resource_uri_missing",
+            _set_provider_result_type_generated_candidate,
+            "unsupported_archive_handoff_result_type",
         ),
-        (
-            lambda raw: raw["payload"]["archive"].update({"sha256": "not-a-sha"}),  # type: ignore[index]
-            "archive_sha256_invalid",
-        ),
+        (_allow_provider_activation, "activation_not_allowed"),
+        (_remove_provider_archive_resource_uri, "archive_resource_uri_missing"),
+        (_set_invalid_provider_archive_sha, "archive_sha256_invalid"),
     ],
 )
 def test_build_provider_archive_import_preview_handoff_fails_closed_for_invalid_inputs(
-    mutator: object,
+    mutator: Callable[[dict[str, object]], object],
     expected_code: str,
 ) -> None:
     """Return deterministic blockers without enqueueing or materializing provider output."""
     raw = _valid_portable_archive_envelope()
-    mutator(raw)  # type: ignore[operator]
+    mutator(raw)
 
     handoff = build_provider_archive_import_preview_handoff(
         raw,
@@ -408,4 +435,23 @@ def test_build_provider_archive_import_preview_handoff_fails_closed_for_invalid_
 
     assert handoff["ready"] is False
     assert expected_code in _blocker_codes(handoff)
+    assert handoff["archive"] is None
+
+
+def test_provider_archive_handoff_skips_archive_parse_for_non_archives() -> None:
+    """Avoid archive-payload diagnostics for provider result types that are not archives."""
+    raw = _valid_portable_archive_envelope()
+    raw["result_type"] = "generated_candidate"
+    raw["payload"] = None
+
+    handoff = build_provider_archive_import_preview_handoff(
+        raw,
+        user_id="user-1",
+        request_id="request-1",
+        preview_id="preview-1",
+    )
+
+    codes = _blocker_codes(handoff)
+    assert "unsupported_archive_handoff_result_type" in codes
+    assert "archive_payload_missing" not in codes
     assert handoff["archive"] is None

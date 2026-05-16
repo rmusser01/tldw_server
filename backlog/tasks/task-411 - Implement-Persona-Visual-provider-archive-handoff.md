@@ -52,6 +52,8 @@ Implemented `build_provider_archive_import_preview_handoff()` in `provider_envel
 RED verification: focused provider-envelope pytest failed on missing `build_provider_archive_import_preview_handoff` import before implementation.
 
 GREEN verification: focused provider-envelope pytest passed with 33 tests; Persona Visual jobs pytest passed with 8 tests; py_compile passed for the touched helper/test; git diff --check passed; Bandit on `provider_envelope.py` wrote `/tmp/bandit_persona_provider_archive_handoff.json` with zero findings.
+
+PR #1792 review follow-up: addressed still-valid CodeRabbit/Gemini/Qodo comments by skipping archive metadata parsing for non-portable_archive handoffs, tightening the SHA-256 regex to lowercase after normalization, removing the redundant commit_eligible branch, replacing the hardcoded test job type with `PERSONA_VISUAL_PACK_IMPORT_PREVIEW_JOB_TYPE`, wrapping newly added long test/helper lines, and adding a regression that non-archive handoffs do not get archive_payload_missing blockers. Validation: provider-envelope pytest passed with 34 tests; Persona Visual jobs pytest passed with 8 tests; py_compile passed; git diff --check passed; Bandit wrote `/tmp/bandit_persona_provider_archive_handoff_review.json` with zero findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
