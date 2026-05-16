@@ -13,10 +13,16 @@ const mocks = vi.hoisted(() => ({
         | string
         | {
             defaultValue?: string
+            count?: number
           }
     ) => {
       if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
-      if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
+      if (defaultValueOrOptions?.defaultValue) {
+        return defaultValueOrOptions.defaultValue.replace(
+          "{{count}}",
+          String(defaultValueOrOptions.count ?? "")
+        )
+      }
       return key
     }
   )
@@ -327,6 +333,94 @@ describe("VisualPackEditor", () => {
       "active"
     )
     expect(screen.queryByTestId("visual-buddy-setup-choice-card")).not.toBeInTheDocument()
+  })
+
+  it("shows a post-setup management header with active pack counts and top attention", async () => {
+    const activePack = makeVisualPack({
+      id: "active-pack",
+      title: "Rendered now",
+      status: "active"
+    })
+    const draftPack = makeVisualPack({
+      id: "draft-pack",
+      title: "Draft pack",
+      status: "draft"
+    })
+    const reviewPack = makeVisualPack({
+      id: "review-pack",
+      title: "Review pack",
+      status: "review"
+    })
+    const candidate = {
+      id: "candidate-1",
+      pack_id: "active-pack",
+      persona_id: "persona-1",
+      job_id: "job-1",
+      status: "review",
+      proposed_manifest_patch: {},
+      generated_asset_ids: ["asset-a"],
+      generated_assets: [visualAssets[0]],
+      prompt: "review this pose",
+      failure_reason: null,
+      created_at: "2026-05-09T00:00:00Z",
+      last_modified: "2026-05-09T00:00:00Z",
+      version: 1
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse({
+          packs: [activePack, draftPack, reviewPack],
+          active_pack: activePack
+        })
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/active-pack/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({
+          candidates: [candidate, { ...candidate, id: "candidate-2" }]
+        })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    const header = await screen.findByTestId("persona-visual-management-header")
+    expect(header).toHaveTextContent("Selected persona")
+    expect(header).toHaveTextContent("Garden Helper")
+    expect(header).toHaveTextContent("Rendered now")
+    expect(header).toHaveTextContent("active 1")
+    expect(header).toHaveTextContent("draft 1")
+    expect(header).toHaveTextContent("review 1")
+    await waitFor(() => expect(header).toHaveTextContent("Review required"))
+    expect(header).toHaveTextContent("2 generated candidates need review.")
+    expect(screen.getByTestId("persona-visual-pack-select")).toBeInTheDocument()
   })
 
   it("does not show setup choices before active pack state is known", async () => {

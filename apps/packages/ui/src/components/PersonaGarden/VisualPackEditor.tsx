@@ -88,6 +88,11 @@ import {
   type PersonaVisualGenerationReadinessView
 } from "./personaVisualGenerationReadiness"
 import {
+  buildPersonaVisualManagementSummary,
+  type PersonaVisualManagementAttentionRow,
+  type PersonaVisualManagementModel
+} from "./personaVisualManagementSummary"
+import {
   formatStarterExpectedAssetGroups,
   getStarterComplexityTierLabel,
   getStarterProductionStatusLabel,
@@ -120,6 +125,231 @@ type VisualPackTranslate = (
   key: string,
   options?: { defaultValue?: string; [key: string]: unknown }
 ) => string
+
+const getManagementAttentionCopy = (
+  row: PersonaVisualManagementAttentionRow | undefined,
+  t: VisualPackTranslate
+): { title: string; message: string } => {
+  if (!row) {
+    return {
+      title: t("sidepanel:personaGarden.visuals.management.allClearTitle", {
+        defaultValue: "No immediate attention needed"
+      }),
+      message: t("sidepanel:personaGarden.visuals.management.allClearMessage", {
+        defaultValue: "Review and activation controls remain available below."
+      })
+    }
+  }
+
+  const countMessage = (
+    key: string,
+    singular: string,
+    plural: string
+  ): string =>
+    t(key, {
+      count: row.count,
+      defaultValue: row.count === 1 ? `1 ${singular}` : `${row.count} ${plural}`,
+      defaultValue_one: "{{count}} " + singular,
+      defaultValue_other: "{{count}} " + plural
+    })
+
+  switch (row.kind) {
+    case "failed_pack":
+      return {
+        title: t("sidepanel:personaGarden.visuals.management.failedPackTitle", {
+          defaultValue: "Failed pack needs review"
+        }),
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.failedPackMessage",
+          "failed pack needs cleanup or replacement.",
+          "failed packs need cleanup or replacement."
+        )
+      }
+    case "invalid_manifest":
+      return {
+        title: t("sidepanel:personaGarden.visuals.management.invalidManifestTitle", {
+          defaultValue: "Activation is blocked"
+        }),
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.invalidManifestMessage",
+          "selected manifest issue blocks activation.",
+          "selected manifest issues block activation."
+        )
+      }
+    case "generated_candidates_review":
+      return {
+        title: t("sidepanel:personaGarden.visuals.management.reviewRequiredTitle", {
+          defaultValue: "Review required"
+        }),
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.reviewRequiredMessage",
+          "generated candidate needs review.",
+          "generated candidates need review."
+        )
+      }
+    case "generated_candidates_failed":
+      return {
+        title: t("sidepanel:personaGarden.visuals.management.failedCandidateTitle", {
+          defaultValue: "Generation failed"
+        }),
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.failedCandidateMessage",
+          "generated candidate failed.",
+          "generated candidates failed."
+        )
+      }
+    case "import_preview_ready":
+      return {
+        title: t("sidepanel:personaGarden.visuals.management.importPreviewTitle", {
+          defaultValue: "Import preview ready"
+        }),
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.importPreviewMessage",
+          "import preview needs choices or review.",
+          "import previews need choices or review."
+        )
+      }
+    case "import_commit_completed":
+      return {
+        title: t("sidepanel:personaGarden.visuals.management.importCommitTitle", {
+          defaultValue: "Imported draft ready"
+        }),
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.importCommitMessage",
+          "import commit created a draft for review.",
+          "import commits created drafts for review."
+        )
+      }
+    case "export_completed":
+      return {
+        title: t("sidepanel:personaGarden.visuals.management.exportCompletedTitle", {
+          defaultValue: "Export ready"
+        }),
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.exportCompletedMessage",
+          "archive is ready to download.",
+          "archives are ready to download."
+        )
+      }
+    case "library_source_unavailable":
+      return {
+        title: t("sidepanel:personaGarden.visuals.management.libraryUnavailableTitle", {
+          defaultValue: "Library source unavailable"
+        }),
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.libraryUnavailableMessage",
+          "library item points to a missing source pack.",
+          "library items point to missing source packs."
+        )
+      }
+    case "library_source_changed":
+      return {
+        title: t("sidepanel:personaGarden.visuals.management.libraryChangedTitle", {
+          defaultValue: "Library source changed"
+        }),
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.libraryChangedMessage",
+          "library item may be stale.",
+          "library items may be stale."
+        )
+      }
+    case "generation_unavailable":
+      return {
+        title: t("sidepanel:personaGarden.visuals.management.generationUnavailableTitle", {
+          defaultValue: "Generation unavailable"
+        }),
+        message: t("sidepanel:personaGarden.visuals.management.generationUnavailableMessage", {
+          defaultValue: "Check generation readiness before queueing assets."
+        })
+      }
+    case "pending_job":
+      return {
+        title: t("sidepanel:personaGarden.visuals.management.pendingJobTitle", {
+          defaultValue: "Job in progress"
+        }),
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.pendingJobMessage",
+          "visual job is still running.",
+          "visual jobs are still running."
+        )
+      }
+    case "failed_job":
+    default:
+      return {
+        title: t("sidepanel:personaGarden.visuals.management.failedJobTitle", {
+          defaultValue: "Job failed"
+        }),
+        message: countMessage(
+          "sidepanel:personaGarden.visuals.management.failedJobMessage",
+          "visual job needs recovery.",
+          "visual jobs need recovery."
+        )
+      }
+  }
+}
+
+const VisualManagementHeader: React.FC<{
+  personaName: string
+  model: PersonaVisualManagementModel
+  t: VisualPackTranslate
+}> = ({ personaName, model, t }) => {
+  const topAttention = model.attentionRows[0]
+  const attentionCopy = getManagementAttentionCopy(topAttention, t)
+  const counts = model.summary.packCounts
+
+  return (
+    <section
+      data-testid="persona-visual-management-header"
+      className="border-b border-border pb-3"
+      aria-label={t("sidepanel:personaGarden.visuals.management.ariaLabel", {
+        defaultValue: "Persona Visual management summary"
+      })}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+            {t("sidepanel:personaGarden.visuals.management.personaLabel", {
+              defaultValue: "Selected persona"
+            })}
+          </div>
+          <div className="mt-1 text-sm font-medium text-text">{personaName}</div>
+          <div className="mt-1 text-xs text-text-muted">
+            {model.summary.activePackTitle ||
+              t("sidepanel:personaGarden.visuals.management.noActivePack", {
+                defaultValue: "No active visual pack"
+              })}
+          </div>
+        </div>
+        <div
+          className="flex flex-wrap gap-1 text-xs"
+          aria-label={t("sidepanel:personaGarden.visuals.management.countsLabel", {
+            defaultValue: "Pack lifecycle counts"
+          })}
+        >
+          {(["active", "draft", "review", "archived", "failed"] as const).map(
+            (status) => (
+              <span
+                key={status}
+                className="rounded border border-border bg-surface px-2 py-1 text-text-muted"
+              >
+                <span>
+                  {t(`sidepanel:personaGarden.visuals.management.status.${status}`, {
+                    defaultValue: status
+                  })}
+                </span>{" "}
+                <span className="font-medium text-text">{counts[status]}</span>
+              </span>
+            )
+          )}
+        </div>
+      </div>
+      <div className="mt-3 rounded-md border border-border bg-surface px-3 py-2 text-xs">
+        <div className="font-medium text-text">{attentionCopy.title}</div>
+        <div className="mt-1 text-text-muted">{attentionCopy.message}</div>
+      </div>
+    </section>
+  )
+}
 
 const getGenerationReadinessCopy = (
   view: PersonaVisualGenerationReadinessView,
@@ -930,6 +1160,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       null,
     [selectedPackId, visiblePacks]
   )
+  const activePack = React.useMemo(
+    () => visiblePacks.find((pack) => pack.id === activePackId) ?? null,
+    [activePackId, visiblePacks]
+  )
   const availableDuplicateTargets = React.useMemo(
     () => duplicateTargets.filter((target) => target.id !== selectedPersonaId),
     [duplicateTargets, selectedPersonaId]
@@ -1012,6 +1246,33 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const generationReadinessCopy = React.useMemo(
     () => getGenerationReadinessCopy(generationReadinessView, t),
     [generationReadinessView, t]
+  )
+  const managementModel = React.useMemo(
+    () =>
+      buildPersonaVisualManagementSummary({
+        packs: visiblePacks,
+        activePack,
+        selectedPack,
+        validationErrors,
+        candidates,
+        libraryItems,
+        importPreview,
+        importCommitJob,
+        exportJob,
+        generationReadiness: generationReadinessView
+      }),
+    [
+      activePack,
+      candidates,
+      exportJob,
+      generationReadinessView,
+      importCommitJob,
+      importPreview,
+      libraryItems,
+      selectedPack,
+      validationErrors,
+      visiblePacks
+    ]
   )
 
   const loadPacks = React.useCallback(
@@ -2617,6 +2878,12 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     !hasActiveVisual &&
     !importPreview &&
     !importCommitJob
+  const showManagementHeader =
+    isActive &&
+    Boolean(selectedPersonaId) &&
+    packStateMatchesSelectedPersona &&
+    packsLoaded &&
+    !showSetupChoices
   const recommendedStarter = starterPacks[0] ?? null
   const importPreviewPanel = (
     <div className="rounded border border-border bg-bg p-2">
@@ -3067,17 +3334,32 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       </Modal>
 
       <div className="rounded-lg border border-border bg-surface p-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
-              {t("sidepanel:personaGarden.visuals.heading", {
-                defaultValue: "Visual Packs"
-              })}
+        {showManagementHeader ? (
+          <VisualManagementHeader
+            personaName={selectedPersonaName || selectedPersonaId}
+            model={managementModel}
+            t={t}
+          />
+        ) : null}
+        <div
+          className={
+            showManagementHeader
+              ? "mt-3 flex flex-wrap items-start justify-end gap-3"
+              : "flex flex-wrap items-start justify-between gap-3"
+          }
+        >
+          {!showManagementHeader ? (
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+                {t("sidepanel:personaGarden.visuals.heading", {
+                  defaultValue: "Visual Packs"
+                })}
+              </div>
+              <div className="mt-1 text-sm font-medium text-text">
+                {selectedPersonaName || selectedPersonaId}
+              </div>
             </div>
-            <div className="mt-1 text-sm font-medium text-text">
-              {selectedPersonaName || selectedPersonaId}
-            </div>
-          </div>
+          ) : null}
           <Button
             data-testid="persona-visual-pack-refresh-button"
             size="small"
