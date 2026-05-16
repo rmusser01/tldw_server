@@ -148,6 +148,27 @@ const extractConfiguredProviders = (payload: any): any[] => {
   });
 };
 
+const normalizeCockpitProviderKey = (provider: string): string => {
+  const normalized = provider.trim().toLowerCase();
+  if (normalized === 'llama.cpp') return 'llamacpp';
+  if (normalized === 'local-llm') return 'local';
+  return normalized;
+};
+
+const normalizeConfiguredChatModelId = (providerName: string, value: unknown): string => {
+  let model = String(value || '').trim().replace(/^tldw:/i, '');
+  const separatorIndex = model.indexOf(':');
+  if (separatorIndex <= 0 || separatorIndex === model.length - 1) return model;
+
+  const prefix = normalizeCockpitProviderKey(model.slice(0, separatorIndex));
+  const configuredProvider = normalizeCockpitProviderKey(providerName);
+  if (prefix === configuredProvider) {
+    model = model.slice(separatorIndex + 1).trim();
+  }
+
+  return model;
+};
+
 const buildConfiguredChatModelSelection = (payload: any): RealChatModelSelection => {
   const configuredProviders = extractConfiguredProviders(payload).filter(
     (provider: any) => Array.isArray(provider?.models) && provider.models.length > 0
@@ -160,18 +181,19 @@ const buildConfiguredChatModelSelection = (payload: any): RealChatModelSelection
     throw new Error('No configured provider with chat models is available on the real server');
   }
 
-  const model =
+  const providerName = String(provider.name || '').trim();
+  if (!providerName) {
+    throw new Error('Configured chat model provider is missing a provider name');
+  }
+
+  const rawModel =
     typeof provider.default_model === 'string' && provider.default_model.trim().length > 0
       ? provider.default_model.trim()
       : String(provider.models[0] || '').trim();
+  const model = normalizeConfiguredChatModelId(providerName, rawModel);
 
   if (!model) {
     throw new Error(`Configured provider ${provider.name || '<unknown>'} has no usable model`);
-  }
-
-  const providerName = String(provider.name || '').trim();
-  if (!providerName) {
-    throw new Error(`Configured model ${model} is missing a provider name`);
   }
 
   return {
@@ -531,13 +553,6 @@ const assertProviderQualifiedPayload = async (page: Page, response: Response) =>
 const escapeCssAttrValue = (value: string): string =>
   value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
-const normalizeCockpitProviderKey = (provider: string): string => {
-  const normalized = provider.trim().toLowerCase();
-  if (normalized === 'llama.cpp') return 'llamacpp';
-  if (normalized === 'local-llm') return 'local';
-  return normalized;
-};
-
 const selectConfiguredCockpitModel = async (
   page: Page,
   selection: RealChatModelSelection
@@ -614,6 +629,37 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(
       apiPost(fakeRequest, '/api/v1/example', { sample: true })
     ).resolves.toEqual({ status: 204, body: null });
+  });
+
+  test('normalizes configured provider model IDs before deriving cockpit keys', () => {
+    expect(
+      buildConfiguredChatModelSelection({
+        providers: [
+          {
+            name: 'openai',
+            is_configured: true,
+            default_model: 'tldw:openai:gpt-4.1-mini',
+            models: ['openai:gpt-4.1-mini'],
+          },
+        ],
+      })
+    ).toEqual({
+      provider: 'openai',
+      model: 'gpt-4.1-mini',
+      key: 'tldw:gpt-4.1-mini',
+    });
+
+    expect(
+      buildConfiguredChatModelSelection({
+        providers: [
+          {
+            name: 'llama.cpp',
+            is_configured: true,
+            models: ['llama3:latest'],
+          },
+        ],
+      }).model
+    ).toBe('llama3:latest');
   });
 
   test('does not intercept backend routes in this real-server spec', async ({
@@ -743,7 +789,10 @@ test.describe('/chat cockpit real-server parity', () => {
     await page.getByRole('button', { name: /Advanced controls/i }).click();
     await expect(page.getByTestId('composer-options-panel')).toBeVisible();
 
-    await page.getByTestId('model-selector').first().click();
+    const modelSelector = page.getByTestId('model-selector').first();
+    await modelSelector.focus();
+    await expect(modelSelector).toBeFocused();
+    await page.keyboard.press('Enter');
     await expect(page.getByRole('textbox', { name: 'Search models' })).toBeVisible();
     await expect(page.getByRole('menu').first()).toBeVisible();
     await page.keyboard.press('Escape');

@@ -31,7 +31,7 @@ Do not edit browser-extension sidepanel/sidebar files, `/settings`, character-li
   - Add accessible mobile tab/tabpanel relationship coverage if it does not fit the maturity test cleanly.
 - Modify: `apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts`
   - Expand the existing real-server mobile test to prove draft preservation across context/runtime/focus transitions and capture active-conversation screenshots.
-- Update: `backlog/tasks/task-402 - Polish-main-chat-mobile-cockpit-experience.md`
+- Update: `backlog/completed/task-402 - Polish-main-chat-mobile-cockpit-experience.md`
   - Record touched files, verification, and completion state.
 
 ## Stage 1: Prove the Mobile Shell Gap
@@ -100,4 +100,4 @@ Do not edit browser-extension sidepanel/sidebar files, `/settings`, character-li
 
 - [x] Run all verification commands fresh before making completion claims.
 - [x] Update `TASK-402` acceptance criteria, implementation notes, verification, and final summary.
-- [ ] Commit the mobile cockpit polish slice.
+- [x] Commit the mobile cockpit polish slice.

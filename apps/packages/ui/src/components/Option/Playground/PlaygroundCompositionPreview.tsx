@@ -1,7 +1,7 @@
 import React from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { getDesignSystemState, type DesignSystemStateKey } from "@/design-system";
+import { getDesignSystemState } from "@/design-system";
 import { cockpitRailStyles } from "./playground-cockpit-rail-styles";
 import type {
   PlaygroundCompositionPreviewEntry,
@@ -13,6 +13,35 @@ import type {
 export type PlaygroundCompositionPreviewProps = {
   summary: PlaygroundCompositionPreviewSummary;
 };
+
+type PreviewDesignSystemStateKey =
+  | "ready"
+  | "degraded"
+  | "unavailable"
+  | "loading"
+  | "empty";
+
+const previewStateKeyByPreviewState = {
+  ready: "ready",
+  degraded: "degraded",
+  unavailable: "unavailable",
+} satisfies Record<PlaygroundCompositionPreviewState, PreviewDesignSystemStateKey>;
+
+const previewStateKeyByEntryState = {
+  active: "ready",
+  degraded: "degraded",
+  unavailable: "unavailable",
+  loading: "loading",
+  disabled: "empty",
+} satisfies Record<PlaygroundCompositionPreviewEntryState, PreviewDesignSystemStateKey>;
+
+const designSystemStateLabels = {
+  ready: getDesignSystemState("ready").label,
+  degraded: getDesignSystemState("degraded").label,
+  unavailable: getDesignSystemState("unavailable").label,
+  loading: getDesignSystemState("loading").label,
+  empty: getDesignSystemState("empty").label,
+} satisfies Record<PreviewDesignSystemStateKey, string>;
 
 const stateClass = (state: PlaygroundCompositionPreviewEntryState) => {
   if (state === "active") return "border-success/40 bg-success/10 text-success";
@@ -26,34 +55,22 @@ const overallLabel = (
   state: PlaygroundCompositionPreviewState,
   t: ReturnType<typeof useTranslation>["t"],
 ) => {
-  const stateKeyByPreviewState = {
-    ready: "ready",
-    degraded: "degraded",
-    unavailable: "unavailable",
-  } satisfies Record<PlaygroundCompositionPreviewState, DesignSystemStateKey>;
-  const stateDefinition = getDesignSystemState(stateKeyByPreviewState[state]);
-  if (state === "ready") return t("cockpit.compositionReady", stateDefinition.label);
-  if (state === "degraded") return t("cockpit.compositionDegraded", stateDefinition.label);
-  return t("cockpit.compositionUnavailable", stateDefinition.label);
+  const stateLabel = designSystemStateLabels[previewStateKeyByPreviewState[state]];
+  if (state === "ready") return t("cockpit.compositionReady", stateLabel);
+  if (state === "degraded") return t("cockpit.compositionDegraded", stateLabel);
+  return t("cockpit.compositionUnavailable", stateLabel);
 };
 
 const entryStateLabel = (
   state: PlaygroundCompositionPreviewEntryState,
   t: ReturnType<typeof useTranslation>["t"],
 ) => {
-  const stateKeyByEntryState = {
-    active: "ready",
-    degraded: "degraded",
-    unavailable: "unavailable",
-    loading: "loading",
-    disabled: "empty",
-  } satisfies Record<PlaygroundCompositionPreviewEntryState, DesignSystemStateKey>;
-  const stateDefinition = getDesignSystemState(stateKeyByEntryState[state]);
+  const stateLabel = designSystemStateLabels[previewStateKeyByEntryState[state]];
   if (state === "active") return t("cockpit.active", "Active");
-  if (state === "degraded") return t("cockpit.degraded", stateDefinition.label);
-  if (state === "unavailable") return t("cockpit.unavailable", stateDefinition.label);
-  if (state === "loading") return t("cockpit.loading", stateDefinition.label);
-  return t("cockpit.empty", stateDefinition.label);
+  if (state === "degraded") return t("cockpit.degraded", stateLabel);
+  if (state === "unavailable") return t("cockpit.unavailable", stateLabel);
+  if (state === "loading") return t("cockpit.loading", stateLabel);
+  return t("cockpit.empty", stateLabel);
 };
 
 const pluralize = (count: number, singular: string, plural: string) =>
@@ -144,11 +161,9 @@ export const PlaygroundCompositionPreview = ({
       </div>
 
       <ul className="mt-2 divide-y divide-border/60">
-        {summary.entries
-          .filter((entry) => entry.kind !== "composition")
-          .map((entry) => (
-            <PreviewRow key={entry.id} entry={entry} />
-          ))}
+        {summary.entries.map((entry) => (
+          <PreviewRow key={entry.id} entry={entry} />
+        ))}
       </ul>
 
       <button

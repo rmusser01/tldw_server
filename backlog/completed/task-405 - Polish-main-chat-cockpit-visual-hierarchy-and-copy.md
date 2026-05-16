@@ -1,5 +1,5 @@
 ---
-id: TASK-402
+id: TASK-405
 title: Polish main /chat cockpit visual hierarchy and copy
 status: Done
 labels:
@@ -39,10 +39,10 @@ PR7 slice from the main /chat cockpit maturity roadmap. Keep scope limited to ma
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Main /chat cockpit rail sections no longer read as generic settings dumps; grouping and hierarchy remain dense but scannable.
-- [ ] #2 Terminology for prompt, assistant/persona/character, context, provider route, scoped settings, and MCP tools is consistent across cockpit rails/status/composition surfaces.
-- [ ] #3 Visual noise from repeated borders, duplicated labels, and low-value helper copy is reduced while preserving existing controls and keyboard names.
-- [ ] #4 Design-system state labels/tokens remain the source of truth, and browser proof covers desktop and mobile cockpit states.
+- [x] #1 Main /chat cockpit rail sections no longer read as generic settings dumps; grouping and hierarchy remain dense but scannable.
+- [x] #2 Terminology for prompt, assistant/persona/character, context, provider route, scoped settings, and MCP tools is consistent across cockpit rails/status/composition surfaces.
+- [x] #3 Visual noise from repeated borders, duplicated labels, and low-value helper copy is reduced while preserving existing controls and keyboard names.
+- [x] #4 Design-system state labels/tokens remain the source of truth, and browser proof covers desktop and mobile cockpit states.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -65,10 +65,10 @@ Completed PR7 main /chat cockpit visual/copy polish. Shared rail styles now back
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

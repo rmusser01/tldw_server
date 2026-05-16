@@ -127,6 +127,33 @@ describe("PlaygroundCompositionPreview", () => {
     expect(within(region).getByText("Scope: openai:gpt-4.1-mini")).toBeInTheDocument();
   });
 
+  it("keeps composition/status rows visible in the closed summary", () => {
+    render(
+      <PlaygroundCompositionPreview
+        summary={summary({
+          entries: [
+            {
+              id: "composition-loading",
+              kind: "composition",
+              label: "Context preview",
+              title: "Context preview loading",
+              detail: "Checking the next message stack.",
+              state: "loading",
+            },
+          ],
+        })}
+      />,
+    );
+
+    const region = screen.getByRole("region", {
+      name: "Next message composition",
+    });
+
+    expect(within(region).getByText("Context preview")).toBeInTheDocument();
+    expect(within(region).getByText("Context preview loading")).toBeInTheDocument();
+    expect(within(region).getByText("Loading")).toBeInTheDocument();
+  });
+
   it("keeps detailed context stack and footprint behind a disclosure", () => {
     render(<PlaygroundCompositionPreview summary={summary()} />);
 

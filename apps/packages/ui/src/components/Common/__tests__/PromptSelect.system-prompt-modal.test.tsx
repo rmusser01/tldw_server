@@ -58,6 +58,7 @@ vi.mock("antd", async () => {
       value={props.value}
       defaultValue={props.defaultValue}
       onChange={props.onChange}
+      onKeyDownCapture={props.onKeyDownCapture}
       onKeyDown={props.onKeyDown}
     />
   ))

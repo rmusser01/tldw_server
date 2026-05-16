@@ -1,7 +1,7 @@
 # Main Chat Cockpit Visual and Copy Polish Plan
 
 Roadmap: `Docs/superpowers/specs/2026-05-15-main-chat-cockpit-maturity-roadmap-design.md`
-Backlog: TASK-402
+Backlog: TASK-405
 Scope: Main WebUI `/chat` cockpit only. No browser extension/sidebar/sidepanel work.
 
 ## Stage 1: Pin Visual-Copy Contract

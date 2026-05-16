@@ -43,10 +43,10 @@ PR6 slice from the main /chat cockpit maturity roadmap. Keep scope limited to th
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Mobile /chat users can switch context/runtime/focus cockpit surfaces without losing the composer draft.
-- [ ] #2 Mobile /chat users can reach prompt, persona/model, context, and MCP/tool state controls from the cockpit flow.
-- [ ] #3 Mobile layout preserves composer reachability, focus return, sticky status visibility, and usable tap targets.
-- [ ] #4 Real-server/browser proof covers mobile context, runtime, focus/active conversation, and relevant error/degraded or blocked state handling where observable.
+- [x] #1 Mobile /chat users can switch context/runtime/focus cockpit surfaces without losing the composer draft.
+- [x] #2 Mobile /chat users can reach prompt, persona/model, context, and MCP/tool state controls from the cockpit flow.
+- [x] #3 Mobile layout preserves composer reachability, focus return, sticky status visibility, and usable tap targets.
+- [x] #4 Real-server/browser proof covers mobile context, runtime, focus/active conversation, and relevant error/degraded or blocked state handling where observable.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -69,10 +69,10 @@ Mobile /chat cockpit now preserves the draft across context/runtime/focus transi
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
