@@ -678,7 +678,7 @@ Omit untouched files from `git add`.
 - Modify if needed: `apps/tldw-frontend/__tests__/e2e-harness-readiness.guard.test.ts`
 - Update Backlog task notes for any deferred verification.
 
-- [ ] **Step 1: Replace stale helper selectors with current wizard selectors**
+- [x] **Step 1: Replace stale helper selectors with current wizard selectors**
 
 In `journey-helpers.ts`, prefer current labels and roles:
 
@@ -691,7 +691,7 @@ In `journey-helpers.ts`, prefer current labels and roles:
 
 Do not depend on `quick-ingest-run`, `quick-ingest-cancel`, or tabbed result ids unless Task 1 proves the legacy modal remains active.
 
-- [ ] **Step 2: Update WebUI e2e expectations for current behavior**
+- [x] **Step 2: Update WebUI e2e expectations for current behavior**
 
 In `media-ingest.spec.ts`, ensure coverage exists for:
 
@@ -706,7 +706,7 @@ In `media-ingest.spec.ts`, ensure coverage exists for:
 
 Add small assertions for any behavior changed in Tasks 2 through 5.
 
-- [ ] **Step 3: Classify extension e2e specs**
+- [x] **Step 3: Classify extension e2e specs**
 
 Using the Task 1 map, update `apps/extension/tests/e2e/quick-ingest-ux-audit.spec.ts` and `apps/extension/tests/e2e/quick-ingest-cancel.spec.ts`:
 
@@ -714,7 +714,7 @@ Using the Task 1 map, update `apps/extension/tests/e2e/quick-ingest-ux-audit.spe
 - if they cover legacy modal only and legacy is unreachable, retire or skip with a clear comment and replace coverage in `media-ingest.spec.ts`
 - if extension packaging needs separate coverage, keep extension-specific assertions focused on sidepanel/runtime constraints
 
-- [ ] **Step 4: Run focused unit coverage**
+- [x] **Step 4: Run focused unit coverage**
 
 Run:
 
@@ -724,7 +724,7 @@ bunx vitest run apps/packages/ui/src/components/Common/QuickIngest/__tests__ app
 
 Expected: shared quick-ingest unit and integration tests pass.
 
-- [ ] **Step 5: Run focused WebUI e2e coverage**
+- [x] **Step 5: Run focused WebUI e2e coverage**
 
 Run:
 
@@ -734,7 +734,7 @@ npx playwright test apps/tldw-frontend/e2e/workflows/media-ingest.spec.ts --grep
 
 Expected: WebUI quick-ingest e2e coverage passes or only skips known server-unavailable live-ingest cases with explicit skip messages.
 
-- [ ] **Step 6: Run focused extension e2e coverage if the extension harness is available**
+- [x] **Step 6: Run focused extension e2e coverage if the extension harness is available**
 
 Run:
 
@@ -744,7 +744,7 @@ npx playwright test apps/extension/tests/e2e/quick-ingest-ux-audit.spec.ts apps/
 
 Expected: extension quick-ingest tests pass. If the local extension harness is unavailable, record the exact failure and keep this as a known verification gap in Backlog.
 
-- [ ] **Step 7: Run final static checks for touched frontend paths**
+- [x] **Step 7: Run final static checks for touched frontend paths**
 
 Run:
 
@@ -756,7 +756,7 @@ Expected: no whitespace errors.
 
 If the repo has a focused TypeScript check for touched frontend files, run it here and record the command/output in Backlog. Do not run a broad slow suite unless required by the PR owner.
 
-- [ ] **Step 8: Commit verification updates**
+- [x] **Step 8: Commit verification updates**
 
 Run:
 
@@ -766,6 +766,18 @@ git commit -m "test: update quick ingest wizard coverage"
 ```
 
 Omit untouched files from `git add`.
+
+**Completion notes:**
+- Commit: `be1984cee test: update quick ingest wizard coverage`.
+- WebUI journey helpers now target the active wizard dialog, URL input aria/placeholder, `Use defaults & process`, `Configure N items`, and `Start Processing` paths instead of legacy `quick-ingest-run`/old results-panel fallbacks.
+- WebUI e2e now asserts first-open purpose/50 MB copy and mixed valid/invalid URL paste validation before processing.
+- Extension `quick-ingest-ux-audit` and `quick-ingest-cancel` are classified as active-wizard specs and now use current wizard roles, current supported-format copy, `wizard-results-step`, completed/error regions, `Use defaults & process`, and `Cancel All`.
+- Verification: `./node_modules/.bin/vitest run src/components/Common/QuickIngest/__tests__ src/services/__tests__/quick-ingest-batch.test.ts src/services/__tests__/quick-ingest-session-reattach.test.ts --maxWorkers=1 --no-file-parallelism` passed with 15 files / 178 tests.
+- Verification: `TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://127.0.0.1:18001 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/media-ingest.spec.ts --grep "Quick Ingest" --project=chromium --reporter=line` passed outside the macOS sandbox with 11 tests.
+- Verification gap: `bunx playwright test tests/e2e/quick-ingest-ux-audit.spec.ts tests/e2e/quick-ingest-cancel.spec.ts --reporter=line` did not reach test execution. Extension global setup first tried `npm run build:chrome:prod` and failed with `/bin/sh: npm: command not found`; the fallback `bun run build:chrome:prod` entered `wxt build`, emitted duplicate-import warnings, then stayed silent/hung for several minutes until the test/build processes were terminated. The run ended with `error: script "build:chrome:prod" exited with code 1`.
+- Static verification: `git diff --check` passed.
+- Additional targeted check: `bunx tsc --noEmit --pretty false --skipLibCheck --target ESNext --module ESNext --moduleResolution Bundler --jsx react-jsx --types node,chrome --allowSyntheticDefaultImports --esModuleInterop tests/e2e/quick-ingest-ux-audit.spec.ts tests/e2e/quick-ingest-cancel.spec.ts` failed only in imported extension harness helpers: `tests/e2e/utils/extension-build.ts` missing `browser`/argument-count errors and `tests/e2e/utils/extension-id.ts` Page/Worker concat typing.
+- Bandit: skipped for this task because the touched files are frontend Playwright TypeScript only.
 
 ---
 
