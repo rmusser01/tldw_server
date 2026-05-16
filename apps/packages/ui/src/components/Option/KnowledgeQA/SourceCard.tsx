@@ -123,7 +123,7 @@ export function SourceCard({
   className,
 }: SourceCardProps) {
   const { t } = useTranslation("knowledge")
-  const [copiedState, setCopiedState] = React.useState<"text" | "citation" | null>(null)
+  const [copiedState, setCopiedState] = React.useState<"excerpt" | "citation" | null>(null)
   const [isExpanded, setIsExpanded] = React.useState(false)
   const [overflowOpen, setOverflowOpen] = React.useState(false)
   const overflowRef = React.useRef<HTMLDivElement>(null)
@@ -226,20 +226,20 @@ export function SourceCard({
     }, 2000)
   }, [])
 
-  const handleCopyText = useCallback(async () => {
+  const handleCopyExcerpt = useCallback(async () => {
     const requestId = latestCopyRequestIdRef.current + 1
     latestCopyRequestIdRef.current = requestId
     try {
-      await navigator.clipboard.writeText(content)
+      await navigator.clipboard.writeText(excerpt)
       if (!isMountedRef.current || latestCopyRequestIdRef.current !== requestId) {
         return
       }
-      setCopiedState("text")
+      setCopiedState("excerpt")
       scheduleCopiedStateReset(requestId)
     } catch (error) {
-      console.error("Failed to copy source text:", error)
+      console.error("Failed to copy source excerpt:", error)
     }
-  }, [content, scheduleCopiedStateReset])
+  }, [excerpt, scheduleCopiedStateReset])
 
   const handleCopyCitation = useCallback(async () => {
     const requestId = latestCopyRequestIdRef.current + 1
@@ -548,8 +548,9 @@ export function SourceCard({
             onClick={handleCopyCitation}
             className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-border bg-surface text-text-subtle hover:bg-hover hover:text-text transition-colors"
             title="Copy citation"
+            aria-label={`Copy citation for source ${index}`}
           >
-            {copiedState === "citation" ? "Copied!" : "Cite"}
+            {copiedState === "citation" ? "Copied!" : "Copy citation"}
           </button>
 
           <div ref={overflowRef} className="relative">
@@ -621,18 +622,23 @@ export function SourceCard({
                 <button
                   type="button"
                   role="menuitem"
+                  aria-label={
+                    copiedState === "excerpt"
+                      ? `Copied excerpt from source ${index}`
+                      : `Copy excerpt from source ${index}`
+                  }
                   onClick={() => {
-                    handleCopyText()
+                    handleCopyExcerpt()
                     setOverflowOpen(false)
                   }}
                   className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-subtle hover:bg-hover hover:text-text transition-colors"
                 >
-                  {copiedState === "text" ? (
+                  {copiedState === "excerpt" ? (
                     <Check className="w-3.5 h-3.5" />
                   ) : (
                     <Copy className="w-3.5 h-3.5" />
                   )}
-                  {copiedState === "text" ? "Copied text" : "Copy text"}
+                  {copiedState === "excerpt" ? "Copied excerpt" : "Copy excerpt"}
                 </button>
                 {url && (
                   <button

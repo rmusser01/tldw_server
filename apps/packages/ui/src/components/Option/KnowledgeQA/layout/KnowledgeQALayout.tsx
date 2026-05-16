@@ -161,6 +161,8 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
   }
   const focusSource = knowledgeQa.focusSource ?? (() => undefined)
   const settingsPanelOpen = knowledgeQa.settingsPanelOpen ?? false
+  const sourceHealth = knowledgeQa.sourceHealth
+  const refreshSourceHealth = knowledgeQa.refreshSourceHealth ?? (async () => undefined)
 
   const isMobile = useMobile()
   const { mode, setLayoutMode, isSimple, isResearch, showPromotionToast, dismissPromotion, acceptPromotion } =
@@ -176,6 +178,8 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
   const hasResults = results.length > 0 || Boolean(answer)
   const showNoResultsState =
     hasSearched && !isSearching && !error && results.length === 0 && !answer
+  const nearestMatchesAvailable =
+    (knowledgeQa.searchDetails?.alsoConsidered?.length ?? 0) > 0
   const hasVisibleResultsArea =
     hasResults || showNoResultsState || Boolean(error) || isSearching
   const recentHistoryItem = useMemo(() => {
@@ -354,11 +358,6 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
     })
   }
 
-  const handleBroadenScope = () => {
-    updateSetting("top_k", Math.min(50, Math.max(settings.top_k + 5, 10)))
-    setSettingsPanelOpen(true)
-  }
-
   const handleEnableWeb = () => {
     if (!settings.enable_web_fallback) {
       updateSetting("enable_web_fallback", true)
@@ -367,7 +366,7 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
 
   const handleShowNearestMatches = () => {
     setEvidenceRailOpen(true)
-    setEvidenceRailTab("sources")
+    setEvidenceRailTab(results.length > 0 ? "sources" : "details")
     if (results.length > 0) {
       focusSource(0)
     }
@@ -462,6 +461,8 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                   }
                   contextChangedSinceLastRun={contextChangedSinceLastRun}
                   scopeChangeDetails={scopeChangeDetails}
+                  sourceHealth={sourceHealth}
+                  onRefreshSourceHealth={refreshSourceHealth}
                   showAddSources={isMobile}
                   className={isDesktopReadyState ? "justify-center" : undefined}
                 />
@@ -491,6 +492,8 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                   }
                   contextChangedSinceLastRun={contextChangedSinceLastRun}
                   scopeChangeDetails={scopeChangeDetails}
+                  sourceHealth={sourceHealth}
+                  onRefreshSourceHealth={refreshSourceHealth}
                   onOpenSettings={() => setSettingsPanelOpen(true)}
                 />
               )}
@@ -508,6 +511,8 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                     onSelectSources={handleOpenSourceSelector}
                     onAddSources={handleAddSources}
                     hasSources={settings.sources.length > 0}
+                    selectedSources={settings.sources}
+                    sourceHealth={sourceHealth}
                     hasRecentSession={Boolean(recentHistoryItem)}
                     webFallbackEnabled={settings.enable_web_fallback}
                   />
@@ -558,11 +563,14 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                 {showNoResultsState ? (
                   <React.Suspense fallback={null}>
                     <LazyNoResultsRecovery
-                      onBroadenScope={handleBroadenScope}
+                      onOpenQuickIngest={handleAddSources}
                       onEnableWeb={handleEnableWeb}
                       onShowNearestMatches={handleShowNearestMatches}
                       webEnabled={settings.enable_web_fallback}
+                      selectedSources={settings.sources}
+                      sourceHealth={sourceHealth}
                       sourceStatus={knowledgeQa.searchDetails?.sourceStatus}
+                      showNearestMatchesAvailable={nearestMatchesAvailable}
                     />
                   </React.Suspense>
                 ) : null}

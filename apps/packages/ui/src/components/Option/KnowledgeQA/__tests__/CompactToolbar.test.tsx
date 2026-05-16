@@ -3,6 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import React from "react"
 import type { RagSource } from "@/services/rag/unified-rag"
+import type { KnowledgeSourceHealthState } from "../types"
 
 vi.mock("@/libs/utils", () => ({
   cn: (...args: unknown[]) => args.filter(Boolean).join(" "),
@@ -23,7 +24,9 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 
 import { CompactToolbar } from "../context/CompactToolbar"
 
-const defaultProps = {
+type CompactToolbarTestProps = React.ComponentProps<typeof CompactToolbar>
+
+const defaultProps: CompactToolbarTestProps = {
   sources: [] as RagSource[],
   preset: "balanced" as const,
   webEnabled: false,
@@ -39,7 +42,48 @@ const defaultProps = {
   showAddSources: false,
 }
 
-function renderToolbar(overrides: Partial<typeof defaultProps> = {}) {
+const sourceHealth: KnowledgeSourceHealthState = {
+  loading: false,
+  error: null,
+  loadedAt: "2026-05-16T00:00:00Z",
+  sources: [
+    {
+      sourceId: "media_db",
+      label: "Documents & Media",
+      available: true,
+      searchable: true,
+      itemCount: null,
+      indexedCount: null,
+      lastUpdated: null,
+      lastIndexed: null,
+      indexStatus: "ready",
+      embeddingStatus: "not_applicable",
+      disabledReason: null,
+      workspaceScoped: false,
+      hiddenByDefault: false,
+      privacyNote: null,
+    },
+    {
+      sourceId: "prompts",
+      label: "Prompts",
+      available: false,
+      searchable: false,
+      itemCount: null,
+      indexedCount: null,
+      lastUpdated: null,
+      lastIndexed: null,
+      indexStatus: "unavailable",
+      embeddingStatus: "unavailable",
+      disabledReason: "no_retriever_configured",
+      workspaceScoped: false,
+      hiddenByDefault: false,
+      privacyNote: null,
+    },
+  ],
+  bySource: {},
+}
+
+function renderToolbar(overrides: Partial<CompactToolbarTestProps> = {}) {
   return render(<CompactToolbar {...defaultProps} {...overrides} />)
 }
 
@@ -52,6 +96,20 @@ describe("CompactToolbar", () => {
   it('renders source summary "None" when sources is empty', () => {
     renderToolbar({ sources: [] })
     expect(screen.getByText(/Sources:.*None/)).toBeDefined()
+  })
+
+  it("renders a compact source health summary when available", () => {
+    renderToolbar({ sourceHealth })
+    expect(screen.getByText("Sources ready: 1 of 2")).toBeInTheDocument()
+  })
+
+  it("lets users refresh source health from the compact summary", async () => {
+    const onRefreshSourceHealth = vi.fn()
+    renderToolbar({ sourceHealth, onRefreshSourceHealth })
+
+    await userEvent.click(screen.getByRole("button", { name: "Refresh source health" }))
+
+    expect(onRefreshSourceHealth).toHaveBeenCalledOnce()
   })
 
   it('renders single source label "Documents & Media" for media_db', () => {

@@ -320,6 +320,13 @@ export const chatRagMethods = {
     return await this.request<any>({ path: '/api/v1/rag/health', method: 'GET' })
   },
 
+  async ragSourceHealth(this: TldwApiClientCore): Promise<any> {
+    return await this.request<any>({
+      path: "/api/v1/rag/source-health",
+      method: "GET",
+    })
+  },
+
   async ragSearch(this: TldwApiClientCore, query: string, options?: any): Promise<any> {
     const { timeoutMs, signal, ...rest } = options || {}
     const normalizedQuery = this.normalizeRagQuery(query)
