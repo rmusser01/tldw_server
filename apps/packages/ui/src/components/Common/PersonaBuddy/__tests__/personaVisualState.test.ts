@@ -38,6 +38,40 @@ describe("resolvePersonaVisualState", () => {
     ).toBe("approval_needed")
   })
 
+  it("uses custom runtime overrides declared by the active visual pack", () => {
+    const customState = asPersonaVisualCustomStateId("tool.notes_search")
+
+    expect(
+      resolvePersonaVisualState({
+        liveVoiceState: "speaking",
+        runtimeOverride: {
+          state: customState,
+          reason: "mcp_runtime.notes.search",
+          expiresAt: 2000
+        },
+        runtimeStateIds: [customState],
+        now: 1000
+      })
+    ).toBe("tool.notes_search")
+  })
+
+  it("ignores custom runtime overrides missing from the active visual pack", () => {
+    const customState = asPersonaVisualCustomStateId("tool.notes_search")
+
+    expect(
+      resolvePersonaVisualState({
+        liveVoiceState: "speaking",
+        runtimeOverride: {
+          state: customState,
+          reason: "mcp_runtime.notes.search",
+          expiresAt: 2000
+        },
+        runtimeStateIds: [],
+        now: 1000
+      })
+    ).toBe("speaking")
+  })
+
   it("ignores expired runtime overrides", () => {
     expect(
       resolvePersonaVisualState({

@@ -1,3 +1,5 @@
+"""MCP tools for Persona Visual packs and Buddy runtime state triggers."""
+
 from __future__ import annotations
 
 import asyncio
@@ -17,6 +19,7 @@ from tldw_Server_API.app.core.Persona.visuals import (
     MAX_TRIGGER_DURATION_MS,
     MIN_TRIGGER_DURATION_MS,
     VISUAL_STATE_IDS,
+    custom_visual_state_id_error,
 )
 
 from ..base import BaseModule, create_tool_definition
@@ -42,6 +45,7 @@ _PERSONA_VISUALS_NONCRITICAL_EXCEPTIONS = (
 )
 
 _MAX_LIBRARY_ITEMS_OFFSET = 1_000_000
+_MAX_TRIGGER_REASON_LENGTH = 200
 
 
 class PersonaVisualsModule(BaseModule):
@@ -94,7 +98,15 @@ class PersonaVisualsModule(BaseModule):
                 parameters={
                     "properties": {
                         "persona_id": {"type": "string"},
-                        "state": {"type": "string", "enum": sorted(VISUAL_STATE_IDS)},
+                        "state": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 96,
+                            "description": (
+                                "Built-in visual state or custom state declared by the "
+                                "active Persona Visual pack."
+                            ),
+                        },
                         "duration_ms": {
                             "type": "integer",
                             "minimum": MIN_TRIGGER_DURATION_MS,
@@ -209,14 +221,12 @@ class PersonaVisualsModule(BaseModule):
             return
         if tool_name == "persona_visuals.trigger_state":
             self._validate_optional_string(arguments, "persona_id")
-            state = str(arguments.get("state") or "").strip()
-            if not state:
-                raise ValueError("state is required")
-            if state not in VISUAL_STATE_IDS:
-                raise ValueError(f"Unknown visual state: {state}")
+            self._normalize_visual_state_id(arguments.get("state"))
             if arguments.get("duration_ms") is not None:
                 int(arguments["duration_ms"])
             self._validate_optional_string(arguments, "reason")
+            if "reason" in arguments:
+                arguments["reason"] = self._safe_trigger_reason(arguments.get("reason"))
             return
         if tool_name == "persona_visuals.create_draft_pack":
             self._validate_optional_string(arguments, "persona_id")
@@ -286,7 +296,7 @@ class PersonaVisualsModule(BaseModule):
             draft_packs = [pack for pack in packs if str(pack.get("status") or "") == "draft"]
             return {
                 "persona_id": persona_id,
-                "states": sorted(VISUAL_STATE_IDS),
+                "states": sorted(self._runtime_visual_state_ids(active_pack)),
                 "active_pack": self._pack_summary(db, active_pack, persona_id=persona_id, user_id=user_id)
                 if active_pack
                 else None,
@@ -324,14 +334,17 @@ class PersonaVisualsModule(BaseModule):
     def _trigger_state_sync(self, args: dict[str, Any], context: Any | None) -> dict[str, Any]:
         user_id = self._resolve_user_id(context)
         persona_id = self._resolve_persona_id(args, context)
-        state = str(args.get("state") or "").strip()
-        if state not in VISUAL_STATE_IDS:
-            raise ValueError(f"Unknown visual state: {state}")
+        state = self._normalize_visual_state_id(args.get("state"))
         duration_ms = self._clamp_duration(args.get("duration_ms", 1500))
         session_id = str(getattr(context, "session_id", "") or "").strip() or None
         db = self._open_db(context)
         try:
             self._require_persona(db, persona_id=persona_id, user_id=user_id)
+            active_pack = db.get_active_persona_visual_pack(persona_id=persona_id, user_id=user_id)
+            if not self._visual_state_available_for_runtime(active_pack, state):
+                raise ValueError(
+                    f"Custom visual state {state} is not available in the active Persona Visual pack"
+                )
         finally:
             self._close_db(db)
         return {
@@ -340,7 +353,7 @@ class PersonaVisualsModule(BaseModule):
             "session_id": session_id,
             "state": state,
             "duration_ms": duration_ms,
-            "reason": str(args.get("reason") or "mcp_runtime").strip() or "mcp_runtime",
+            "reason": self._safe_trigger_reason(args.get("reason")),
         }
 
     def _create_draft_pack_sync(self, args: dict[str, Any], context: Any | None) -> dict[str, Any]:
@@ -657,6 +670,53 @@ class PersonaVisualsModule(BaseModule):
     def _validate_optional_string(arguments: dict[str, Any], key: str) -> None:
         if arguments.get(key) is not None and not isinstance(arguments.get(key), str):
             raise ValueError(f"{key} must be a string")
+
+    @staticmethod
+    def _normalize_visual_state_id(value: Any) -> str:
+        state = str(value or "").strip()
+        if not state:
+            raise ValueError("state is required")
+        if state in VISUAL_STATE_IDS:
+            return state
+        custom_error = custom_visual_state_id_error(state)
+        if custom_error:
+            raise ValueError(custom_error)
+        return state
+
+    @staticmethod
+    def _visual_state_available_for_runtime(
+        active_pack: dict[str, Any] | None,
+        state: str,
+    ) -> bool:
+        if state in VISUAL_STATE_IDS:
+            return True
+        return state in PersonaVisualsModule._runtime_visual_state_ids(active_pack)
+
+    @staticmethod
+    def _runtime_visual_state_ids(active_pack: dict[str, Any] | None) -> set[str]:
+        state_ids = set(VISUAL_STATE_IDS)
+        manifest = active_pack.get("manifest") if isinstance(active_pack, dict) else None
+        if not isinstance(manifest, dict):
+            return state_ids
+        states = manifest.get("states")
+        state_catalog = manifest.get("state_catalog")
+        if not isinstance(states, dict) or not isinstance(state_catalog, dict):
+            return state_ids
+        state_ids.update(
+            state
+            for state in states
+            if state in state_catalog and custom_visual_state_id_error(state) is None
+        )
+        return state_ids
+
+    @staticmethod
+    def _safe_trigger_reason(value: Any) -> str:
+        if value is not None and not isinstance(value, str):
+            return "mcp_runtime"
+        reason = " ".join(str(value or "mcp_runtime").split())
+        if not reason:
+            return "mcp_runtime"
+        return reason[:_MAX_TRIGGER_REASON_LENGTH]
 
 
 __all__ = ["PersonaVisualsModule"]

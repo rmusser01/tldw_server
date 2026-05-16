@@ -20,7 +20,10 @@ import type {
   PersonaBuddyRenderContext,
   PersonaBuddySummary
 } from "@/types/persona-buddy"
-import { PERSONA_VISUAL_PACK_ACTIVATED_EVENT } from "@/types/persona-visuals"
+import {
+  isPersonaVisualCustomStateIdText,
+  PERSONA_VISUAL_PACK_ACTIVATED_EVENT
+} from "@/types/persona-visuals"
 import type { PersonaVisualPack } from "@/types/persona-visuals"
 
 import { useBuddyShellRenderContext } from "./BuddyShellRenderContext"
@@ -394,6 +397,15 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       runtimeOverride.sessionId === renderContext.live_session_id)
       ? runtimeOverride
       : null
+  const runtimeStateIds = React.useMemo(() => {
+    const states = visualPack?.manifest?.states
+    const stateCatalog = visualPack?.manifest?.state_catalog
+    if (!states || !stateCatalog) return []
+    return Object.keys(states).filter((stateId) =>
+      Object.prototype.hasOwnProperty.call(stateCatalog, stateId) &&
+      isPersonaVisualCustomStateIdText(stateId)
+    )
+  }, [visualPack])
   const visualState =
     renderContext.visual_state ??
     resolvePersonaVisualState({
@@ -405,6 +417,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
         Boolean(renderContext.recovery_mode) &&
         renderContext.recovery_mode !== "none",
       runtimeOverride: applicableRuntimeOverride,
+      runtimeStateIds,
       authoredTriggers: visualPack?.manifest?.authored_triggers,
       mcpRuntimeReason: applicableRuntimeOverride?.reason
     })

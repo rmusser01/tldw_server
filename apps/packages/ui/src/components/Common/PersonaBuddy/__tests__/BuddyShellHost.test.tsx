@@ -845,6 +845,80 @@ describe("BuddyShellHost", () => {
     )
   })
 
+  it("renders custom visual states from active-pack runtime overrides", async () => {
+    const basePack = buildVisualPack("persona-1")
+    const customState = asPersonaVisualCustomStateId("tool.notes_search")
+    const visualPack = {
+      ...basePack,
+      manifest: {
+        ...basePack.manifest,
+        state_catalog: {
+          [customState]: {
+            label: "Searching notes",
+            kind: "tool_variant"
+          }
+        },
+        states: {
+          ...basePack.manifest.states,
+          [customState]: { animation_id: "tool-notes-search" }
+        },
+        animations: {
+          ...basePack.manifest.animations,
+          "tool-notes-search": {
+            frames: [{ asset_id: "tool-notes-search-asset", duration_ms: 100 }]
+          }
+        }
+      },
+      assets_by_id: {
+        ...basePack.assets_by_id,
+        "tool-notes-search-asset": {
+          id: "tool-notes-search-asset",
+          url: "/assets/tool-notes-search.png",
+          mime_type: "image/png",
+          asset_role: "frame",
+          width: 24,
+          height: 24
+        }
+      }
+    }
+    visualMocks.listPersonaVisualPacks.mockResolvedValue({
+      packs: [visualPack],
+      active_pack: visualPack
+    })
+    usePersonaVisualRuntimeStore.getState().setOverride({
+      personaId: "persona-1",
+      sessionId: "session-1",
+      state: customState,
+      reason: "mcp_runtime.notes.search",
+      expiresAt: Date.now() + 10_000
+    })
+
+    renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        live_session_id: "session-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        live_voice_state: "thinking"
+      },
+      root: "sidepanel"
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+        "data-visual-state",
+        "tool.notes_search"
+      )
+    })
+    expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+      "src",
+      expect.stringContaining("/assets/tool-notes-search.png")
+    )
+  })
+
   it("keeps derived buddy text when active visual pack loading fails", async () => {
     visualMocks.listPersonaVisualPacks.mockRejectedValue(new Error("offline"))
 
