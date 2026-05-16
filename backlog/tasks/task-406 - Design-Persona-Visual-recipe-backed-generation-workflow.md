@@ -41,6 +41,7 @@ Docs/superpowers/specs/2026-05-16-persona-visual-recipe-generation-design.md
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added `Docs/superpowers/specs/2026-05-16-persona-visual-recipe-generation-design.md`.
+- Addressed PR review feedback by replacing the non-existent `talking_static_sheet` example with the fixture-backed `static_talking_reaction_sheet` key, clarifying that `prompt` remains required for V1, adding request/correlation identifiers, specifying trace/audit events, and expanding validation tests for missing prompts and overlong composed prompts.
 - Verified with `git diff --check`.
 - Bandit skipped because this slice only changes documentation and Backlog task metadata.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
@@ -48,7 +49,7 @@ Docs/superpowers/specs/2026-05-16-persona-visual-recipe-generation-design.md
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Backend-only design drafted for connecting Persona Visual starter production_recipe metadata to existing generation Jobs and generated-candidate review without adding WebUI or runtime activation behavior.
+Backend-only design drafted and review feedback addressed for connecting Persona Visual starter production_recipe metadata to existing generation Jobs and generated-candidate review without adding WebUI or runtime activation behavior.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

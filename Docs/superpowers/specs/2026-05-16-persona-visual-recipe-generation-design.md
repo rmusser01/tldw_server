@@ -20,7 +20,7 @@ The current backend already has the right primitives:
 - Generated candidates are listed, fetched, accepted, rejected, or failed through existing review endpoints.
 - Starter catalog responses expose bounded `production_recipe` metadata after PR #1762.
 
-The gap is that the generation request only carries free-form prompt text. It does not have a backend contract for saying “generate the `talking_static_sheet` output described by starter `x` using this starter’s recipe metadata.”
+The gap is that the generation request only carries free-form prompt text. It does not have a backend contract for saying “generate the `static_talking_reaction_sheet` output described by starter `x` using this starter’s recipe metadata.”
 
 ## Goals
 
@@ -50,11 +50,12 @@ Recommended request shape:
 
 ```json
 {
-  "prompt": "Optional user direction layered onto the recipe",
+  "request_id": "client-or-server-correlation-id",
+  "prompt": "User direction layered onto the recipe",
   "target_state": "speaking",
   "backend": "configured-image-backend",
   "starter_pack_id": "research-buddy-basic",
-  "recipe_output": "required_state_loops"
+  "recipe_output": "static_talking_reaction_sheet"
 }
 ```
 
@@ -67,6 +68,7 @@ Recommended request shape:
 - `starter_pack_id`: optional string, bounded to the same identifier expectations as starter catalog IDs.
 - `recipe_output`: optional string, bounded to the same item text limit used by production recipe metadata.
 - `prompt`: remains required for V1 unless implementation chooses a later explicit recipe-only mode. For the first slice, keeping it required avoids silent generation from generic recipes.
+- `request_id`: optional client-provided correlation identifier. If omitted, the backend should generate one before validation/enqueue and return it with the job response in the implementation slice.
 
 ### Validation Rules
 
@@ -88,13 +90,15 @@ Add a `recipe_intent` object to the existing generation payload:
   "user_id": "1",
   "persona_id": "persona-id",
   "pack_id": "pack-id",
+  "request_id": "client-or-server-correlation-id",
   "prompt": "Effective bounded prompt sent to the image adapter",
   "target_state": "speaking",
   "backend": "configured-image-backend",
   "recipe_intent": {
     "starter_pack_id": "research-buddy-basic",
-    "recipe_output": "required_state_loops",
-    "user_prompt": "Optional user direction layered onto the recipe",
+    "recipe_output": "static_talking_reaction_sheet",
+    "correlation_id": "client-or-server-correlation-id",
+    "user_prompt": "User direction layered onto the recipe",
     "identity_brief": "bounded recipe identity text",
     "neutral_anchor": "bounded neutral anchor text",
     "static_sheet": "bounded static sheet text",
@@ -104,6 +108,8 @@ Add a `recipe_intent` object to the existing generation payload:
 ```
 
 The payload should not include raw external provider output, secrets, file paths, or mutable starter objects. It should contain only bounded recipe strings and identifiers needed for trace-safe replay and review.
+
+`request_id` and `recipe_intent.correlation_id` should carry the same normalized value for recipe-backed requests. Plain prompt-only requests may use the same request ID behavior without `recipe_intent`.
 
 ## Prompt Construction
 
@@ -126,6 +132,7 @@ The implementation should avoid introducing prompt-template configurability in t
 
 Current idempotency keys include user, persona, pack, target state, prompt, and backend. Recipe-backed requests should include a digest of:
 
+- request ID/correlation ID
 - `starter_pack_id`
 - `recipe_output`
 - bounded recipe context used at enqueue time
@@ -133,7 +140,7 @@ Current idempotency keys include user, persona, pack, target state, prompt, and 
 - target state
 - backend
 
-This prevents a prompt-only request and a recipe-backed request with similar text from collapsing into the same job. It also avoids accidental reuse when starter recipe metadata changes in a future PR.
+This prevents a prompt-only request and a recipe-backed request with similar text from collapsing into the same job. It also avoids accidental reuse when starter recipe metadata changes in a future PR. The correlation ID should not replace idempotency; it exists for audit/debug linkage, while idempotency still covers payload equivalence.
 
 ## Worker Behavior
 
@@ -170,6 +177,24 @@ Use existing endpoint error style and add specific machine-readable messages whe
 
 Backend failures from image providers continue to surface through existing job failure semantics.
 
+## Traceability and Audit Events
+
+Recipe-backed generation should define one correlation chain from request validation through review outcome:
+
+- `request_id`: client-provided or server-generated identifier returned by the generation-job response.
+- `correlation_id`: same normalized value copied into `recipe_intent` and log/audit metadata.
+- `job_id`: Jobs row ID returned by the existing generation job creation path.
+- `candidate_id`: generated-candidate ID created by the worker.
+
+The implementation should emit structured, bounded log or audit events at these points:
+
+- `persona_visual.recipe_generation.request_validated`: after persona, pack, starter, and recipe output validation.
+- `persona_visual.recipe_generation.job_created`: after the Jobs row is created; include `request_id`, `correlation_id`, `job_id`, `persona_id`, `pack_id`, `starter_pack_id`, and `recipe_output`.
+- `persona_visual.recipe_generation.candidate_created`: after the worker stores the generated candidate; include `request_id` or `correlation_id` when available, plus `job_id`, `candidate_id`, `persona_id`, and `pack_id`.
+- `persona_visual.recipe_generation.candidate_reviewed`: when an existing candidate review endpoint accepts, rejects, or fails a recipe-backed candidate; include `job_id`, `candidate_id`, review status, and correlation identifiers when available.
+
+Events must not include raw provider credentials, generated image bytes, local filesystem paths, unbounded prompts, or raw exception bodies. If durable candidate provenance is deferred in Slice 1, the review event may fall back to `job_id` and `candidate_id` correlation until a later slice adds durable `recipe_intent` lookup.
+
 ## Trace Safety
 
 Recipe intent is safe to store and return only if it remains bounded and non-secret:
@@ -188,6 +213,7 @@ Recipe intent is safe to store and return only if it remains bounded and non-sec
 - Add service/helper logic to validate starter recipe intent.
 - Compose bounded generation prompt.
 - Add `recipe_intent` to the existing generation job payload.
+- Add `request_id`/correlation ID handling and trace/audit event requirements.
 - Update idempotency digest.
 - Add unit/API tests.
 - Do not change worker persistence or candidate response shape.
@@ -209,10 +235,13 @@ Focused tests should cover:
 - Prompt-only generation remains unchanged.
 - Request with only `starter_pack_id` fails.
 - Request with only `recipe_output` fails.
+- Request without prompt fails because prompt remains required for V1.
 - Unknown starter ID fails.
 - Unknown recipe output fails.
+- Composed prompt exceeding the max length fails closed.
 - Valid recipe-backed request queues the existing job type.
 - Job payload includes bounded `recipe_intent`.
+- Job payload and response include request/correlation identifiers.
 - Idempotency distinguishes recipe-backed and prompt-only requests.
 - Worker still creates generated candidates without activation.
 
