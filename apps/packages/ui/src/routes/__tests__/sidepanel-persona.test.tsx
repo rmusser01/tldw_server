@@ -1324,6 +1324,100 @@ describe("SidepanelPersona", () => {
     }
   })
 
+  it("detours setup into visual buddy setup and returns to the wizard", async () => {
+    mocks.location.search = "?persona_id=garden-helper&tab=profiles"
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: ""
+    })
+
+    mocks.fetchWithAuth.mockImplementation((path: string) => {
+      if (path === "/api/v1/persona/catalog") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [{ id: "garden-helper", name: "Garden Helper" }]
+        })
+      }
+      if (path === "/api/v1/persona/profiles/garden-helper") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "garden-helper",
+            version: 2,
+            voice_defaults: {
+              confirmation_mode: "destructive_only"
+            },
+            setup: {
+              status: "in_progress",
+              version: 1,
+              current_step: "voice",
+              completed_steps: ["persona"],
+              completed_at: null,
+              last_test_type: null
+            },
+            use_persona_state_context_default: true
+          })
+        })
+      }
+      if (path.includes("/persona/profiles/garden-helper/setup-analytics")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            persona_id: "garden-helper",
+            summary: { total_runs: 0, completed_runs: 0, completion_rate: 0 }
+          })
+        })
+      }
+      if (path === "/api/v1/persona/profiles/garden-helper/visual-packs") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ packs: [], active_pack: null })
+        })
+      }
+      if (path === "/api/v1/persona/visual-starter-packs") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ starter_packs: [] })
+        })
+      }
+      if (path.includes("/visual-library")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ items: [] })
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        error: `unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(<SidepanelPersona />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("assistant-setup-overlay")).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Set up visual buddy" }))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("assistant-setup-overlay")).not.toBeInTheDocument()
+    })
+    expect(await screen.findByTestId("persona-visual-pack-editor")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Visuals" })).toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: "Profiles" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: "Commands" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: "Live Session" })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Return to setup" }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("assistant-setup-overlay")).toBeInTheDocument()
+    })
+  })
+
   it("captures starter command and safety choices into the setup handoff summary", async () => {
     mocks.location.search = "?persona_id=garden-helper&tab=profiles"
     mocks.getConfig.mockResolvedValue({

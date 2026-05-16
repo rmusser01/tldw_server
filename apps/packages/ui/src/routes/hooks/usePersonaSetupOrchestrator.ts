@@ -23,6 +23,7 @@ import type {
   SetupHandoffConsumedAction,
   SetupCommandDetourState,
   SetupLiveDetourState,
+  SetupVisualDetourState,
 } from "../personaTypes"
 import {
   DEFAULT_SETUP_REVIEW_SUMMARY,
@@ -98,6 +99,8 @@ export interface UsePersonaSetupOrchestratorReturn {
   setSetupCommandDetour: React.Dispatch<React.SetStateAction<SetupCommandDetourState | null>>
   setupLiveDetour: SetupLiveDetourState | null
   setSetupLiveDetour: React.Dispatch<React.SetStateAction<SetupLiveDetourState | null>>
+  setupVisualDetour: SetupVisualDetourState | null
+  setSetupVisualDetour: React.Dispatch<React.SetStateAction<SetupVisualDetourState | null>>
   setupNoMatchPhrase: string | null
 
   // ── Intent tracking ──
@@ -151,6 +154,8 @@ export interface UsePersonaSetupOrchestratorReturn {
     text: string
   }) => void
   handleReturnToSetupFromLiveDetour: () => void
+  handleOpenVisualSetupDetour: () => void
+  handleReturnToSetupFromVisualDetour: () => void
   /** Returns `true` when the detour was consumed and caller should clear command-editor state. */
   handleSetupDetourCommandSaved: (
     commandId: string,
@@ -338,6 +343,8 @@ export function usePersonaSetupOrchestrator(
     React.useState<SetupCommandDetourState | null>(null)
   const [setupLiveDetour, setSetupLiveDetour] =
     React.useState<SetupLiveDetourState | null>(null)
+  const [setupVisualDetour, setSetupVisualDetour] =
+    React.useState<SetupVisualDetourState | null>(null)
   const [setupNoMatchPhrase, setSetupNoMatchPhrase] =
     React.useState<string | null>(null)
 
@@ -355,6 +362,7 @@ export function usePersonaSetupOrchestrator(
     React.useState<SetupReviewSummary>(DEFAULT_SETUP_REVIEW_SUMMARY)
 
   const setupHandoffFocusTokenRef = React.useRef(0)
+  const setupVisualDetourPersonaIdRef = React.useRef("")
 
   // ── Sync refs ──
   React.useEffect(() => {
@@ -379,10 +387,22 @@ export function usePersonaSetupOrchestrator(
     setSetupTestResumeNote(null)
     setSetupCommandDetour(null)
     setSetupLiveDetour(null)
+    setSetupVisualDetour(null)
     setSetupNoMatchPhrase(null)
     setupWizardLastLiveTextRef.current = ""
     setupWizardAwaitingLiveResponseRef.current = false
   }, [personaSetupWizard.currentStep, personaSetupWizard.isSetupRequired, setupWizardAwaitingLiveResponseRef, setupWizardLastLiveTextRef])
+
+  React.useEffect(() => {
+    const normalizedPersonaId = String(selectedPersonaId || "").trim()
+    if (
+      setupVisualDetourPersonaIdRef.current &&
+      setupVisualDetourPersonaIdRef.current !== normalizedPersonaId
+    ) {
+      setSetupVisualDetour(null)
+    }
+    setupVisualDetourPersonaIdRef.current = normalizedPersonaId
+  }, [selectedPersonaId])
 
   // ── Emit step_viewed analytics ──
   React.useEffect(() => {
@@ -1061,6 +1081,7 @@ export function usePersonaSetupOrchestrator(
         setSetupTestResumeNote(null)
         setSetupCommandDetour(null)
         setSetupLiveDetour(null)
+        setSetupVisualDetour(null)
         setSetupNoMatchPhrase(null)
         setupWizardLastLiveTextRef.current = ""
       } catch (setupError: any) {
@@ -1106,6 +1127,7 @@ export function usePersonaSetupOrchestrator(
       setSetupTestResumeNote(null)
       setSetupCommandDetour(null)
       setSetupLiveDetour(null)
+      setSetupVisualDetour(null)
       setSetupNoMatchPhrase(null)
       setSetupReviewSummaryDraft(DEFAULT_SETUP_REVIEW_SUMMARY)
       setupWizardLastLiveTextRef.current = ""
@@ -1286,6 +1308,29 @@ export function usePersonaSetupOrchestrator(
     }
   }, [emitSetupAnalyticsEvent, setupLiveDetour?.source, setupWizardAwaitingLiveResponseRef])
 
+  const handleOpenVisualSetupDetour = React.useCallback(() => {
+    setSetupVisualDetour({
+      source: "wizard_optional_card",
+      returnStep: personaSetupWizard.currentStep,
+    })
+    setActiveTab("visuals")
+    void emitSetupAnalyticsEvent({
+      eventType: "detour_started",
+      step: personaSetupWizard.currentStep,
+      detourSource: "wizard_optional_visuals",
+    })
+  }, [emitSetupAnalyticsEvent, personaSetupWizard.currentStep, setActiveTab])
+
+  const handleReturnToSetupFromVisualDetour = React.useCallback(() => {
+    const returnStep = setupVisualDetour?.returnStep || personaSetupWizard.currentStep
+    setSetupVisualDetour(null)
+    void emitSetupAnalyticsEvent({
+      eventType: "detour_returned",
+      step: returnStep,
+      detourSource: "wizard_optional_visuals",
+    })
+  }, [emitSetupAnalyticsEvent, personaSetupWizard.currentStep, setupVisualDetour?.returnStep])
+
   /** Returns `true` when the detour was consumed and caller should clear command-editor state. */
   const handleSetupDetourCommandSaved = React.useCallback(
     (_commandId: string, context: { fromDraft: boolean }): boolean => {
@@ -1449,6 +1494,8 @@ export function usePersonaSetupOrchestrator(
     setSetupCommandDetour,
     setupLiveDetour,
     setSetupLiveDetour,
+    setupVisualDetour,
+    setSetupVisualDetour,
     setupNoMatchPhrase,
 
     setupIntentTargetTab,
@@ -1479,6 +1526,8 @@ export function usePersonaSetupOrchestrator(
     handleCreateCommandFromSetupNoMatch,
     handleRecoverSetupInLiveSession,
     handleReturnToSetupFromLiveDetour,
+    handleOpenVisualSetupDetour,
+    handleReturnToSetupFromVisualDetour,
     handleSetupDetourCommandSaved,
     consumeSetupHandoffAction,
 
