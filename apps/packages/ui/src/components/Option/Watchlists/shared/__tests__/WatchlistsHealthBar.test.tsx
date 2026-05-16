@@ -58,12 +58,17 @@ vi.mock("@/store/watchlists", () => ({
 }))
 
 vi.mock("antd", () => ({
-  Button: ({ children, icon, onClick, ...props }: any) => (
-    <button type="button" onClick={onClick} {...props}>
-      {icon}
-      {children}
-    </button>
-  ),
+  Button: ({ children, icon, onClick, ...props }: any) => {
+    const { type: antdType, htmlType = "button", ...buttonProps } = props
+    void antdType
+
+    return (
+      <button {...buttonProps} type={htmlType} onClick={onClick}>
+        {icon}
+        {children}
+      </button>
+    )
+  },
   Spin: () => <span role="status">Loading</span>,
   Tag: ({ children, onClick, ...props }: any) => (
     <span onClick={onClick} {...props}>
@@ -124,6 +129,10 @@ describe("WatchlistsHealthBar", () => {
     render(<WatchlistsHealthBar onNavigate={onNavigate} />)
 
     const attention = await screen.findByTestId("watchlists-health-bar-attention")
+    expect(screen.getByTestId("watchlists-health-bar-refresh")).toHaveAttribute(
+      "type",
+      "button"
+    )
 
     const expectedBadges = [
       { label: "Feeds need review (2)", variant: "warning", tab: "sources" },
