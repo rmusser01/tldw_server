@@ -65,6 +65,10 @@ const storageState = vi.hoisted(() => ({
   values: new Map<string, unknown>(),
 }));
 
+const chatSettingsState = vi.hoisted(() => ({
+  syncChatSettingsForServerChat: vi.fn(async (_params: unknown) => null),
+}));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, defaultValue?: string) => defaultValue || key,
@@ -72,11 +76,38 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
-  PlaygroundForm: () => <div data-testid="playground-form" />,
+  PlaygroundForm: ({
+    onDraftMessageChange,
+  }: {
+    onDraftMessageChange?: (message: string) => void;
+  }) => (
+    <div data-testid="playground-form">
+      <textarea
+        aria-label="Composer draft"
+        data-testid="composer-textarea"
+        onChange={(event) => onDraftMessageChange?.(event.currentTarget.value)}
+      />
+    </div>
+  ),
 }));
 
 vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({
-  PlaygroundChat: () => <div data-testid="playground-chat" />,
+  PlaygroundChat: ({
+    showStarterDeck,
+  }: {
+    showStarterDeck?: boolean;
+  }) => {
+    const legacyWouldShowStarterDeck =
+      messageOptionState.value.messages.length === 0;
+
+    return (
+      <div data-testid="playground-chat">
+        {(showStarterDeck ?? legacyWouldShowStarterDeck) && (
+          <div data-testid="playground-empty-mode-deck" />
+        )}
+      </div>
+    );
+  },
 }));
 
 vi.mock("@/components/Sidepanel/Chat/ArtifactsPanel", () => ({
@@ -97,6 +128,11 @@ vi.mock("@/hooks/playground-session-restore", () => ({
 
 vi.mock("@/services/app", () => ({
   webUIResumeLastChat: vi.fn(async () => false),
+}));
+
+vi.mock("@/services/chat-settings", () => ({
+  syncChatSettingsForServerChat: (params: unknown) =>
+    chatSettingsState.syncChatSettingsForServerChat(params),
 }));
 
 vi.mock("@/db/dexie/helpers", () => ({
@@ -229,6 +265,7 @@ describe("Playground cockpit shell", () => {
     messageOptionState.value.contextFiles = [];
     messageOptionState.value.regenerateLastMessage = vi.fn();
     sessionPersistenceState.value.sessionScopeReady = true;
+    chatSettingsState.syncChatSettingsForServerChat.mockClear();
   });
 
   it("renders the cockpit rails, main chat surface, and status strip by default", async () => {
@@ -251,6 +288,68 @@ describe("Playground cockpit shell", () => {
     ).toHaveTextContent("Context and runtime rails visible.");
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
+  });
+
+  it("shows the starter deck for a true blank chat state", async () => {
+    render(<Playground />);
+
+    expect(
+      await screen.findByTestId("playground-empty-mode-deck"),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the starter deck when the composer has unsent draft text", async () => {
+    render(<Playground />);
+
+    expect(
+      await screen.findByTestId("playground-empty-mode-deck"),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId("composer-textarea"), {
+      target: { value: "Draft a cockpit-ready message" },
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("playground-empty-mode-deck")).toBeNull();
+    });
+  });
+
+  it("keeps the starter deck hidden for an active conversation without rendered messages", async () => {
+    messageOptionState.value.historyId = "local-history-1";
+    messageOptionState.value.serverChatId = "server-chat-1";
+
+    render(<Playground />);
+
+    await screen.findByTestId("playground-cockpit-shell");
+
+    expect(screen.queryByTestId("playground-empty-mode-deck")).toBeNull();
+  });
+
+  it("restores the starter deck when draft text is cleared before send", async () => {
+    render(<Playground />);
+
+    expect(
+      await screen.findByTestId("playground-empty-mode-deck"),
+    ).toBeInTheDocument();
+
+    const composer = screen.getByTestId("composer-textarea");
+    fireEvent.change(composer, {
+      target: { value: "Temporary draft" },
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("playground-empty-mode-deck")).toBeNull();
+    });
+
+    fireEvent.change(composer, {
+      target: { value: "" },
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("playground-empty-mode-deck"),
+      ).toBeInTheDocument();
+    });
   });
 
   it("keeps cockpit tooltip ids unique across multiple shell instances", async () => {

@@ -248,6 +248,7 @@ type Props = {
   onPrepareResearchFollowUp?: (target: ResearchFollowUpTarget) => void;
   stickyDockEnabled?: boolean;
   onComposerLayoutChange?: (metrics: ComposerDockLayoutMetrics) => void;
+  onDraftMessageChange?: (message: string) => void;
 };
 
 type DefaultCharacterPreferenceQueryResult = {
@@ -428,6 +429,7 @@ export const PlaygroundForm = ({
   onPrepareResearchFollowUp,
   stickyDockEnabled = false,
   onComposerLayoutChange,
+  onDraftMessageChange,
 }: Props) => {
   const { t: translate } = useTranslation(["playground", "common", "option"]);
   const t = React.useCallback(
@@ -1770,6 +1772,10 @@ export const PlaygroundForm = ({
     wrapComposerProfile,
     draftSaved,
   } = composerInput;
+
+  React.useEffect(() => {
+    onDraftMessageChange?.(form.values.message || "");
+  }, [form.values.message, onDraftMessageChange]);
 
   const { deferredInput: deferredComposerInput } = useDeferredComposerInput(
     form.values.message || "",

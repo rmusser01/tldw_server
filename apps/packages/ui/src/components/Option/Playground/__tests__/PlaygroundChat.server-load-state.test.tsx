@@ -119,6 +119,18 @@ describe("PlaygroundChat selected server chat load state", () => {
     expect(emptyState.parentElement?.parentElement).not.toHaveClass("pt-16")
   })
 
+  it("omits the starter deck when the parent chat surface disallows it", () => {
+    useMessageOptionState.value = {
+      ...useMessageOptionState.value,
+      serverChatLoadState: "idle",
+      serverChatLoadError: null
+    }
+
+    render(<PlaygroundChat showStarterDeck={false} />)
+
+    expect(screen.queryByTestId("playground-empty")).not.toBeInTheDocument()
+  })
+
   it("shows a selected-chat load failure state instead of the empty state", () => {
     useMessageOptionState.value = {
       ...useMessageOptionState.value,
