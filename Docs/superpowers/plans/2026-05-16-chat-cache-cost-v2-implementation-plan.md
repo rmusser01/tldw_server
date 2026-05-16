@@ -45,12 +45,14 @@
 - Create: `tldw_Server_API/app/core/Chat/prompt_envelope_debug_store.py`
 - Modify: `tldw_Server_API/app/core/Chat/chat_service.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py`
+- Create: `tldw_Server_API/app/services/prompt_envelope_debug_cleanup_service.py`
 - Modify: `tldw_Server_API/app/core/AuthNZ/migrations.py`
 - Modify: `tldw_Server_API/app/core/AuthNZ/pg_migrations_extra.py`
 - Modify: `tldw_Server_API/app/core/AuthNZ/repos/usage_repo.py`
 - Modify: `tldw_Server_API/Config_Files/config.txt`
 - Modify: `tldw_Server_API/Config_Files/README.md`
 - Test: `tldw_Server_API/tests/Chat/unit/test_prompt_envelope_debug_store.py`
+- Test: `tldw_Server_API/tests/Chat/unit/test_prompt_envelope_debug_cleanup_service.py`
 - Test: `tldw_Server_API/tests/Usage/test_usage_tracker_sqlite.py`
 - Test: `tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py`
 
@@ -66,7 +68,8 @@
   - no raw prompt text is retained when disabled;
   - enabled persistence stores bounded envelope JSON plus redaction metadata;
   - oversized raw envelopes are rejected or truncated according to config;
-  - prompt debug rows have an expiry timestamp.
+  - prompt debug rows have an expiry timestamp;
+  - expired prompt debug rows are pruned by the cleanup path.
 
   Run:
 
@@ -108,7 +111,16 @@
   - store only when `prompt_envelope_debug_persistence_enabled` is true;
   - return a debug envelope id or `None`.
 
-- [ ] **Step 5: Wire chat and character-chat dispatch**
+- [ ] **Step 5: Add retention pruning**
+
+  Implement an internal cleanup service, modeled on existing best-effort retention workers, that calls a repository/store method to delete expired `llm_prompt_envelope_debug` rows by `expires_at`. The cleanup should:
+  - run on a configurable interval when debug persistence is enabled;
+  - also be callable once from tests and admin maintenance paths;
+  - enforce an optional max-row or max-byte cap by deleting oldest rows first;
+  - log counts only, never raw prompt content;
+  - fail closed for invalid retention settings.
+
+- [ ] **Step 6: Wire chat and character-chat dispatch**
 
   After final prompt assembly and before provider dispatch, call the debug store from:
   - `tldw_Server_API/app/core/Chat/chat_service.py`
@@ -116,11 +128,11 @@
 
   Store a debug-envelope id in usage metadata when a row is captured. Do not expose raw prompt text in normal chat responses.
 
-- [ ] **Step 6: Add admin retrieval with explicit sensitive-data boundary**
+- [ ] **Step 7: Add admin retrieval with explicit sensitive-data boundary**
 
   Add an admin-only fetch path if needed, but keep it separate from normal list/CSV endpoints. The response should be disabled unless debug persistence is enabled and should return `404` for expired/missing rows.
 
-- [ ] **Step 7: Verify Task 1**
+- [ ] **Step 8: Verify Task 1**
 
   Run:
 
@@ -128,11 +140,13 @@
   source .venv/bin/activate
   python -m pytest \
     tldw_Server_API/tests/Chat/unit/test_prompt_envelope_debug_store.py \
+    tldw_Server_API/tests/Chat/unit/test_prompt_envelope_debug_cleanup_service.py \
     tldw_Server_API/tests/Usage/test_usage_tracker_sqlite.py \
     tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py \
     -q
   python -m bandit -r \
     tldw_Server_API/app/core/Chat \
+    tldw_Server_API/app/services/prompt_envelope_debug_cleanup_service.py \
     tldw_Server_API/app/core/AuthNZ/repos/usage_repo.py \
     tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py \
     -f json -o /tmp/bandit_chat_cache_v2_debug_envelopes.json
@@ -243,7 +257,7 @@
   - `debug_envelope_id`
   - `pinned_world_book_tokens`
   - `pinned_world_book_entry_count`
-  - `local_prefill_latency_ms`
+  - `local_prefill_latency_ms` as integer milliseconds
   - `local_prefill_latency_source`
   - `local_prefill_latency_confidence`
 
@@ -299,7 +313,7 @@
   - `app_observed_ttft`: streaming time-to-first-token measured by this app.
   - `estimated`: token-count or throughput-derived estimate.
 
-  Tests must assert that estimated values are labeled as estimates and that local diagnostics remain cost-neutral.
+  Tests must assert that estimated values are labeled as estimates, local diagnostics remain cost-neutral, and millisecond latency values are normalized to integer storage before aggregation.
 
 - [ ] **Step 4: Extract llama.cpp response timings**
 
@@ -314,13 +328,13 @@
   Add nullable usage columns for local latency fields. Suggested fields:
 
   ```text
-  local_prefill_latency_ms REAL
+  local_prefill_latency_ms INTEGER
   local_prefill_latency_source TEXT
   local_prefill_latency_confidence TEXT
   local_prefill_latency_detail_json TEXT
   ```
 
-  Keep details bounded and redacted.
+  Store milliseconds as integers to match existing usage-log duration fields and avoid floating-point aggregation drift. Keep details bounded and redacted.
 
 - [ ] **Step 7: Verify Task 4**
 
