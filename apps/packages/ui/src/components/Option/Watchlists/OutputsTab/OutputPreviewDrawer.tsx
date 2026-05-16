@@ -32,6 +32,7 @@ import {
   getOutputTemplateVersion,
   isAudioOutput
 } from "./outputMetadata"
+import { ReportEvidencePanel } from "./ReportEvidencePanel"
 
 interface OutputPreviewDrawerProps {
   output: WatchlistOutput | null | undefined
@@ -209,6 +210,17 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
   const artifactLabel = useMemo(() => {
     return getOutputArtifactLabel(output)
   }, [output])
+  const hasReportEvidenceMetadata = useMemo(() => {
+    const metadata = output?.metadata
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+      return false
+    }
+    return (
+      "report_snapshot_path" in metadata ||
+      "report_readiness" in metadata ||
+      "report_schema_version" in metadata
+    )
+  }, [output?.metadata])
 
   // Open in new tab (for HTML)
   const handleOpenInNewTab = () => {
@@ -327,6 +339,14 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
               )}
             </div>
           )}
+          {output && hasReportEvidenceMetadata && (
+            <div className="rounded-lg border border-border bg-surface p-3">
+              <ReportEvidencePanel
+                outputId={output.id}
+                compact
+              />
+            </div>
+          )}
 
           {audioObjectUrl ? (
             <div className="rounded-lg border border-border bg-surface p-4">
@@ -402,6 +422,14 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
                   Chatbook: {output.chatbook_path}
                 </div>
               )}
+            </div>
+          )}
+          {output && hasReportEvidenceMetadata && (
+            <div className="rounded-lg border border-border bg-surface p-3">
+              <ReportEvidencePanel
+                outputId={output.id}
+                compact
+              />
             </div>
           )}
 

@@ -1208,6 +1208,39 @@
   "items_shortcuts_help": {
     "message": "Open this shortcuts help panel."
   },
+  "reports_builder_title": {
+    "message": "Create report"
+  },
+  "reports_builder_createReport": {
+    "message": "Create report"
+  },
+  "reports_builder_runRequired": {
+    "message": "Select a run to generate a report."
+  },
+  "reports_builder_proceedWithWarnings": {
+    "message": "Proceed with warnings"
+  },
+  "reports_builder_generate": {
+    "message": "Generate defensible report"
+  },
+  "reports_builder_emptyQueue": {
+    "message": "No queued updates found for this run."
+  },
+  "reports_builder_readiness": {
+    "message": "Report readiness"
+  },
+  "reports_evidence_title": {
+    "message": "Evidence snapshot"
+  },
+  "reports_evidence_legacyTitle": {
+    "message": "Live provenance only"
+  },
+  "reports_evidence_legacyDescription": {
+    "message": "This older report was created before evidence snapshots were available."
+  },
+  "reports_evidence_errorTitle": {
+    "message": "Evidence snapshot unavailable"
+  },
   "outputs_title": {
     "message": "Reports"
   },

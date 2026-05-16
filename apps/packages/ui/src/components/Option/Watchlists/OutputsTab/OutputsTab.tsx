@@ -19,6 +19,8 @@ import {
   Clock3,
   Download,
   Eye,
+  FileText,
+  PlusCircle,
   RefreshCw,
   RotateCcw,
   XCircle
@@ -47,10 +49,18 @@ import {
   getOutputDeliveryStatuses,
   getOutputFileExtension,
   getOutputMimeType,
+  getOutputReportReadiness,
+  getOutputReportSnapshotAvailable,
   getOutputTemplateName,
   getOutputTemplateVersion,
+  getReadinessLabel,
+  getReadinessTagColor,
+  getAlertCount,
+  getSourceCount,
+  getWeakEvidenceWarningCount,
   isAudioOutput
 } from "./outputMetadata"
+import { ReportBuilderDrawer } from "./ReportBuilderDrawer"
 import {
   getFocusableActiveElement,
   restoreFocusToElement
@@ -112,6 +122,7 @@ export const OutputsTab: React.FC = () => {
   const outputPreviewOpen = useWatchlistsStore((s) => s.outputPreviewOpen)
   const selectedOutputId = useWatchlistsStore((s) => s.selectedOutputId)
   const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
+  const watchlists = useWatchlistsStore((s) => Array.isArray(s.watchlists) ? s.watchlists : [])
 
   // Store actions
   const setOutputs = useWatchlistsStore((s) => s.setOutputs)
@@ -138,6 +149,7 @@ export const OutputsTab: React.FC = () => {
   const [customTitle, setCustomTitle] = useState("")
   const [regenLoading, setRegenLoading] = useState(false)
   const [outputsLiveAnnouncement, setOutputsLiveAnnouncement] = useState("")
+  const [reportBuilderOpen, setReportBuilderOpen] = useState(false)
   const regenOutputIsAudio = useMemo(() => isAudioOutput(regenOutput), [regenOutput])
   const [deliveryStatusFilter, setDeliveryStatusFilter] = useState<string | null>(null)
   const normalizedDeliveryStatusFilter = normalizeDeliveryStatusValue(deliveryStatusFilter)
@@ -494,6 +506,10 @@ export const OutputsTab: React.FC = () => {
   const selectedOutput = selectedOutputId
     ? outputs.find((o) => o.id === selectedOutputId)
     : null
+  const selectedWatchlist = useMemo(
+    () => watchlists.find((watchlist) => watchlist.id === selectedWatchlistId) || null,
+    [selectedWatchlistId, watchlists]
+  )
 
   // Table columns
   const allColumns: ColumnsType<WatchlistOutput> = [
@@ -503,12 +519,38 @@ export const OutputsTab: React.FC = () => {
       key: "title",
       ellipsis: true,
       render: (title: string | null, record) => (
-        <span className="inline-flex items-center gap-2">
-          <span className="font-medium">{title || `Output #${record.id}`}</span>
-          <Tag color={getOutputArtifactTagColor(record)}>
-            {getOutputArtifactLabel(record)}
-          </Tag>
-        </span>
+        <div className="space-y-1">
+          <span className="inline-flex flex-wrap items-center gap-2">
+            <span className="font-medium">{title || `Output #${record.id}`}</span>
+            <Tag color={getOutputArtifactTagColor(record)}>
+              {getOutputArtifactLabel(record)}
+            </Tag>
+            {getOutputReportSnapshotAvailable(record.metadata) ? (
+              <Tag color="blue">
+                {t("watchlists:reports.evidence.title", "Evidence snapshot")}
+              </Tag>
+            ) : null}
+          </span>
+          <span className="inline-flex flex-wrap gap-2 text-xs text-text-muted">
+            <span>
+              {t("watchlists:reports.table.sourceCount", "{{count}} sources", {
+                count: getSourceCount(record.metadata)
+              })}
+            </span>
+            <span>
+              {t("watchlists:reports.table.alertCount", "{{count}} alerts", {
+                count: getAlertCount(record.metadata)
+              })}
+            </span>
+            {getWeakEvidenceWarningCount(record.metadata) > 0 && (
+              <span>
+                {t("watchlists:reports.table.weakWarningCount", "{{count}} weak evidence warnings", {
+                  count: getWeakEvidenceWarningCount(record.metadata)
+                })}
+              </span>
+            )}
+          </span>
+        </div>
       )
     },
     {
@@ -629,6 +671,31 @@ export const OutputsTab: React.FC = () => {
       }
     },
     {
+      title: t("watchlists:outputs.columns.readiness", "Readiness"),
+      key: "readiness",
+      width: 180,
+      render: (_, record) => {
+        const readiness = getOutputReportReadiness(record.metadata)
+        return (
+          <Space size={[4, 4]} wrap>
+            <Tag color={getReadinessTagColor(readiness.state)}>
+              {getReadinessLabel(readiness.state)}
+            </Tag>
+            {getOutputReportSnapshotAvailable(record.metadata) ? (
+              <Tooltip title={t("watchlists:reports.evidence.snapshotAvailable", "Immutable evidence snapshot is available")}>
+                <Tag color="blue">
+                  <span className="inline-flex items-center gap-1">
+                    <FileText className="h-3.5 w-3.5" aria-hidden />
+                    {t("watchlists:reports.evidence.snapshotShort", "Evidence")}
+                  </span>
+                </Tag>
+              </Tooltip>
+            ) : null}
+          </Space>
+        )
+      }
+    },
+    {
       title: t("watchlists:outputs.columns.expires", "Expires"),
       dataIndex: "expires_at",
       key: "expires_at",
@@ -694,7 +761,7 @@ export const OutputsTab: React.FC = () => {
     }
     return ""
   }
-  const defaultColumnKeys = new Set(["title", "job", "run_id", "created_at", "delivery", "actions"])
+  const defaultColumnKeys = new Set(["title", "job", "run_id", "created_at", "delivery", "readiness", "actions"])
   const columns = showAdvancedFilters
     ? allColumns
     : allColumns.filter((column) => defaultColumnKeys.has(resolveColumnKey(column)))
@@ -800,6 +867,13 @@ export const OutputsTab: React.FC = () => {
         >
           {t("common:refresh", "Refresh")}
         </Button>
+        <Button
+          type="primary"
+          icon={<PlusCircle className="h-4 w-4" />}
+          onClick={() => setReportBuilderOpen(true)}
+        >
+          {t("watchlists:reports.builder.createReport", "Create report")}
+        </Button>
       </div>
 
       {/* Description */}
@@ -881,6 +955,19 @@ export const OutputsTab: React.FC = () => {
         open={outputPreviewOpen}
         onClose={closeOutputPreview}
       />
+
+      {reportBuilderOpen && (
+        <ReportBuilderDrawer
+          open={reportBuilderOpen}
+          selectedWatchlist={selectedWatchlist}
+          defaultRunId={outputsRunFilter}
+          onClose={() => setReportBuilderOpen(false)}
+          onCreated={() => {
+            setReportBuilderOpen(false)
+            loadOutputs()
+          }}
+        />
+      )}
 
       <Modal
         title={t("watchlists:outputs.regenerateTitle", "Regenerate Output")}

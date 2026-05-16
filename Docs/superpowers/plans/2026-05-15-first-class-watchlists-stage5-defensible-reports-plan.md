@@ -716,7 +716,7 @@ git commit -m "feat: add watchlist report evidence client contract"
 - Test: `apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/OutputsTab.defensible-reports.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.focus-management.test.tsx`
 
-- [ ] **Step 1: Write failing UI tests**
+- [x] **Step 1: Write failing UI tests**
 
 Builder tests:
 
@@ -742,7 +742,7 @@ Output tab tests:
 - Preview drawer can open an evidence section for outputs with snapshots.
 - Regenerate keeps existing behavior and can opt into Stage 5 metadata defaults.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -756,7 +756,7 @@ bunx vitest run \
 
 Expected: FAIL because UI components are not implemented.
 
-- [ ] **Step 3: Build `ReportEvidencePanel`**
+- [x] **Step 3: Build `ReportEvidencePanel`**
 
 Component requirements:
 
@@ -774,7 +774,7 @@ Component requirements:
 - Use Ant Design `Table` only where it fits; switch to list/detail rows below narrow widths using CSS classes already used in Watchlists.
 - Handle loading, error, empty, legacy, and missing-snapshot states.
 
-- [ ] **Step 4: Build `ReportBuilderDrawer`**
+- [x] **Step 4: Build `ReportBuilderDrawer`**
 
 Component requirements:
 
@@ -786,7 +786,7 @@ Component requirements:
 - It must prevent generation only when readiness is blocking or no run/items are selected.
 - It must send `item_ids` for the queued included items so the backend can snapshot the same set.
 
-- [ ] **Step 5: Integrate `OutputsTab`**
+- [x] **Step 5: Integrate `OutputsTab`**
 
 Add:
 
@@ -803,7 +803,7 @@ Preserve:
 - Existing delivery issue banner.
 - Existing focus restoration behavior.
 
-- [ ] **Step 6: Integrate `OutputPreviewDrawer`**
+- [x] **Step 6: Integrate `OutputPreviewDrawer`**
 
 Add:
 
@@ -812,7 +812,7 @@ Add:
 - Keep download/chat actions unchanged.
 - Make audio outputs show evidence metadata even when rendered text content is unavailable.
 
-- [ ] **Step 7: Add copy**
+- [x] **Step 7: Add copy**
 
 Suggested copy:
 
@@ -835,7 +835,7 @@ Suggested copy:
 - `Generate defensible report`
 - `Open Updates queue`
 
-- [ ] **Step 8: Run UI tests**
+- [x] **Step 8: Run UI tests**
 
 Run:
 
@@ -851,7 +851,14 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit Stage 5D**
+Verified on 2026-05-16:
+
+- `bunx vitest run src/services/__tests__/watchlists-reports.test.ts src/components/Option/Watchlists/OutputsTab/__tests__/ReportBuilderDrawer.test.tsx src/components/Option/Watchlists/OutputsTab/__tests__/ReportEvidencePanel.test.tsx src/components/Option/Watchlists/OutputsTab/__tests__/OutputsTab.defensible-reports.test.tsx src/components/Option/Watchlists/OutputsTab/__tests__/OutputsTab.smoke.test.tsx src/components/Option/Watchlists/OutputsTab/__tests__/OutputsTab.regenerate-modal.test.tsx src/components/Option/Watchlists/OutputsTab/__tests__/OutputsTab.advanced-filters.test.tsx src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.focus-management.test.tsx src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.audio.test.tsx` passed: 9 files, 30 tests.
+- `git diff --check` passed.
+- Watchlists locale JSON files parsed successfully.
+- `node_modules/.bin/tsc --noEmit -p tsconfig.json --pretty false` still exits with the existing repo-wide baseline; touched-path grep for Stage 5D files returned no matches.
+
+- [x] **Step 9: Commit Stage 5D**
 
 Commit:
 

@@ -1386,6 +1386,71 @@
       "openAlerts": "Open Alerts"
     }
   },
+  "reports": {
+    "builder": {
+      "title": "Create report",
+      "createReport": "Create report",
+      "preset": "Report preset",
+      "run": "Run",
+      "runRequired": "Select a run to generate a report.",
+      "reportTitle": "Report title",
+      "titlePlaceholder": "Optional title",
+      "format": "Format",
+      "template": "Template",
+      "includeEvidence": "Include evidence table",
+      "includeExcluded": "Include excluded trail",
+      "includedUpdates": "Included updates",
+      "readiness": "Report readiness",
+      "queuedCount": "{{count}} queued update{{plural}}",
+      "sourceCount": "{{count}} source{{plural}}",
+      "proceedWithWarnings": "Proceed with warnings",
+      "generate": "Generate defensible report",
+      "created": "Generated defensible report.",
+      "createError": "Failed to generate report.",
+      "emptyQueue": "No queued updates found for this run.",
+      "excludedTrail": "Excluded trail",
+      "excludedCount": "{{count}} update{{plural}} not queued",
+      "noExcluded": "No excluded updates in this run.",
+      "ready": "Ready"
+    },
+    "presets": {
+      "cti": "CTI / OSINT",
+      "news": "News briefing",
+      "general": "General research"
+    },
+    "table": {
+      "sourceCount": "{{count}} sources",
+      "alertCount": "{{count}} alerts",
+      "weakWarningCount": "{{count}} weak evidence warnings"
+    },
+    "evidence": {
+      "title": "Evidence snapshot",
+      "snapshotAvailable": "Immutable evidence snapshot is available",
+      "snapshotShort": "Evidence",
+      "capturedAt": "Immutable snapshot captured at {{time}}",
+      "uniqueSources": "Unique sources: {{count}}",
+      "alertCount": "Alerts: {{count}}",
+      "missingSources": "Missing provenance: {{count}}",
+      "legacyTitle": "Live provenance only",
+      "legacyDescription": "This older report was created before evidence snapshots were available.",
+      "errorTitle": "Evidence snapshot unavailable",
+      "empty": "No report evidence available",
+      "reviewed": "Reviewed",
+      "needsReview": "Needs review",
+      "queued": "Queued",
+      "excludedTrail": "Excluded trail",
+      "noExcluded": "No excluded updates captured.",
+      "openSource": "Open source",
+      "columns": {
+        "update": "Update",
+        "source": "Source",
+        "published": "Published",
+        "alerts": "Alert evidence",
+        "state": "Review/queue state",
+        "link": "Link"
+      }
+    }
+  },
   "outputs": {
     "title": "Reports",
     "description": "Generated briefings and reports from your watchlist monitors.",
@@ -1458,6 +1523,7 @@
       "format": "Format",
       "created": "Created",
       "delivery": "Delivery",
+      "readiness": "Readiness",
       "expires": "Expires",
       "actions": "Actions"
     }
