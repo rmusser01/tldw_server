@@ -208,9 +208,32 @@ root artifact ID, artifact version ID, and previous-version links. Artifact
 creation writes the initial version record; artifact updates create a new
 version record and carry the previous version ID forward.
 
-This does not complete the full product contract. Workspace artifact detail UI,
-ACP deliverable promotion flows, accepted-version export adapters, and broader
-redaction/retention verification remain separate follow-up slices.
+This storage/API foundation is now consumed by the ACP promotion, Workspace UI
+detail, and accepted-export slices below. It still does not imply that every
+generated output is traceable unless that output is represented by this
+contract or an explicitly mapped equivalent.
+
+### Current ACP Promotion Foundation
+
+Issue #1706 implements promotion for accepted ACP completion artifacts that are
+structured as source-grounded workspace briefs, reports, specs, action plans,
+or tables. Promotion writes `producer_type="acp"` metadata with task/run/session
+and review-run references, preserves source lineage and redaction posture, maps
+accepted reviewer-loop state to `review_state="accepted"`, and updates an
+existing artifact as a new version when the same artifact ID is promoted again.
+
+Rejected, needs-revision, malformed, unsupported, or workspace-less ACP outputs
+remain execution evidence and are not presented as accepted workspace work
+products.
+
+### Current Workspace UI Foundation
+
+Issue #1707 implements the Workspace artifact detail surface for traceable
+artifacts. The UI shows review state, ACP provenance, authenticated session and
+diagnostics drill-through links, source lineage, version/root/previous-version
+metadata, redaction posture, export references, and review-state controls. When
+the redaction posture is restricted, the detail view hides ACP provenance and
+source-lineage details while keeping safe state labels visible.
 
 ### Current Accepted Export Foundation
 
@@ -222,6 +245,19 @@ and appends a version-specific export reference to the workspace artifact.
 This does not complete all export channels. Rich document/slides/table exports,
 external file-artifact storage, Chatbook bundling, export retention policies,
 and UI-triggered download workflows remain separate follow-up slices.
+
+### Current Release Verification
+
+Issue #1704 records release signoff for the first ACP artifact golden path in
+`Docs/Development/ACP_Artifact_Release_Verification_2026_05_15.md`. The focused
+verification covers ACP-to-artifact promotion, source lineage, ACP provenance,
+redaction, reviewer-loop state mapping, versioning, accepted export identity,
+and UI hydration/detail behavior.
+
+This verification is intentionally scoped to accepted structured ACP
+deliverables that satisfy the contract. Non-golden-path artifact types, rich
+document exports, Chatbook packaging, external file-artifact materialization,
+and live downstream-agent certification remain separately tracked work.
 
 ## Release Caveats
 
