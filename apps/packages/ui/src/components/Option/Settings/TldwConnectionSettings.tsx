@@ -12,7 +12,7 @@ import type { FormInstance } from "antd"
 import React from "react"
 import type { TFunction } from "i18next"
 import { isFirefoxTarget } from "@/config/platform"
-import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
+import { Alert } from "@/components/ui/primitives"
 import {
   getCoreStatusLabel,
   getRagStatusLabel,
