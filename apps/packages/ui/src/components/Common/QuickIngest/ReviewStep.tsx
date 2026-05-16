@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo } from "react"
-import { Alert, Button } from "antd"
 import { useTranslation } from "react-i18next"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import {
   AlertTriangle,
   ArrowLeft,
@@ -247,34 +247,32 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
         </p>
 
         {!isOnlineForIngest && (
-          <Alert
-            type="warning"
-            showIcon
+          <DesignSystemAlert
+            variant="warning"
             icon={<AlertTriangle className="h-4 w-4" />}
             className="mt-3"
-            message={qi("wizard.offline.title", "Server offline")}
-            description={
+            title={qi("wizard.offline.title", "Server offline")}
+            action={
+              onRetryConnection
+                ? {
+                    label: isCheckingConnection
+                      ? qi("wizard.offline.checking", "Checking...")
+                      : qi("wizard.offline.retry", "Retry connection"),
+                    onClick: onRetryConnection,
+                    loading: isCheckingConnection,
+                    disabled: isCheckingConnection,
+                  }
+                : undefined
+            }
+          >
+            {
               connectionRecoveryMessage ||
               qi(
                 "wizard.offline.description",
                 "Reconnect to your tldw server before processing. You can go back and keep editing the queue."
               )
             }
-            action={
-              onRetryConnection ? (
-                <Button
-                  size="small"
-                  onClick={onRetryConnection}
-                  loading={isCheckingConnection}
-                  disabled={isCheckingConnection}
-                >
-                  {isCheckingConnection
-                    ? qi("wizard.offline.checking", "Checking...")
-                    : qi("wizard.offline.retry", "Retry connection")}
-                </Button>
-              ) : undefined
-            }
-          />
+          </DesignSystemAlert>
         )}
 
         {/* Contextual warnings */}

@@ -1,6 +1,7 @@
 import React from "react"
-import { Alert, Button, Checkbox, Select, Tag, Typography } from "antd"
+import { Button, Checkbox, Select, Tag, Typography } from "antd"
 
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import {
   PersonaTurnDetectionControls,
   type PersonaTurnDetectionPreset
@@ -304,7 +305,11 @@ export const AssistantVoiceCard: React.FC<AssistantVoiceCardProps> = ({
           </div>
         </div>
         {wakeWarning ? (
-          <Alert className="mt-2" type="warning" showIcon message={wakeWarning} />
+          <DesignSystemAlert
+            className="mt-2"
+            variant="warning"
+            title={wakeWarning}
+          />
         ) : null}
       </div>
 

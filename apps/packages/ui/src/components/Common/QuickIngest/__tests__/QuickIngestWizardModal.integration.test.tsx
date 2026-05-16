@@ -825,7 +825,11 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     await waitFor(() => {
       expect(screen.getByText("Ready to Process")).toBeTruthy()
     })
-    expect(screen.getByText(/server offline/i)).toBeInTheDocument()
+    const offlineTitle = screen.getByText(/server offline/i)
+    expect(offlineTitle).toBeInTheDocument()
+    expect(
+      offlineTitle.closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
     expect(screen.getByText(/cannot reach your tldw server/i)).toBeInTheDocument()
 
     const startButton = screen.getByRole("button", { name: /start processing/i })

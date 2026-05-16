@@ -162,6 +162,16 @@ describe("AssistantVoiceCard", () => {
     expect(props.onToggleWakeArmed).toHaveBeenCalledTimes(1)
   })
 
+  it("renders wake warnings through the design-system Alert primitive", () => {
+    const props = defaultVoiceCardProps()
+    props.wakeWarning = "Wake detector needs microphone permission."
+
+    render(<AssistantVoiceCard {...props} />)
+
+    const warning = screen.getByText("Wake detector needs microphone permission.")
+    expect(warning.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+  })
+
   it("does not arm wake from resolved fallback trigger phrases when session wake props are omitted", () => {
     const props = defaultVoiceCardProps()
     props.resolvedDefaults = {
