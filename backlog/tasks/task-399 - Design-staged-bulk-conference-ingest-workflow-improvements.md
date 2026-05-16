@@ -37,7 +37,7 @@ Create a critique-hardened staged design for PR-sized improvements that take Qui
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Drafted the staged bulk conference ingest workflow design. The spec-review loop completed after tightening read-only preflight guarantees, durable collection ownership, collection item membership for unresolved/resolved items, metadata/job sequencing, scoped Knowledge QA, and PR-sized recovery/QA stages. Awaiting user review before implementation planning.
+Drafted and hardening-reviewed the staged bulk conference ingest workflow design. The latest pass added granular capability gates, Collections_DB/tag identity risk handling, owner/TTL-bounded preflight rules, backend-enforced scoped Knowledge QA, idempotent retry, submit-failure states, and conservative extension permission constraints. Awaiting user review before implementation planning.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
