@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
+    LlamaCppAsset,
+    LlamaCppAssetMetadata,
+    LlamaCppAssetsResponse,
     LlamaCppInventoryItem,
     LlamaCppInventoryResponse,
     LlamaCppModelMetadata,
@@ -23,6 +26,16 @@ _QUANT_RE = re.compile(r"(?:^|[-_.])(Q\d(?:_[A-Z0-9]+)*|F16|F32|BF16|IQ\d_[A-Z0-
 _PARAM_RE = re.compile(r"(?:^|[-_.])(\d+(?:\.\d+)?[bm])(?:[-_.]|$)", re.IGNORECASE)
 _CTX_RE = re.compile(r"(?:^|[-_.])(?:ctx|context)[-_.]?(\d{3,6})(?:[-_.]|$)", re.IGNORECASE)
 _REGISTERED_PATH_DELIMITERS = {",", os.pathsep}
+_ASSET_SOURCE_ORDER = {"registered_path": 0, "models_dir": 1, "imported_folder": 2}
+_ASSET_KIND_ORDER = {"folder": 0, "gguf": 1, "mmproj": 2, "unknown": 3}
+_PAIRING_DROP_TOKENS = {
+    "bf16",
+    "f16",
+    "f32",
+    "gguf",
+    "mmproj",
+    "projector",
+}
 
 
 def model_id_for_path(path: Path) -> str:
@@ -30,6 +43,87 @@ def model_id_for_path(path: Path) -> str:
     canonical = str(_canonical_path(path, "Model"))
     digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:24]
     return f"gguf:{digest}"
+
+
+def asset_id_for_path(path: Path, kind: str) -> str:
+    """Return the stable local asset ID for a canonical path and asset kind."""
+    normalized_kind = str(kind).strip().lower() or "unknown"
+    canonical = str(_canonical_path(path, "Asset"))
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:24]
+    return f"{normalized_kind}:{digest}"
+
+
+def scan_assets(config_state: dict[str, Any] | None = None, limit: int = 500) -> LlamaCppAssetsResponse:
+    """Return a bounded local llama.cpp asset inventory."""
+    saved_config = _saved_config_from_state(config_state)
+    models_dir = _optional_path(saved_config.get("models_dir"))
+    registered_paths = _path_list(saved_config.get("registered_model_paths"))
+    imported_folders = _path_list(saved_config.get("imported_asset_folders"))
+    allowed_bases = _allowed_bases_for_config(saved_config)
+    warnings: list[str] = []
+    assets: list[LlamaCppAsset] = []
+    seen_ids: set[str] = set()
+    scan_limited = False
+
+    def add_asset(asset: LlamaCppAsset | None) -> bool:
+        if asset is None or asset.asset_id in seen_ids:
+            return False
+        assets.append(asset)
+        seen_ids.add(asset.asset_id)
+        return True
+
+    for path in registered_paths:
+        if len(assets) >= limit:
+            scan_limited = True
+            break
+        add_asset(_asset_for_path(path, source="registered_path", allowed_bases=allowed_bases, warnings=warnings))
+
+    if models_dir is None:
+        warnings.append("LlamaCpp.models_dir is not configured; only registered asset paths and imported folders were checked.")
+    elif not models_dir.exists():
+        warnings.append(f"Configured models_dir '{models_dir}' does not exist.")
+    elif not models_dir.is_dir():
+        warnings.append(f"Configured models_dir '{models_dir}' is not a directory.")
+    else:
+        for path in _iter_asset_files(models_dir, warnings, max(limit - len(assets), 0)):
+            if len(assets) >= limit:
+                scan_limited = True
+                break
+            add_asset(_asset_for_path(path, source="models_dir", allowed_bases=allowed_bases, warnings=warnings))
+
+    for folder in imported_folders:
+        if len(assets) >= limit:
+            scan_limited = True
+            break
+        folder_asset = _folder_asset_for_path(folder, allowed_bases=allowed_bases)
+        add_asset(folder_asset)
+        if len(assets) >= limit:
+            scan_limited = True
+            break
+        if folder_asset.resolved_path and not folder_asset.warnings:
+            for path in _iter_asset_files(Path(folder_asset.resolved_path), warnings, max(limit - len(assets), 0)):
+                if len(assets) >= limit:
+                    scan_limited = True
+                    break
+                add_asset(
+                    _asset_for_path(
+                        path,
+                        source="imported_folder",
+                        allowed_bases=allowed_bases,
+                        warnings=warnings,
+                    )
+                )
+
+    _attach_mmproj_candidates(assets)
+    assets.sort(
+        key=lambda asset: (
+            _ASSET_SOURCE_ORDER.get(asset.source, 99),
+            _ASSET_KIND_ORDER.get(asset.kind, 99),
+            asset.display_name.lower(),
+            asset.resolved_path or asset.path,
+        )
+    )
+    return LlamaCppAssetsResponse(assets=assets, warnings=warnings, scan_limited=scan_limited)
 
 
 def scan_inventory(config_state: dict[str, Any] | None = None, limit: int = 500) -> LlamaCppInventoryResponse:
@@ -44,6 +138,8 @@ def scan_inventory(config_state: dict[str, Any] | None = None, limit: int = 500)
 
     allowed_bases = _allowed_bases_for_config(saved_config)
     for path in registered_paths:
+        if _is_projector_asset_path(path):
+            continue
         item = _item_for_path(path, source="registered_path", allowed_bases=allowed_bases, warnings=warnings)
         if item is None:
             continue
@@ -123,14 +219,98 @@ def register_model_path(path: Path) -> LlamaCppInventoryItem:
     return item
 
 
+def register_asset_path(path: Path) -> LlamaCppAsset:
+    """Persist a local registered asset path and return its asset representation."""
+    canonical = _canonical_path(path, "Registered asset")
+    _validate_path_for_config(canonical, "registered_model_paths", "Registered asset path")
+    try:
+        with llamacpp_config_write_lock():
+            saved_config = _read_saved_config()
+            allowed_bases = _allowed_bases_for_config(saved_config)
+            if not allowed_bases or not handler_utils.is_path_allowed(canonical, allowed_bases):
+                raise ServerError("Registered asset path is outside allowed llama.cpp paths.")
+            existing = _path_list(saved_config.get("registered_model_paths"))
+            existing_by_id: dict[str, Path] = {}
+            for item in existing:
+                try:
+                    existing_canonical = _canonical_path(item, "Registered asset")
+                    existing_by_id[asset_id_for_path(existing_canonical, _asset_kind_for_path(existing_canonical))] = (
+                        existing_canonical
+                    )
+                except ServerError:
+                    existing_by_id[_unresolved_path_key(item)] = item.expanduser()
+            existing_by_id.setdefault(asset_id_for_path(canonical, _asset_kind_for_path(canonical)), canonical)
+
+            registered_value = ", ".join(str(item) for item in existing_by_id.values())
+            setup_manager.update_config({"LlamaCpp": {"registered_model_paths": registered_value}})
+            refresh_config_cache()
+    except Exception as exc:
+        if isinstance(exc, LockAcquisitionError):
+            raise ServerError("Failed to acquire the llama.cpp config write lock.") from exc
+        if isinstance(exc, ServerError):
+            raise
+        raise ServerError("Failed to persist registered llama.cpp asset path.") from exc
+
+    saved_config["registered_model_paths"] = [registered_value]
+    allowed_bases = _allowed_bases_for_config(saved_config)
+    asset = _asset_for_path(canonical, source="registered_path", allowed_bases=allowed_bases)
+    if asset is None:
+        raise ServerError("Registered asset path could not be resolved.")
+    return asset
+
+
+def import_asset_folder(path: Path) -> LlamaCppAsset:
+    """Register an existing allowlisted local folder for asset scanning."""
+    canonical = _canonical_path(path, "Imported asset folder")
+    _validate_path_for_config(canonical, "imported_asset_folders", "Imported asset folder")
+    if not canonical.exists():
+        raise ServerError("Imported asset folder does not exist.")
+    if not canonical.is_dir():
+        raise ServerError("Imported asset path is not a folder.")
+
+    try:
+        with llamacpp_config_write_lock():
+            saved_config = _read_saved_config()
+            allowed_bases = _allowed_bases_for_config(saved_config)
+            if not allowed_bases or not handler_utils.is_path_allowed(canonical, allowed_bases):
+                raise ServerError("Imported asset folder is outside allowed llama.cpp paths.")
+            existing = _path_list(saved_config.get("imported_asset_folders"))
+            existing_by_id: dict[str, Path] = {}
+            for item in existing:
+                try:
+                    existing_canonical = _canonical_path(item, "Imported asset folder")
+                    existing_by_id[asset_id_for_path(existing_canonical, "folder")] = existing_canonical
+                except ServerError:
+                    existing_by_id[_unresolved_path_key(item)] = item.expanduser()
+            existing_by_id.setdefault(asset_id_for_path(canonical, "folder"), canonical)
+
+            imported_value = ", ".join(str(item) for item in existing_by_id.values())
+            setup_manager.update_config({"LlamaCpp": {"imported_asset_folders": imported_value}})
+            refresh_config_cache()
+    except Exception as exc:
+        if isinstance(exc, LockAcquisitionError):
+            raise ServerError("Failed to acquire the llama.cpp config write lock.") from exc
+        if isinstance(exc, ServerError):
+            raise
+        raise ServerError("Failed to persist imported llama.cpp asset folder.") from exc
+
+    saved_config["imported_asset_folders"] = [imported_value]
+    allowed_bases = _allowed_bases_for_config(saved_config)
+    return _folder_asset_for_path(canonical, allowed_bases=allowed_bases)
+
+
 def _validate_registered_path_for_config(path: Path) -> None:
+    _validate_path_for_config(path, "registered_model_paths", "Registered model path")
+
+
+def _validate_path_for_config(path: Path, field: str, label: str) -> None:
     text = str(path)
     try:
-        setup_manager.validate_config_value_single_line("LlamaCpp", "registered_model_paths", text)
+        setup_manager.validate_config_value_single_line("LlamaCpp", field, text)
     except ValueError as exc:
-        raise ServerError("Registered model path contains unsupported config characters.") from exc
+        raise ServerError(f"{label} contains unsupported config characters.") from exc
     if any(delimiter in text for delimiter in _REGISTERED_PATH_DELIMITERS):
-        raise ServerError("Registered model path contains unsupported list delimiter characters.")
+        raise ServerError(f"{label} contains unsupported list delimiter characters.")
 
 
 def resolve_model_id(model_id: str) -> Path:
@@ -145,7 +325,7 @@ def resolve_model_id(model_id: str) -> Path:
     for item in inventory.models:
         if item.model_id == wanted:
             path = _canonical_path(Path(item.path), "Model")
-            if path.suffix.lower() != ".gguf" or not path.is_file():
+            if path.suffix.lower() != ".gguf" or _asset_kind_for_path(path) != "gguf" or not path.is_file():
                 raise ModelNotFoundError(f"Model ID {wanted} does not reference an available GGUF file.")
             if not allowed_bases or not handler_utils.is_path_allowed(path, allowed_bases):
                 raise ServerError("Model path is outside allowed llama.cpp paths.")
@@ -174,7 +354,7 @@ def _iter_gguf_models(models_dir: Path, warnings: list[str], limit: int):
             lowered = filename.lower()
             if not lowered.endswith(".gguf"):
                 continue
-            if lowered.startswith("mmproj"):
+            if _asset_kind_for_path(Path(filename)) != "gguf":
                 continue
             yield Path(root) / filename
 
@@ -186,9 +366,196 @@ def _has_scannable_gguf(models_dir: Path, warnings: list[str]) -> bool:
     for _root, _dirs, files in os.walk(models_dir, topdown=True, onerror=_on_error):
         for filename in files:
             lowered = filename.lower()
-            if lowered.endswith(".gguf") and not lowered.startswith("mmproj"):
+            if lowered.endswith(".gguf") and _asset_kind_for_path(Path(filename)) == "gguf":
                 return True
     return False
+
+
+def _iter_asset_files(root_dir: Path, warnings: list[str], limit: int):
+    if limit <= 0:
+        return
+
+    visited = 0
+    max_visited = max(limit * 20, 1000)
+
+    def _on_error(error: OSError) -> None:
+        warnings.append(f"Could not scan '{error.filename}': {error.strerror or error.__class__.__name__}.")
+
+    for root, dirs, files in os.walk(root_dir, topdown=True, onerror=_on_error):
+        dirs.sort()
+        files.sort()
+        visited += len(dirs) + len(files)
+        if visited > max_visited:
+            warnings.append("Asset inventory scan reached the traversal limit.")
+            return
+        for filename in files:
+            if filename.lower().endswith(".gguf"):
+                yield Path(root) / filename
+
+
+def _asset_for_path(
+    path: Path,
+    *,
+    source: str,
+    allowed_bases: list[Path],
+    warnings: list[str] | None = None,
+) -> LlamaCppAsset | None:
+    try:
+        canonical = _canonical_path(path, "Asset")
+    except ServerError:
+        if warnings is not None:
+            warnings.append("Could not inspect an asset inventory path because it could not be resolved.")
+        return None
+
+    basename = canonical.name
+    kind = _asset_kind_for_path(canonical)
+    item_warnings: list[str] = []
+    size_bytes: int | None = None
+    modified_at: str | None = None
+
+    if kind == "unknown":
+        item_warnings.append("Registered asset path does not reference a recognized GGUF or mmproj file.")
+    elif kind == "gguf":
+        item_warnings.append("Asset capability is unknown until inspected or selected in a profile.")
+
+    if not canonical.exists():
+        item_warnings.append("Registered asset path is missing.")
+    elif not canonical.is_file():
+        item_warnings.append("Registered asset path is not a file.")
+    else:
+        try:
+            stat_result = canonical.stat()
+            size_bytes = stat_result.st_size
+            modified_at = datetime.fromtimestamp(stat_result.st_mtime, UTC).isoformat()
+        except PermissionError:
+            item_warnings.append("Registered asset path is not readable.")
+        except OSError:
+            item_warnings.append("Could not read registered asset metadata.")
+
+    if allowed_bases and not handler_utils.is_path_allowed(canonical, allowed_bases):
+        item_warnings.append("Asset path is outside allowed llama.cpp paths and cannot be used until allowed_paths is updated.")
+
+    return LlamaCppAsset(
+        asset_id=asset_id_for_path(canonical, kind),
+        kind=kind,
+        identity_basis="resolved_path",
+        path=str(path.expanduser()),
+        resolved_path=str(canonical),
+        display_name=_display_name(basename),
+        source=source,
+        size_bytes=size_bytes,
+        modified_at=modified_at,
+        metadata=_asset_metadata_from_filename(basename),
+        capabilities=_capabilities_for_asset(kind),
+        warnings=item_warnings,
+    )
+
+
+def _folder_asset_for_path(path: Path, *, allowed_bases: list[Path]) -> LlamaCppAsset:
+    canonical = _canonical_path(path, "Imported asset folder")
+    warnings: list[str] = []
+    modified_at: str | None = None
+
+    if not canonical.exists():
+        warnings.append("Imported asset folder is missing.")
+    elif not canonical.is_dir():
+        warnings.append("Imported asset path is not a folder.")
+    else:
+        try:
+            modified_at = datetime.fromtimestamp(canonical.stat().st_mtime, UTC).isoformat()
+        except PermissionError:
+            warnings.append("Imported asset folder is not readable.")
+        except OSError:
+            warnings.append("Could not read imported folder metadata.")
+
+    if allowed_bases and not handler_utils.is_path_allowed(canonical, allowed_bases):
+        warnings.append("Imported asset folder is outside allowed llama.cpp paths and cannot be scanned until allowed_paths is updated.")
+
+    return LlamaCppAsset(
+        asset_id=asset_id_for_path(canonical, "folder"),
+        kind="folder",
+        identity_basis="resolved_path",
+        path=str(path.expanduser()),
+        resolved_path=str(canonical),
+        display_name=canonical.name or str(canonical),
+        source="imported_folder",
+        modified_at=modified_at,
+        metadata=LlamaCppAssetMetadata(),
+        capabilities=["asset_folder"],
+        warnings=warnings,
+    )
+
+
+def _asset_kind_for_path(path: Path) -> str:
+    lowered_name = path.name.lower()
+    if not lowered_name.endswith(".gguf"):
+        return "unknown"
+    stem = lowered_name[:-5]
+    if "mmproj" in stem or "projector" in stem:
+        return "mmproj"
+    return "gguf"
+
+
+def _is_projector_asset_path(path: Path) -> bool:
+    try:
+        candidate = _canonical_path(path, "Model")
+    except ServerError:
+        candidate = path
+    return _asset_kind_for_path(candidate) == "mmproj"
+
+
+def _capabilities_for_asset(kind: str) -> list[str]:
+    if kind == "mmproj":
+        return ["vision_projector"]
+    if kind == "gguf":
+        return ["unknown"]
+    return []
+
+
+def _attach_mmproj_candidates(assets: list[LlamaCppAsset]) -> None:
+    by_parent: dict[Path, list[LlamaCppAsset]] = {}
+    for asset in assets:
+        if asset.kind not in {"gguf", "mmproj"} or not asset.resolved_path:
+            continue
+        by_parent.setdefault(Path(asset.resolved_path).parent, []).append(asset)
+
+    for grouped_assets in by_parent.values():
+        base_assets = [asset for asset in grouped_assets if asset.kind == "gguf"]
+        projector_assets = [asset for asset in grouped_assets if asset.kind == "mmproj"]
+        if not base_assets or not projector_assets:
+            continue
+
+        for base_asset in base_assets:
+            base_tokens = _pairing_tokens(base_asset.display_name)
+            candidates = [
+                projector
+                for projector in projector_assets
+                if len(projector_assets) == 1 or base_tokens.intersection(_pairing_tokens(projector.display_name))
+            ]
+            for projector in candidates:
+                if projector.asset_id not in base_asset.mmproj_asset_ids:
+                    base_asset.mmproj_asset_ids.append(projector.asset_id)
+                if base_asset.asset_id not in projector.base_model_asset_ids:
+                    projector.base_model_asset_ids.append(base_asset.asset_id)
+            if candidates:
+                _append_unique_warning(
+                    base_asset.warnings,
+                    "mmproj pairing is inferred; verify the projector before launching vision profiles.",
+                )
+
+
+def _pairing_tokens(value: str) -> set[str]:
+    tokens = {token for token in re.split(r"[^a-zA-Z0-9]+", value.lower()) if token}
+    return {
+        token
+        for token in tokens
+        if token not in _PAIRING_DROP_TOKENS and not _QUANT_RE.fullmatch(token) and not _PARAM_RE.fullmatch(token)
+    }
+
+
+def _append_unique_warning(warnings: list[str], warning: str) -> None:
+    if warning not in warnings:
+        warnings.append(warning)
 
 
 def _item_for_path(
@@ -264,6 +631,19 @@ def _metadata_from_filename(filename: str) -> LlamaCppModelMetadata:
     )
 
 
+def _asset_metadata_from_filename(filename: str) -> LlamaCppAssetMetadata:
+    quant_match = _QUANT_RE.search(filename)
+    param_match = _PARAM_RE.search(filename)
+    ctx_match = _CTX_RE.search(filename)
+    family_hint = _display_name(filename).replace("_", " ").replace("-", " ").strip() or None
+    return LlamaCppAssetMetadata(
+        quantization=quant_match.group(1).upper() if quant_match else None,
+        parameter_hint=param_match.group(1).upper() if param_match else None,
+        context_hint=int(ctx_match.group(1)) if ctx_match else None,
+        family_hint=family_hint,
+    )
+
+
 def _display_name(filename: str) -> str:
     return filename[:-5] if filename.lower().endswith(".gguf") else filename
 
@@ -284,11 +664,12 @@ def _read_saved_config() -> dict[str, Any]:
     parser = load_comprehensive_config()
     section = parser["LlamaCpp"] if parser and parser.has_section("LlamaCpp") else None
     if section is None:
-        return {"allowed_paths": [], "registered_model_paths": []}
+        return {"allowed_paths": [], "registered_model_paths": [], "imported_asset_folders": []}
     return {
         "models_dir": _str_or_none(section.get("models_dir", fallback=None)),
         "allowed_paths": _split_list(section.get("allowed_paths", fallback="")),
         "registered_model_paths": _split_list(section.get("registered_model_paths", fallback="")),
+        "imported_asset_folders": _split_list(section.get("imported_asset_folders", fallback="")),
     }
 
 

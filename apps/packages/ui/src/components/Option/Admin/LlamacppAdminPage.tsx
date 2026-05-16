@@ -5,6 +5,7 @@ import { PageShell } from "@/components/Common/PageShell"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type {
+  LlamacppAssetsResponse,
   LlamacppConfigResponse,
   LlamacppHardwareSnapshotResponse,
   LlamacppInventoryResponse,
@@ -22,6 +23,7 @@ import {
   sanitizeAdminErrorMessage,
   type AdminGuardState
 } from "./admin-error-utils"
+import { LlamacppAssetsPanel } from "./LlamacppAssetsPanel"
 import { LlamacppInventoryPanel } from "./LlamacppInventoryPanel"
 import { LlamacppLaunchPanel } from "./LlamacppLaunchPanel"
 import { LlamacppReadinessPanel } from "./LlamacppReadinessPanel"
@@ -119,6 +121,7 @@ export const LlamacppAdminPage: React.FC = () => {
   const [config, setConfig] = React.useState<LlamacppConfigResponse | null>(null)
   const [status, setStatus] = React.useState<LlamacppStatus | null>(null)
   const [inventory, setInventory] = React.useState<LlamacppInventoryResponse | null>(null)
+  const [assets, setAssets] = React.useState<LlamacppAssetsResponse | null>(null)
   const [hardware, setHardware] = React.useState<LlamacppHardwareSnapshotResponse | null>(null)
   const [runtimeProfiles, setRuntimeProfiles] = React.useState<LlamacppProfile[]>([])
   const [runtimeInstances, setRuntimeInstances] = React.useState<LlamacppRuntime[]>([])
@@ -126,11 +129,15 @@ export const LlamacppAdminPage: React.FC = () => {
   const [loadingConfig, setLoadingConfig] = React.useState(false)
   const [loadingStatus, setLoadingStatus] = React.useState(false)
   const [loadingInventory, setLoadingInventory] = React.useState(true)
+  const [loadingAssets, setLoadingAssets] = React.useState(true)
   const [loadingRuntimes, setLoadingRuntimes] = React.useState(true)
   const [registeringPath, setRegisteringPath] = React.useState(false)
+  const [registeringAssetPath, setRegisteringAssetPath] = React.useState(false)
+  const [importingAssetFolder, setImportingAssetFolder] = React.useState(false)
 
   const [statusError, setStatusError] = React.useState<string | null>(null)
   const [inventoryError, setInventoryError] = React.useState<string | null>(null)
+  const [assetError, setAssetError] = React.useState<string | null>(null)
   const [runtimeError, setRuntimeError] = React.useState<string | null>(null)
   const [runtimeUnsupported, setRuntimeUnsupported] = React.useState(false)
   const [adminGuard, setAdminGuard] = React.useState<AdminGuardState>(null)
@@ -208,6 +215,22 @@ export const LlamacppAdminPage: React.FC = () => {
     }
   }, [markAdminGuardFromError])
 
+  const loadAssets = React.useCallback(async () => {
+    try {
+      setLoadingAssets(true)
+      setAssetError(null)
+      const data = await tldwClient.getLlamacppAssets()
+      setAssets(data)
+    } catch (error: unknown) {
+      setAssets(null)
+      setAssetError(
+        sanitizeAdminErrorMessage(error, "Failed to load Llama.cpp assets.")
+      )
+    } finally {
+      setLoadingAssets(false)
+    }
+  }, [])
+
   const loadHardware = React.useCallback(async () => {
     try {
       const data = await tldwClient.getLlamacppHardware()
@@ -263,10 +286,18 @@ export const LlamacppAdminPage: React.FC = () => {
       loadConfig(),
       loadStatus(),
       loadInventory(),
+      loadAssets(),
       loadHardware(),
       loadRuntimePlane()
     ])
-  }, [loadConfig, loadHardware, loadInventory, loadRuntimePlane, loadStatus])
+  }, [
+    loadAssets,
+    loadConfig,
+    loadHardware,
+    loadInventory,
+    loadRuntimePlane,
+    loadStatus
+  ])
 
   const effectiveState =
     status?.state || status?.status || status?.backend || "unknown"
@@ -309,6 +340,43 @@ export const LlamacppAdminPage: React.FC = () => {
       return false
     } finally {
       setRegisteringPath(false)
+    }
+  }
+
+  const handleRegisterAssetPath = async (path: string): Promise<boolean> => {
+    try {
+      setRegisteringAssetPath(true)
+      setAssetError(null)
+      const asset = await tldwClient.registerLlamacppAssetPath(path)
+      await loadAssets()
+      if (asset.kind === "gguf") {
+        await loadInventory()
+      }
+      return true
+    } catch (error: unknown) {
+      setAssetError(
+        sanitizeAdminErrorMessage(error, "Failed to register Llama.cpp asset path.")
+      )
+      return false
+    } finally {
+      setRegisteringAssetPath(false)
+    }
+  }
+
+  const handleImportAssetFolder = async (path: string): Promise<boolean> => {
+    try {
+      setImportingAssetFolder(true)
+      setAssetError(null)
+      await tldwClient.importLlamacppAssetFolder(path)
+      await loadAssets()
+      return true
+    } catch (error: unknown) {
+      setAssetError(
+        sanitizeAdminErrorMessage(error, "Failed to import Llama.cpp asset folder.")
+      )
+      return false
+    } finally {
+      setImportingAssetFolder(false)
     }
   }
 
@@ -620,6 +688,17 @@ export const LlamacppAdminPage: React.FC = () => {
                 }}
               />
             )}
+
+            <LlamacppAssetsPanel
+              assets={assets}
+              loading={loadingAssets}
+              registeringPath={registeringAssetPath}
+              importingFolder={importingAssetFolder}
+              error={assetError}
+              onRegisterPath={handleRegisterAssetPath}
+              onImportFolder={handleImportAssetFolder}
+              onReload={loadAssets}
+            />
 
             <LlamacppInventoryPanel
               inventory={inventory}

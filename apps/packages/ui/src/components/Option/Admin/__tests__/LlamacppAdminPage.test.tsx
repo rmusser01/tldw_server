@@ -7,6 +7,7 @@ const apiMock = vi.hoisted(() => ({
   getLlamacppConfig: vi.fn(),
   getLlamacppStatus: vi.fn(),
   getLlamacppInventory: vi.fn(),
+  getLlamacppAssets: vi.fn(),
   getLlamacppHardware: vi.fn(),
   listLlamacppProfiles: vi.fn(),
   listLlamacppInstances: vi.fn(),
@@ -20,7 +21,9 @@ const apiMock = vi.hoisted(() => ({
   startLlamacppServer: vi.fn(),
   stopLlamacppServer: vi.fn(),
   useLlamacppInChat: vi.fn(),
-  registerLlamacppModelPath: vi.fn()
+  registerLlamacppModelPath: vi.fn(),
+  registerLlamacppAssetPath: vi.fn(),
+  importLlamacppAssetFolder: vi.fn()
 }))
 
 vi.mock("react-i18next", () => ({
@@ -195,6 +198,7 @@ const mockConfig = {
     default_ctx_size: 4096,
     allowed_paths: ["/srv/models"],
     registered_model_paths: [],
+    imported_asset_folders: [],
     log_output_file: null
   },
   active_config: {
@@ -237,6 +241,66 @@ const mockInventory = {
     }
   ],
   warnings: ["One registered path was skipped."],
+  scan_limited: false
+}
+
+const mockAssets = {
+  assets: [
+    {
+      asset_id: "gguf:toy-model-id",
+      kind: "gguf",
+      identity_basis: "resolved_path",
+      path: "/srv/models/gguf/toy-7b-q4_k_m.gguf",
+      resolved_path: "/srv/models/gguf/toy-7b-q4_k_m.gguf",
+      display_name: "Toy 7B Q4_K_M",
+      source: "models_dir",
+      size_bytes: 4_200_000_000,
+      modified_at: "2026-05-15T10:00:00Z",
+      metadata: {
+        quantization: "Q4_K_M",
+        parameter_hint: "7B",
+        context_hint: 4096,
+        family_hint: "toy"
+      },
+      capabilities: ["unknown"],
+      mmproj_asset_ids: ["mmproj:toy-vision"],
+      base_model_asset_ids: [],
+      warnings: ["Projector pairing is inferred."]
+    },
+    {
+      asset_id: "mmproj:toy-vision",
+      kind: "mmproj",
+      identity_basis: "resolved_path",
+      path: "/srv/models/gguf/mmproj-toy.gguf",
+      resolved_path: "/srv/models/gguf/mmproj-toy.gguf",
+      display_name: "mmproj-toy",
+      source: "models_dir",
+      size_bytes: 50_000_000,
+      modified_at: null,
+      metadata: {},
+      capabilities: ["vision_projector"],
+      mmproj_asset_ids: [],
+      base_model_asset_ids: ["gguf:toy-model-id"],
+      warnings: []
+    },
+    {
+      asset_id: "folder:external",
+      kind: "folder",
+      identity_basis: "resolved_path",
+      path: "/srv/models/imported",
+      resolved_path: "/srv/models/imported",
+      display_name: "imported",
+      source: "imported_folder",
+      size_bytes: null,
+      modified_at: null,
+      metadata: {},
+      capabilities: ["asset_folder"],
+      mmproj_asset_ids: [],
+      base_model_asset_ids: [],
+      warnings: []
+    }
+  ],
+  warnings: ["One imported folder could not be read."],
   scan_limited: false
 }
 
@@ -343,6 +407,7 @@ describe("LlamacppAdminPage", () => {
       port: 8080
     })
     apiMock.getLlamacppInventory.mockResolvedValue(mockInventory)
+    apiMock.getLlamacppAssets.mockResolvedValue(mockAssets)
     apiMock.getLlamacppHardware.mockResolvedValue({
       ram_total_bytes: 16_000_000_000,
       ram_available_bytes: 8_000_000_000,
@@ -398,6 +463,8 @@ describe("LlamacppAdminPage", () => {
       warnings: []
     })
     apiMock.registerLlamacppModelPath.mockResolvedValue(mockInventory.models[0])
+    apiMock.registerLlamacppAssetPath.mockResolvedValue(mockAssets.assets[0])
+    apiMock.importLlamacppAssetFolder.mockResolvedValue(mockAssets.assets[2])
   })
 
   it("renders readiness from saved config and restart-required state", async () => {
@@ -414,9 +481,9 @@ describe("LlamacppAdminPage", () => {
   it("renders inventory display names warnings and stable model selection", async () => {
     render(<LlamacppAdminPage />)
 
-    expect(await screen.findByText("Toy 7B Q4_K_M")).toBeTruthy()
+    expect((await screen.findAllByText("Toy 7B Q4_K_M")).length).toBeGreaterThan(0)
     expect(screen.getByText("toy-7b-q4_k_m.gguf")).toBeTruthy()
-    expect(screen.getByText("/srv/models/gguf/toy-7b-q4_k_m.gguf")).toBeTruthy()
+    expect(screen.getAllByText("/srv/models/gguf/toy-7b-q4_k_m.gguf").length).toBeGreaterThan(0)
     expect(screen.getByText("Metadata is filename-derived.")).toBeTruthy()
     expect(screen.getByText("Selected")).toBeTruthy()
   })
@@ -567,7 +634,59 @@ describe("LlamacppAdminPage", () => {
     })
   })
 
-  it("loads config status inventory and hardware only once during strict-mode mount", async () => {
+  it("renders asset inventory groups and warnings next to legacy inventory", async () => {
+    render(<LlamacppAdminPage />)
+
+    expect(await screen.findByText("Assets")).toBeTruthy()
+    expect(screen.getByText("GGUF models")).toBeTruthy()
+    expect(screen.getByText("mmproj projectors")).toBeTruthy()
+    expect(screen.getByText("Imported folders")).toBeTruthy()
+    expect(screen.getByText("One imported folder could not be read.")).toBeTruthy()
+    expect(screen.getByText("Projector candidates: mmproj:toy-vision")).toBeTruthy()
+    expect(screen.getByText("Base model candidates: gguf:toy-model-id")).toBeTruthy()
+    expect(screen.getByText("Inventory")).toBeTruthy()
+  })
+
+  it("registers an asset path and reloads assets plus legacy GGUF inventory", async () => {
+    render(<LlamacppAdminPage />)
+
+    fireEvent.change(await screen.findByLabelText("Register local asset path"), {
+      target: { value: "/external/model.gguf" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Register asset" }))
+
+    await waitFor(() => {
+      expect(apiMock.registerLlamacppAssetPath).toHaveBeenCalledWith("/external/model.gguf")
+      expect(apiMock.getLlamacppAssets).toHaveBeenCalledTimes(2)
+      expect(apiMock.getLlamacppInventory).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  it("imports an asset folder and reloads assets", async () => {
+    render(<LlamacppAdminPage />)
+
+    fireEvent.change(await screen.findByLabelText("Import local asset folder"), {
+      target: { value: "/srv/models/imported" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Import folder" }))
+
+    await waitFor(() => {
+      expect(apiMock.importLlamacppAssetFolder).toHaveBeenCalledWith("/srv/models/imported")
+      expect(apiMock.getLlamacppAssets).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  it("shows asset load failure without hiding legacy inventory", async () => {
+    apiMock.getLlamacppAssets.mockRejectedValueOnce(new Error("asset scan failed"))
+
+    render(<LlamacppAdminPage />)
+
+    expect(await screen.findByText("Inventory")).toBeTruthy()
+    expect(await screen.findByText("asset scan failed")).toBeTruthy()
+    expect(screen.getAllByText("Toy 7B Q4_K_M").length).toBeGreaterThan(0)
+  })
+
+  it("loads config status inventory assets and hardware only once during strict-mode mount", async () => {
     render(
       <React.StrictMode>
         <LlamacppAdminPage />
@@ -578,6 +697,7 @@ describe("LlamacppAdminPage", () => {
       expect(apiMock.getLlamacppConfig).toHaveBeenCalledTimes(1)
       expect(apiMock.getLlamacppStatus).toHaveBeenCalledTimes(1)
       expect(apiMock.getLlamacppInventory).toHaveBeenCalledTimes(1)
+      expect(apiMock.getLlamacppAssets).toHaveBeenCalledTimes(1)
       expect(apiMock.getLlamacppHardware).toHaveBeenCalledTimes(1)
       expect(apiMock.listLlamacppProfiles).toHaveBeenCalledTimes(1)
       expect(apiMock.listLlamacppInstances).toHaveBeenCalledTimes(1)

@@ -152,7 +152,7 @@ If Python 3.10 compatibility rejects dynamic `Literal` usage during tests, repla
 - Modify: `tldw_Server_API/app/core/Local_LLM/llamacpp_config_service.py`
 - Test: `tldw_Server_API/tests/LLM_Local/test_llamacpp_asset_inventory_service.py`
 
-- [ ] **Step 1: Write failing schema/config tests**
+- [x] **Step 1: Write failing schema/config tests**
 
 Create `tldw_Server_API/tests/LLM_Local/test_llamacpp_asset_inventory_service.py` with:
 
@@ -199,7 +199,7 @@ def test_config_state_reads_imported_asset_folders(monkeypatch, tmp_path: Path):
     assert state["saved_config"]["imported_asset_folders"] == [str(imported)]
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -210,7 +210,7 @@ Run:
 
 Expected: FAIL because `imported_asset_folders` is not parsed yet.
 
-- [ ] **Step 3: Add schemas and saved config field**
+- [x] **Step 3: Add schemas and saved config field**
 
 In `llamacpp_admin_schemas.py`:
 
@@ -225,7 +225,7 @@ In `llamacpp_config_service.py`:
 - do not add it to `RESTART_FIELDS`; registering a folder changes inventory, not an active process;
 - do not add an environment override in this slice unless existing config docs already define one.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run:
 
@@ -236,7 +236,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/llamacpp_admin_schemas.py \
@@ -252,7 +252,7 @@ git commit -m "Add llama.cpp asset inventory schema contract"
 - Modify: `tldw_Server_API/app/core/Local_LLM/llamacpp_inventory_service.py`
 - Test: `tldw_Server_API/tests/LLM_Local/test_llamacpp_asset_inventory_service.py`
 
-- [ ] **Step 1: Write failing asset discovery tests**
+- [x] **Step 1: Write failing asset discovery tests**
 
 Append:
 
@@ -305,7 +305,7 @@ def test_scan_assets_reports_stale_imported_folder_without_failing(monkeypatch, 
     assert any("missing" in warning.lower() for warning in folder.warnings)
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run:
 
@@ -317,7 +317,7 @@ Run:
 
 Expected: FAIL because `scan_assets` does not exist.
 
-- [ ] **Step 3: Implement asset scanning helpers**
+- [x] **Step 3: Implement asset scanning helpers**
 
 In `llamacpp_inventory_service.py`:
 
@@ -341,7 +341,7 @@ Implementation notes:
 - keep de-duplication by `asset_id`;
 - return assets sorted by source, kind, display name, and path for stable UI/tests.
 
-- [ ] **Step 4: Run tests to verify pass**
+- [x] **Step 4: Run tests to verify pass**
 
 Run:
 
@@ -352,7 +352,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 5: Run legacy inventory tests**
+- [x] **Step 5: Run legacy inventory tests**
 
 Run:
 
@@ -364,7 +364,7 @@ Run:
 
 Expected: PASS. If these fail because legacy inventory changed shape, fix the adapter instead of changing the tests.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Local_LLM/llamacpp_inventory_service.py \
@@ -379,7 +379,7 @@ git commit -m "Add llama.cpp local asset discovery"
 - Modify: `tldw_Server_API/app/core/Local_LLM/llamacpp_inventory_service.py`
 - Test: `tldw_Server_API/tests/LLM_Local/test_llamacpp_asset_inventory_service.py`
 
-- [ ] **Step 1: Write failing pairing tests**
+- [x] **Step 1: Write failing pairing tests**
 
 Append:
 
@@ -409,7 +409,7 @@ def test_scan_assets_adds_inferred_mmproj_candidates_with_warnings(monkeypatch, 
     assert any("inferred" in warning.lower() for warning in base_asset.warnings)
 ```
 
-- [ ] **Step 2: Run test to verify failure**
+- [x] **Step 2: Run test to verify failure**
 
 Run:
 
@@ -420,7 +420,7 @@ Run:
 
 Expected: FAIL because candidate pairing is not populated.
 
-- [ ] **Step 3: Implement conservative pairing**
+- [x] **Step 3: Implement conservative pairing**
 
 Add a helper such as `_attach_mmproj_candidates(assets: list[LlamaCppAsset]) -> None`.
 
@@ -433,7 +433,7 @@ Rules:
 - Never remove or hide assets because pairing is ambiguous.
 - Never auto-populate profile `mmproj_model_id` from candidate metadata.
 
-- [ ] **Step 4: Run pairing and service tests**
+- [x] **Step 4: Run pairing and service tests**
 
 Run:
 
@@ -444,7 +444,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Local_LLM/llamacpp_inventory_service.py \
@@ -460,7 +460,7 @@ git commit -m "Infer llama.cpp mmproj asset candidates"
 - Modify: `tldw_Server_API/app/api/v1/endpoints/llamacpp.py`
 - Modify: `tldw_Server_API/tests/LLM_Local/test_llamacpp_inventory_api.py`
 
-- [ ] **Step 1: Write failing API tests**
+- [x] **Step 1: Write failing API tests**
 
 Append tests to `test_llamacpp_inventory_api.py`:
 
@@ -515,7 +515,7 @@ def test_import_folder_persists_allowlisted_folder_and_returns_folder_asset(monk
     assert updates[-1]["LlamaCpp"]["imported_asset_folders"] == str(imported)
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run:
 
@@ -527,7 +527,7 @@ Run:
 
 Expected: FAIL because routes/service methods do not exist.
 
-- [ ] **Step 3: Add service mutation methods**
+- [x] **Step 3: Add service mutation methods**
 
 In `llamacpp_inventory_service.py`:
 
@@ -541,7 +541,7 @@ In `llamacpp_inventory_service.py`:
 - persist folders to `imported_asset_folders`;
 - preserve existing registered paths/folders by stable ID and unresolved-path fallback.
 
-- [ ] **Step 4: Add endpoints**
+- [x] **Step 4: Add endpoints**
 
 In `llamacpp.py`, add routes near the legacy inventory routes:
 
@@ -561,7 +561,7 @@ async def get_llamacpp_assets_endpoint(
 
 Add `POST /llamacpp/assets/register-path` and `POST /llamacpp/assets/import-folder` with `ServerError` mapped to HTTP 400 and `from e` exception chaining.
 
-- [ ] **Step 5: Run API tests**
+- [x] **Step 5: Run API tests**
 
 Run:
 
@@ -572,7 +572,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Local_LLM/llamacpp_inventory_service.py \
@@ -588,7 +588,7 @@ git commit -m "Add llama.cpp asset inventory APIs"
 - Modify: `tldw_Server_API/app/core/Local_LLM/llamacpp_inventory_service.py`
 - Modify: `tldw_Server_API/tests/LLM_Local/test_llamacpp_inventory_api.py`
 
-- [ ] **Step 1: Write failing regression tests**
+- [x] **Step 1: Write failing regression tests**
 
 Append:
 
@@ -631,7 +631,7 @@ def test_resolve_model_id_rejects_mmproj_asset_id(monkeypatch, tmp_path: Path):
         llamacpp_inventory_service.resolve_model_id(llamacpp_inventory_service.asset_id_for_path(projector, "mmproj"))
 ```
 
-- [ ] **Step 2: Run tests to verify current behavior**
+- [x] **Step 2: Run tests to verify current behavior**
 
 Run:
 
@@ -647,6 +647,8 @@ Expected: FAIL only if the adapter has not been corrected yet. If they already p
 
 Update `scan_inventory()` so it can call `scan_assets()` internally, filter `kind == "gguf"`, and convert to `LlamaCppInventoryItem`.
 
+Implementation note: no production adapter change was made in this step because the regression tests passed with the current legacy scanner, and adapting it directly through `scan_assets()` would risk dropping existing non-GGUF registered-path warning entries that legacy tests still protect.
+
 Keep:
 
 - `model_id_for_path(path)` returning `gguf:<hash>`;
@@ -655,7 +657,7 @@ Keep:
 - `scan_limited` behavior;
 - `resolve_model_id()` resolving only available GGUF files.
 
-- [ ] **Step 4: Run focused backend tests**
+- [x] **Step 4: Run focused backend tests**
 
 Run:
 
@@ -668,7 +670,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Local_LLM/llamacpp_inventory_service.py \
@@ -684,7 +686,7 @@ git commit -m "Preserve llama.cpp legacy inventory compatibility"
 - Modify: `apps/packages/ui/src/services/tldw/domains/models-audio.ts`
 - Modify: `apps/packages/ui/src/services/tldw/TldwApiClient.ts`
 
-- [ ] **Step 1: Write failing type/client tests if a client test harness exists**
+- [x] **Step 1: Write failing type/client tests if a client test harness exists**
 
 Search first:
 
@@ -700,7 +702,9 @@ If an existing service test harness covers `models-audio`, add tests for:
 
 If no matching harness exists, document the skip in the commit body and rely on component/Admin page tests in Tasks 7 and 8.
 
-- [ ] **Step 2: Add TypeScript asset types**
+Implementation note: no dedicated `models-audio` service test harness exists; coverage for the new methods is deferred to the component/Admin tests in Tasks 7 and 8.
+
+- [x] **Step 2: Add TypeScript asset types**
 
 Add:
 
@@ -739,7 +743,7 @@ export interface LlamacppAssetsResponse {
 }
 ```
 
-- [ ] **Step 3: Add API methods**
+- [x] **Step 3: Add API methods**
 
 Add methods to the domain client and mirrored client:
 
@@ -757,7 +761,9 @@ bunx tsc --noEmit --pretty false
 
 Expected: PASS or known repo-wide baseline failures unrelated to touched files. If repo-wide failures occur, run the narrow touched-path TypeScript check used in this repo's design-system slices and document the baseline separately.
 
-- [ ] **Step 5: Commit**
+Implementation note: `bunx tsc --noEmit --pretty false` was attempted, but Bun could not write to its temp directory inside the sandbox. The required escalated rerun was rejected by the approval reviewer, and retrying with `TMPDIR=/private/tmp` failed with the same tempdir access error. Frontend behavioral validation continues through Vitest in Tasks 7 and 8.
+
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/packages/ui/src/types/llamacpp-admin.ts \
@@ -773,7 +779,7 @@ git commit -m "Add llama.cpp asset API client types"
 - Create: `apps/packages/ui/src/components/Option/Admin/LlamacppAssetsPanel.tsx`
 - Create: `apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppAssetsPanel.test.tsx`
 
-- [ ] **Step 1: Write failing component tests**
+- [x] **Step 1: Write failing component tests**
 
 Create tests that render:
 
@@ -843,7 +849,7 @@ it("renders asset groups warnings and inferred projector candidates", async () =
 })
 ```
 
-- [ ] **Step 2: Run test to verify failure**
+- [x] **Step 2: Run test to verify failure**
 
 Run:
 
@@ -853,7 +859,9 @@ bunx vitest run apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppA
 
 Expected: FAIL because component does not exist.
 
-- [ ] **Step 3: Implement minimal panel**
+Verification note: `bunx vitest run packages/ui/src/components/Option/Admin/__tests__/LlamacppAssetsPanel.test.tsx` from `apps/` failed red because `../LlamacppAssetsPanel` did not exist. Earlier root/package attempts exposed missing worktree dependency links; `bun install` in `apps/` repaired local test dependencies, and the unrelated tracked dependency-link pruning was restored before continuing.
+
+- [x] **Step 3: Implement minimal panel**
 
 Use existing local conventions from `LlamacppInventoryPanel.tsx`:
 
@@ -868,7 +876,7 @@ Use existing local conventions from `LlamacppInventoryPanel.tsx`:
 - show candidate IDs as labels, not as automatic "paired" state;
 - keep text compact and avoid redesigning the whole Admin page.
 
-- [ ] **Step 4: Run panel tests**
+- [x] **Step 4: Run panel tests**
 
 Run:
 
@@ -878,7 +886,9 @@ bunx vitest run apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppA
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+Verification note: `./node_modules/.bin/vitest run src/components/Option/Admin/__tests__/LlamacppAssetsPanel.test.tsx` passed from `apps/packages/ui`.
+
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Admin/LlamacppAssetsPanel.tsx \
@@ -893,7 +903,7 @@ git commit -m "Add llama.cpp assets panel"
 - Modify: `apps/packages/ui/src/components/Option/Admin/LlamacppAdminPage.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppAdminPage.test.tsx`
 
-- [ ] **Step 1: Write failing Admin page tests**
+- [x] **Step 1: Write failing Admin page tests**
 
 Add tests for:
 
@@ -902,7 +912,7 @@ Add tests for:
 - import folder calls the folder endpoint and reloads assets;
 - asset endpoint failure is shown without hiding the legacy inventory panel.
 
-- [ ] **Step 2: Run selected Admin page tests**
+- [x] **Step 2: Run selected Admin page tests**
 
 Run:
 
@@ -912,7 +922,9 @@ bunx vitest run apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppA
 
 Expected: FAIL because Admin page does not yet load/render assets.
 
-- [ ] **Step 3: Integrate asset state**
+Verification note: `./node_modules/.bin/vitest run src/components/Option/Admin/__tests__/LlamacppAdminPage.test.tsx` failed with 5 expected asset-integration failures before implementation.
+
+- [x] **Step 3: Integrate asset state**
 
 In `LlamacppAdminPage.tsx`:
 
@@ -927,7 +939,7 @@ In `LlamacppAdminPage.tsx`:
 - render `<LlamacppAssetsPanel />` near the existing inventory panel;
 - keep the existing `LlamacppInventoryPanel` and launch flow intact.
 
-- [ ] **Step 4: Run Admin tests**
+- [x] **Step 4: Run Admin tests**
 
 Run:
 
@@ -938,7 +950,9 @@ bunx vitest run apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppA
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+Verification note: `./node_modules/.bin/vitest run src/components/Option/Admin/__tests__/LlamacppAssetsPanel.test.tsx src/components/Option/Admin/__tests__/LlamacppAdminPage.test.tsx` passed from `apps/packages/ui`.
+
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Admin/LlamacppAdminPage.tsx \
@@ -953,7 +967,7 @@ git commit -m "Wire llama.cpp assets into admin page"
 - All touched files.
 - Backlog task for the implementation slice.
 
-- [ ] **Step 1: Run backend tests**
+- [x] **Step 1: Run backend tests**
 
 Run:
 
@@ -966,7 +980,9 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 2: Run frontend tests**
+Verification note: passed with 32 tests, 5 warnings.
+
+- [x] **Step 2: Run frontend tests**
 
 Run:
 
@@ -978,7 +994,9 @@ bunx vitest run apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppA
 
 Expected: PASS.
 
-- [ ] **Step 3: Run Bandit on touched Python scope**
+Verification note: `./node_modules/.bin/vitest run src/components/Option/Admin/__tests__/LlamacppAssetsPanel.test.tsx src/components/Option/Admin/__tests__/LlamacppInventoryPanel.test.tsx src/components/Option/Admin/__tests__/LlamacppAdminPage.test.tsx` passed from `apps/packages/ui` with 3 test files and 20 tests.
+
+- [x] **Step 3: Run Bandit on touched Python scope**
 
 Run:
 
@@ -992,7 +1010,9 @@ Run:
 
 Expected: PASS with no new findings in touched code. If Bandit reports existing baseline issues outside the changed lines, document them separately and do not hide new issues.
 
-- [ ] **Step 4: Run whitespace check**
+Verification note: Bandit wrote `/tmp/bandit_llamacpp_asset_inventory_v2.json` with 0 results.
+
+- [x] **Step 4: Run whitespace check**
 
 Run:
 
@@ -1002,7 +1022,9 @@ git diff --check
 
 Expected: no output.
 
-- [ ] **Step 5: Update Backlog task**
+Verification note: `git diff --check` produced no output.
+
+- [x] **Step 5: Update Backlog task**
 
 Update the implementation task with:
 
@@ -1012,7 +1034,7 @@ Update the implementation task with:
 - known skips or blockers;
 - PR link if one is opened.
 
-- [ ] **Step 6: Final commit**
+- [x] **Step 6: Final commit**
 
 If any verification/backlog edits remain:
 
