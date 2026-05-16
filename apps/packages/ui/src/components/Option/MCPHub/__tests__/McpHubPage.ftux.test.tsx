@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 
@@ -69,9 +69,7 @@ describe("McpHubPage FTUX", () => {
     const explainer = screen.getByTestId("mcp-hub-explainer")
     expect(explainer).toBeTruthy()
 
-    const closeButton = explainer.querySelector(".ant-alert-close-icon")
-    expect(closeButton).toBeTruthy()
-    await user.click(closeButton!)
+    await user.click(within(explainer).getByRole("button", { name: "Dismiss" }))
 
     expect(screen.queryByTestId("mcp-hub-explainer")).toBeNull()
     expect(localStorage.getItem("tldw:mcp-hub:explainer-dismissed")).toBe("true")

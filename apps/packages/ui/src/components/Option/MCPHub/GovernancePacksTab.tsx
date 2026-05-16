@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from "react"
-import { Alert, Button, Card, Descriptions, Divider, Empty, Input, List, Modal, Radio, Space, Tag, Typography } from "antd"
+import { Button, Card, Descriptions, Divider, Empty, Input, List, Modal, Radio, Space, Typography } from "antd"
+import {
+  ProductStateAlert as Alert,
+  ProductStateBadge as Tag,
+} from "@/components/Option/productStatePrimitives"
 import { BLOCKED_STATE_LABEL } from "@/design-system"
 
 import {

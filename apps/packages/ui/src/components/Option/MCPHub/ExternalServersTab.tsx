@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Alert, Button, Card, Checkbox, Empty, List, Modal, Space, Tag, Tooltip, Typography } from "antd"
+import { Button, Card, Checkbox, Empty, List, Modal, Space, Tag, Tooltip, Typography } from "antd"
 import { QuestionCircleOutlined } from "@ant-design/icons"
 import { useQueryClient } from "@tanstack/react-query"
+import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
 
 import {
   clearExternalServerSlotSecret,

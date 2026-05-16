@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState, type ReactNode } from "react"
 import { useSearchParams } from "react-router-dom"
-import { Alert, Button, Tabs, Typography } from "antd"
+import { Button, Tabs, Typography } from "antd"
+import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
 
 import { ApprovalPoliciesTab } from "./ApprovalPoliciesTab"
 import { CapabilityMappingsTab } from "./CapabilityMappingsTab"

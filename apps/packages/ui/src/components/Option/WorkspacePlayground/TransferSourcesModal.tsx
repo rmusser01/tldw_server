@@ -1,5 +1,6 @@
 import React from "react"
-import { Alert, Button, Checkbox, Input, Modal, Radio, message } from "antd"
+import { Button, Checkbox, Input, Modal, Radio, message } from "antd"
+import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
 import { useTranslation } from "react-i18next"
 import { useWorkspaceStore } from "@/store/workspace"
 import type {
