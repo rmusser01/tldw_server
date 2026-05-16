@@ -894,6 +894,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const importPreviewRequestIdRef = React.useRef(0)
   const importCommitRequestIdRef = React.useRef(0)
   const importCommitInFlightRef = React.useRef(false)
+  const importCommitRefreshInFlightRef = React.useRef(false)
   const selectedPersonaIdRef = React.useRef(selectedPersonaId)
   const selectedPackIdRef = React.useRef("")
 
@@ -1068,12 +1069,16 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         return true
       } catch (loadError) {
         if (!isLatestRequest()) return false
-        setPacks([])
-        setActivePackId("")
-        setPacksLoaded(false)
-        setPacksLoadedPersonaId("")
-        selectPackId("")
-        setDraftManifest(DEFAULT_MANIFEST)
+        if (options.fallbackPack) {
+          const fallbackPack = options.fallbackPack
+          setPacks((current) => mergePack(current, fallbackPack))
+          setActivePackId((current) =>
+            fallbackPack.status === "active" ? fallbackPack.id : current
+          )
+          setPacksLoaded(true)
+          setPacksLoadedPersonaId(targetPersonaId)
+          selectPackId(options.preferredPackId || fallbackPack.id)
+        }
         setError(
           loadError instanceof Error
             ? loadError.message
@@ -1353,6 +1358,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     importPreviewRequestIdRef.current += 1
     importCommitRequestIdRef.current += 1
     importCommitInFlightRef.current = false
+    importCommitRefreshInFlightRef.current = false
     setImportPreview(null)
     setImportCommitJob(null)
     setSelectedImportPreviewFile(null)
@@ -1895,6 +1901,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const handleRefreshImportCommit = async () => {
     if (!selectedPersonaId || !importCommitJob?.job_id) return
     if (importCommitInFlightRef.current) return
+    if (importCommitRefreshInFlightRef.current || refreshingImportCommit) return
     const targetPersonaId = selectedPersonaId
     const jobId = importCommitJob.job_id
     const requestId = importCommitRequestIdRef.current + 1
@@ -1902,6 +1909,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     const isCurrentImportCommitRequest = () =>
       importCommitRequestIdRef.current === requestId &&
       selectedPersonaIdRef.current === targetPersonaId
+    importCommitRefreshInFlightRef.current = true
     setRefreshingImportCommit(true)
     setError(null)
     try {
@@ -1934,6 +1942,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         )
       }
     } finally {
+      if (importCommitRequestIdRef.current === requestId) {
+        importCommitRefreshInFlightRef.current = false
+      }
       if (isCurrentImportCommitRequest()) setRefreshingImportCommit(false)
     }
   }
@@ -2527,6 +2538,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const importPreviewFileError = getImportPreviewFileError(selectedImportPreviewFile, t)
   const importPreviewJobCopy = getImportPreviewJobCopy(importPreview, t)
   const importCommitJobCopy = getImportCommitJobCopy(importCommitJob, t)
+  const importCommitJobPackIsSelected =
+    !importCommitJob ||
+    !("pack_id" in importCommitJob) ||
+    !importCommitJob.pack_id ||
+    selectedPack?.id === importCommitJob.pack_id
   const importPreviewWarnings = fullImportPreview
     ? [
         ...(fullImportPreview.validation_warnings || []),
@@ -2864,7 +2880,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                       {importCommitJob.job_id}
                     </span>
                   </div>
-                  {selectedPack && importCommitJobCopy ? (
+                  {selectedPack && importCommitJobCopy && importCommitJobPackIsSelected ? (
                     <div data-testid="persona-visual-import-commit-job-copy">
                       {importCommitJobCopy}
                     </div>

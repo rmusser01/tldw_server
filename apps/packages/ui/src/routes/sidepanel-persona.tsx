@@ -1980,7 +1980,7 @@ const SidepanelPersona = ({
         <LazyVisualPackEditor
           selectedPersonaId={selectedPersonaId}
           selectedPersonaName={selectedPersonaName}
-          isActive={activeTab === "visuals"}
+          isActive={effectiveActiveTab === "visuals"}
           onOpenPersonaVisuals={(personaId) => {
             setSelectedPersonaId(personaId)
             setActiveTab("visuals")
