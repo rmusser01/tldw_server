@@ -588,7 +588,7 @@ git commit -m "Add llama.cpp asset inventory APIs"
 - Modify: `tldw_Server_API/app/core/Local_LLM/llamacpp_inventory_service.py`
 - Modify: `tldw_Server_API/tests/LLM_Local/test_llamacpp_inventory_api.py`
 
-- [ ] **Step 1: Write failing regression tests**
+- [x] **Step 1: Write failing regression tests**
 
 Append:
 
@@ -631,7 +631,7 @@ def test_resolve_model_id_rejects_mmproj_asset_id(monkeypatch, tmp_path: Path):
         llamacpp_inventory_service.resolve_model_id(llamacpp_inventory_service.asset_id_for_path(projector, "mmproj"))
 ```
 
-- [ ] **Step 2: Run tests to verify current behavior**
+- [x] **Step 2: Run tests to verify current behavior**
 
 Run:
 
@@ -647,6 +647,8 @@ Expected: FAIL only if the adapter has not been corrected yet. If they already p
 
 Update `scan_inventory()` so it can call `scan_assets()` internally, filter `kind == "gguf"`, and convert to `LlamaCppInventoryItem`.
 
+Implementation note: no production adapter change was made in this step because the regression tests passed with the current legacy scanner, and adapting it directly through `scan_assets()` would risk dropping existing non-GGUF registered-path warning entries that legacy tests still protect.
+
 Keep:
 
 - `model_id_for_path(path)` returning `gguf:<hash>`;
@@ -655,7 +657,7 @@ Keep:
 - `scan_limited` behavior;
 - `resolve_model_id()` resolving only available GGUF files.
 
-- [ ] **Step 4: Run focused backend tests**
+- [x] **Step 4: Run focused backend tests**
 
 Run:
 
@@ -668,7 +670,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Local_LLM/llamacpp_inventory_service.py \

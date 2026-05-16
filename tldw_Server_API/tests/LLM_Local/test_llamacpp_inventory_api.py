@@ -293,6 +293,44 @@ def test_import_folder_persists_allowlisted_folder_and_returns_folder_asset(monk
 
 
 @pytest.mark.unit
+def test_legacy_inventory_excludes_mmproj_assets_after_asset_v2(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    (models_dir / "chat.gguf").write_text("base")
+    (models_dir / "mmproj-chat.gguf").write_text("projector")
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(models_dir),
+    )
+
+    inventory = llamacpp_inventory_service.scan_inventory(limit=500)
+
+    assert [item.basename for item in inventory.models] == ["chat.gguf"]
+
+
+@pytest.mark.unit
+def test_resolve_model_id_rejects_mmproj_asset_id(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+    from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ModelNotFoundError
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    projector = models_dir / "mmproj-chat.gguf"
+    projector.write_text("projector")
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(models_dir),
+    )
+
+    with pytest.raises(ModelNotFoundError):
+        llamacpp_inventory_service.resolve_model_id(llamacpp_inventory_service.asset_id_for_path(projector, "mmproj"))
+
+
+@pytest.mark.unit
 def test_register_path_persists_and_returns_inventory_item(monkeypatch, tmp_path: Path):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
 
