@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -14,6 +15,7 @@ from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_store import DEFAULT_PR
 from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
     LlamaCppPortPolicy,
     LlamaCppProfile,
+    LlamaCppProfileNotFoundError,
     LlamaCppRuntime,
     LlamaCppRuntimeState,
 )
@@ -42,6 +44,7 @@ class _Logger:
 
 class _SupervisorStub:
     def __init__(self) -> None:
+        self.config = type("Config", (), {"models_dir": Path("/models")})()
         self.profiles: dict[str, LlamaCppProfile] = {
             "one": LlamaCppProfile(
                 profile_id="one",
@@ -72,6 +75,7 @@ class _SupervisorStub:
             "two": LlamaCppRuntime(profile_id="two", state=LlamaCppRuntimeState.STOPPED),
         }
         self.started_profile_ids: list[str] = []
+        self.started_paths: list[Path] = []
         self.tail_requests: list[tuple[str, int]] = []
 
     def list_profiles(self) -> list[LlamaCppProfile]:
@@ -137,7 +141,10 @@ class _SupervisorStub:
         return list(self.runtimes.values())
 
     def get_runtime(self, profile_id: str) -> LlamaCppRuntime:
-        return self.runtimes[profile_id]
+        runtime = self.runtimes.get(profile_id)
+        if runtime is None:
+            raise LlamaCppProfileNotFoundError(f"Llama.cpp profile '{profile_id}' was not found.")
+        return runtime
 
     def tail_logs(self, profile_id: str, lines: int) -> dict[str, object]:
         self.tail_requests.append((profile_id, lines))
@@ -154,6 +161,27 @@ class _SupervisorStub:
             endpoint="http://127.0.0.1:8181",
             model_id=model_id,
             model_path="/models/default.gguf",
+        )
+        self.runtimes[DEFAULT_PROFILE_ID] = runtime
+        return runtime
+
+    async def start_default_by_path(
+        self,
+        model_path: Path,
+        server_args: dict[str, object],
+        *,
+        model_label: str | None = None,
+    ) -> LlamaCppRuntime:
+        _ = model_label
+        self.started_profile_ids.append(DEFAULT_PROFILE_ID)
+        self.started_paths.append(model_path)
+        runtime = LlamaCppRuntime(
+            profile_id=DEFAULT_PROFILE_ID,
+            state=LlamaCppRuntimeState.RUNNING,
+            host=str(server_args.get("host") or "127.0.0.1"),
+            port=int(server_args.get("port") or 8181),
+            endpoint=f"http://127.0.0.1:{int(server_args.get('port') or 8181)}",
+            model_path=str(model_path),
         )
         self.runtimes[DEFAULT_PROFILE_ID] = runtime
         return runtime
@@ -180,9 +208,36 @@ class _SupervisorStub:
 class _ManagerStub:
     logger = _Logger()
 
-    def __init__(self, supervisor: _SupervisorStub) -> None:
+    def __init__(self, supervisor: _SupervisorStub, handler: Any | None = None) -> None:
         self.llamacpp_supervisor = supervisor
-        self.llamacpp = None
+        self.llamacpp = handler
+
+
+class _LegacyHandlerStub:
+    def __init__(self) -> None:
+        self.start_calls: list[dict[str, Any]] = []
+        self.stop_calls = 0
+        self.inference_calls: list[dict[str, Any]] = []
+
+    async def start_server(self, **kwargs: Any) -> dict[str, object]:
+        self.start_calls.append(kwargs)
+        return {"status": "started", "model": kwargs.get("model_filename"), "backend": "llamacpp"}
+
+    async def stop_server(self) -> str:
+        self.stop_calls += 1
+        return "Stopped"
+
+    async def get_server_status(self) -> dict[str, object]:
+        return {"status": "running", "model": "legacy-model.gguf", "backend": "llamacpp"}
+
+    async def inference(self, **kwargs: Any) -> dict[str, object]:
+        self.inference_calls.append(kwargs)
+        raise AssertionError("legacy inference should not be used when supervisor default is running")
+
+
+class _FreshSupervisorStub(_SupervisorStub):
+    async def stop_default(self) -> LlamaCppRuntime:
+        raise LlamaCppProfileNotFoundError("Llama.cpp profile 'default' was not found.")
 
 
 def _make_app_with_manager(manager: _ManagerStub) -> FastAPI:
@@ -333,3 +388,123 @@ def test_v1_use_in_chat_uses_supervisor_default_runtime(monkeypatch: pytest.Monk
     assert body["provider"] == "llama"
     assert body["endpoint"] == "http://127.0.0.1:8181"
     assert body["updated"] is True
+
+
+@pytest.mark.unit
+def test_profile_scoped_use_in_chat_uses_selected_runtime(monkeypatch: pytest.MonkeyPatch):
+    calls: list[tuple[str, Any]] = []
+    supervisor = _SupervisorStub()
+    supervisor.runtimes["one"] = LlamaCppRuntime(
+        profile_id="one",
+        state=LlamaCppRuntimeState.RUNNING,
+        host="0.0.0.0",
+        port=8181,
+    )
+    app = _make_app_with_manager(_ManagerStub(supervisor))
+
+    class FakeLock:
+        def __enter__(self) -> "FakeLock":
+            calls.append(("lock_enter", None))
+            return self
+
+        def __exit__(self, *exc: Any) -> None:
+            calls.append(("lock_exit", None))
+
+    monkeypatch.setattr(
+        lp.llamacpp_provider_service.setup_manager,
+        "update_config",
+        lambda updates: calls.append(("update_config", updates)),
+    )
+    monkeypatch.setattr(
+        lp.llamacpp_provider_service,
+        "refresh_config_cache",
+        lambda: calls.append(("refresh_config_cache", None)),
+    )
+    monkeypatch.setattr(lp.llamacpp_provider_service, "llamacpp_config_write_lock", lambda: FakeLock())
+
+    with TestClient(app) as client:
+        response = client.post("/api/v1/llamacpp/profiles/one/use-in-chat")
+
+    assert response.status_code == 200, response.text
+    assert calls == [
+        ("lock_enter", None),
+        ("update_config", {"Local-API": {"llama_api_IP": "http://127.0.0.1:8181"}}),
+        ("refresh_config_cache", None),
+        ("lock_exit", None),
+    ]
+    body = response.json()
+    assert body["provider"] == "llama"
+    assert body["endpoint"] == "http://127.0.0.1:8181"
+    assert body["updated"] is True
+
+
+@pytest.mark.unit
+def test_v1_start_server_uses_supervisor_default_when_legacy_handler_exists():
+    supervisor = _SupervisorStub()
+    handler = _LegacyHandlerStub()
+    app = _make_app_with_manager(_ManagerStub(supervisor, handler=handler))
+
+    with TestClient(app) as client:
+        started = client.post(
+            "/api/v1/llamacpp/start_server",
+            json={"model_filename": "tiny.gguf", "server_args": {"port": 8199}},
+        )
+        status = client.get("/api/v1/llamacpp/status")
+        stopped = client.post("/api/v1/llamacpp/stop_server", json={})
+
+    assert started.status_code == 200, started.text
+    assert started.json()["status"] == "running"
+    assert started.json()["backend"] == "llamacpp"
+    assert started.json()["model"] == "/models/tiny.gguf"
+    assert supervisor.started_paths == [Path("/models/tiny.gguf")]
+    assert supervisor.started_profile_ids == [DEFAULT_PROFILE_ID]
+    assert handler.start_calls == []
+    assert status.json()["status"] == "running"
+    assert status.json()["model"] == "/models/tiny.gguf"
+    assert stopped.json()["status"] == "stopped"
+    assert handler.stop_calls == 0
+
+
+@pytest.mark.unit
+def test_v1_inference_uses_running_supervisor_default_after_start_by_model(monkeypatch: pytest.MonkeyPatch):
+    supervisor = _SupervisorStub()
+    handler = _LegacyHandlerStub()
+    calls: list[tuple[LlamaCppRuntime, dict[str, object]]] = []
+    app = _make_app_with_manager(_ManagerStub(supervisor, handler=handler))
+
+    async def fake_post(runtime: LlamaCppRuntime, payload: Any) -> dict[str, object]:
+        calls.append((runtime, payload.to_kwargs()))
+        return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
+
+    monkeypatch.setattr(lp, "_post_supervisor_runtime_inference", fake_post, raising=False)
+
+    with TestClient(app) as client:
+        started = client.post("/api/v1/llamacpp/start-by-model", json={"model_id": "gguf:abc", "server_args": {}})
+        response = client.post(
+            "/api/v1/llamacpp/inference",
+            json={"messages": [{"role": "user", "content": "hello"}]},
+        )
+
+    assert started.status_code == 200, started.text
+    assert response.status_code == 200, response.text
+    assert response.json()["backend"] == "llamacpp"
+    assert response.json()["model"] == "/models/default.gguf"
+    assert calls[0][0].profile_id == DEFAULT_PROFILE_ID
+    assert calls[0][1]["messages"] == [{"role": "user", "content": "hello"}]
+    assert handler.inference_calls == []
+
+
+@pytest.mark.unit
+def test_v1_stop_server_is_idempotent_when_supervisor_default_missing():
+    supervisor = _FreshSupervisorStub()
+    app = _make_app_with_manager(_ManagerStub(supervisor))
+
+    with TestClient(app) as client:
+        response = client.post("/api/v1/llamacpp/stop_server", json={})
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "status": "stopped",
+        "message": "No managed llama.cpp server is currently running.",
+        "backend": "llamacpp",
+    }

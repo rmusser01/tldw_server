@@ -3,21 +3,26 @@ id: TASK-397.2
 title: Implement llama.cpp managed runtime stage 1
 status: In Progress
 assignee: []
-created_date: '2026-05-16 01:43'
-updated_date: '2026-05-16 03:36'
+created_date: 2026-05-16 01:43
+updated_date: 2026-05-16 03:36
 labels:
-  - llamacpp
-  - local-llm
-  - webui
-  - backend
+- llamacpp
+- local-llm
+- webui
+- backend
 dependencies:
-  - TASK-397.1
+- TASK-397.1
 documentation:
-  - Docs/superpowers/specs/2026-05-16-llamacpp-managed-runtime-roadmap-design.md
-  - >-
-    Docs/superpowers/plans/2026-05-16-llamacpp-managed-runtime-stage1-implementation-plan.md
+- Docs/superpowers/specs/2026-05-16-llamacpp-managed-runtime-roadmap-design.md
+- Docs/superpowers/plans/2026-05-16-llamacpp-managed-runtime-stage1-implementation-plan.md
 parent_task_id: TASK-397
 priority: high
+modified_files:
+- Docs/superpowers/plans/2026-05-16-llamacpp-managed-runtime-stage1-implementation-plan.md
+- tldw_Server_API/app/api/v1/endpoints/llamacpp.py
+- tldw_Server_API/app/core/Local_LLM/llamacpp_supervisor_service.py
+- tldw_Server_API/tests/LLM_Local/test_llamacpp_runtime_api.py
+- tldw_Server_API/tests/LLM_Local/test_llamacpp_supervisor_service.py
 ---
 
 ## Description
@@ -67,3 +72,9 @@ Task 4: added admin llama.cpp profile and instance APIs, per-profile lifecycle a
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Task 4 review fixes: added profile-scoped use-in-chat, routed V1 start_server and inference through the supervisor default profile when available, made fresh default stop idempotent, and added regression coverage for split-brain and start-by-model to inference behavior. Verification: focused runtime/supervisor pytest 21 passed; broader llama.cpp backend slice 89 passed; py_compile passed; Bandit /tmp/bandit_llamacpp_runtime_api_review_fix.json had no errors/results; git diff --check passed.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

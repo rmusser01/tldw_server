@@ -370,6 +370,28 @@ async def test_supervisor_default_profile_bridge(monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.asyncio
+async def test_supervisor_default_profile_bridge_accepts_model_path(tmp_path: Path):
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    model_path = make_model(config, "direct.gguf")
+
+    runtime = await supervisor.start_default_by_path(
+        model_path,
+        {"port": 8184, "ctx_size": 1024},
+        model_label="direct.gguf",
+    )
+    profile_result = supervisor.store.get("default")
+
+    assert profile_result is not None
+    assert profile_result.profile_id == "default"
+    assert profile_result.model_id is None
+    assert profile_result.model_path == str(model_path)
+    assert profile_result.port == 8184
+    assert profile_result.server_args == {"port": 8184, "ctx_size": 1024}
+    assert runtime.state == LlamaCppRuntimeState.RUNNING
+    assert runtime.model_path == str(model_path)
+
+
+@pytest.mark.asyncio
 async def test_supervisor_serializes_default_start_profile_updates(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):

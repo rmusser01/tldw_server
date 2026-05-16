@@ -520,6 +520,7 @@ Add endpoints from the spec:
 - `POST /api/v1/llamacpp/profiles/{profile_id}/stop`
 - `POST /api/v1/llamacpp/profiles/{profile_id}/pause`
 - `POST /api/v1/llamacpp/profiles/{profile_id}/resume`
+- `POST /api/v1/llamacpp/profiles/{profile_id}/use-in-chat`
 - `GET /api/v1/llamacpp/instances`
 - `GET /api/v1/llamacpp/instances/{profile_id}`
 - `GET /api/v1/llamacpp/instances/{profile_id}/logs/tail`
@@ -533,10 +534,12 @@ sanitized `500`.
 Change these to prefer supervisor when present:
 
 - `start_llamacpp_by_model_endpoint`
+- `start_llamacpp_server_endpoint`
 - `stop_llamacpp_server_endpoint`
 - `get_llamacpp_status_endpoint`
 - `tail_llamacpp_logs_endpoint`
 - `use_llamacpp_in_chat_endpoint`
+- `run_llamacpp_inference_endpoint`
 
 Keep manager/handler fallback for tests and compatibility.
 
@@ -551,6 +554,13 @@ Keep manager/handler fallback for tests and compatibility.
 ```
 
 Expected: PASS.
+
+Task 4 review fix coverage:
+
+- profile-scoped `use-in-chat`
+- V1 split-brain protection when supervisor and legacy handler both exist
+- `start-by-model` followed by V1 inference on the supervisor default profile
+- fresh `stop_server` idempotency when no default profile exists
 
 - [ ] **Step 7: Commit**
 

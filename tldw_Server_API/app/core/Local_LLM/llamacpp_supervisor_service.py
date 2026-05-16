@@ -295,9 +295,80 @@ class LlamaCppSupervisor:
         self._validate_runtime_port_available(profile)
         return await self._store_upsert(profile)
 
+    async def ensure_default_profile_from_path(
+        self,
+        model_path: Path,
+        server_args: dict[str, object],
+        *,
+        model_label: str | None = None,
+    ) -> LlamaCppProfile:
+        async with self._lock_for(DEFAULT_PROFILE_ID):
+            return await self._ensure_default_profile_from_path_unlocked(
+                model_path,
+                server_args,
+                model_label=model_label,
+            )
+
+    async def _ensure_default_profile_from_path_unlocked(
+        self,
+        model_path: Path,
+        server_args: dict[str, object],
+        *,
+        model_label: str | None = None,
+    ) -> LlamaCppProfile:
+        _ = model_label
+        try:
+            resolved_model_path = Path(model_path).expanduser().resolve()
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ServerError("Model path could not be resolved.") from exc
+        existing = self.store.get(DEFAULT_PROFILE_ID)
+        host = str(server_args.get("host") or self.config.default_host or "127.0.0.1")
+        port = int(server_args.get("port") or self.config.default_port)
+        if existing is None:
+            profile = LlamaCppProfile(
+                profile_id=DEFAULT_PROFILE_ID,
+                name=DEFAULT_PROFILE_NAME,
+                enabled=True,
+                model_id=None,
+                model_path=str(resolved_model_path),
+                host=host,
+                port=port,
+                port_policy=LlamaCppPortPolicy.EXPLICIT,
+                server_args=dict(server_args),
+            )
+        else:
+            profile = existing.model_copy(
+                update={
+                    "enabled": True,
+                    "model_id": None,
+                    "model_path": str(resolved_model_path),
+                    "host": host,
+                    "port": port,
+                    "port_policy": LlamaCppPortPolicy.EXPLICIT,
+                    "server_args": dict(server_args),
+                }
+            )
+        self._validate_runtime_port_available(profile)
+        return await self._store_upsert(profile)
+
     async def start_default_by_model(self, model_id: str, server_args: dict[str, object]) -> LlamaCppRuntime:
         async with self._lock_for(DEFAULT_PROFILE_ID):
             profile = await self._ensure_default_profile_from_model_unlocked(model_id, server_args)
+            return await self._start_profile_unlocked(profile.profile_id, restart=True)
+
+    async def start_default_by_path(
+        self,
+        model_path: Path,
+        server_args: dict[str, object],
+        *,
+        model_label: str | None = None,
+    ) -> LlamaCppRuntime:
+        async with self._lock_for(DEFAULT_PROFILE_ID):
+            profile = await self._ensure_default_profile_from_path_unlocked(
+                model_path,
+                server_args,
+                model_label=model_label,
+            )
             return await self._start_profile_unlocked(profile.profile_id, restart=True)
 
     async def stop_default(self) -> LlamaCppRuntime:
