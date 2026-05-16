@@ -856,6 +856,8 @@ class WatchlistReportEvidenceSnapshot(BaseModel):
     source_summary: dict[str, Any] = Field(default_factory=dict)
     included_count: int = 0
     excluded_count: int = 0
+    excluded_total_count: int | None = None
+    excluded_items_truncated: bool = False
     alert_count: int = 0
     critical_alert_count: int = 0
     readiness: WatchlistReportReadiness
@@ -898,6 +900,14 @@ class WatchlistOutputCreateRequest(BaseModel):
     type: str = Field("briefing_markdown", description="Output template/type identifier")
     format: Literal["md", "html"] | None = Field(None, description="Rendered output format (overrides template)")
     metadata: dict[str, Any] | None = Field(None, description="Optional metadata stored alongside the output")
+    report_preset: WatchlistReportPreset = Field(
+        default="auto",
+        description="Report evidence/readiness preset. Defaults to Watchlist domain when available.",
+    )
+    include_evidence_table: bool = Field(default=True, description="Expose evidence details to report templates")
+    include_excluded_items: bool = Field(default=True, description="Capture excluded same-run items in evidence snapshots")
+    require_reviewed_items: bool = Field(default=False, description="Warn when queued report items have not been reviewed")
+    allow_weak_evidence: bool = Field(default=True, description="Allow generation when readiness warnings are present")
     template_name: str | None = Field(None, description="Name of a stored template to render with")
     template_version: int | None = Field(
         default=None,

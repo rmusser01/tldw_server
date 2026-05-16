@@ -3759,6 +3759,38 @@ class WatchlistsDatabase:
         ).rows
         return [WatchlistContentAlertRow(**row) for row in rows], total
 
+    def list_content_alerts_for_items(
+        self,
+        watchlist_id: int,
+        item_ids: list[int],
+        *,
+        limit: int = 1000,
+    ) -> dict[int, list[WatchlistContentAlertRow]]:
+        self.get_watchlist(int(watchlist_id))
+        unique_ids = list(dict.fromkeys(int(item_id) for item_id in item_ids))
+        if not unique_ids:
+            return {}
+        placeholders = ",".join("?" for _ in unique_ids)
+        rows = self.backend.execute(
+            f"""
+            SELECT id, user_id, watchlist_id, rule_id, item_id, run_id, job_id, source_id,
+                   severity, status, title, snippet, matched_text, evidence_json,
+                   dedupe_key, created_at, read_at, dismissed_at
+            FROM watchlist_content_alerts
+            WHERE user_id = ?
+              AND watchlist_id = ?
+              AND item_id IN ({placeholders})
+            ORDER BY item_id ASC, created_at ASC, id ASC
+            LIMIT ?
+            """,  # nosec B608
+            tuple([self.user_id, int(watchlist_id), *unique_ids, max(1, int(limit))]),
+        ).rows
+        grouped: dict[int, list[WatchlistContentAlertRow]] = {}
+        for row in rows:
+            alert = WatchlistContentAlertRow(**row)
+            grouped.setdefault(int(alert.item_id), []).append(alert)
+        return grouped
+
     def update_content_alert(
         self,
         alert_id: int,

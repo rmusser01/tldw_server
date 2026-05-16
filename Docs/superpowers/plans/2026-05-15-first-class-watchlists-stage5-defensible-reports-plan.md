@@ -397,7 +397,7 @@ git commit -m "feat: add watchlist report evidence contract"
 - Modify as needed: `tldw_Server_API/app/core/DB_Management/Watchlists_DB.py`
 - Test: `tldw_Server_API/tests/Watchlists/test_watchlist_reports_api.py`
 
-- [ ] **Step 1: Write failing API tests**
+- [x] **Step 1: Write failing API tests**
 
 Cover:
 
@@ -410,7 +410,7 @@ Cover:
 
 Use real test DB fixtures and existing output creation routes. Do not mock the Watchlists API layer.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -421,7 +421,7 @@ python -m pytest tldw_Server_API/tests/Watchlists/test_watchlist_reports_api.py 
 
 Expected: FAIL because endpoints and snapshot persistence are not implemented.
 
-- [ ] **Step 3: Extend create request schema**
+- [x] **Step 3: Extend create request schema**
 
 Add backwards-compatible optional fields to `WatchlistOutputCreateRequest`:
 
@@ -439,7 +439,7 @@ Compatibility rules:
 - `report_preset="auto"` resolves from the Watchlist domain when available; otherwise use `general_research`.
 - `require_reviewed_items=true` does not block artifact generation unless `allow_weak_evidence=false`; otherwise it emits readiness warnings.
 
-- [ ] **Step 4: Add snapshot storage helpers**
+- [x] **Step 4: Add snapshot storage helpers**
 
 In `watchlists.py`, add small local helpers near output helpers:
 
@@ -458,7 +458,7 @@ def _load_report_snapshot_for_user(user_id: int, storage_name: str) -> dict[str,
 
 Use existing `_resolve_output_path_for_user` path safety; do not accept arbitrary absolute paths.
 
-- [ ] **Step 5: Build snapshot before rendering**
+- [x] **Step 5: Build snapshot before rendering**
 
 Inside `create_output`, after items/job/run/watchlist are resolved and before template rendering:
 
@@ -482,7 +482,7 @@ context["report"] = {
 }
 ```
 
-- [ ] **Step 6: Persist snapshot after primary output row exists**
+- [x] **Step 6: Persist snapshot after primary output row exists**
 
 Because the snapshot should include `output_id`, persist it immediately after the primary artifact row is created:
 
@@ -501,7 +501,7 @@ Because the snapshot should include `output_id`, persist it immediately after th
 - If later delivery/audio metadata updates occur, merge instead of replacing these report metadata fields.
 - If any later variant creation fails and `_cleanup_outputs()` runs, remove the snapshot sidecar too.
 
-- [ ] **Step 7: Add output evidence/readiness endpoints**
+- [x] **Step 7: Add output evidence/readiness endpoints**
 
 Add routes after output detail/download routes:
 
@@ -522,7 +522,7 @@ Route behavior:
 - For legacy outputs, return `immutable_snapshot=false`, `snapshot=None`, and readiness state `legacy_live_only` with an explanatory info warning.
 - For missing sidecar path, return 404 `report_snapshot_missing` unless metadata marks the output as legacy.
 
-- [ ] **Step 8: Run API tests**
+- [x] **Step 8: Run API tests**
 
 Run:
 
@@ -533,7 +533,7 @@ python -m pytest tldw_Server_API/tests/Watchlists/test_watchlist_reports_api.py 
 
 Expected: PASS.
 
-- [ ] **Step 9: Run existing output regressions**
+- [x] **Step 9: Run existing output regressions**
 
 Run:
 
@@ -547,7 +547,9 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 10: Commit Stage 5B**
+Stage 5B verification note: this checkout does not contain `test_watchlists_run_flow_rss`; verification used `test_watchlists_api.py::test_items_and_outputs_flow` plus existing delivery/audio metadata regressions.
+
+- [x] **Step 10: Commit Stage 5B**
 
 Commit:
 

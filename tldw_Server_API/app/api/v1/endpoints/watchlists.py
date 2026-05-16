@@ -78,6 +78,10 @@ from tldw_Server_API.app.core.Watchlists.filters import evaluate_filters as _eva
 from tldw_Server_API.app.core.Watchlists.filters import normalize_filters as _normalize_job_filters
 from tldw_Server_API.app.core.Watchlists.opml import generate_opml, parse_opml
 from tldw_Server_API.app.core.Watchlists.pipeline import run_watchlist_job
+from tldw_Server_API.app.core.Watchlists.report_evidence import (
+    build_legacy_live_only_readiness,
+    build_report_evidence_snapshot,
+)
 from tldw_Server_API.app.core.Watchlists.watchlists_telemetry_metrics import (
     record_onboarding_ingest_result,
     record_summary_request,
@@ -202,7 +206,9 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
     WatchlistTelemetryThresholdSummary,
     WatchlistOutput,
     WatchlistOutputCreateRequest,
+    WatchlistOutputEvidenceResponse,
     WatchlistOutputsListResponse,
+    WatchlistReportReadiness,
     WatchlistsListResponse,
     WatchlistUpdateRequest,
     WatchlistTemplateCreateRequest,
@@ -252,6 +258,7 @@ router = APIRouter(prefix="/watchlists", tags=["watchlists"])
 DEFAULT_OUTPUT_TTL_SECONDS = int(os.getenv("WATCHLIST_OUTPUT_DEFAULT_TTL_SECONDS", "0") or 0)
 TEMP_OUTPUT_TTL_SECONDS = int(os.getenv("WATCHLIST_OUTPUT_TEMP_TTL_SECONDS", "86400") or 86400)
 DEFAULT_TTS_BRIEF_MAX_ITEMS = int(os.getenv("WATCHLIST_OUTPUT_TTS_BRIEF_MAX_ITEMS", "10") or 10)
+REPORT_EXCLUDED_ITEMS_MAX = int(os.getenv("WATCHLIST_REPORT_EXCLUDED_ITEMS_MAX", "200") or 200)
 TEMPLATE_COMPOSER_FLOW_MAX_DIFF_CHARS = max(
     1024, int(os.getenv("WATCHLIST_TEMPLATE_FLOW_CHECK_MAX_DIFF_CHARS", "50000") or 50000)
 )
@@ -1143,6 +1150,82 @@ def _load_output_content(user_id: int, row) -> str | None:
         return path.read_text(encoding="utf-8")
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         return None
+
+
+def _build_report_snapshot_filename(output_title: str, ts: str) -> str:
+    filename = _build_output_filename(output_title, "evidence", ts, "md")
+    stem = filename.rsplit(".", 1)[0]
+    return f"{stem}.json"
+
+
+def _write_report_snapshot_for_user(user_id: int, filename: str, snapshot: dict[str, Any]) -> None:
+    path = _resolve_output_path_for_user(user_id, filename)
+    path.write_text(json.dumps(snapshot, ensure_ascii=False, sort_keys=True, indent=2), encoding="utf-8")
+
+
+def _load_report_snapshot_for_user(user_id: int, storage_name: str) -> dict[str, Any]:
+    path = _resolve_output_path_for_user(user_id, storage_name)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("report_snapshot_invalid")
+    return payload
+
+
+def _resolve_report_preset(requested: str | None, watchlist_row: Any | None) -> str:
+    normalized = str(requested or "auto").strip().lower()
+    if normalized in {"cti_osint", "news_briefing", "general_research"}:
+        return normalized
+    domain = str(getattr(watchlist_row, "domain", "") or "").strip().lower()
+    if domain in {"cti", "cti_osint", "osint", "threat_intel", "threat_intelligence"}:
+        return "cti_osint"
+    if domain in {"news", "news_briefing", "journalism"}:
+        return "news_briefing"
+    return "general_research"
+
+
+def _source_rows_for_report(db: WatchlistsDatabase, items: list[Any]) -> dict[int, Any]:
+    source_ids = sorted({
+        int(getattr(item, "source_id"))
+        for item in items
+        if getattr(item, "source_id", None) is not None
+    })
+    sources: dict[int, Any] = {}
+    for source_id in source_ids:
+        try:
+            sources[source_id] = db.get_source(source_id)
+        except KeyError:
+            continue
+    return sources
+
+
+def _report_metadata_from_snapshot(
+    *,
+    snapshot: dict[str, Any],
+    snapshot_path: str,
+    preset: str,
+) -> dict[str, Any]:
+    readiness = snapshot.get("readiness") if isinstance(snapshot.get("readiness"), dict) else {}
+    source_summary = snapshot.get("source_summary") if isinstance(snapshot.get("source_summary"), dict) else {}
+    warnings = readiness.get("warnings") if isinstance(readiness.get("warnings"), list) else []
+    weak_warning_count = sum(
+        1
+        for warning in warnings
+        if isinstance(warning, dict) and str(warning.get("severity") or "warning") != "info"
+    )
+    return {
+        "report_preset": preset,
+        "report_schema_version": int(snapshot.get("schema_version") or 1),
+        "report_snapshot_path": snapshot_path,
+        "report_readiness": readiness,
+        "included_item_count": int(snapshot.get("included_count") or 0),
+        "excluded_item_count": int(snapshot.get("excluded_count") or 0),
+        "excluded_item_total_count": int(snapshot.get("excluded_total_count") or snapshot.get("excluded_count") or 0),
+        "excluded_items_truncated": bool(snapshot.get("excluded_items_truncated", False)),
+        "source_count": int(source_summary.get("unique_source_count") or 0),
+        "alert_count": int(snapshot.get("alert_count") or 0),
+        "critical_alert_count": int(snapshot.get("critical_alert_count") or 0),
+        "weak_evidence_warning_count": weak_warning_count,
+    }
 
 
 def _row_to_output(row, *, user_id: int | None = None, content_override: str | None = None) -> WatchlistOutput:
@@ -5098,6 +5181,12 @@ async def create_output(
         except KeyError:
             raise HTTPException(status_code=404, detail="job_not_found") from None
         watchlist_id = getattr(job, "watchlist_id", None)
+    watchlist_row = None
+    if watchlist_id is not None:
+        try:
+            watchlist_row = db.get_watchlist(int(watchlist_id))
+        except KeyError:
+            raise HTTPException(status_code=404, detail="watchlist_not_found") from None
 
     job_prefs: dict[str, Any] = {}
     try:
@@ -5131,6 +5220,43 @@ async def create_output(
         raise HTTPException(status_code=400, detail="no_items_available")
 
     item_models = [_row_to_scraped_item(it) for it in items]
+    effective_report_preset = _resolve_report_preset(payload.report_preset, watchlist_row)
+    included_item_ids = [int(getattr(item, "id")) for item in items]
+    included_item_id_set = set(included_item_ids)
+    all_run_items, _ = db.list_items(run_id=payload.run_id, limit=1000, offset=0)
+    excluded_candidates = [
+        item
+        for item in all_run_items
+        if int(getattr(item, "id", 0) or 0) not in included_item_id_set
+        and (payload.item_ids or str(getattr(item, "status", "")) != "ingested")
+    ]
+    excluded_total_count = len(excluded_candidates)
+    excluded_limit = max(0, REPORT_EXCLUDED_ITEMS_MAX)
+    excluded_items = excluded_candidates[:excluded_limit] if excluded_limit else []
+    excluded_items_truncated = excluded_total_count > len(excluded_items)
+    source_rows = _source_rows_for_report(db, [*items, *excluded_items])
+    alerts_by_item: dict[int, list[Any]] = {}
+    if watchlist_id is not None:
+        alerts_by_item = db.list_content_alerts_for_items(
+            int(watchlist_id),
+            included_item_ids,
+            limit=max(1000, len(included_item_ids) * 10),
+        )
+    report_snapshot = build_report_evidence_snapshot(
+        watchlist_id=int(watchlist_id) if watchlist_id is not None else None,
+        job=job,
+        run=run,
+        included_items=items,
+        excluded_items=excluded_items if payload.include_excluded_items else [],
+        sources=source_rows,
+        alerts=alerts_by_item,
+        preset=effective_report_preset,
+        generated_at=_utcnow_iso(),
+    )
+    report_snapshot["excluded_total_count"] = excluded_total_count if payload.include_excluded_items else 0
+    report_snapshot["excluded_items_truncated"] = bool(excluded_items_truncated and payload.include_excluded_items)
+    if not payload.allow_weak_evidence and report_snapshot.get("readiness", {}).get("state") == "warning":
+        raise HTTPException(status_code=422, detail="report_readiness_warning")
     tts_generate_explicit = "generate_tts" in payload.model_fields_set
     tts_brief_enabled = bool(tts_brief_defaults.get("enabled", False))
     tts_brief_max_items = _safe_int(tts_brief_defaults.get("max_items"), DEFAULT_TTS_BRIEF_MAX_ITEMS)
@@ -5404,6 +5530,16 @@ async def create_output(
         )
 
     context = _build_output_context(title, job, run, item_models, groups=output_groups)
+    context["report"] = {
+        "preset": effective_report_preset,
+        "readiness": report_snapshot.get("readiness", {}),
+        "source_summary": report_snapshot.get("source_summary", {}),
+        "included_items": report_snapshot.get("included_items", []) if payload.include_evidence_table else [],
+        "excluded_items": report_snapshot.get("excluded_items", []) if payload.include_excluded_items else [],
+        "included_count": report_snapshot.get("included_count", 0),
+        "excluded_count": report_snapshot.get("excluded_count", 0),
+        "alert_count": report_snapshot.get("alert_count", 0),
+    }
 
     # Inject LLM summaries into context
     if llm_summaries:
@@ -5529,6 +5665,7 @@ async def create_output(
     base_metadata = dict(metadata)
     tags = sorted({t for itm in item_models for t in (itm.tags or []) if isinstance(t, str)})
     created_outputs: list[tuple[int, Any]] = []
+    created_snapshot_paths: list[Any] = []
     template_id = output_template.id if output_template else None
 
     def _variant_metadata(
@@ -5627,6 +5764,12 @@ async def create_output(
         return row
 
     def _cleanup_outputs() -> None:
+        for path in created_snapshot_paths:
+            try:
+                if path and hasattr(path, "exists") and path.exists():
+                    path.unlink()
+            except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug(f"watchlists: cleanup failed to remove report snapshot {path}: {exc}")
         for oid, path in created_outputs:
             try:
                 if path and hasattr(path, "exists") and path.exists():
@@ -5649,6 +5792,22 @@ async def create_output(
             tpl=output_template,
             variant_of=None,
             template_id_override=template_id,
+        )
+        report_snapshot["output_id"] = int(row.id)
+        report_snapshot_filename = _build_report_snapshot_filename(title, ts)
+        report_snapshot_path = _resolve_output_path_for_user(user_id, report_snapshot_filename)
+        _write_report_snapshot_for_user(user_id, report_snapshot_filename, report_snapshot)
+        created_snapshot_paths.append(report_snapshot_path)
+        metadata.update(
+            _report_metadata_from_snapshot(
+                snapshot=report_snapshot,
+                snapshot_path=report_snapshot_filename,
+                preset=effective_report_preset,
+            )
+        )
+        row = collections_db.update_output_artifact_metadata(
+            row.id,
+            metadata_json=json.dumps({k: v for k, v in metadata.items() if v is not None}),
         )
 
         if payload.generate_mece and payload.type != "mece_markdown":
@@ -6025,6 +6184,103 @@ async def download_output(
         return HTMLResponse(content=content, headers=headers)
     headers = {"Content-Disposition": f'attachment; filename="{filename}.md"'}
     return PlainTextResponse(content=content, media_type="text/markdown", headers=headers)
+
+
+def _get_watchlist_output_row_or_404(collections_db: Any, output_id: int) -> tuple[Any, dict[str, Any]]:
+    try:
+        row = collections_db.get_output_artifact(output_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="output_not_found") from exc
+    metadata = _parse_output_metadata(row)
+    if metadata.get("origin") != "watchlists":
+        raise HTTPException(status_code=404, detail="output_not_found")
+    return row, metadata
+
+
+def _load_output_report_evidence_payload(
+    *,
+    user_id: int,
+    output_id: int,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    snapshot_path = metadata.get("report_snapshot_path")
+    if not snapshot_path:
+        return {
+            "output_id": output_id,
+            "immutable_snapshot": False,
+            "snapshot": None,
+            "readiness": build_legacy_live_only_readiness(),
+        }
+    try:
+        snapshot = _load_report_snapshot_for_user(user_id, str(snapshot_path))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="report_snapshot_missing") from exc
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(f"watchlists report snapshot load failed for output {output_id}: {exc}")
+        raise HTTPException(status_code=404, detail="report_snapshot_missing") from exc
+    snapshot["output_id"] = int(snapshot.get("output_id") or output_id)
+    readiness = snapshot.get("readiness")
+    if not isinstance(readiness, dict):
+        readiness = metadata.get("report_readiness") if isinstance(metadata.get("report_readiness"), dict) else None
+    if not isinstance(readiness, dict):
+        readiness = build_legacy_live_only_readiness()
+    return {
+        "output_id": output_id,
+        "immutable_snapshot": True,
+        "snapshot": snapshot,
+        "readiness": readiness,
+    }
+
+
+@router.get(
+    "/outputs/{output_id}/evidence",
+    response_model=WatchlistOutputEvidenceResponse,
+    summary="Get immutable report evidence for a Watchlists output",
+)
+async def get_output_evidence(
+    output_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    collections_db = Depends(get_collections_db_for_user),
+):
+    collections_db.purge_expired_outputs()
+    row, metadata = _get_watchlist_output_row_or_404(collections_db, output_id)
+    output = _row_to_output(row)
+    if output.expired:
+        collections_db.purge_expired_outputs()
+        raise HTTPException(status_code=404, detail="output_not_found")
+    user_id = resolve_user_id_for_request(
+        current_user,
+        as_int=True,
+        error_status=500,
+        invalid_detail="invalid user_id",
+    )
+    return _load_output_report_evidence_payload(user_id=user_id, output_id=output_id, metadata=metadata)
+
+
+@router.get(
+    "/outputs/{output_id}/readiness",
+    response_model=WatchlistReportReadiness,
+    summary="Get report readiness for a Watchlists output",
+)
+async def get_output_readiness(
+    output_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    collections_db = Depends(get_collections_db_for_user),
+):
+    collections_db.purge_expired_outputs()
+    row, metadata = _get_watchlist_output_row_or_404(collections_db, output_id)
+    output = _row_to_output(row)
+    if output.expired:
+        collections_db.purge_expired_outputs()
+        raise HTTPException(status_code=404, detail="output_not_found")
+    user_id = resolve_user_id_for_request(
+        current_user,
+        as_int=True,
+        error_status=500,
+        invalid_detail="invalid user_id",
+    )
+    payload = _load_output_report_evidence_payload(user_id=user_id, output_id=output_id, metadata=metadata)
+    return payload["readiness"]
 
 
 # --------------------
