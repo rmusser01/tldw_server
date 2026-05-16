@@ -403,14 +403,16 @@ If a listed file was not touched or does not exist, omit it from `git add`.
 **Files:**
 - Modify: `apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx`
 - Modify: `apps/packages/ui/src/components/Common/QuickIngest/AddContentStep.tsx`
+- Modify: `apps/packages/ui/src/components/Common/QuickIngest/ReviewStep.tsx`
 - Modify: `apps/packages/ui/src/components/Common/QuickIngest/ProcessingStep.tsx`
 - Modify: `apps/packages/ui/src/components/Common/QuickIngest/FloatingProgressWidget.tsx`
 - Modify if needed: `apps/packages/ui/src/store/connection.tsx`
 - Test: `apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx`
 - Test: `apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx`
+- Test: `apps/packages/ui/src/components/Common/QuickIngest/__tests__/FloatingProgressWidget.test.tsx`
 - Test: `apps/tldw-frontend/e2e/workflows/media-ingest.spec.ts`
 
-- [ ] **Step 1: Write failing test for disconnected processing guard**
+- [x] **Step 1: Write failing test for disconnected processing guard**
 
 In `QuickIngestWizardModal.integration.test.tsx`, mock the connection store or the direct hook chosen during implementation so the Add step receives disconnected state. Assert:
 
@@ -422,7 +424,7 @@ expect(screen.getByText(/retry|diagnostics|settings/i)).toBeInTheDocument()
 
 Use the exact wording chosen in implementation, but keep the behavior: users can see why processing is blocked.
 
-- [ ] **Step 2: Write failing tests for minimized terminal states**
+- [x] **Step 2: Write failing tests for minimized terminal states**
 
 Add or extend a FloatingProgressWidget-focused test. If no test file exists, add widget assertions to `QuickIngestWizardModal.session.test.tsx` or create:
 
@@ -435,7 +437,7 @@ Cover:
 - status `cancelled` shows Cancelled
 - status `interrupted` or equivalent lifecycle shows Interrupted if represented in state
 
-- [ ] **Step 3: Run failing tests**
+- [x] **Step 3: Run failing tests**
 
 Run:
 
@@ -445,7 +447,7 @@ bunx vitest run apps/packages/ui/src/components/Common/QuickIngest/__tests__/Qui
 
 Expected: new disconnected/widget assertions fail before implementation.
 
-- [ ] **Step 4: Pass connection state into AddContentStep**
+- [x] **Step 4: Pass connection state into AddContentStep**
 
 In `QuickIngestWizardModal.tsx`, read the central connection state from `useConnectionStore` or the existing quick-ingest connection abstraction if Task 1 identified one. Pass a boolean into:
 
@@ -458,7 +460,7 @@ In `QuickIngestWizardModal.tsx`, read the central connection state from `useConn
 
 Do not block users from editing queued input while offline unless the existing `FileDropZone` behavior requires it. Block only processing actions or clearly route them to setup/retry.
 
-- [ ] **Step 5: Add visible disconnected recovery in Add step**
+- [x] **Step 5: Add visible disconnected recovery in Add step**
 
 In `AddContentStep.tsx`, when `isOnlineForIngest` is false:
 
@@ -469,7 +471,7 @@ In `AddContentStep.tsx`, when `isOnlineForIngest` is false:
 
 Avoid a new global notification system.
 
-- [ ] **Step 6: Make progress copy neutral or item-aware**
+- [x] **Step 6: Make progress copy neutral or item-aware**
 
 In `ProcessingStep.tsx`, replace type-specific wrong copy such as "Transcribing and indexing content" with neutral copy for mixed batches:
 
@@ -479,7 +481,7 @@ In `ProcessingStep.tsx`, replace type-specific wrong copy such as "Transcribing 
 
 If item-type-aware labels are easy from existing per-item metadata, use them in row-level stages, not in the global banner.
 
-- [ ] **Step 7: Split minimized widget terminal states**
+- [x] **Step 7: Split minimized widget terminal states**
 
 In `FloatingProgressWidget.tsx`, replace the `allDone` single label with terminal-state rendering:
 
@@ -490,7 +492,7 @@ In `FloatingProgressWidget.tsx`, replace the `allDone` single label with termina
 
 Use non-success colors for failed/cancelled.
 
-- [ ] **Step 8: Run focused tests**
+- [x] **Step 8: Run focused tests**
 
 Run:
 
@@ -500,7 +502,7 @@ bunx vitest run apps/packages/ui/src/components/Common/QuickIngest/__tests__/Qui
 
 Expected: disconnected, cancel, stale completion, and widget terminal-state tests pass.
 
-- [ ] **Step 9: Run focused e2e for dismiss/resume**
+- [x] **Step 9: Run focused e2e for dismiss/resume**
 
 Run:
 
@@ -510,7 +512,7 @@ npx playwright test apps/tldw-frontend/e2e/workflows/media-ingest.spec.ts --grep
 
 Expected: dismiss/minimize/reopen flow still passes.
 
-- [ ] **Step 10: Commit status/recovery changes**
+- [x] **Step 10: Commit status/recovery changes**
 
 Run:
 
@@ -520,6 +522,13 @@ git commit -m "fix: clarify quick ingest recovery states"
 ```
 
 Expected: commit contains only status/recovery changes and related tests.
+
+Task 4 completion notes:
+- Functional commit: `9958abdc8 fix: clarify quick ingest recovery states`
+- Focused Vitest passed: `QuickIngestWizardModal.integration.test.tsx`, `QuickIngestWizardModal.session.test.tsx`, and `FloatingProgressWidget.test.tsx` (48 tests)
+- Focused Playwright passed: `media-ingest.spec.ts --grep "quick ingest can be dismissed during processing"` (1 test, 46.2s)
+- `git diff --check` passed
+- Bandit skipped because Task 4 touched frontend TypeScript/TSX only and no Python code.
 
 ---
 
