@@ -4,7 +4,7 @@ title: Implement /knowledge source health and evidence controls
 status: In Progress
 assignee: []
 created_date: '2026-05-16 00:51'
-updated_date: '2026-05-16 01:25'
+updated_date: '2026-05-16 01:37'
 labels:
   - webui
   - knowledge
@@ -31,6 +31,8 @@ priority: high
 
 <!-- SECTION:NOTES:BEGIN -->
 Task 1 backend source-health contract implemented. Focused tests passed: pytest -q test_source_health.py test_rag_source_health_endpoint.py test_source_contract.py test_unified_pipeline.py -k 'source_status or source_health or source_contract' (8 passed, 23 deselected). git diff --check passed. Bandit touched backend scope passed with 0 findings at /tmp/bandit_knowledge_source_health_task1.json.
+
+Quality review fix: source-health no longer instantiates MultiDatabaseRetriever or source-specific databases during health polling. Endpoint derives configured source IDs from resolved request handles and existing Kanban DB files only; integration regression now fails if retriever construction is attempted. Re-ran focused backend tests (8 passed, 23 deselected), git diff --check, and Bandit touched backend scope (0 findings at /tmp/bandit_knowledge_source_health_task1_fix.json).
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

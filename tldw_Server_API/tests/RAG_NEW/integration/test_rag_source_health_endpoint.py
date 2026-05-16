@@ -9,7 +9,6 @@ from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.RAG.rag_service.types import DataSource
 from tldw_Server_API.app.main import app as fastapi_app
 
 
@@ -89,29 +88,11 @@ def test_rag_source_health_returns_safe_canonical_sources(
 ) -> None:
     import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
 
-    captured: dict[str, Any] = {}
+    def fail_retriever_construction(*args: Any, **kwargs: Any) -> None:  # noqa: ARG001
+        raise AssertionError("source health must not instantiate retrievers")
 
-    class StubRetriever:
-        def __init__(self, db_paths: dict[str, str], user_id: str = "0", **kwargs: Any) -> None:
-            captured["db_paths"] = dict(db_paths)
-            captured["user_id"] = user_id
-            captured["kwargs"] = dict(kwargs)
-            self.retrievers = {
-                DataSource.MEDIA_DB: object(),
-                DataSource.NOTES: object(),
-                DataSource.CHAT_HISTORY: object(),
-                DataSource.CHARACTER_CARDS: object(),
-                DataSource.KANBAN: object(),
-                DataSource.PROMPTS: object(),
-                DataSource.WORLD_BOOKS: object(),
-                DataSource.DICTIONARIES: object(),
-            }
-
-        async def retrieve(self, *args: Any, **kwargs: Any) -> list[Any]:  # noqa: ARG002
-            raise AssertionError("source health must not execute retrieval")
-
-    monkeypatch.setattr(rag_ep, "MultiDatabaseRetriever", StubRetriever)
-    monkeypatch.setattr(rag_ep, "_resolve_kanban_db_path", lambda *args, **kwargs: "stub_kanban.db")
+    monkeypatch.setattr(rag_ep, "MultiDatabaseRetriever", fail_retriever_construction)
+    monkeypatch.setattr(rag_ep, "_resolve_existing_kanban_db_path", lambda *args, **kwargs: "stub_kanban.db")
 
     response = client_with_source_health_overrides.get("/api/v1/rag/source-health")
 
@@ -134,16 +115,4 @@ def test_rag_source_health_returns_safe_canonical_sources(
     assert "stub_media.db" not in response.text
     assert "stub_chacha.db" not in response.text
     assert "stub_prompts.db" not in response.text
-    assert captured["db_paths"] == {
-        "media_db": "stub_media.db",
-        "notes_db": "stub_chacha.db",
-        "character_cards_db": "stub_chacha.db",
-        "world_books_db": "stub_chacha.db",
-        "chat_dictionaries_db": "stub_chacha.db",
-        "prompts_db": "stub_prompts.db",
-        "kanban_db": "stub_kanban.db",
-    }
-    assert "media_db_path" not in captured["db_paths"]
-    assert "notes_db_path" not in captured["db_paths"]
-    assert "character_db_path" not in captured["db_paths"]
-    assert "prompts_db_path" not in captured["db_paths"]
+    assert "stub_kanban.db" not in response.text

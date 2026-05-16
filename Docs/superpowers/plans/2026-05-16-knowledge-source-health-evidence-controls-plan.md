@@ -31,7 +31,7 @@ Backend:
 - Modify: `tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py`
   - Adds Pydantic response models and literal status types.
 - Modify: `tldw_Server_API/app/api/v1/endpoints/rag_unified.py`
-  - Adds `GET /api/v1/rag/source-health` with search-like auth, but no query ledger usage.
+  - Adds `GET /api/v1/rag/source-health` with search-like auth, but no query ledger usage or retriever/database creation.
 - Test: `tldw_Server_API/tests/RAG_NEW/unit/test_source_health.py`
   - Pure helper/schema contract tests.
 - Test: `tldw_Server_API/tests/RAG_NEW/integration/test_rag_source_health_endpoint.py`
@@ -370,12 +370,12 @@ def authorized_client():
 
 def test_rag_source_health_returns_safe_canonical_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.api.v1.endpoints import rag_unified
-    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource
-
-    class _FakeRetriever:
-        retrievers = {DataSource.MEDIA_DB: object(), DataSource.NOTES: object()}
-
-    monkeypatch.setattr(rag_unified, "MultiDatabaseRetriever", lambda *_, **__: _FakeRetriever())
+    monkeypatch.setattr(
+        rag_unified,
+        "MultiDatabaseRetriever",
+        lambda *_, **__: pytest.fail("source health must not instantiate retrievers"),
+    )
+    monkeypatch.setattr(rag_unified, "_resolve_existing_kanban_db_path", lambda *_: None)
 
     with TestClient(app) as client:
         response = client.get("/api/v1/rag/source-health")
@@ -393,12 +393,12 @@ def test_authorized_rag_source_health_returns_safe_canonical_shape(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app.api.v1.endpoints import rag_unified
-    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource
-
-    class _FakeRetriever:
-        retrievers = {DataSource.MEDIA_DB: object(), DataSource.NOTES: object()}
-
-    monkeypatch.setattr(rag_unified, "MultiDatabaseRetriever", lambda *_, **__: _FakeRetriever())
+    monkeypatch.setattr(
+        rag_unified,
+        "MultiDatabaseRetriever",
+        lambda *_, **__: pytest.fail("source health must not instantiate retrievers"),
+    )
+    monkeypatch.setattr(rag_unified, "_resolve_existing_kanban_db_path", lambda *_: None)
 
     response = authorized_client.get("/api/v1/rag/source-health")
 
@@ -424,9 +424,9 @@ Modify `tldw_Server_API/app/api/v1/endpoints/rag_unified.py`:
     description="Read-only pre-query source readiness for Knowledge QA.",
     dependencies=[
         Depends(check_rate_limit),
-        Depends(rbac_rate_limit("rag.source_health")),
+        Depends(rbac_rate_limit("rag.search")),
         Depends(RequirePermission(MEDIA_READ)),
-        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="rag.source_health", count_as="call")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="rag.search", count_as="call")),
     ],
 )
 async def source_health_endpoint(
@@ -435,36 +435,20 @@ async def source_health_endpoint(
     chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     prompts_db: PromptsDatabase = Depends(get_prompts_db_for_user),
 ) -> KnowledgeSourceHealthResponse:
-    db_paths: dict[str, str] = {}
-    if media_db is not None and getattr(media_db, "db_path", None):
-        db_paths["media_db"] = str(media_db.db_path)
-    if chacha_db is not None and getattr(chacha_db, "db_path", None):
-        chacha_path = str(chacha_db.db_path)
-        db_paths["notes_db"] = chacha_path
-        db_paths["character_cards_db"] = chacha_path
-        db_paths["world_books_db"] = chacha_path
-        db_paths["chat_dictionaries_db"] = chacha_path
-    if prompts_db is not None and getattr(prompts_db, "db_path_str", None):
-        db_paths["prompts_db"] = str(prompts_db.db_path_str)
-    kanban_db_path = _resolve_kanban_db_path(current_user)
-    if kanban_db_path:
-        db_paths["kanban_db"] = str(kanban_db_path)
-
-    retriever = MultiDatabaseRetriever(
-        db_paths=db_paths,
-        user_id=str(getattr(current_user, "id", None) or "0"),
+    configured_sources = _build_source_health_configured_sources(
         media_db=media_db,
         chacha_db=chacha_db,
         prompts_db=prompts_db,
+        kanban_db_path=_resolve_existing_kanban_db_path(current_user),
     )
     return KnowledgeSourceHealthResponse(
         sources=build_source_health_entries(
-            configured_sources=set(retriever.retrievers.keys())
+            configured_sources=configured_sources
         )
     )
 ```
 
-Use the normalized `MultiDatabaseRetriever` path keys shown above. Do not pass the search endpoint's `media_db_path`, `notes_db_path`, `character_db_path`, or `prompts_db_path` keys directly into `MultiDatabaseRetriever`, because those names are pipeline argument names rather than retriever constructor keys. Adjust signatures/imports to match current constructors. Do not record RAG query usage and do not call search.
+Do not instantiate `MultiDatabaseRetriever` or source-specific databases in the source-health endpoint. Derive source availability from already-resolved request dependencies and existing files that can be checked without creating directories, schema, indexes, vector stores, or records. Do not record RAG query usage and do not call search.
 
 - [ ] **Step 9: Add compatibility regression for post-query `metadata.source_status`**
 

@@ -11,6 +11,7 @@ import inspect
 import json
 import os
 import time
+from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -70,7 +71,8 @@ from tldw_Server_API.app.core.RAG.rag_service.response_mapping import (
 )
 from tldw_Server_API.app.core.RAG.rag_service.source_health import build_source_health_entries
 from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import stream_rag_events
-from tldw_Server_API.app.core.config import get_config_value
+from tldw_Server_API.app.core.config import get_config_value, settings as core_settings
+from tldw_Server_API.app.core.Utils.Utils import get_project_root
 
 # Unified Pipeline
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
@@ -372,6 +374,74 @@ def _resolve_kanban_db_path(current_user: Optional[User], request_user_id: Optio
     except (RuntimeError, ValueError, OSError, TypeError):
         logger.debug("Failed to resolve kanban DB path", exc_info=True)
         return None
+
+
+def _resolve_source_health_user_id(current_user: Optional[User], request_user_id: Optional[str] = None) -> Optional[str]:
+    """Resolve a filesystem-safe user directory component without creating storage."""
+    candidates: list[Any] = []
+    if current_user is not None:
+        for attr in ("id", "id_int"):
+            candidates.append(getattr(current_user, attr, None))
+    candidates.append(request_user_id)
+
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        raw = str(candidate).strip()
+        if raw.isdigit() and int(raw) > 0:
+            return raw
+    return None
+
+
+def _resolve_source_health_user_db_base_dir() -> Path:
+    """Resolve the user DB base directory path without ensuring directories."""
+    raw_base = os.getenv("USER_DB_BASE_DIR") or core_settings.get("USER_DB_BASE_DIR")
+    if raw_base:
+        base_path = Path(raw_base).expanduser()
+        if not base_path.is_absolute():
+            base_path = Path(get_project_root()) / base_path
+        return base_path.resolve(strict=False)
+    return (Path(get_project_root()) / "Databases" / "user_databases").resolve(strict=False)
+
+
+def _resolve_existing_kanban_db_path(
+    current_user: Optional[User],
+    request_user_id: Optional[str] = None,
+) -> Optional[str]:
+    """Return an existing Kanban DB path without creating user directories or schema."""
+    user_id = _resolve_source_health_user_id(current_user, request_user_id)
+    if user_id is None:
+        return None
+    candidate = _resolve_source_health_user_db_base_dir() / user_id / DatabasePaths.KANBAN_DB_NAME
+    return str(candidate) if candidate.is_file() else None
+
+
+def _build_source_health_configured_sources(
+    *,
+    media_db: Any,
+    chacha_db: Any,
+    prompts_db: Any,
+    kanban_db_path: Optional[str],
+) -> set[Any]:
+    """Derive source availability from already-resolved handles and existing files."""
+    configured: set[Any] = set()
+    if media_db is not None:
+        configured.add("media_db")
+    if chacha_db is not None:
+        configured.update(
+            {
+                "notes",
+                "chats",
+                "characters",
+                "world_books",
+                "dictionaries",
+            }
+        )
+    if prompts_db is not None:
+        configured.add("prompts")
+    if kanban_db_path:
+        configured.add("kanban")
+    return configured
 
 
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
@@ -1000,40 +1070,14 @@ async def source_health_endpoint(
     prompts_db: PromptsDatabase = Depends(get_prompts_db_for_user),
 ) -> KnowledgeSourceHealthResponse:
     """Return safe pre-query readiness for canonical Knowledge QA sources."""
-    db_paths: dict[str, str] = {}
-    media_db_path = getattr(media_db, "db_path", None) if media_db is not None else None
-    if media_db_path:
-        db_paths["media_db"] = str(media_db_path)
-
-    chacha_db_path = getattr(chacha_db, "db_path", None) if chacha_db is not None else None
-    if chacha_db_path:
-        chacha_path = str(chacha_db_path)
-        db_paths["notes_db"] = chacha_path
-        db_paths["character_cards_db"] = chacha_path
-        db_paths["world_books_db"] = chacha_path
-        db_paths["chat_dictionaries_db"] = chacha_path
-
-    prompts_db_path = None
-    if prompts_db is not None:
-        prompts_db_path = getattr(prompts_db, "db_path_str", None) or getattr(prompts_db, "db_path", None)
-    if prompts_db_path:
-        db_paths["prompts_db"] = str(prompts_db_path)
-
-    kanban_db_path = _resolve_kanban_db_path(current_user)
-    if kanban_db_path:
-        db_paths["kanban_db"] = str(kanban_db_path)
-
-    retriever = MultiDatabaseRetriever(
-        db_paths=db_paths,
-        user_id=_resolve_implicit_feedback_user_id(None, current_user) or "0",
+    configured_sources = _build_source_health_configured_sources(
         media_db=media_db,
         chacha_db=chacha_db,
         prompts_db=prompts_db,
+        kanban_db_path=_resolve_existing_kanban_db_path(current_user),
     )
     return KnowledgeSourceHealthResponse(
-        sources=build_source_health_entries(
-            configured_sources=set(retriever.retrievers.keys())
-        )
+        sources=build_source_health_entries(configured_sources=configured_sources)
     )
 
 
