@@ -166,6 +166,17 @@ export const PlaygroundContextRail = ({
       ),
     };
   const promptActive = effectivePromptSummary.state !== "none";
+  const showActionablePromptEmptyState =
+    !promptActive && Boolean(compositionPreviewSummary);
+  const promptManagementLabel = showActionablePromptEmptyState
+    ? t("cockpit.promptReady", "Ready to add prompt")
+    : effectivePromptSummary.label;
+  const promptManagementDetail = showActionablePromptEmptyState
+    ? t(
+        "cockpit.promptReadyDetail",
+        "Select a prompt to add system instructions.",
+      )
+    : effectivePromptSummary.detail;
   const effectiveSessionStatusLabel =
     sessionStatusLabel ||
     (sessionStatus === "failed"
@@ -422,9 +433,9 @@ export const PlaygroundContextRail = ({
         <h2 className={cockpitRailStyles.heading}>{t("cockpit.prompt", "Prompt")}</h2>
         <div className="mt-1 flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className={cockpitRailStyles.value}>{effectivePromptSummary.label}</p>
-            {effectivePromptSummary.detail ? (
-              <p className={cockpitRailStyles.muted}>{effectivePromptSummary.detail}</p>
+            <p className={cockpitRailStyles.value}>{promptManagementLabel}</p>
+            {promptManagementDetail ? (
+              <p className={cockpitRailStyles.muted}>{promptManagementDetail}</p>
             ) : null}
           </div>
           <span

@@ -55,7 +55,7 @@ Quick wins:
 - Add empty assistant response messaging and retry affordance. Implemented in this branch: blank assistant turns now render explicit message-card recovery actions and a runtime sidechannel warning with regenerate available for both `role: "assistant"` and real-server `isBot: true` message shapes.
 - Add tooltips to sidechannel collapse/restore controls.
 - Show compact composition summary while rails are collapsed. Implemented in this branch: when either main `/chat` cockpit rail is hidden, the composer area now keeps model, assistant/persona, prompt, context count, and MCP/tool state visible with restore actions for hidden rails.
-- De-duplicate prompt empty-state copy in the Context rail.
+- De-duplicate prompt empty-state copy in the Context rail. Implemented in this branch: when composition already states `No prompt selected`, Prompt management now uses actionable selection copy instead of repeating the same empty state.
 
 Larger design opportunities:
 
@@ -76,6 +76,11 @@ Verification for implemented collapsed composition summary quick win:
 - Updated screenshot: `apps/tldw-frontend/test-results/workflows-chat-cockpit.rea-eebf0-kpit-focus-controls-working-chromium/chat-cockpit-desktop-collapsed-summary.png` shows the collapsed cockpit summary above the composer.
 - `bunx tsc --noEmit -p tsconfig.json --pretty false` still fails on existing package-wide baseline errors; filtered output contains no touched cockpit files after the narrow type cleanup.
 - Bandit skipped because this slice changes frontend TypeScript and E2E coverage only.
+
+Verification for implemented prompt empty-state de-duplication:
+
+- `bunx vitest run src/components/Option/Playground/__tests__/PlaygroundContextRail.first-slice.test.tsx src/components/Option/Playground/__tests__/PlaygroundCollapsedCompositionSummary.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx --config vitest.config.ts` passed with 51 tests.
+- Bandit skipped because this slice changes frontend TypeScript tests and UI copy only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

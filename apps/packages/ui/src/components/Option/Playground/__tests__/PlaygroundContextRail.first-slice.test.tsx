@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { PlaygroundContextRail } from "../PlaygroundContextRail";
@@ -96,6 +96,37 @@ const compositionSummary = (): PlaygroundCompositionPreviewSummary => ({
     warningCount: 0,
     readiness: "unavailable",
   },
+});
+
+const noPromptCompositionSummary = (): PlaygroundCompositionPreviewSummary => ({
+  ...compositionSummary(),
+  entries: [
+    {
+      id: "prompt",
+      kind: "prompt",
+      label: "Prompt",
+      title: "No prompt selected",
+      detail: "No prompt context will be added.",
+      state: "disabled",
+    },
+    {
+      id: "model",
+      kind: "model",
+      label: "Model",
+      title: "openai:gpt-4.1-mini",
+      detail: "openai",
+      state: "active",
+    },
+    {
+      id: "tools",
+      kind: "tools",
+      label: "MCP tools",
+      title: "MCP tools",
+      detail: "2 chat tools available",
+      state: "active",
+    },
+  ],
+  contextStack: [],
 });
 
 describe("PlaygroundContextRail first-slice controls", () => {
@@ -232,6 +263,35 @@ describe("PlaygroundContextRail first-slice controls", () => {
     expect(preview).toHaveTextContent("Research brief");
     expect(preview).toHaveTextContent("openai:gpt-4.1-mini");
     expect(preview).toHaveTextContent("MCP tools");
+  });
+
+  it("does not repeat the no-prompt empty state in prompt management", () => {
+    renderRail({
+      compositionPreviewSummary: noPromptCompositionSummary(),
+      promptSummary: {
+        state: "none",
+        label: "No prompt selected",
+        detail: "No prompt context will be added.",
+      },
+      promptSelectControl: (
+        <button type="button" aria-label="Select a prompt">
+          Select prompt
+        </button>
+      ),
+    });
+
+    expect(
+      screen.getByRole("region", { name: "Next message composition" }),
+    ).toHaveTextContent("No prompt selected");
+
+    const promptManagement = screen.getByRole("region", {
+      name: "Prompt management",
+    });
+    expect(within(promptManagement).queryByText("No prompt selected")).toBeNull();
+    expect(within(promptManagement).getByText("Ready to add prompt")).toBeInTheDocument();
+    expect(
+      within(promptManagement).getByText("Select a prompt to add system instructions."),
+    ).toBeInTheDocument();
   });
 
   it("exposes web search as a pressed-state control", () => {
