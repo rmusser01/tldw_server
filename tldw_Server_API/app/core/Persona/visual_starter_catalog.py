@@ -310,6 +310,11 @@ class PersonaVisualStarterCatalogService:
             field_name="animation_coverage_notes",
             starter_id=starter.id,
         )
+        neutral_anchor_required = PersonaVisualStarterCatalogService._starter_metadata_bool(
+            starter.neutral_anchor_required,
+            field_name="neutral_anchor_required",
+            starter_id=starter.id,
+        )
         return {
             "id": starter.id,
             "title": starter.title,
@@ -323,7 +328,7 @@ class PersonaVisualStarterCatalogService:
             "license_label": starter.license_label,
             "complexity_tier": complexity_tier,
             "production_status": production_status,
-            "neutral_anchor_required": bool(starter.neutral_anchor_required),
+            "neutral_anchor_required": neutral_anchor_required,
             "expected_asset_groups": list(expected_asset_groups),
             "animation_coverage_notes": list(animation_coverage_notes),
         }
@@ -389,8 +394,13 @@ class PersonaVisualStarterCatalogService:
             field_name="expected_asset_groups",
             starter_id=starter.id,
         )
+        neutral_anchor_required = PersonaVisualStarterCatalogService._starter_metadata_bool(
+            starter.neutral_anchor_required,
+            field_name="neutral_anchor_required",
+            starter_id=starter.id,
+        )
         if (
-            starter.neutral_anchor_required
+            neutral_anchor_required
             and "neutral_anchor" not in expected_asset_groups
         ):
             raise PersonaVisualStarterCatalogError(
@@ -485,6 +495,17 @@ class PersonaVisualStarterCatalogService:
                 details={"starter_pack_id": starter_id, "field_name": field_name},
             )
         return normalized
+
+    @staticmethod
+    def _starter_metadata_bool(value: object, *, field_name: str, starter_id: str) -> bool:
+        """Return one starter metadata boolean or fail fixture validation."""
+        if not isinstance(value, bool):
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter metadata boolean must be a boolean.",
+                details={"starter_pack_id": starter_id, "field_name": field_name},
+            )
+        return value
 
     @staticmethod
     def _starter_metadata_tuple(

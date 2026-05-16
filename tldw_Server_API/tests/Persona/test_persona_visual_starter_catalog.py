@@ -167,6 +167,8 @@ def test_starter_pack_reports_production_readiness_metadata(
         ("animation_coverage_notes", None),
         ("animation_coverage_notes", "Scaffold fixture only."),
         ("animation_coverage_notes", ("Scaffold fixture only.", "")),
+        ("neutral_anchor_required", "false"),
+        ("neutral_anchor_required", 1),
     ),
 )
 def test_list_starter_packs_rejects_malformed_production_metadata(
