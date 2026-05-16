@@ -108,6 +108,17 @@ stored with `status: "blocked"` and includes `commit_eligible: false`,
 is still a review-only path: no asset rows or pack rows are committed, no pack is
 activated, no runtime renderer is loaded, and no MCP provider behavior is added.
 
+For V1 `sprite_frames` archives, import preview also exposes lightweight packet
+diagnostics in `bundle_summary`. `manifest_asset_references` lists source asset
+IDs referenced by timed manifest animations, and each `bundle_summary.assets[]`
+entry includes `manifest_referenced`. When an archive asset declares a known
+Buddy pipeline `asset_group`, such as `neutral_anchor`, `static_talking_sheet`,
+`static_reaction_sheet`, `animation_strips`, or `animation_atlas`, preview
+returns that group for review. Unknown groups are returned as null, so arbitrary
+archive metadata does not become a support claim. This lets review surfaces
+distinguish source sheets and neutral anchors from runtime strip or atlas outputs
+without committing or activating the archive.
+
 ### Sprite Atlas Frames
 ## Sprite Atlas Packs
 
