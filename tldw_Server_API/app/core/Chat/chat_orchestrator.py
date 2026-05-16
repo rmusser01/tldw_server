@@ -339,6 +339,7 @@ def chat_api_call(
     # Provider-specific extensions (e.g., Bedrock guardrails)
     extra_headers: Optional[dict[str, str]] = None,
     extra_body: Optional[dict[str, Any]] = None,
+    inference_prefix_cache_intent: Optional[dict[str, Any]] = None,
     # Optional preloaded config to reduce repeated IO in hot paths
     app_config: Optional[dict[str, Any]] = None,
     # Testing hooks
@@ -432,6 +433,7 @@ def chat_api_call(
         "user_identifier": user_identifier,
         "extra_headers": extra_headers,
         "extra_body": extra_body,
+        "inference_prefix_cache_intent": inference_prefix_cache_intent,
         "app_config": app_config,
         "http_client_factory": http_client_factory,
         "http_fetcher": http_fetcher,
@@ -574,6 +576,7 @@ async def chat_api_call_async(
     user_identifier: Optional[str] = None,
     extra_headers: Optional[dict[str, str]] = None,
     extra_body: Optional[dict[str, Any]] = None,
+    inference_prefix_cache_intent: Optional[dict[str, Any]] = None,
     app_config: Optional[dict[str, Any]] = None,
     http_client_factory: Optional[Callable[[int], Any]] = None,
     http_fetcher: Optional[Callable[..., Any]] = None,
@@ -616,6 +619,7 @@ async def chat_api_call_async(
         "user_identifier": user_identifier,
         "extra_headers": extra_headers,
         "extra_body": extra_body,
+        "inference_prefix_cache_intent": inference_prefix_cache_intent,
         "app_config": app_config,
         "http_client_factory": http_client_factory,
         "http_fetcher": http_fetcher,

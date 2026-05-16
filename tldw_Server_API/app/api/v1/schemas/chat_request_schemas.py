@@ -933,6 +933,20 @@ class ChatCompletionRequest(BaseModel):
         description="Provider-specific extra body content. For Bedrock guardrails, include"
         " 'amazon-bedrock-guardrailConfig': { 'tagSuffix': '...'} if needed.",
     )
+    billing_prompt_cache_intent: Optional[dict[str, Any]] = Field(
+        None,
+        description=(
+            "[Extension] Explicit billing prompt-cache intent. Disabled unless enabled=true; "
+            "provider adapters translate only documented cache controls and report intent separately from usage."
+        ),
+    )
+    inference_prefix_cache_intent: Optional[dict[str, Any]] = Field(
+        None,
+        description=(
+            "[Extension] Cost-neutral local inference prefix-cache diagnostic intent for local providers such as "
+            "vLLM and llama.cpp. This does not request or imply paid-provider billing-cache discounts."
+        ),
+    )
     thinking_budget_tokens: Optional[int] = Field(
         None,
         ge=0,

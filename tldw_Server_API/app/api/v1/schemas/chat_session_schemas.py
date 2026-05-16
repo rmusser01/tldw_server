@@ -612,6 +612,20 @@ class CharacterChatCompletionV2Request(BaseModel):
     max_tokens: Optional[int] = Field(None, description="Max tokens in the completion")
     tools: Optional[list[dict[str, Any]]] = Field(None, description="Tool definitions")
     tool_choice: Optional[dict[str, Any]] = Field(None, description="Tool choice specification")
+    billing_prompt_cache_intent: Optional[dict[str, Any]] = Field(
+        None,
+        description=(
+            "Explicit billing prompt-cache intent for paid providers. Disabled unless enabled=true; "
+            "cache usage is still proven only by provider usage metadata."
+        ),
+    )
+    inference_prefix_cache_intent: Optional[dict[str, Any]] = Field(
+        None,
+        description=(
+            "Cost-neutral local inference prefix-cache diagnostic intent for local providers such as "
+            "vLLM and llama.cpp. It never marks provider billing cache usage as authoritative."
+        ),
+    )
     stream: Optional[bool] = Field(False, description="If true, stream the assistant response (SSE)")
 
     @model_validator(mode="after")

@@ -240,6 +240,20 @@ rate_limit_tokens_per_minute = 100000
 run_first_rollout_mode = default_on
 run_first_provider_allowlist = openai:gpt-4o-mini,anthropic:claude-3-7-sonnet,openai:gpt-4o,google:gemini-2.5-flash
 run_first_presentation_variant = chat_phase2b_v1
+# Pre-dispatch prompt/cost guardrails for chat and character chat.
+# Disabled by default; when enabled, warning thresholds are non-blocking unless
+# prompt_guardrails_default_action = block or a hard-cap threshold is exceeded.
+# Env overrides use upper-case names such as CHAT_PROMPT_GUARDRAILS_ENABLED.
+prompt_guardrails_enabled = false
+prompt_guardrails_default_action = warn
+# prompt_guardrails_warn_total_estimated_tokens = 32000
+# prompt_guardrails_block_total_estimated_tokens = 128000
+# prompt_guardrails_warn_static_segment_tokens = 12000
+# prompt_guardrails_warn_world_book_tokens = 8000
+# prompt_guardrails_warn_max_output_tokens = 8192
+# prompt_guardrails_warn_choice_count = 1
+prompt_guardrails_warn_reasoning_efforts = high,xhigh
+prompt_guardrails_warn_on_fingerprint_churn = true
 # Controls how much historical context is loaded for each chat request.
 # Accepts 1-500; values outside range are clamped. Default: 20.
 history_messages_limit = 20

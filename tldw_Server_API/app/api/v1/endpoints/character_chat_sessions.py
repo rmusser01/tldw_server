@@ -102,6 +102,10 @@ from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import (
     get_character_rate_limiter,
 )
+from tldw_Server_API.app.core.Character_Chat.world_book_prompt_context import (
+    apply_world_book_prompt_context,
+    build_world_book_prompt_context,
+)
 
 # Import shared constants
 from tldw_Server_API.app.core.Character_Chat.constants import (
@@ -140,6 +144,11 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call,
     perform_chat_api_call_async,
     resolve_provider_and_model,
+)
+from tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope
+from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
+    evaluate_prompt_cost_guardrails,
+    load_prompt_cost_guardrail_config,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -4559,39 +4568,20 @@ async def prompt_assembly_preview(
 
         lorebook_text = ""
         lorebook_diagnostics: list[dict[str, Any]] = []
+        lorebook_cost_diagnostics: dict[str, Any] = {}
         try:
-            from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
-
-            wb_manager = WorldBookService(db)
-            recent_text = " ".join(
-                str(m.get("content", "")) for m in formatted if m.get("role") in ("user", "assistant")
-            )[-2000:]
-            if recent_text.strip():
-                world_book_character_id = (
+            world_book_context = build_world_book_prompt_context(
+                formatted,
+                db=db,
+                character_id=(
                     turn_context.get("active_character_id")
                     or conversation.get("character_id")
-                )
-                wb_result = wb_manager.process_context(
-                    text=recent_text,
-                    character_id=world_book_character_id,
-                    include_diagnostics=True,
-                )
-                if isinstance(wb_result, dict):
-                    wb_context = wb_result.get("processed_context", "")
-                    lorebook_diagnostics = wb_result.get("diagnostics") or []
-                    if wb_context and wb_context.strip():
-                        lorebook_text = f"World info:\n{wb_context.strip()}"
-                        insert_pos = 0
-                        for idx, msg in enumerate(formatted):
-                            role = str(msg.get("role", "")).strip().lower()
-                            if role == "system":
-                                insert_pos = idx + 1
-                            else:
-                                break
-                        formatted.insert(
-                            insert_pos,
-                            {"role": "system", "content": lorebook_text},
-                        )
+                ),
+            )
+            formatted = apply_world_book_prompt_context(formatted, world_book_context)
+            lorebook_text = world_book_context.text
+            lorebook_diagnostics = list(world_book_context.legacy_diagnostics)
+            lorebook_cost_diagnostics = dict(world_book_context.diagnostics) if lorebook_text else {}
         except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:
             pass
 
@@ -4663,6 +4653,8 @@ async def prompt_assembly_preview(
             }
             if name == "lorebook" and lorebook_diagnostics:
                 section_payload["diagnostics"] = lorebook_diagnostics
+            if name == "lorebook" and lorebook_cost_diagnostics:
+                section_payload["cost_diagnostics"] = lorebook_cost_diagnostics
             sections.append(section_payload)
 
         message_tokens = sum(_estimate_tokens(str(m.get("content", ""))) for m in messages)
@@ -4924,38 +4916,31 @@ async def character_chat_completion(
             )
 
         # Inject world book context and capture diagnostics for this turn.
+        pre_world_book_formatted_for_guardrails = [dict(message) for message in formatted]
         turn_lorebook_diagnostics: Optional[list[dict[str, Any]]] = None
+        turn_lorebook_cost_diagnostics: Optional[dict[str, Any]] = None
+        turn_lorebook_text_for_guardrails: Optional[str] = None
         try:
-            from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
-            wb_manager = WorldBookService(db)
-            recent_text = " ".join(
-                str(m.get("content", "")) for m in formatted if m.get("role") in ("user", "assistant")
-            )[-2000:]
-            if recent_text.strip():
-                world_book_character_id = (
+            world_book_context = build_world_book_prompt_context(
+                formatted,
+                db=db,
+                character_id=(
                     active_character_id
                     or conversation.get("character_id")
-                )
-                wb_result = wb_manager.process_context(
-                    text=recent_text,
-                    character_id=world_book_character_id,
-                    include_diagnostics=True,
-                )
-                if isinstance(wb_result, dict):
-                    wb_context = wb_result.get("processed_context", "")
-                    turn_lorebook_diagnostics = wb_result.get("diagnostics") or None
-                    if wb_context and wb_context.strip():
-                        # Insert world book context as a system message after existing system messages.
-                        insert_pos = 0
-                        for idx, msg in enumerate(formatted):
-                            if str(msg.get("role", "")).strip().lower() == "system":
-                                insert_pos = idx + 1
-                            else:
-                                break
-                        formatted.insert(insert_pos, {
-                            "role": "system",
-                            "content": f"World info:\n{wb_context.strip()}",
-                        })
+                ),
+            )
+            formatted = apply_world_book_prompt_context(formatted, world_book_context)
+            turn_lorebook_text_for_guardrails = world_book_context.text or None
+            turn_lorebook_diagnostics = (
+                list(world_book_context.legacy_diagnostics)
+                if world_book_context.legacy_diagnostics
+                else None
+            )
+            turn_lorebook_cost_diagnostics = (
+                dict(world_book_context.diagnostics)
+                if world_book_context.text
+                else None
+            )
         except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:
             pass  # world book injection is best-effort
 
@@ -5110,6 +5095,65 @@ async def character_chat_completion(
         legacy_allow_local = parse_boolean(os.getenv("ALLOW_LOCAL_LLM_CALLS"))
         offline_sim = provider == "local-llm" and not (enable_local_llm or disable_offline_sim or legacy_allow_local)
         streams_unified = str(os.getenv("STREAMS_UNIFIED", "0")).strip().lower() in {"1", "true", "on", "yes"}
+        turn_prompt_guardrail_diagnostics: Optional[dict[str, Any]] = None
+        prompt_guardrails_enabled = False
+        try:
+            prompt_guardrail_config = load_prompt_cost_guardrail_config()
+            prompt_guardrails_enabled = prompt_guardrail_config.enabled
+            if prompt_guardrail_config.enabled:
+                prompt_guardrail_envelope = build_prompt_cost_envelope(
+                    (
+                        pre_world_book_formatted_for_guardrails
+                        if turn_lorebook_text_for_guardrails
+                        else formatted
+                    ),
+                    world_book_text=turn_lorebook_text_for_guardrails,
+                )
+                prompt_guardrail_decision = evaluate_prompt_cost_guardrails(
+                    prompt_guardrail_envelope,
+                    request_options={"max_tokens": body.max_tokens, "streaming": bool(body.stream)},
+                    config=prompt_guardrail_config,
+                )
+                if prompt_guardrail_decision.action != "allow":
+                    turn_prompt_guardrail_diagnostics = prompt_guardrail_decision.to_response_metadata()
+                    log_metadata = {
+                        "provider": provider,
+                        "model": model,
+                        "streaming": bool(body.stream),
+                        "decision": turn_prompt_guardrail_diagnostics,
+                    }
+                    if prompt_guardrail_decision.action == "block":
+                        logger.warning(
+                            "Character chat prompt cost guardrail blocked request: {}",
+                            log_metadata,
+                        )
+                        raise HTTPException(
+                            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            detail={
+                                "type": "prompt_cost_guardrail_block",
+                                "message": "Prompt cost guardrail blocked request before provider dispatch.",
+                                "prompt_guardrails": turn_prompt_guardrail_diagnostics,
+                            },
+                        )
+                    logger.warning(
+                        "Character chat prompt cost guardrail warnings: {}",
+                        log_metadata,
+                    )
+        except HTTPException:
+            raise
+        except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug(
+                "Character chat prompt cost guardrail evaluation failed due to {}",
+                type(exc).__name__,
+            )
+            if prompt_guardrails_enabled:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={
+                        "type": "prompt_cost_guardrail_error",
+                        "message": "Prompt cost guardrail evaluation failed before provider dispatch.",
+                    },
+                ) from exc
         llm_resp = None
         if not offline_sim:
             # Enforce per-minute completion rate only for real provider calls
@@ -5127,6 +5171,8 @@ async def character_chat_completion(
                     max_tokens=body.max_tokens,
                     tools=body.tools,
                     tool_choice=body.tool_choice,
+                    billing_prompt_cache_intent=body.billing_prompt_cache_intent,
+                    inference_prefix_cache_intent=body.inference_prefix_cache_intent,
                     streaming=bool(body.stream),
                     user_identifier=str(current_user.id),
                     app_config=byok_resolution.app_config,
@@ -5543,6 +5589,10 @@ async def character_chat_completion(
                 metadata_extra["mood_topic"] = resolved_mood_topic
             if turn_lorebook_diagnostics:
                 metadata_extra["lorebook_diagnostics"] = turn_lorebook_diagnostics
+            if turn_lorebook_cost_diagnostics:
+                metadata_extra["lorebook_cost_diagnostics"] = turn_lorebook_cost_diagnostics
+            if turn_prompt_guardrail_diagnostics:
+                metadata_extra["prompt_guardrails"] = turn_prompt_guardrail_diagnostics
             validated_tool_calls = (
                 _validate_and_truncate_tool_calls(assistant_tool_calls)
                 if assistant_tool_calls
