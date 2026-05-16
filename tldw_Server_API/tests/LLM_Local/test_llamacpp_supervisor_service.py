@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+from configparser import ConfigParser
 from pathlib import Path
 from typing import Any
 
@@ -12,13 +13,14 @@ from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
     LlamaCppProfileCreateRequest,
     LlamaCppProfileUpdateRequest,
 )
-from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ModelNotFoundError, ServerError
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_store import JsonLlamaCppProfileStore
 from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
     LlamaCppPortPolicy,
     LlamaCppProfile,
     LlamaCppProfileConflictError,
+    LlamaCppProfileMode,
     LlamaCppRuntime,
     LlamaCppRuntimeState,
 )
@@ -54,6 +56,32 @@ def make_model(config: LlamaCppConfig, name: str = "model.gguf") -> Path:
     return model_path
 
 
+def _llamacpp_parser(default_models_dir: Path, **overrides: str) -> ConfigParser:
+    parser = ConfigParser()
+    parser.add_section("LlamaCpp")
+    values = {
+        "enabled": "true",
+        "models_dir": str(default_models_dir),
+        "allowed_paths": "",
+        "registered_model_paths": "",
+        "imported_asset_folders": "",
+    }
+    values.update(overrides)
+    parser["LlamaCpp"] = values
+    return parser
+
+
+@pytest.fixture(autouse=True)
+def configure_inventory_for_supervisor_tests(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(tmp_path / "models"),
+    )
+
+
 def profile(
     profile_id: str,
     *,
@@ -80,12 +108,19 @@ class FakeRunner:
         self.profile_id = profile_id
         self.calls = calls
         self.runtime = LlamaCppRuntime(profile_id=profile_id, state=LlamaCppRuntimeState.DEFINED)
+        self.model_paths: list[Path] = []
+        self.starts: list[LlamaCppProfile] = []
         self.cleaned = False
         self.stop_calls = 0
 
     async def start(self, model_path: Path, profile: LlamaCppProfile) -> LlamaCppRuntime:
         self.calls[self.profile_id] = self.calls.get(self.profile_id, 0) + 1
+        self.model_paths.append(model_path)
+        self.starts.append(profile)
         await asyncio.sleep(0)
+        resolved_args: list[str] = []
+        if profile.server_args.get("mmproj"):
+            resolved_args = ["llama-server", "--mmproj", str(profile.server_args["mmproj"])]
         self.runtime = LlamaCppRuntime(
             profile_id=self.profile_id,
             state=LlamaCppRuntimeState.RUNNING,
@@ -95,6 +130,7 @@ class FakeRunner:
             endpoint=f"http://{profile.host}:{profile.port}",
             model_id=profile.model_id,
             model_path=str(model_path),
+            resolved_args=resolved_args,
         )
         return self.runtime
 
@@ -164,6 +200,133 @@ def make_supervisor(tmp_path: Path) -> tuple[LlamaCppSupervisor, LlamaCppConfig,
     factory = FakeRunnerFactory()
     supervisor = LlamaCppSupervisor(config=config, store=store, runner_factory=factory)
     return supervisor, config, factory
+
+
+def configure_supervisor_assets(
+    monkeypatch: pytest.MonkeyPatch,
+    config: LlamaCppConfig,
+    *,
+    base_name: str = "llava.gguf",
+    mmproj_name: str = "mmproj-llava.gguf",
+) -> tuple[Path, Path, str, str]:
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+
+    base_path = make_model(config, base_name)
+    mmproj_path = config.models_dir / mmproj_name
+    mmproj_path.write_text("projector", encoding="utf-8")
+
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(config.models_dir),
+    )
+    return (
+        base_path.resolve(),
+        mmproj_path.resolve(),
+        llamacpp_inventory_service.asset_id_for_path(base_path, "gguf"),
+        llamacpp_inventory_service.asset_id_for_path(mmproj_path, "mmproj"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_supervisor_starts_vision_profile_with_resolved_mmproj(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    supervisor, config, factory = make_supervisor(tmp_path)
+    base_path, mmproj_path, base_asset_id, mmproj_asset_id = configure_supervisor_assets(monkeypatch, config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(
+            profile_id="vision",
+            name="Vision",
+            mode=LlamaCppProfileMode.VISION,
+            model_id=base_asset_id,
+            mmproj_model_id=mmproj_asset_id,
+            server_args={"ctx_size": 4096},
+        )
+    )
+
+    runtime = await supervisor.start_profile("vision")
+
+    runner = factory.runners["vision"]
+    assert runtime.profile_id == "vision"
+    assert runner.model_paths == [base_path]
+    assert runner.starts[0].server_args["ctx_size"] == 4096
+    assert runner.starts[0].server_args["mmproj"] == str(mmproj_path)
+    assert runtime.resolved_args[-2:] == ["--mmproj", str(mmproj_path)]
+    assert supervisor.store.get("vision").server_args == {"ctx_size": 4096}
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejects_vision_profile_without_mmproj_before_runner_spawn(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    supervisor, config, factory = make_supervisor(tmp_path)
+    _base_path, _mmproj_path, base_asset_id, _mmproj_asset_id = configure_supervisor_assets(monkeypatch, config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(
+            profile_id="vision",
+            name="Vision",
+            mode=LlamaCppProfileMode.VISION,
+            model_id=base_asset_id,
+            server_args={"ctx_size": 4096},
+        )
+    )
+
+    with pytest.raises(ServerError, match="mmproj"):
+        await supervisor.start_profile("vision")
+
+    assert factory.runners["vision"].starts == []
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejects_wrong_kind_mmproj_asset_before_runner_spawn(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    supervisor, config, factory = make_supervisor(tmp_path)
+    _base_path, _mmproj_path, base_asset_id, _mmproj_asset_id = configure_supervisor_assets(monkeypatch, config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(
+            profile_id="vision",
+            name="Vision",
+            mode=LlamaCppProfileMode.VISION,
+            model_id=base_asset_id,
+            mmproj_model_id=base_asset_id,
+        )
+    )
+
+    with pytest.raises(ModelNotFoundError, match="mmproj"):
+        await supervisor.start_profile("vision")
+
+    assert factory.runners["vision"].starts == []
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejects_manual_mmproj_path_outside_allowlist_before_runner_spawn(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    supervisor, config, factory = make_supervisor(tmp_path)
+    _base_path, _mmproj_path, base_asset_id, _mmproj_asset_id = configure_supervisor_assets(monkeypatch, config)
+    outside = tmp_path / "outside" / "mmproj-other.gguf"
+    outside.parent.mkdir()
+    outside.write_text("outside projector", encoding="utf-8")
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(
+            profile_id="vision",
+            name="Vision",
+            mode=LlamaCppProfileMode.VISION,
+            model_id=base_asset_id,
+            server_args={"mmproj": str(outside)},
+        )
+    )
+
+    with pytest.raises(ServerError, match="outside allowed"):
+        await supervisor.start_profile("vision")
+
+    assert factory.runners["vision"].starts == []
 
 
 @pytest.mark.asyncio

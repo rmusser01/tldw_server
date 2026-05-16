@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.Local_LLM import handler_utils, llamacpp_inventory
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 from tldw_Server_API.app.core.Local_LLM.llamacpp_process_runner import LlamaCppProcessRunner
+from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_capabilities import resolve_profile_launch
 from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_store import (
     DEFAULT_PROFILE_ID,
     DEFAULT_PROFILE_NAME,
@@ -182,8 +183,13 @@ class LlamaCppSupervisor:
                     return status
                 await runner.stop()
             self._validate_runtime_port_available(profile)
-            model_path = self._resolve_profile_model_path(profile)
-            return await runner.start(model_path, profile)
+            resolution_profile = self._profile_for_launch_resolution(profile)
+            resolved = resolve_profile_launch(
+                resolution_profile,
+                path_resolver=self._resolve_launch_asset_path,
+            )
+            launch_profile = profile.model_copy(update={"server_args": resolved.server_args})
+            return await runner.start(resolved.model_path, launch_profile)
 
     async def stop_profile(self, profile_id: str, disable: bool = False) -> LlamaCppRuntime:
         async with self._lock_for(profile_id):
@@ -424,12 +430,32 @@ class LlamaCppSupervisor:
             raise LlamaCppProfileNotFoundError(f"Llama.cpp profile '{profile_id}' was not found.")
         return profile
 
-    def _resolve_profile_model_path(self, profile: LlamaCppProfile) -> Path:
-        if profile.model_path:
-            return Path(profile.model_path)
-        if profile.model_id:
-            return llamacpp_inventory_service.resolve_model_id(profile.model_id)
-        raise ServerError(f"Llama.cpp profile '{profile.profile_id}' does not have a model.")
+    def _profile_for_launch_resolution(self, profile: LlamaCppProfile) -> LlamaCppProfile:
+        """Return the profile shape used only for launch-time resolution.
+
+        The default-profile compatibility path persists both `model_id` and a
+        resolved `model_path` after `/start-by-model`. Clearing `model_id` here
+        keeps start-by-model/start-by-path bridge launches path-based without
+        mutating the stored profile. Other profiles keep their original asset
+        selection so invalid IDs still fail before runner spawn.
+        """
+        if profile.profile_id == DEFAULT_PROFILE_ID and profile.model_path:
+            return profile.model_copy(update={"model_id": None})
+        return profile
+
+    def _resolve_launch_asset_path(self, raw_path: str | Path, expected_kind: str, label: str) -> Path:
+        """Resolve a launch asset path using the inventory service contract.
+
+        The inventory service reads the current saved llama.cpp config for
+        canonicalization, asset-kind validation, and allowlist enforcement. This
+        avoids stale supervisor config snapshots and preserves the standard
+        `ModelNotFoundError`/`ServerError` behavior used by Admin endpoints.
+        """
+        return llamacpp_inventory_service.resolve_asset_path(
+            raw_path,
+            expected_kind=expected_kind,
+            label=label,
+        )
 
     def _validate_runtime_port_available(self, profile: LlamaCppProfile) -> None:
         if not profile.enabled or profile.port_policy != LlamaCppPortPolicy.EXPLICIT:
