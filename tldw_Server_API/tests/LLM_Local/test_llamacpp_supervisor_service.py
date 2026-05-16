@@ -119,6 +119,40 @@ class FakeRunnerFactory:
         return runner
 
 
+class BlockingFakeRunner(FakeRunner):
+    def __init__(
+        self,
+        profile_id: str,
+        calls: dict[str, int],
+        started: asyncio.Event,
+        release: asyncio.Event,
+        started_profiles: list[str],
+    ):
+        super().__init__(profile_id, calls)
+        self.started = started
+        self.release = release
+        self.started_profiles = started_profiles
+
+    async def start(self, model_path: Path, profile: LlamaCppProfile) -> LlamaCppRuntime:
+        self.started_profiles.append(self.profile_id)
+        self.started.set()
+        await self.release.wait()
+        return await super().start(model_path, profile)
+
+
+class BlockingRunnerFactory(FakeRunnerFactory):
+    def __init__(self):
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.started_profiles: list[str] = []
+
+    def __call__(self, config: LlamaCppConfig, profile_id: str) -> BlockingFakeRunner:
+        runner = BlockingFakeRunner(profile_id, self.calls, self.started, self.release, self.started_profiles)
+        self.runners[profile_id] = runner
+        return runner
+
+
 def make_supervisor(tmp_path: Path) -> tuple[LlamaCppSupervisor, LlamaCppConfig, FakeRunnerFactory]:
     config = make_config(tmp_path)
     store = JsonLlamaCppProfileStore(tmp_path / "profiles.json")
@@ -132,7 +166,7 @@ async def test_supervisor_starts_two_profiles_on_distinct_ports(tmp_path: Path):
     supervisor, config, factory = make_supervisor(tmp_path)
     first_model = make_model(config, "one.gguf")
     second_model = make_model(config, "two.gguf")
-    supervisor.create_profile(
+    await supervisor.create_profile(
         LlamaCppProfileCreateRequest(
             profile_id="one",
             name="One",
@@ -140,7 +174,7 @@ async def test_supervisor_starts_two_profiles_on_distinct_ports(tmp_path: Path):
             port=8181,
         )
     )
-    supervisor.create_profile(
+    await supervisor.create_profile(
         LlamaCppProfileCreateRequest(
             profile_id="two",
             name="Two",
@@ -158,15 +192,16 @@ async def test_supervisor_starts_two_profiles_on_distinct_ports(tmp_path: Path):
     assert factory.calls == {"one": 1, "two": 1}
 
 
-def test_supervisor_rejects_duplicate_enabled_explicit_port(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_supervisor_rejects_duplicate_enabled_explicit_port(tmp_path: Path):
     supervisor, config, _factory = make_supervisor(tmp_path)
     model_path = make_model(config)
-    supervisor.create_profile(
+    await supervisor.create_profile(
         LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
     )
 
     with pytest.raises(LlamaCppProfileConflictError):
-        supervisor.create_profile(
+        await supervisor.create_profile(
             LlamaCppProfileCreateRequest(profile_id="two", name="Two", model_path=str(model_path), port=8181)
         )
 
@@ -175,7 +210,7 @@ def test_supervisor_rejects_duplicate_enabled_explicit_port(tmp_path: Path):
 async def test_supervisor_serializes_same_profile_start(tmp_path: Path):
     supervisor, config, factory = make_supervisor(tmp_path)
     model_path = make_model(config)
-    supervisor.create_profile(
+    await supervisor.create_profile(
         LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
     )
 
@@ -186,10 +221,80 @@ async def test_supervisor_serializes_same_profile_start(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_supervisor_serializes_autoselect_starts_before_port_probe(tmp_path: Path):
+    config = make_config(tmp_path)
+    store = JsonLlamaCppProfileStore(tmp_path / "profiles.json")
+    factory = BlockingRunnerFactory()
+    supervisor = LlamaCppSupervisor(config=config, store=store, runner_factory=factory)
+    first_model = make_model(config, "one.gguf")
+    second_model = make_model(config, "two.gguf")
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(
+            profile_id="one",
+            name="One",
+            model_path=str(first_model),
+            port_policy=LlamaCppPortPolicy.AUTOSELECT,
+        )
+    )
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(
+            profile_id="two",
+            name="Two",
+            model_path=str(second_model),
+            port_policy=LlamaCppPortPolicy.AUTOSELECT,
+        )
+    )
+
+    first_task = asyncio.create_task(supervisor.start_profile("one"))
+    await factory.started.wait()
+    second_task = asyncio.create_task(supervisor.start_profile("two"))
+    await asyncio.sleep(0)
+
+    assert factory.started_profiles == ["one"]
+
+    factory.release.set()
+    await asyncio.gather(first_task, second_task)
+
+    assert factory.calls == {"one": 1, "two": 1}
+
+
+@pytest.mark.asyncio
+async def test_supervisor_serializes_profile_mutations_with_start(tmp_path: Path):
+    config = make_config(tmp_path)
+    store = JsonLlamaCppProfileStore(tmp_path / "profiles.json")
+    factory = BlockingRunnerFactory()
+    supervisor = LlamaCppSupervisor(config=config, store=store, runner_factory=factory)
+    model_path = make_model(config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+
+    start_task = asyncio.create_task(supervisor.start_profile("one"))
+    await factory.started.wait()
+    update_task = asyncio.create_task(supervisor.update_profile("one", LlamaCppProfileUpdateRequest(name="Updated")))
+    delete_task = asyncio.create_task(supervisor.delete_profile("one"))
+    await asyncio.sleep(0)
+
+    assert update_task.done() is False
+    assert delete_task.done() is False
+
+    factory.release.set()
+    runtime = await start_task
+    updated = await update_task
+    deleted = await delete_task
+
+    assert runtime.state == LlamaCppRuntimeState.RUNNING
+    assert updated.name == "Updated"
+    assert deleted is True
+    assert supervisor.list_profiles() == []
+    assert factory.runners["one"].cleaned is True
+
+
+@pytest.mark.asyncio
 async def test_supervisor_stop_pause_resume_and_cleanup(tmp_path: Path):
     supervisor, config, factory = make_supervisor(tmp_path)
     model_path = make_model(config)
-    supervisor.create_profile(
+    await supervisor.create_profile(
         LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
     )
 
@@ -199,7 +304,7 @@ async def test_supervisor_stop_pause_resume_and_cleanup(tmp_path: Path):
     resumed = await supervisor.resume_profile("one")
     await supervisor.start_profile("one")
     supervisor.cleanup_sync()
-    deleted = supervisor.delete_profile("one")
+    deleted = await supervisor.delete_profile("one")
 
     assert stopped.state == LlamaCppRuntimeState.STOPPED
     assert deleted is True
@@ -217,7 +322,7 @@ async def test_supervisor_default_profile_bridge(monkeypatch: pytest.MonkeyPatch
     model_path = make_model(config)
     monkeypatch.setattr(supervisor_module.llamacpp_inventory_service, "resolve_model_id", lambda _model_id: model_path)
 
-    profile_result = supervisor.ensure_default_profile_from_model("gguf:default", {"ctx_size": 1024})
+    profile_result = await supervisor.ensure_default_profile_from_model("gguf:default", {"ctx_size": 1024})
     runtime = await supervisor.start_default_by_model("gguf:default", {"ctx_size": 1024})
     compat = supervisor.default_status_compat()
     stopped = await supervisor.stop_default()
@@ -228,6 +333,66 @@ async def test_supervisor_default_profile_bridge(monkeypatch: pytest.MonkeyPatch
     assert compat["backend"] == "llamacpp"
     assert compat["model"] == str(model_path)
     assert stopped.state == LlamaCppRuntimeState.STOPPED
+
+
+@pytest.mark.asyncio
+async def test_supervisor_serializes_default_start_profile_updates(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_supervisor_service as supervisor_module
+
+    config = make_config(tmp_path)
+    first_model = make_model(config, "first.gguf")
+    second_model = make_model(config, "second.gguf")
+    store = JsonLlamaCppProfileStore(tmp_path / "profiles.json")
+    factory = BlockingRunnerFactory()
+    supervisor = LlamaCppSupervisor(config=config, store=store, runner_factory=factory)
+    model_paths = {"gguf:first": first_model, "gguf:second": second_model}
+    monkeypatch.setattr(
+        supervisor_module.llamacpp_inventory_service,
+        "resolve_model_id",
+        lambda model_id: model_paths[model_id],
+    )
+
+    first_task = asyncio.create_task(supervisor.start_default_by_model("gguf:first", {"port": 8181}))
+    await factory.started.wait()
+    second_task = asyncio.create_task(supervisor.start_default_by_model("gguf:second", {"port": 8182}))
+    await asyncio.sleep(0)
+
+    assert second_task.done() is False
+    assert store.get("default").model_id == "gguf:first"
+
+    factory.release.set()
+    first_runtime = await first_task
+    second_runtime = await second_task
+
+    assert first_runtime.model_id == "gguf:first"
+    assert second_runtime.model_id == "gguf:second"
+    assert store.get("default").model_id == "gguf:second"
+    assert factory.calls == {"default": 2}
+
+
+@pytest.mark.asyncio
+async def test_supervisor_default_start_swaps_running_model(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_supervisor_service as supervisor_module
+
+    supervisor, config, factory = make_supervisor(tmp_path)
+    first_model = make_model(config, "first.gguf")
+    second_model = make_model(config, "second.gguf")
+    model_paths = {"gguf:first": first_model, "gguf:second": second_model}
+    monkeypatch.setattr(
+        supervisor_module.llamacpp_inventory_service,
+        "resolve_model_id",
+        lambda model_id: model_paths[model_id],
+    )
+
+    first_runtime = await supervisor.start_default_by_model("gguf:first", {"port": 8181})
+    second_runtime = await supervisor.start_default_by_model("gguf:second", {"port": 8182})
+
+    assert first_runtime.model_id == "gguf:first"
+    assert second_runtime.model_id == "gguf:second"
+    assert second_runtime.port == 8182
+    assert factory.calls == {"default": 2}
 
 
 def test_manager_attaches_supervisor_and_uses_it_for_cleanup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -269,4 +434,4 @@ def test_manager_attaches_supervisor_and_uses_it_for_cleanup(monkeypatch: pytest
 
     assert manager.llamacpp_supervisor is not None
     assert supervisor_cleanup_called is True
-    assert handler_cleanup_called is False
+    assert handler_cleanup_called is True

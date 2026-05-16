@@ -4,7 +4,7 @@ title: Implement llama.cpp managed runtime stage 1
 status: In Progress
 assignee: []
 created_date: '2026-05-16 01:43'
-updated_date: '2026-05-16 03:00'
+updated_date: '2026-05-16 03:18'
 labels:
   - llamacpp
   - local-llm
@@ -50,6 +50,8 @@ Task 2 review fixes: retained failed-start runtime details with FAILED status an
 Task 2 second review fixes: changed default pipe drainers from readline to bounded read(1024) so long/no-newline output cannot stop draining, and filtered None/empty profile server_args before command construction to match existing LlamaCppHandler behavior. Verification: focused regressions passed; py_compile passed; process runner/profile store/management/inventory pytest reported 55 passed; Bandit on runner/runtime/schema had no findings; git diff --check passed.
 
 Task 3: added LlamaCppSupervisor with profile CRUD, per-profile lifecycle locks, independent start/stop/pause/resume/shutdown/cleanup behavior, runtime listing, default-profile bridge helpers, and LLMInferenceManager cleanup integration. Verification: supervisor pytest passed; process runner/profile store/management/inventory regression suite reported 61 passed; py_compile passed; Bandit on supervisor/manager had no findings; git diff --check passed.
+
+Task 3 review fixes: made profile create/update/delete and default profile ensure asynchronous under the per-profile lock, held the default lock across default-profile update plus restart, added a supervisor-wide start lock for autoselect port selection, preserved legacy LlamaCppHandler cleanup while supervisor cleanup is enabled, and removed the core supervisor dependency on API request schemas. Verification: focused supervisor pytest reported 10 passed; touched llama.cpp regression slice reported 65 passed; py_compile passed; Bandit on supervisor/manager had no findings; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

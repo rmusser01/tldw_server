@@ -241,7 +241,7 @@ class LLMInferenceManager:
             self.llamafile._cleanup_all_managed_servers_sync()
         if self.llamacpp_supervisor:
             self.llamacpp_supervisor.cleanup_sync()
-        elif self.llamacpp:
+        if self.llamacpp:
             # Clean up llama.cpp server processes
             self.llamacpp._cleanup_managed_server_sync()
         self.logger.info("LLMInferenceManager cleanup_on_exit complete.")
