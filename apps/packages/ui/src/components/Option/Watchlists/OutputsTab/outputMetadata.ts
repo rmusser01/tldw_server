@@ -1,4 +1,12 @@
-import type { WatchlistOutput, WatchlistOutputCreate } from "@/types/watchlists"
+import type {
+  WatchlistOutput,
+  WatchlistOutputCreate,
+  WatchlistReportPreset,
+  WatchlistReportReadiness,
+  WatchlistReportReadinessState,
+  WatchlistReportReadinessWarning,
+  WatchlistReportReadinessWarningSeverity
+} from "@/types/watchlists"
 
 export interface DeliveryStatusSummary {
   channel: string
@@ -12,6 +20,23 @@ export interface DeliveryDisclosureSummary {
 }
 
 const AUDIO_OUTPUT_FORMATS = new Set(["mp3", "wav", "ogg", "m4a", "aac", "flac", "opus"])
+const REPORT_PRESETS = new Set<WatchlistReportPreset>([
+  "auto",
+  "cti_osint",
+  "news_briefing",
+  "general_research"
+])
+const READINESS_STATES = new Set<WatchlistReportReadinessState>([
+  "ready",
+  "warning",
+  "blocked",
+  "legacy_live_only"
+])
+const READINESS_WARNING_SEVERITIES = new Set<WatchlistReportReadinessWarningSeverity>([
+  "info",
+  "warning",
+  "blocking"
+])
 const OUTPUT_MIME_TYPES: Record<string, string> = {
   md: "text/markdown",
   html: "text/html",
@@ -36,6 +61,16 @@ const asNonEmptyString = (value: unknown): string | undefined => {
 const asPositiveInteger = (value: unknown): number | undefined => {
   if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) return undefined
   return value
+}
+
+const asNonNegativeInteger = (value: unknown): number | undefined => {
+  if (typeof value === "number") {
+    return Number.isInteger(value) && value >= 0 ? value : undefined
+  }
+  const fromString = asNonEmptyString(value)
+  if (!fromString || !/^\d+$/.test(fromString)) return undefined
+  const parsed = Number.parseInt(fromString, 10)
+  return Number.isSafeInteger(parsed) ? parsed : undefined
 }
 
 const getMetadataRecord = (metadata: unknown): Record<string, unknown> | null =>
@@ -110,6 +145,121 @@ export const getOutputTemplateVersion = (metadata: unknown): number | undefined 
   if (!fromString) return undefined
   const parsed = Number.parseInt(fromString, 10)
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined
+}
+
+const asReportPreset = (value: unknown): WatchlistReportPreset | undefined => {
+  const preset = asNonEmptyString(value)?.toLowerCase()
+  if (!preset) return undefined
+  return REPORT_PRESETS.has(preset as WatchlistReportPreset)
+    ? (preset as WatchlistReportPreset)
+    : undefined
+}
+
+const asReadinessState = (value: unknown): WatchlistReportReadinessState | undefined => {
+  const state = asNonEmptyString(value)?.toLowerCase()
+  if (!state) return undefined
+  return READINESS_STATES.has(state as WatchlistReportReadinessState)
+    ? (state as WatchlistReportReadinessState)
+    : undefined
+}
+
+const asReadinessWarningSeverity = (
+  value: unknown
+): WatchlistReportReadinessWarningSeverity => {
+  const severity = asNonEmptyString(value)?.toLowerCase()
+  if (severity && READINESS_WARNING_SEVERITIES.has(severity as WatchlistReportReadinessWarningSeverity)) {
+    return severity as WatchlistReportReadinessWarningSeverity
+  }
+  return "warning"
+}
+
+const normalizeAffectedItemIds = (value: unknown): number[] => {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => asNonNegativeInteger(item))
+    .filter((item): item is number => item != null)
+}
+
+const normalizeReadinessWarnings = (value: unknown): WatchlistReportReadinessWarning[] => {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((entry) => {
+      const record = getMetadataRecord(entry)
+      if (!record) return null
+      const code = asNonEmptyString(record.code)
+      const message = asNonEmptyString(record.message)
+      if (!code || !message) return null
+      return {
+        code,
+        severity: asReadinessWarningSeverity(record.severity),
+        message,
+        affected_item_ids: normalizeAffectedItemIds(record.affected_item_ids)
+      }
+    })
+    .filter((entry): entry is WatchlistReportReadinessWarning => entry !== null)
+}
+
+export const getOutputReportPreset = (metadata: unknown): WatchlistReportPreset => {
+  const record = getMetadataRecord(metadata)
+  return asReportPreset(record?.report_preset) || "general_research"
+}
+
+export const getOutputReportSnapshotAvailable = (metadata: unknown): boolean => {
+  const record = getMetadataRecord(metadata)
+  return Boolean(asNonEmptyString(record?.report_snapshot_path))
+}
+
+export const getOutputReportReadiness = (metadata: unknown): WatchlistReportReadiness => {
+  const record = getMetadataRecord(metadata)
+  const readiness = getMetadataRecord(record?.report_readiness)
+  const state = asReadinessState(readiness?.state)
+  if (!readiness || !state) {
+    return {
+      state: "legacy_live_only",
+      score: 0,
+      warnings: []
+    }
+  }
+  const score = asNonNegativeInteger(readiness.score)
+  return {
+    state,
+    score: Math.min(score ?? 0, 100),
+    warnings: normalizeReadinessWarnings(readiness.warnings)
+  }
+}
+
+const getOutputReportCount = (metadata: unknown, key: string): number => {
+  const record = getMetadataRecord(metadata)
+  return asNonNegativeInteger(record?.[key]) ?? 0
+}
+
+export const getIncludedItemCount = (metadata: unknown): number =>
+  getOutputReportCount(metadata, "included_item_count")
+
+export const getExcludedItemCount = (metadata: unknown): number =>
+  getOutputReportCount(metadata, "excluded_item_count")
+
+export const getSourceCount = (metadata: unknown): number =>
+  getOutputReportCount(metadata, "source_count")
+
+export const getAlertCount = (metadata: unknown): number =>
+  getOutputReportCount(metadata, "alert_count")
+
+export const getWeakEvidenceWarningCount = (metadata: unknown): number =>
+  getOutputReportCount(metadata, "weak_evidence_warning_count")
+
+export const getReadinessTagColor = (state: WatchlistReportReadinessState): string => {
+  if (state === "ready") return "green"
+  if (state === "warning") return "gold"
+  if (state === "blocked") return "red"
+  return "default"
+}
+
+export const getReadinessLabel = (state: WatchlistReportReadinessState): string => {
+  if (state === "ready") return "Ready"
+  if (state === "warning") return "Needs review"
+  if (state === "blocked") return "Blocked"
+  return "Live provenance only"
 }
 
 const normalizeDelivery = (

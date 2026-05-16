@@ -11,6 +11,10 @@ import type {
   PaginatedResponse,
   RunDetailResponse,
   ScrapedItem,
+  ScrapedItemAlertFilterParams,
+  ScrapedItemBatchUpdateRequest,
+  ScrapedItemBatchUpdateResponse,
+  ScrapedItemSortMode,
   ScrapedItemSmartCounts,
   ScrapedItemUpdate,
   SourceSeenResetResponse,
@@ -29,11 +33,25 @@ import type {
   WatchlistsIaExperimentTelemetryResponse,
   WatchlistsIaExperimentTelemetrySummaryResponse,
   WatchlistsRcTelemetrySummaryResponse,
+  WatchlistContainer,
+  WatchlistContentAlert,
+  WatchlistContentAlertRule,
+  WatchlistContentAlertRuleCreate,
+  WatchlistContentAlertRuleUpdate,
+  WatchlistContentAlertSeverity,
+  WatchlistContentAlertStatus,
+  WatchlistContentAlertUpdate,
+  WatchlistCreate,
+  WatchlistItemSavedView,
+  WatchlistItemSavedViewCreate,
+  WatchlistItemSavedViewUpdate,
   WatchlistJob,
   WatchlistJobCreate,
   WatchlistJobUpdate,
   WatchlistOutput,
   WatchlistOutputCreate,
+  WatchlistOutputEvidenceResponse,
+  WatchlistReportReadiness,
   WatchlistRun,
   WatchlistSettings,
   WatchlistSource,
@@ -42,7 +60,8 @@ import type {
   WatchlistTag,
   WatchlistTemplate,
   WatchlistTemplateCreate,
-  WatchlistTemplateVersionSummary
+  WatchlistTemplateVersionSummary,
+  WatchlistUpdate
 } from "@/types/watchlists"
 
 // Helper to build query string (supports array params)
@@ -64,12 +83,58 @@ const buildQuery = (params?: Record<string, unknown> | object | null): string =>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Sources API
+// Watchlists API
 // ─────────────────────────────────────────────────────────────────────────────
+
+export interface FetchWatchlistsParams {
+  status?: "active" | "paused" | "archived"
+  include_deleted?: boolean
+  page?: number
+  size?: number
+}
+
+export const fetchWatchlists = async (
+  params?: FetchWatchlistsParams
+): Promise<PaginatedResponse<WatchlistContainer>> => {
+  const qs = buildQuery(params || {})
+  return bgRequest<PaginatedResponse<WatchlistContainer>>({
+    path: `/api/v1/watchlists${qs}` as any,
+    method: "GET"
+  })
+}
+
+export const getWatchlist = async (watchlistId: number): Promise<WatchlistContainer> => {
+  return bgRequest<WatchlistContainer>({
+    path: `/api/v1/watchlists/${watchlistId}` as any,
+    method: "GET"
+  })
+}
+
+export const createWatchlist = async (
+  watchlist: WatchlistCreate
+): Promise<WatchlistContainer> => {
+  return bgRequest<WatchlistContainer>({
+    path: "/api/v1/watchlists",
+    method: "POST",
+    body: watchlist
+  })
+}
+
+export const updateWatchlist = async (
+  watchlistId: number,
+  updates: WatchlistUpdate
+): Promise<WatchlistContainer> => {
+  return bgRequest<WatchlistContainer>({
+    path: `/api/v1/watchlists/${watchlistId}` as any,
+    method: "PATCH",
+    body: updates
+  })
+}
 
 export interface FetchSourcesParams {
   q?: string
   tags?: string[]
+  watchlist_id?: number
   page?: number
   size?: number
 }
@@ -83,6 +148,133 @@ export interface ReversibleDeleteResponse {
 export interface SourceDeleteResponse extends ReversibleDeleteResponse {
   source_id: number
 }
+
+export interface WatchlistDeleteResponse extends ReversibleDeleteResponse {
+  watchlist_id: number
+}
+
+export const deleteWatchlist = async (
+  watchlistId: number
+): Promise<WatchlistDeleteResponse> => {
+  return bgRequest<WatchlistDeleteResponse>({
+    path: `/api/v1/watchlists/${watchlistId}` as any,
+    method: "DELETE"
+  })
+}
+
+export const restoreWatchlist = async (
+  watchlistId: number
+): Promise<WatchlistContainer> => {
+  return bgRequest<WatchlistContainer>({
+    path: `/api/v1/watchlists/${watchlistId}/restore` as any,
+    method: "POST"
+  })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Content Alerts API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface FetchContentAlertRulesParams {
+  enabled?: boolean
+  page?: number
+  size?: number
+}
+
+export interface FetchContentAlertsParams {
+  status?: WatchlistContentAlertStatus
+  severity?: WatchlistContentAlertSeverity
+  rule_id?: number
+  source_id?: number
+  q?: string
+  page?: number
+  size?: number
+}
+
+export interface ContentAlertRuleDeleteResponse {
+  deleted: boolean
+}
+
+export const fetchWatchlistContentAlertRules = async (
+  watchlistId: number,
+  params?: FetchContentAlertRulesParams
+): Promise<PaginatedResponse<WatchlistContentAlertRule>> => {
+  const qs = buildQuery(params || {})
+  return bgRequest<PaginatedResponse<WatchlistContentAlertRule>>({
+    path: `/api/v1/watchlists/${watchlistId}/content-alert-rules${qs}` as any,
+    method: "GET"
+  })
+}
+
+export const createWatchlistContentAlertRule = async (
+  watchlistId: number,
+  rule: WatchlistContentAlertRuleCreate
+): Promise<WatchlistContentAlertRule> => {
+  return bgRequest<WatchlistContentAlertRule>({
+    path: `/api/v1/watchlists/${watchlistId}/content-alert-rules` as any,
+    method: "POST",
+    body: rule
+  })
+}
+
+export const updateWatchlistContentAlertRule = async (
+  watchlistId: number,
+  ruleId: number,
+  updates: WatchlistContentAlertRuleUpdate
+): Promise<WatchlistContentAlertRule> => {
+  return bgRequest<WatchlistContentAlertRule>({
+    path: `/api/v1/watchlists/${watchlistId}/content-alert-rules/${ruleId}` as any,
+    method: "PATCH",
+    body: updates
+  })
+}
+
+export const deleteWatchlistContentAlertRule = async (
+  watchlistId: number,
+  ruleId: number
+): Promise<ContentAlertRuleDeleteResponse> => {
+  return bgRequest<ContentAlertRuleDeleteResponse>({
+    path: `/api/v1/watchlists/${watchlistId}/content-alert-rules/${ruleId}` as any,
+    method: "DELETE"
+  })
+}
+
+export const fetchWatchlistContentAlerts = async (
+  watchlistId: number,
+  params?: FetchContentAlertsParams
+): Promise<PaginatedResponse<WatchlistContentAlert>> => {
+  const qs = buildQuery(params || {})
+  return bgRequest<PaginatedResponse<WatchlistContentAlert>>({
+    path: `/api/v1/watchlists/${watchlistId}/alerts${qs}` as any,
+    method: "GET"
+  })
+}
+
+export const getWatchlistContentAlert = async (
+  watchlistId: number,
+  alertId: number
+): Promise<WatchlistContentAlert> => {
+  return bgRequest<WatchlistContentAlert>({
+    path: `/api/v1/watchlists/${watchlistId}/alerts/${alertId}` as any,
+    method: "GET"
+  })
+}
+
+export const updateWatchlistContentAlert = async (
+  watchlistId: number,
+  alertId: number,
+  updates: WatchlistContentAlertUpdate
+): Promise<WatchlistContentAlert> => {
+  return bgRequest<WatchlistContentAlert>({
+    path: `/api/v1/watchlists/${watchlistId}/alerts/${alertId}` as any,
+    method: "PATCH",
+    body: updates
+  })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sources API
+// ─────────────────────────────────────────────────────────────────────────────
 
 export const fetchWatchlistSources = async (
   params?: FetchSourcesParams
@@ -152,12 +344,13 @@ export const bulkCreateSources = async (
 
 export const importOpml = async (
   file: File,
-  options?: { active?: boolean; tags?: string[]; group_id?: number }
+  options?: { active?: boolean; tags?: string[]; group_id?: number; watchlist_id?: number }
 ): Promise<SourcesImportResponse> => {
   const data = await file.arrayBuffer()
   const fields: Record<string, unknown> = {}
   if (options?.active != null) fields.active = String(options.active)
   if (options?.group_id != null) fields.group_id = String(options.group_id)
+  if (options?.watchlist_id != null) fields.watchlist_id = String(options.watchlist_id)
   if (options?.tags?.length) fields.tags = options.tags
   return bgUpload<SourcesImportResponse>({
     path: "/api/v1/watchlists/sources/import",
@@ -302,6 +495,7 @@ export const fetchWatchlistTags = async (
 
 export interface FetchJobsParams {
   q?: string
+  watchlist_id?: number
   page?: number
   size?: number
 }
@@ -431,6 +625,7 @@ export const addJobFilters = async (
 
 export interface FetchRunsParams {
   q?: string
+  watchlist_id?: number
   page?: number
   size?: number
 }
@@ -519,13 +714,16 @@ export const exportRunTalliesCsv = async (runId: number): Promise<string> => {
 // Scraped Items API
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface FetchItemsParams {
+export interface FetchItemsParams extends ScrapedItemAlertFilterParams {
   run_id?: number
   job_id?: number
   source_id?: number
+  watchlist_id?: number
   status?: string
   reviewed?: boolean
   queued_for_briefing?: boolean
+  sort?: ScrapedItemSortMode
+  include_alert_summary?: boolean
   q?: string
   since?: string
   until?: string
@@ -543,10 +741,11 @@ export const fetchScrapedItems = async (
   })
 }
 
-export interface FetchItemSmartCountsParams {
+export interface FetchItemSmartCountsParams extends ScrapedItemAlertFilterParams {
   run_id?: number
   job_id?: number
   source_id?: number
+  watchlist_id?: number
   status?: string
   q?: string
   since?: string
@@ -582,6 +781,58 @@ export const updateScrapedItem = async (
   })
 }
 
+export const batchUpdateScrapedItems = async (
+  payload: ScrapedItemBatchUpdateRequest
+): Promise<ScrapedItemBatchUpdateResponse> => {
+  return bgRequest<ScrapedItemBatchUpdateResponse>({
+    path: "/api/v1/watchlists/items/batch-update" as any,
+    method: "POST",
+    body: payload
+  })
+}
+
+export const fetchWatchlistItemViews = async (
+  watchlistId: number
+): Promise<{ items: WatchlistItemSavedView[] }> => {
+  return bgRequest<{ items: WatchlistItemSavedView[] }>({
+    path: `/api/v1/watchlists/${watchlistId}/item-views` as any,
+    method: "GET"
+  })
+}
+
+export const createWatchlistItemView = async (
+  watchlistId: number,
+  payload: WatchlistItemSavedViewCreate
+): Promise<WatchlistItemSavedView> => {
+  return bgRequest<WatchlistItemSavedView>({
+    path: `/api/v1/watchlists/${watchlistId}/item-views` as any,
+    method: "POST",
+    body: payload
+  })
+}
+
+export const updateWatchlistItemView = async (
+  watchlistId: number,
+  viewId: number,
+  payload: WatchlistItemSavedViewUpdate
+): Promise<WatchlistItemSavedView> => {
+  return bgRequest<WatchlistItemSavedView>({
+    path: `/api/v1/watchlists/${watchlistId}/item-views/${viewId}` as any,
+    method: "PATCH",
+    body: payload
+  })
+}
+
+export const deleteWatchlistItemView = async (
+  watchlistId: number,
+  viewId: number
+): Promise<void> => {
+  return bgRequest<void>({
+    path: `/api/v1/watchlists/${watchlistId}/item-views/${viewId}` as any,
+    method: "DELETE"
+  })
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Outputs API
 // ─────────────────────────────────────────────────────────────────────────────
@@ -589,6 +840,7 @@ export const updateScrapedItem = async (
 export interface FetchOutputsParams {
   job_id?: number
   run_id?: number
+  watchlist_id?: number
   page?: number
   size?: number
 }
@@ -632,6 +884,24 @@ export const downloadWatchlistOutputBinary = async (outputId: number): Promise<A
     path: `/api/v1/watchlists/outputs/${outputId}/download` as any,
     method: "GET",
     responseType: "arrayBuffer"
+  })
+}
+
+export const getWatchlistOutputEvidence = async (
+  outputId: number
+): Promise<WatchlistOutputEvidenceResponse> => {
+  return bgRequest<WatchlistOutputEvidenceResponse>({
+    path: `/api/v1/watchlists/outputs/${outputId}/evidence` as any,
+    method: "GET"
+  })
+}
+
+export const getWatchlistOutputReadiness = async (
+  outputId: number
+): Promise<WatchlistReportReadiness> => {
+  return bgRequest<WatchlistReportReadiness>({
+    path: `/api/v1/watchlists/outputs/${outputId}/readiness` as any,
+    method: "GET"
   })
 }
 

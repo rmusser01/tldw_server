@@ -191,7 +191,7 @@ describe("ItemsTab keyboard shortcuts", () => {
     fireEvent.keyDown(document, { key: "k" })
     expect(screen.getByTestId("watchlists-item-reader")).toHaveTextContent("Item One")
 
-    const searchInput = screen.getByPlaceholderText("Search feed items...")
+    const searchInput = screen.getByPlaceholderText("Search updates...")
     searchInput.focus()
     fireEvent.keyDown(searchInput, { key: "j" })
     expect(screen.getByTestId("watchlists-item-reader")).toHaveTextContent("Item One")

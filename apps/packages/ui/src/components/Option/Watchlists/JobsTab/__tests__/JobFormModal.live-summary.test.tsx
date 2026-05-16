@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { Modal, message } from "antd"
 import { JobFormModal } from "../JobFormModal"
+import { setViewport } from "../../__tests__/test-utils/viewport"
 
 const servicesMock = vi.hoisted(() => ({
   createWatchlistJob: vi.fn(),
@@ -163,6 +164,7 @@ describe("JobFormModal live summary", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    setViewport(1024)
     telemetryMock.trackWatchlistsPreventionTelemetry.mockResolvedValue(undefined)
     vi.spyOn(Modal, "confirm").mockImplementation((config: any) => {
       config?.onOk?.()
@@ -171,22 +173,6 @@ describe("JobFormModal live summary", () => {
         update: vi.fn()
       } as any
     })
-    if (!window.matchMedia) {
-      Object.defineProperty(window, "matchMedia", {
-        writable: true,
-        value: vi.fn().mockImplementation((query: string) => ({
-          matches: false,
-          media: query,
-          onchange: null,
-          addListener: vi.fn(),
-          removeListener: vi.fn(),
-          addEventListener: vi.fn(),
-          removeEventListener: vi.fn(),
-          dispatchEvent: vi.fn()
-        }))
-      })
-    }
-
     servicesMock.fetchWatchlistSources.mockResolvedValue({
       items: [
         {
@@ -235,6 +221,24 @@ describe("JobFormModal live summary", () => {
       createObjectUrlMock
     ;(URL as unknown as { revokeObjectURL?: (url: string) => void }).revokeObjectURL =
       revokeObjectUrlMock
+  })
+
+  it("uses full-width constrained modal chrome with visible create and cancel actions", async () => {
+    setViewport(420)
+
+    render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(servicesMock.fetchWatchlistSources).toHaveBeenCalled()
+      expect(servicesMock.fetchWatchlistGroups).toHaveBeenCalled()
+    })
+
+    const modal = document.querySelector(".ant-modal") as HTMLElement | null
+    expect(modal).not.toBeNull()
+    expect(modal?.style.width).toBe("100vw")
+    expect(modal?.style.maxWidth).toBe("100vw")
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Create" })).toBeInTheDocument()
   })
 
   it("updates the live summary as authoring fields change", async () => {

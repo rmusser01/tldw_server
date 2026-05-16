@@ -102,4 +102,12 @@ describe("option-watchlists route query handoff", () => {
     expect(routeStateMocks.openOutputPreview).toHaveBeenCalledWith(377)
     expect(routeStateMocks.openRunDetail).not.toHaveBeenCalled()
   })
+
+  it("applies alerts deep-link tab from query params", async () => {
+    renderAt("/watchlists?tab=alerts")
+
+    await waitFor(() => {
+      expect(routeStateMocks.setActiveTab).toHaveBeenCalledWith("alerts")
+    })
+  })
 })

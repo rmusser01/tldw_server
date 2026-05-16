@@ -276,7 +276,7 @@ describe("RunDetailDrawer stream lifecycle", () => {
       items: [],
       total: 0,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
     mocks.fetchWatchlistOutputsMock.mockResolvedValue({

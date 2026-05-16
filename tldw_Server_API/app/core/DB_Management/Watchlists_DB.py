@@ -1,7 +1,11 @@
 """
-Watchlists_DB - Persistence for Watchlists (sources, groups/tags, jobs, runs).
+Watchlists_DB - Persistence for Watchlists (containers, sources, groups/tags, jobs, runs).
 
 Tables (per-user, colocated with Media DB):
+- watchlists(id, user_id, name, description, objective, domain, status,
+             priority, tags_json, archived_at, deleted_at,
+             restore_expires_at, created_at, updated_at)
+- watchlist_sources(watchlist_id, source_id, created_at)
 - sources(id, user_id, name, url, source_type, active, settings_json,
           last_scraped_at, etag, last_modified, status, created_at, updated_at)
 - groups(id, user_id, name, description, parent_group_id)
@@ -10,8 +14,8 @@ Tables (per-user, colocated with Media DB):
 - source_tags(source_id, tag_id)
 - scrape_jobs(id, user_id, name, description, scope_json, schedule_expr,
               active, max_concurrency, per_host_delay_ms, retry_policy_json,
-              output_prefs_json, schedule_timezone, created_at, updated_at,
-              last_run_at, next_run_at)
+              output_prefs_json, schedule_timezone, watchlist_id, created_at,
+              updated_at, last_run_at, next_run_at)
 - scrape_runs(id, job_id, status, started_at, finished_at, stats_json,
               error_msg, log_path)
 - scrape_run_items(run_id, media_id, source_id)
@@ -23,6 +27,8 @@ Tables (per-user, colocated with Media DB):
                 last_seen_at, elapsed_ms, reached_target, created_at)
 - watchlist_onboarding_events(id, user_id, session_id, event_type, event_at,
                 details_json, created_at)
+- watchlist_item_saved_views(id, user_id, watchlist_id, name, filters_json,
+                sort, is_default, created_at, updated_at)
 
 Notes:
 - Backed by DatabaseBackendFactory; default to per-user SQLite Media DB path.
@@ -36,6 +42,7 @@ import contextlib
 import functools
 import json
 import os
+import re
 import sqlite3
 import threading
 from collections.abc import Generator, Iterable
@@ -68,9 +75,65 @@ _WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS = (
     json.JSONDecodeError,
 )
 
+_DEFAULT_WATCHLIST_NAME = "Imported Watchlist"
+_VALID_WATCHLIST_DOMAINS = {"cti_osint", "news", "general"}
+_VALID_WATCHLIST_STATUSES = {"active", "paused", "archived"}
+_VALID_WATCHLIST_PRIORITIES = {"low", "medium", "high", "critical"}
+_VALID_CONTENT_ALERT_RULE_KINDS = {"keyword", "regex", "descriptor", "classification", "entity", "ioc", "cve"}
+_VALID_CONTENT_ALERT_MATCH_MODES = {"contains", "exact", "regex"}
+_VALID_CONTENT_ALERT_SEVERITIES = {"info", "low", "medium", "high", "critical"}
+_VALID_CONTENT_ALERT_STATUSES = {"unread", "read", "dismissed"}
+_VALID_ITEM_SAVED_VIEW_FILTER_KEYS = {
+    "run_id",
+    "job_id",
+    "source_id",
+    "status",
+    "reviewed",
+    "queued_for_briefing",
+    "q",
+    "search",
+    "since",
+    "until",
+    "has_alert",
+    "alert_status",
+    "alert_severity",
+    "alert_rule_id",
+    "smart_filter",
+}
+_VALID_ITEM_SAVED_VIEW_SMART_FILTERS = {"all", "today", "today_unread", "todayUnread", "unread", "reviewed", "queued"}
+_NESTED_REGEX_QUANTIFIER_RE = re.compile(
+    r"\((?:[^()\\]|\\.)*(?:\*|\+|\{\d+(?:,\d*)?\})(?:[^()\\]|\\.)*\)\s*(?:\*|\+|\{\d+(?:,\d*)?\})"
+)
+
 
 def _utcnow_iso() -> str:
     return datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+
+
+def _escape_like_literal(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _looks_like_nested_quantifier(pattern: str) -> bool:
+    return bool(_NESTED_REGEX_QUANTIFIER_RE.search(pattern))
+
+
+@dataclass
+class WatchlistRow:
+    id: int
+    user_id: str
+    name: str
+    description: str | None
+    objective: str | None
+    domain: str
+    status: str
+    priority: str
+    tags_json: str | None
+    created_at: str
+    updated_at: str
+    archived_at: str | None = None
+    deleted_at: str | None = None
+    restore_expires_at: str | None = None
 
 
 @dataclass
@@ -131,6 +194,7 @@ class JobRow:
     last_run_at: str | None
     next_run_at: str | None
     wf_schedule_id: str | None = None
+    watchlist_id: int | None = None
 
 
 @dataclass
@@ -163,6 +227,7 @@ class ScrapedItemRow:
     reviewed: int
     queued_for_briefing: int
     created_at: str
+    alert_summary: dict[str, Any] | None = None
 
     def tags(self) -> list[str]:
         if not self.tags_json:
@@ -174,6 +239,61 @@ class ScrapedItemRow:
         except _WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS:
             return []
         return []
+
+
+@dataclass
+class WatchlistContentAlertRuleRow:
+    id: int
+    user_id: str
+    watchlist_id: int
+    name: str
+    enabled: int
+    rule_kind: str
+    match_mode: str
+    pattern: str
+    severity: str
+    source_constraints_json: str | None
+    metadata_json: str | None
+    created_at: str
+    updated_at: str
+    classification: str | None = None
+    descriptor: str | None = None
+    entity_type: str | None = None
+
+
+@dataclass
+class WatchlistContentAlertRow:
+    id: int
+    user_id: str
+    watchlist_id: int
+    rule_id: int
+    item_id: int
+    run_id: int
+    job_id: int
+    source_id: int
+    severity: str
+    status: str
+    title: str | None
+    snippet: str | None
+    matched_text: str | None
+    evidence_json: str | None
+    dedupe_key: str
+    created_at: str
+    read_at: str | None = None
+    dismissed_at: str | None = None
+
+
+@dataclass
+class WatchlistItemSavedViewRow:
+    id: int
+    user_id: str
+    watchlist_id: int
+    name: str
+    filters_json: str
+    sort: str
+    is_default: int
+    created_at: str
+    updated_at: str
 
 
 @dataclass
@@ -431,6 +551,34 @@ class WatchlistsDatabase:
             CREATE INDEX IF NOT EXISTS idx_sources_user ON sources(user_id);
             CREATE UNIQUE INDEX IF NOT EXISTS ux_sources_user_url ON sources(user_id, url);
 
+            CREATE TABLE IF NOT EXISTS watchlists (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
+                objective TEXT,
+                domain TEXT NOT NULL DEFAULT 'general',
+                status TEXT NOT NULL DEFAULT 'active',
+                priority TEXT NOT NULL DEFAULT 'medium',
+                tags_json TEXT,
+                archived_at TEXT,
+                deleted_at TEXT,
+                restore_expires_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_watchlists_user_status ON watchlists(user_id, status);
+            CREATE INDEX IF NOT EXISTS idx_watchlists_user_deleted ON watchlists(user_id, deleted_at);
+
+            CREATE TABLE IF NOT EXISTS watchlist_sources (
+                watchlist_id BIGINT NOT NULL,
+                source_id BIGINT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE (watchlist_id, source_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_watchlist_sources_watchlist ON watchlist_sources(watchlist_id);
+            CREATE INDEX IF NOT EXISTS idx_watchlist_sources_source ON watchlist_sources(source_id);
+
             CREATE TABLE IF NOT EXISTS groups (
                 id BIGSERIAL PRIMARY KEY,
                 user_id TEXT NOT NULL,
@@ -472,6 +620,7 @@ class WatchlistsDatabase:
                 output_prefs_json TEXT,
                 job_filters_json TEXT,
                 schedule_timezone TEXT,
+                watchlist_id BIGINT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 last_run_at TEXT,
@@ -533,6 +682,70 @@ class WatchlistsDatabase:
             CREATE INDEX IF NOT EXISTS idx_scraped_items_status ON scraped_items(status);
             CREATE INDEX IF NOT EXISTS idx_scraped_items_reviewed ON scraped_items(reviewed);
             CREATE INDEX IF NOT EXISTS idx_scraped_items_created ON scraped_items(created_at);
+
+            CREATE TABLE IF NOT EXISTS watchlist_content_alert_rules (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                watchlist_id BIGINT NOT NULL,
+                name TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                rule_kind TEXT NOT NULL,
+                match_mode TEXT NOT NULL DEFAULT 'contains',
+                pattern TEXT NOT NULL,
+                classification TEXT,
+                descriptor TEXT,
+                entity_type TEXT,
+                source_constraints_json TEXT,
+                severity TEXT NOT NULL DEFAULT 'medium',
+                metadata_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_content_alert_rules_user_watchlist_enabled
+                ON watchlist_content_alert_rules(user_id, watchlist_id, enabled);
+            CREATE INDEX IF NOT EXISTS idx_content_alert_rules_user_watchlist_kind
+                ON watchlist_content_alert_rules(user_id, watchlist_id, rule_kind);
+
+            CREATE TABLE IF NOT EXISTS watchlist_content_alerts (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                watchlist_id BIGINT NOT NULL,
+                rule_id BIGINT NOT NULL,
+                item_id BIGINT NOT NULL,
+                run_id BIGINT NOT NULL,
+                job_id BIGINT NOT NULL,
+                source_id BIGINT NOT NULL,
+                severity TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'unread',
+                title TEXT,
+                snippet TEXT,
+                matched_text TEXT,
+                evidence_json TEXT,
+                dedupe_key TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                read_at TEXT,
+                dismissed_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_content_alerts_user_watchlist_status_created
+                ON watchlist_content_alerts(user_id, watchlist_id, status, created_at);
+            CREATE INDEX IF NOT EXISTS idx_content_alerts_user_watchlist_rule
+                ON watchlist_content_alerts(user_id, watchlist_id, rule_id);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_content_alerts_dedupe_key
+                ON watchlist_content_alerts(dedupe_key);
+
+            CREATE TABLE IF NOT EXISTS watchlist_item_saved_views (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                watchlist_id BIGINT NOT NULL,
+                name TEXT NOT NULL,
+                filters_json TEXT NOT NULL,
+                sort TEXT NOT NULL DEFAULT 'created_desc',
+                is_default INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_item_saved_views_user_watchlist
+                ON watchlist_item_saved_views(user_id, watchlist_id);
 
             CREATE TABLE IF NOT EXISTS watchlist_clusters (
                 job_id BIGINT NOT NULL,
@@ -640,6 +853,34 @@ class WatchlistsDatabase:
             CREATE INDEX IF NOT EXISTS idx_sources_user ON sources(user_id);
             CREATE UNIQUE INDEX IF NOT EXISTS ux_sources_user_url ON sources(user_id, url);
 
+            CREATE TABLE IF NOT EXISTS watchlists (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
+                objective TEXT,
+                domain TEXT NOT NULL DEFAULT 'general',
+                status TEXT NOT NULL DEFAULT 'active',
+                priority TEXT NOT NULL DEFAULT 'medium',
+                tags_json TEXT,
+                archived_at TEXT,
+                deleted_at TEXT,
+                restore_expires_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_watchlists_user_status ON watchlists(user_id, status);
+            CREATE INDEX IF NOT EXISTS idx_watchlists_user_deleted ON watchlists(user_id, deleted_at);
+
+            CREATE TABLE IF NOT EXISTS watchlist_sources (
+                watchlist_id INTEGER NOT NULL,
+                source_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE (watchlist_id, source_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_watchlist_sources_watchlist ON watchlist_sources(watchlist_id);
+            CREATE INDEX IF NOT EXISTS idx_watchlist_sources_source ON watchlist_sources(source_id);
+
             CREATE TABLE IF NOT EXISTS groups (
                 id INTEGER PRIMARY KEY,
                 user_id TEXT NOT NULL,
@@ -681,6 +922,7 @@ class WatchlistsDatabase:
                 output_prefs_json TEXT,
                 job_filters_json TEXT,
                 schedule_timezone TEXT,
+                watchlist_id INTEGER,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 last_run_at TEXT,
@@ -743,6 +985,70 @@ class WatchlistsDatabase:
             CREATE INDEX IF NOT EXISTS idx_scraped_items_status ON scraped_items(status);
             CREATE INDEX IF NOT EXISTS idx_scraped_items_reviewed ON scraped_items(reviewed);
             CREATE INDEX IF NOT EXISTS idx_scraped_items_created ON scraped_items(created_at);
+
+            CREATE TABLE IF NOT EXISTS watchlist_content_alert_rules (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                watchlist_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                rule_kind TEXT NOT NULL,
+                match_mode TEXT NOT NULL DEFAULT 'contains',
+                pattern TEXT NOT NULL,
+                classification TEXT,
+                descriptor TEXT,
+                entity_type TEXT,
+                source_constraints_json TEXT,
+                severity TEXT NOT NULL DEFAULT 'medium',
+                metadata_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_content_alert_rules_user_watchlist_enabled
+                ON watchlist_content_alert_rules(user_id, watchlist_id, enabled);
+            CREATE INDEX IF NOT EXISTS idx_content_alert_rules_user_watchlist_kind
+                ON watchlist_content_alert_rules(user_id, watchlist_id, rule_kind);
+
+            CREATE TABLE IF NOT EXISTS watchlist_content_alerts (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                watchlist_id INTEGER NOT NULL,
+                rule_id INTEGER NOT NULL,
+                item_id INTEGER NOT NULL,
+                run_id INTEGER NOT NULL,
+                job_id INTEGER NOT NULL,
+                source_id INTEGER NOT NULL,
+                severity TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'unread',
+                title TEXT,
+                snippet TEXT,
+                matched_text TEXT,
+                evidence_json TEXT,
+                dedupe_key TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                read_at TEXT,
+                dismissed_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_content_alerts_user_watchlist_status_created
+                ON watchlist_content_alerts(user_id, watchlist_id, status, created_at);
+            CREATE INDEX IF NOT EXISTS idx_content_alerts_user_watchlist_rule
+                ON watchlist_content_alerts(user_id, watchlist_id, rule_id);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_content_alerts_dedupe_key
+                ON watchlist_content_alerts(dedupe_key);
+
+            CREATE TABLE IF NOT EXISTS watchlist_item_saved_views (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                watchlist_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                filters_json TEXT NOT NULL,
+                sort TEXT NOT NULL DEFAULT 'created_desc',
+                is_default INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_item_saved_views_user_watchlist
+                ON watchlist_item_saved_views(user_id, watchlist_id);
 
             CREATE TABLE IF NOT EXISTS watchlist_clusters (
                 job_id INTEGER NOT NULL,
@@ -843,6 +1149,15 @@ class WatchlistsDatabase:
         if not _col_exists("scrape_jobs", "job_filters_json"):
             with contextlib.suppress(_WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS):
                 self.backend.execute("ALTER TABLE scrape_jobs ADD COLUMN job_filters_json TEXT", ())
+        if not _col_exists("scrape_jobs", "watchlist_id"):
+            watchlist_id_type = "BIGINT" if self.backend.backend_type == BackendType.POSTGRESQL else "INTEGER"
+            with contextlib.suppress(_WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS):
+                self.backend.execute(f"ALTER TABLE scrape_jobs ADD COLUMN watchlist_id {watchlist_id_type}", ())  # nosec B608
+        with contextlib.suppress(_WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS):
+            self.backend.execute(
+                "CREATE INDEX IF NOT EXISTS idx_jobs_user_watchlist ON scrape_jobs(user_id, watchlist_id)",
+                (),
+            )
         if not _col_exists("sources", "defer_until"):
             with contextlib.suppress(_WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS):
                 self.backend.execute("ALTER TABLE sources ADD COLUMN defer_until TEXT", ())
@@ -910,6 +1225,374 @@ class WatchlistsDatabase:
                 "DELETE FROM deleted_jobs WHERE user_id = ? AND expires_at <= ?",
                 (self.user_id, now),
             )
+
+    # ------------------------
+    # Watchlist containers
+    # ------------------------
+    def _validate_watchlist_domain(self, domain: str | None) -> str:
+        value = (domain or "general").strip().lower()
+        if value not in _VALID_WATCHLIST_DOMAINS:
+            raise ValueError("invalid_watchlist_domain")
+        return value
+
+    def _validate_watchlist_status(self, status: str | None) -> str:
+        value = (status or "active").strip().lower()
+        if value not in _VALID_WATCHLIST_STATUSES:
+            raise ValueError("invalid_watchlist_status")
+        return value
+
+    def _validate_watchlist_priority(self, priority: str | None) -> str:
+        value = (priority or "medium").strip().lower()
+        if value not in _VALID_WATCHLIST_PRIORITIES:
+            raise ValueError("invalid_watchlist_priority")
+        return value
+
+    def _normalize_watchlist_tags(self, tags: Iterable[str] | None) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        for raw in tags or []:
+            value = str(raw).strip()
+            if not value:
+                continue
+            if value in seen:
+                continue
+            seen.add(value)
+            out.append(value)
+        return out
+
+    def create_watchlist(
+        self,
+        *,
+        name: str,
+        description: str | None = None,
+        objective: str | None = None,
+        domain: str = "general",
+        status: str = "active",
+        priority: str = "medium",
+        tags: list[str] | None = None,
+    ) -> WatchlistRow:
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            raise ValueError("watchlist_name_required")
+        clean_domain = self._validate_watchlist_domain(domain)
+        clean_status = self._validate_watchlist_status(status)
+        clean_priority = self._validate_watchlist_priority(priority)
+        now = _utcnow_iso()
+        tags_json = json.dumps(self._normalize_watchlist_tags(tags), ensure_ascii=False)
+        archived_at = now if clean_status == "archived" else None
+        res = self._execute_insert(
+            """
+            INSERT INTO watchlists (
+                user_id, name, description, objective, domain, status, priority,
+                tags_json, archived_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                self.user_id,
+                clean_name,
+                description,
+                objective,
+                clean_domain,
+                clean_status,
+                clean_priority,
+                tags_json,
+                archived_at,
+                now,
+                now,
+            ),
+        )
+        new_id = self._extract_lastrowid(res)
+        if not new_id:
+            raise RuntimeError("failed_to_create_watchlist")
+        return self.get_watchlist(new_id)
+
+    def get_watchlist(self, watchlist_id: int, include_deleted: bool = False) -> WatchlistRow:
+        where = "id = ? AND user_id = ?"
+        params: list[Any] = [watchlist_id, self.user_id]
+        if not include_deleted:
+            where += " AND deleted_at IS NULL"
+        row = self.backend.execute(
+            f"""
+            SELECT id, user_id, name, description, objective, domain, status, priority,
+                   tags_json, archived_at, deleted_at, restore_expires_at, created_at, updated_at
+            FROM watchlists
+            WHERE {where}
+            """,  # nosec B608
+            tuple(params),
+        ).first
+        if not row:
+            raise KeyError("watchlist_not_found")
+        return WatchlistRow(**row)
+
+    def list_watchlists(
+        self,
+        *,
+        status: str | None = None,
+        include_deleted: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[WatchlistRow], int]:
+        where = ["user_id = ?"]
+        params: list[Any] = [self.user_id]
+        if not include_deleted:
+            where.append("deleted_at IS NULL")
+        if status:
+            where.append("status = ?")
+            params.append(self._validate_watchlist_status(status))
+        where_sql = " AND ".join(where)
+        total = int(self.backend.execute(f"SELECT COUNT(*) AS cnt FROM watchlists WHERE {where_sql}", tuple(params)).scalar or 0)  # nosec B608
+        rows = self.backend.execute(
+            f"""
+            SELECT id, user_id, name, description, objective, domain, status, priority,
+                   tags_json, archived_at, deleted_at, restore_expires_at, created_at, updated_at
+            FROM watchlists
+            WHERE {where_sql}
+            ORDER BY created_at DESC, id DESC
+            LIMIT ? OFFSET ?
+            """,  # nosec B608
+            tuple(params + [limit, offset]),
+        ).rows
+        return [WatchlistRow(**row) for row in rows], total
+
+    def update_watchlist(self, watchlist_id: int, fields: dict[str, Any]) -> WatchlistRow:
+        self.get_watchlist(watchlist_id)
+        if not fields:
+            return self.get_watchlist(watchlist_id)
+        sets: list[str] = []
+        params: list[Any] = []
+        for key in ("name", "description", "objective"):
+            if key in fields:
+                value = fields.get(key)
+                if key == "name":
+                    value = str(value or "").strip()
+                    if not value:
+                        raise ValueError("watchlist_name_required")
+                sets.append(f"{key} = ?")
+                params.append(value)
+        if "domain" in fields:
+            sets.append("domain = ?")
+            params.append(self._validate_watchlist_domain(fields.get("domain")))
+        if "priority" in fields:
+            sets.append("priority = ?")
+            params.append(self._validate_watchlist_priority(fields.get("priority")))
+        if "tags" in fields:
+            sets.append("tags_json = ?")
+            params.append(json.dumps(self._normalize_watchlist_tags(fields.get("tags")), ensure_ascii=False))
+        if "tags_json" in fields:
+            sets.append("tags_json = ?")
+            params.append(fields.get("tags_json"))
+        if "status" in fields:
+            status = self._validate_watchlist_status(fields.get("status"))
+            sets.append("status = ?")
+            params.append(status)
+            sets.append("archived_at = ?")
+            params.append(_utcnow_iso() if status == "archived" else None)
+        if sets:
+            sets.append("updated_at = ?")
+            params.append(_utcnow_iso())
+            params.extend([watchlist_id, self.user_id])
+            self.backend.execute(
+                f"UPDATE watchlists SET {', '.join(sets)} WHERE id = ? AND user_id = ? AND deleted_at IS NULL",  # nosec B608
+                tuple(params),
+            )
+        return self.get_watchlist(watchlist_id)
+
+    def delete_watchlist(
+        self,
+        watchlist_id: int,
+        *,
+        restore_window_seconds: int = 7 * 24 * 60 * 60,
+    ) -> tuple[bool, str | None]:
+        try:
+            self.get_watchlist(watchlist_id)
+        except KeyError:
+            return False, None
+        now = _utcnow_iso()
+        expires_at = self._restore_expires_at(restore_window_seconds)
+        result = self.backend.execute(
+            """
+            UPDATE watchlists
+            SET status = 'archived',
+                archived_at = COALESCE(archived_at, ?),
+                deleted_at = ?,
+                restore_expires_at = ?,
+                updated_at = ?
+            WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+            """,
+            (now, now, expires_at, now, watchlist_id, self.user_id),
+        )
+        return bool(result.rowcount > 0), expires_at
+
+    def restore_watchlist(self, watchlist_id: int) -> WatchlistRow:
+        row = self.get_watchlist(watchlist_id, include_deleted=True)
+        if self._is_restore_expired(row.restore_expires_at):
+            raise KeyError("watchlist_restore_expired")
+        now = _utcnow_iso()
+        self.backend.execute(
+            """
+            UPDATE watchlists
+            SET deleted_at = NULL,
+                restore_expires_at = NULL,
+                updated_at = ?
+            WHERE id = ? AND user_id = ?
+            """,
+            (now, watchlist_id, self.user_id),
+        )
+        return self.get_watchlist(watchlist_id)
+
+    def add_source_to_watchlist(self, watchlist_id: int, source_id: int) -> None:
+        self.get_watchlist(watchlist_id)
+        self.get_source(source_id)
+        now = _utcnow_iso()
+        try:
+            self.backend.execute(
+                """
+                INSERT INTO watchlist_sources (watchlist_id, source_id, created_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(watchlist_id, source_id) DO NOTHING
+                """,
+                (watchlist_id, source_id, now),
+            )
+        except _WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS:
+            self.backend.execute(
+                """
+                INSERT INTO watchlist_sources (watchlist_id, source_id, created_at)
+                SELECT ?, ?, ?
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM watchlist_sources WHERE watchlist_id = ? AND source_id = ?
+                )
+                """,
+                (watchlist_id, source_id, now, watchlist_id, source_id),
+            )
+
+    def list_watchlist_sources(
+        self,
+        watchlist_id: int,
+        *,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[SourceRow], int]:
+        self.get_watchlist(watchlist_id)
+        total = int(
+            self.backend.execute(
+                """
+                SELECT COUNT(*) AS cnt
+                FROM sources s
+                JOIN watchlist_sources ws ON ws.source_id = s.id
+                WHERE s.user_id = ? AND ws.watchlist_id = ?
+                """,
+                (self.user_id, watchlist_id),
+            ).scalar
+            or 0
+        )
+        rows = self.backend.execute(
+            """
+            SELECT s.id, s.user_id, s.name, s.url, s.source_type, s.active,
+                   s.settings_json, s.last_scraped_at, s.etag, s.last_modified,
+                   s.defer_until, s.status, s.consec_not_modified, s.consec_errors,
+                   s.created_at, s.updated_at
+            FROM sources s
+            JOIN watchlist_sources ws ON ws.source_id = s.id
+            WHERE s.user_id = ? AND ws.watchlist_id = ?
+            ORDER BY s.created_at DESC
+            LIMIT ? OFFSET ?
+            """,
+            (self.user_id, watchlist_id, limit, offset),
+        ).rows
+        out: list[SourceRow] = []
+        for row in rows:
+            sid = int(row.get("id"))
+            tag_rows = self.backend.execute(
+                "SELECT t.name FROM source_tags st JOIN tags t ON st.tag_id = t.id WHERE st.source_id = ?",
+                (sid,),
+            ).rows
+            tags = [tag.get("name") for tag in tag_rows if tag.get("name")]
+            out.append(SourceRow(tags=tags, **row))  # type: ignore[arg-type]
+        return out, total
+
+    def list_source_watchlist_ids(self, source_id: int, *, include_deleted: bool = False) -> list[int]:
+        self.get_source(source_id)
+        where = ["ws.source_id = ?", "w.user_id = ?"]
+        params: list[Any] = [source_id, self.user_id]
+        if not include_deleted:
+            where.append("w.deleted_at IS NULL")
+        rows = self.backend.execute(
+            f"""
+            SELECT ws.watchlist_id
+            FROM watchlist_sources ws
+            JOIN watchlists w ON w.id = ws.watchlist_id
+            WHERE {' AND '.join(where)}
+            ORDER BY ws.created_at ASC, ws.watchlist_id ASC
+            """,  # nosec B608
+            tuple(params),
+        ).rows
+        out: list[int] = []
+        for row in rows:
+            value = row.get("watchlist_id")
+            if value is not None:
+                out.append(int(value))
+        return out
+
+    def ensure_default_watchlist(self) -> WatchlistRow:
+        row = self.backend.execute(
+            """
+            SELECT id, user_id, name, description, objective, domain, status, priority,
+                   tags_json, archived_at, deleted_at, restore_expires_at, created_at, updated_at
+            FROM watchlists
+            WHERE user_id = ? AND name = ? AND deleted_at IS NULL
+            ORDER BY id ASC
+            LIMIT 1
+            """,
+            (self.user_id, _DEFAULT_WATCHLIST_NAME),
+        ).first
+        if row:
+            watchlist = WatchlistRow(**row)
+        else:
+            watchlist = self.create_watchlist(
+                name=_DEFAULT_WATCHLIST_NAME,
+                description="Migrated unscoped Watchlists content.",
+                objective="Hold sources and monitors created before first-class Watchlists.",
+                domain="general",
+                status="active",
+                priority="medium",
+                tags=[],
+            )
+            self.backfill_default_watchlist_scope(int(watchlist.id))
+        return watchlist
+
+    def backfill_default_watchlist_scope(self, watchlist_id: int | None = None) -> None:
+        target = int(watchlist_id or self.ensure_default_watchlist().id)
+        self.get_watchlist(target)
+        now = _utcnow_iso()
+        try:
+            self.backend.execute(
+                """
+                INSERT INTO watchlist_sources (watchlist_id, source_id, created_at)
+                SELECT ?, id, ?
+                FROM sources
+                WHERE user_id = ?
+                ON CONFLICT(watchlist_id, source_id) DO NOTHING
+                """,
+                (target, now, self.user_id),
+            )
+        except _WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS:
+            source_rows = self.backend.execute(
+                "SELECT id FROM sources WHERE user_id = ?",
+                (self.user_id,),
+            ).rows
+            for source_row in source_rows:
+                source_id = source_row.get("id")
+                if source_id is None:
+                    continue
+                self.add_source_to_watchlist(target, int(source_id))
+        self.backend.execute(
+            """
+            UPDATE scrape_jobs
+            SET watchlist_id = ?
+            WHERE user_id = ? AND watchlist_id IS NULL
+            """,
+            (target, self.user_id),
+        )
 
     def _ensure_tag_ids_with_connection(self, names: list[str], connection: Any) -> list[int]:
         normalized = self._normalize_tag_names(names)
@@ -1038,6 +1721,7 @@ class WatchlistsDatabase:
         settings_json: str | None = None,
         tags: list[str] | None = None,
         group_ids: list[int] | None = None,
+        watchlist_id: int | None = None,
     ) -> SourceRow:
         now = _utcnow_iso()
         # Try insert; if UNIQUE(user_id,url) violates, fetch existing id and proceed idempotently
@@ -1091,6 +1775,8 @@ class WatchlistsDatabase:
                         "INSERT INTO source_groups (source_id, group_id) SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM source_groups WHERE source_id = ? AND group_id = ?)",
                         (sid, gid, sid, gid),
                     )
+        target_watchlist_id = int(watchlist_id) if watchlist_id is not None else int(self.ensure_default_watchlist().id)
+        self.add_source_to_watchlist(target_watchlist_id, sid)
         row = self.get_source(sid)
         row.was_created = created_new
         return row
@@ -1130,7 +1816,15 @@ class WatchlistsDatabase:
         tags = [r.get("name") for r in tags_rows if r.get("name")]
         return SourceRow(tags=tags, **row)  # type: ignore[arg-type]
 
-    def list_sources(self, q: str | None, tag_names: list[str] | None, limit: int, offset: int, group_ids: list[int] | None = None) -> tuple[list[SourceRow], int]:
+    def list_sources(
+        self,
+        q: str | None,
+        tag_names: list[str] | None,
+        limit: int,
+        offset: int,
+        group_ids: list[int] | None = None,
+        watchlist_id: int | None = None,
+    ) -> tuple[list[SourceRow], int]:
         where = ["user_id = ?"]
         params: list[Any] = [self.user_id]
         if q:
@@ -1144,6 +1838,11 @@ class WatchlistsDatabase:
                 f"EXISTS (SELECT 1 FROM source_groups sg WHERE sg.source_id = sources.id AND sg.group_id IN ({placeholders}))"  # nosec B608
             )
             params.extend(group_ids)
+        if watchlist_id is not None:
+            where.append(
+                "EXISTS (SELECT 1 FROM watchlist_sources ws WHERE ws.source_id = sources.id AND ws.watchlist_id = ?)"
+            )
+            params.append(int(watchlist_id))
         # Tag filter: require all tags
         if tag_names:
             normalized_tags = []
@@ -1680,13 +2379,16 @@ class WatchlistsDatabase:
         retry_policy_json: str | None,
         output_prefs_json: str | None,
         job_filters_json: str | None = None,
+        watchlist_id: int | None = None,
     ) -> JobRow:
         now = _utcnow_iso()
+        target_watchlist_id = int(watchlist_id) if watchlist_id is not None else int(self.ensure_default_watchlist().id)
+        self.get_watchlist(target_watchlist_id)
         res = self._execute_insert(
             """
             INSERT INTO scrape_jobs (user_id, name, description, scope_json, schedule_expr, active, max_concurrency,
-            per_host_delay_ms, retry_policy_json, output_prefs_json, job_filters_json, schedule_timezone, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            per_host_delay_ms, retry_policy_json, output_prefs_json, job_filters_json, schedule_timezone, watchlist_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 self.user_id,
@@ -1701,6 +2403,7 @@ class WatchlistsDatabase:
                 output_prefs_json,
                 job_filters_json,
                 schedule_timezone,
+                target_watchlist_id,
                 now,
                 now,
             ),
@@ -1715,7 +2418,7 @@ class WatchlistsDatabase:
             """
             SELECT id, user_id, name, description, scope_json, schedule_expr, schedule_timezone, active,
                    max_concurrency, per_host_delay_ms, retry_policy_json, output_prefs_json, job_filters_json,
-                   created_at, updated_at, last_run_at, next_run_at, wf_schedule_id
+                   created_at, updated_at, last_run_at, next_run_at, wf_schedule_id, watchlist_id
             FROM scrape_jobs WHERE id = ? AND user_id = ?
             """,
             (job_id, self.user_id),
@@ -1724,16 +2427,25 @@ class WatchlistsDatabase:
             raise KeyError("job_not_found")
         return JobRow(**row)
 
-    def list_jobs(self, q: str | None, limit: int, offset: int) -> tuple[list[JobRow], int]:
+    def list_jobs(
+        self,
+        q: str | None,
+        limit: int,
+        offset: int,
+        watchlist_id: int | None = None,
+    ) -> tuple[list[JobRow], int]:
         where = ["user_id = ?"]
         params: list[Any] = [self.user_id]
         if q:
             where.append("(name LIKE ? OR description LIKE ?)")
             like = f"%{q}%"
             params.extend([like, like])
+        if watchlist_id is not None:
+            where.append("watchlist_id = ?")
+            params.append(int(watchlist_id))
         total = int(self.backend.execute(f"SELECT COUNT(*) AS cnt FROM scrape_jobs WHERE {' AND '.join(where)}", tuple(params)).scalar or 0)  # nosec B608
         rows = self.backend.execute(
-            f"SELECT id, user_id, name, description, scope_json, schedule_expr, schedule_timezone, active, max_concurrency, per_host_delay_ms, retry_policy_json, output_prefs_json, job_filters_json, created_at, updated_at, last_run_at, next_run_at, wf_schedule_id FROM scrape_jobs WHERE {' AND '.join(where)} ORDER BY created_at DESC LIMIT ? OFFSET ?",  # nosec B608
+            f"SELECT id, user_id, name, description, scope_json, schedule_expr, schedule_timezone, active, max_concurrency, per_host_delay_ms, retry_policy_json, output_prefs_json, job_filters_json, created_at, updated_at, last_run_at, next_run_at, wf_schedule_id, watchlist_id FROM scrape_jobs WHERE {' AND '.join(where)} ORDER BY created_at DESC LIMIT ? OFFSET ?",  # nosec B608
             tuple(params + [limit, offset]),
         ).rows
         return [JobRow(**r) for r in rows], total
@@ -1799,12 +2511,16 @@ class WatchlistsDatabase:
             "retry_policy_json",
             "output_prefs_json",
             "job_filters_json",
+            "watchlist_id",
         ):
             if key in patch and patch[key] is not None:
                 fields.append(f"{key} = ?")
                 val = patch[key]
                 if key == "active":
                     val = 1 if bool(val) else 0
+                if key == "watchlist_id":
+                    val = int(val)
+                    self.get_watchlist(val)
                 params.append(val)
         if fields:
             fields.append("updated_at = ?")
@@ -1853,6 +2569,7 @@ class WatchlistsDatabase:
             "last_run_at": job.last_run_at,
             "next_run_at": job.next_run_at,
             "wf_schedule_id": job.wf_schedule_id,
+            "watchlist_id": job.watchlist_id,
         }
         deleted_at = _utcnow_iso()
         expires_at = self._restore_expires_at(undo_window_seconds)
@@ -1947,6 +2664,7 @@ class WatchlistsDatabase:
                 payload.get("last_run_at"),
                 payload.get("next_run_at"),
                 payload.get("wf_schedule_id"),
+                payload.get("watchlist_id"),
             )
 
             if existing:
@@ -1956,7 +2674,7 @@ class WatchlistsDatabase:
                     SET name = ?, description = ?, scope_json = ?, schedule_expr = ?, schedule_timezone = ?,
                         active = ?, max_concurrency = ?, per_host_delay_ms = ?, retry_policy_json = ?,
                         output_prefs_json = ?, job_filters_json = ?, created_at = ?, updated_at = ?,
-                        last_run_at = ?, next_run_at = ?, wf_schedule_id = ?
+                        last_run_at = ?, next_run_at = ?, wf_schedule_id = ?, watchlist_id = ?
                     WHERE id = ? AND user_id = ?
                     """,
                     (*values, job_id, self.user_id),
@@ -1968,8 +2686,9 @@ class WatchlistsDatabase:
                     INSERT INTO scrape_jobs (
                         id, user_id, name, description, scope_json, schedule_expr, schedule_timezone,
                         active, max_concurrency, per_host_delay_ms, retry_policy_json, output_prefs_json,
-                        job_filters_json, created_at, updated_at, last_run_at, next_run_at, wf_schedule_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        job_filters_json, created_at, updated_at, last_run_at, next_run_at, wf_schedule_id,
+                        watchlist_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (job_id, self.user_id, *values),
                     connection=conn,
@@ -2059,7 +2778,13 @@ class WatchlistsDatabase:
         ).rows
         return [RunRow(**r) for r in rows], total
 
-    def list_runs(self, q: str | None, limit: int, offset: int) -> tuple[list[RunRow], int]:
+    def list_runs(
+        self,
+        q: str | None,
+        limit: int,
+        offset: int,
+        watchlist_id: int | None = None,
+    ) -> tuple[list[RunRow], int]:
         """List runs across all jobs for this user.
 
         Optional q filters by job name/description, run status, or run id (text match).
@@ -2071,6 +2796,9 @@ class WatchlistsDatabase:
             # Match job name/description or run status/id (text)
             where.append("(j.name LIKE ? OR j.description LIKE ? OR sr.status LIKE ? OR CAST(sr.id AS TEXT) LIKE ?)")
             params.extend([like, like, like, like])
+        if watchlist_id is not None:
+            where.append("j.watchlist_id = ?")
+            params.append(int(watchlist_id))
         where_sql = " AND ".join(where)
         total = int(
             self.backend.execute(
@@ -2186,6 +2914,348 @@ class WatchlistsDatabase:
             raise KeyError("item_not_found")
         return ScrapedItemRow(**row)
 
+    @staticmethod
+    def _validate_item_sort(sort: str | None) -> str:
+        value = str(sort or "created_desc").strip()
+        aliases = {
+            "newest": "created_desc",
+            "oldest": "created_asc",
+            "unreadFirst": "unread_first",
+            "unread_first": "unread_first",
+        }
+        normalized = aliases.get(value, value.lower())
+        if normalized not in {
+            "created_desc",
+            "created_asc",
+            "published_desc",
+            "published_asc",
+            "unread_first",
+            "source_asc",
+            "alert_severity_desc",
+        }:
+            raise ValueError("invalid_item_sort")
+        return normalized
+
+    @staticmethod
+    def _item_order_sql(sort: str) -> str:
+        if sort == "created_asc":
+            return "si.created_at ASC, si.id ASC"
+        if sort == "published_desc":
+            return "COALESCE(si.published_at, si.created_at) DESC, si.id DESC"
+        if sort == "published_asc":
+            return "COALESCE(si.published_at, si.created_at) ASC, si.id ASC"
+        if sort == "unread_first":
+            return "si.reviewed ASC, si.created_at DESC, si.id DESC"
+        if sort == "source_asc":
+            return "si.source_id ASC, si.created_at DESC, si.id DESC"
+        if sort == "alert_severity_desc":
+            return """
+                COALESCE((
+                    SELECT MAX(
+                        CASE wca.severity
+                            WHEN 'critical' THEN 5
+                            WHEN 'high' THEN 4
+                            WHEN 'medium' THEN 3
+                            WHEN 'low' THEN 2
+                            WHEN 'info' THEN 1
+                            ELSE 0
+                        END
+                    )
+                    FROM watchlist_content_alerts wca
+                    WHERE wca.user_id = sj.user_id
+                      AND wca.watchlist_id = sj.watchlist_id
+                      AND wca.item_id = si.id
+                ), 0) DESC,
+                si.created_at DESC,
+                si.id DESC
+            """
+        return "si.created_at DESC, si.id DESC"
+
+    def _build_item_alert_exists_clause(
+        self,
+        *,
+        alert_status: str | None = None,
+        alert_severity: str | None = None,
+        alert_rule_id: int | None = None,
+    ) -> tuple[str, list[Any]]:
+        where = [
+            "wca.user_id = sj.user_id",
+            "wca.watchlist_id = sj.watchlist_id",
+            "wca.item_id = si.id",
+        ]
+        params: list[Any] = []
+        if alert_status is not None:
+            where.append("wca.status = ?")
+            params.append(self._validate_content_alert_status(alert_status))
+        if alert_severity is not None:
+            where.append("wca.severity = ?")
+            params.append(self._validate_content_alert_severity(alert_severity))
+        if alert_rule_id is not None:
+            where.append("wca.rule_id = ?")
+            params.append(int(alert_rule_id))
+        clause = f"EXISTS (SELECT 1 FROM watchlist_content_alerts wca WHERE {' AND '.join(where)})"  # nosec B608
+        return clause, params
+
+    def get_item_alert_summaries(
+        self,
+        item_ids: list[int],
+        *,
+        watchlist_id: int | None = None,
+    ) -> dict[int, dict[str, Any]]:
+        if not item_ids:
+            return {}
+        placeholders = ",".join("?" for _ in item_ids)
+        where = ["user_id = ?", f"item_id IN ({placeholders})"]
+        params: list[Any] = [self.user_id, *[int(item_id) for item_id in item_ids]]
+        if watchlist_id is not None:
+            where.append("watchlist_id = ?")
+            params.append(int(watchlist_id))
+        rows = self.backend.execute(
+            f"""
+            SELECT id, item_id, rule_id, severity, status, created_at, matched_text
+            FROM watchlist_content_alerts
+            WHERE {' AND '.join(where)}
+            ORDER BY item_id ASC, created_at ASC, id ASC
+            """,  # nosec B608
+            tuple(params),
+        ).rows
+        summaries: dict[int, dict[str, Any]] = {}
+        severity_rank = {"info": 1, "low": 2, "medium": 3, "high": 4, "critical": 5}
+        for row in rows:
+            item_id = int(row["item_id"])
+            summary = summaries.setdefault(
+                item_id,
+                {
+                    "total": 0,
+                    "unread": 0,
+                    "read": 0,
+                    "dismissed": 0,
+                    "highest_severity": None,
+                    "latest_alert_id": None,
+                    "latest_alert_status": None,
+                    "latest_alert_created_at": None,
+                    "latest_matched_text": None,
+                    "rule_ids": [],
+                    "severities": [],
+                },
+            )
+            status = str(row.get("status") or "")
+            severity = str(row.get("severity") or "")
+            summary["total"] += 1
+            if status in {"unread", "read", "dismissed"}:
+                summary[status] += 1
+            rule_id = int(row["rule_id"])
+            if rule_id not in summary["rule_ids"]:
+                summary["rule_ids"].append(rule_id)
+            if severity and severity not in summary["severities"]:
+                summary["severities"].append(severity)
+            highest = summary["highest_severity"]
+            if highest is None or severity_rank.get(severity, 0) > severity_rank.get(str(highest), 0):
+                summary["highest_severity"] = severity
+
+            created_at = str(row.get("created_at") or "")
+            latest_created_at = str(summary["latest_alert_created_at"] or "")
+            latest_id = int(summary["latest_alert_id"] or 0)
+            row_id = int(row["id"])
+            if (created_at, row_id) >= (latest_created_at, latest_id):
+                summary["latest_alert_id"] = row_id
+                summary["latest_alert_status"] = status
+                summary["latest_alert_created_at"] = created_at
+                summary["latest_matched_text"] = row.get("matched_text")
+        return summaries
+
+    def _source_belongs_to_watchlist(self, *, watchlist_id: int, source_id: int) -> bool:
+        row = self.backend.execute(
+            """
+            SELECT 1
+            FROM watchlist_sources ws
+            JOIN sources s ON s.id = ws.source_id
+            WHERE ws.watchlist_id = ? AND ws.source_id = ? AND s.user_id = ?
+            """,
+            (int(watchlist_id), int(source_id), self.user_id),
+        ).first
+        return bool(row)
+
+    @staticmethod
+    def _normalize_item_saved_view_name(name: str) -> str:
+        value = str(name or "").strip()
+        if not value:
+            raise ValueError("saved_view_name_required")
+        if len(value) > 120:
+            raise ValueError("saved_view_name_too_long")
+        return value
+
+    def _normalize_item_filter_payload(
+        self,
+        filters: dict[str, Any] | None,
+        *,
+        watchlist_id: int,
+        allow_smart_filter: bool = False,
+    ) -> dict[str, Any]:
+        payload = dict(filters or {})
+        normalized: dict[str, Any] = {}
+        for key, value in payload.items():
+            if key not in _VALID_ITEM_SAVED_VIEW_FILTER_KEYS:
+                raise ValueError("invalid_saved_view_filter")
+            if value is None or value == "":
+                continue
+            if key == "source_id":
+                source_id = int(value)
+                if not self._source_belongs_to_watchlist(watchlist_id=watchlist_id, source_id=source_id):
+                    raise ValueError("source_not_in_watchlist")
+                normalized[key] = source_id
+            elif key in {"run_id", "job_id", "alert_rule_id"}:
+                normalized[key] = int(value)
+            elif key in {"reviewed", "queued_for_briefing", "has_alert"}:
+                normalized[key] = bool(value)
+            elif key == "alert_status":
+                normalized[key] = self._validate_content_alert_status(str(value))
+            elif key == "alert_severity":
+                normalized[key] = self._validate_content_alert_severity(str(value))
+            elif key == "smart_filter":
+                if not allow_smart_filter:
+                    raise ValueError("invalid_saved_view_filter")
+                smart_filter = str(value).strip()
+                if smart_filter not in _VALID_ITEM_SAVED_VIEW_SMART_FILTERS:
+                    raise ValueError("invalid_saved_view_filter")
+                normalized[key] = smart_filter
+            else:
+                normalized[key] = str(value)
+        return normalized
+
+    def create_item_saved_view(
+        self,
+        *,
+        watchlist_id: int,
+        name: str,
+        filters: dict[str, Any] | None,
+        sort: str | None = None,
+        is_default: bool = False,
+    ) -> WatchlistItemSavedViewRow:
+        self.get_watchlist(int(watchlist_id))
+        clean_name = self._normalize_item_saved_view_name(name)
+        clean_sort = self._validate_item_sort(sort)
+        clean_filters = self._normalize_item_filter_payload(
+            filters,
+            watchlist_id=int(watchlist_id),
+            allow_smart_filter=True,
+        )
+        now = _utcnow_iso()
+        if is_default:
+            self.backend.execute(
+                "UPDATE watchlist_item_saved_views SET is_default = 0, updated_at = ? WHERE user_id = ? AND watchlist_id = ?",
+                (now, self.user_id, int(watchlist_id)),
+            )
+        res = self._execute_insert(
+            """
+            INSERT INTO watchlist_item_saved_views
+                (user_id, watchlist_id, name, filters_json, sort, is_default, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                self.user_id,
+                int(watchlist_id),
+                clean_name,
+                json.dumps(clean_filters, sort_keys=True),
+                clean_sort,
+                1 if is_default else 0,
+                now,
+                now,
+            ),
+        )
+        view_id = self._extract_lastrowid(res)
+        if not view_id:
+            raise RuntimeError("failed_to_create_item_saved_view")
+        return self.get_item_saved_view(view_id=int(view_id), watchlist_id=int(watchlist_id))
+
+    def get_item_saved_view(self, *, view_id: int, watchlist_id: int) -> WatchlistItemSavedViewRow:
+        row = self.backend.execute(
+            """
+            SELECT id, user_id, watchlist_id, name, filters_json, sort, is_default, created_at, updated_at
+            FROM watchlist_item_saved_views
+            WHERE id = ? AND user_id = ? AND watchlist_id = ?
+            """,
+            (int(view_id), self.user_id, int(watchlist_id)),
+        ).first
+        if not row:
+            raise KeyError("item_saved_view_not_found")
+        return WatchlistItemSavedViewRow(**row)
+
+    def list_item_saved_views(self, *, watchlist_id: int) -> list[WatchlistItemSavedViewRow]:
+        self.get_watchlist(int(watchlist_id))
+        rows = self.backend.execute(
+            """
+            SELECT id, user_id, watchlist_id, name, filters_json, sort, is_default, created_at, updated_at
+            FROM watchlist_item_saved_views
+            WHERE user_id = ? AND watchlist_id = ?
+            ORDER BY is_default DESC, updated_at DESC, id DESC
+            """,
+            (self.user_id, int(watchlist_id)),
+        ).rows
+        return [WatchlistItemSavedViewRow(**row) for row in rows]
+
+    def update_item_saved_view(
+        self,
+        *,
+        view_id: int,
+        watchlist_id: int,
+        fields: dict[str, Any],
+    ) -> WatchlistItemSavedViewRow:
+        current = self.get_item_saved_view(view_id=int(view_id), watchlist_id=int(watchlist_id))
+        if not fields:
+            return current
+        sets: list[str] = []
+        params: list[Any] = []
+        if "name" in fields and fields["name"] is not None:
+            sets.append("name = ?")
+            params.append(self._normalize_item_saved_view_name(str(fields["name"])))
+        if "filters" in fields and fields["filters"] is not None:
+            clean_filters = self._normalize_item_filter_payload(
+                dict(fields["filters"] or {}),
+                watchlist_id=int(watchlist_id),
+                allow_smart_filter=True,
+            )
+            sets.append("filters_json = ?")
+            params.append(json.dumps(clean_filters, sort_keys=True))
+        if "sort" in fields and fields["sort"] is not None:
+            sets.append("sort = ?")
+            params.append(self._validate_item_sort(str(fields["sort"])))
+        if "is_default" in fields and fields["is_default"] is not None:
+            is_default = bool(fields["is_default"])
+            if is_default:
+                now = _utcnow_iso()
+                self.backend.execute(
+                    """
+                    UPDATE watchlist_item_saved_views
+                    SET is_default = 0, updated_at = ?
+                    WHERE user_id = ? AND watchlist_id = ? AND id != ?
+                    """,
+                    (now, self.user_id, int(watchlist_id), int(view_id)),
+                )
+            sets.append("is_default = ?")
+            params.append(1 if is_default else 0)
+        if not sets:
+            return current
+        sets.append("updated_at = ?")
+        params.append(_utcnow_iso())
+        params.extend([int(view_id), self.user_id, int(watchlist_id)])
+        self.backend.execute(
+            f"""
+            UPDATE watchlist_item_saved_views
+            SET {', '.join(sets)}
+            WHERE id = ? AND user_id = ? AND watchlist_id = ?
+            """,  # nosec B608
+            tuple(params),
+        )
+        return self.get_item_saved_view(view_id=int(view_id), watchlist_id=int(watchlist_id))
+
+    def delete_item_saved_view(self, *, view_id: int, watchlist_id: int) -> bool:
+        result = self.backend.execute(
+            "DELETE FROM watchlist_item_saved_views WHERE id = ? AND user_id = ? AND watchlist_id = ?",
+            (int(view_id), self.user_id, int(watchlist_id)),
+        )
+        return int(getattr(result, "rowcount", 0) or 0) > 0
+
     def list_items(
         self,
         *,
@@ -2198,9 +3268,17 @@ class WatchlistsDatabase:
         search: str | None = None,
         since: str | None = None,
         until: str | None = None,
+        watchlist_id: int | None = None,
+        sort: str | None = None,
+        has_alert: bool | None = None,
+        alert_status: str | None = None,
+        alert_severity: str | None = None,
+        alert_rule_id: int | None = None,
+        include_alert_summary: bool = False,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[ScrapedItemRow], int]:
+        sort_mode = self._validate_item_sort(sort)
         where = ["sj.user_id = ?"]
         params: list[Any] = [self.user_id]
         if run_id is not None:
@@ -2212,6 +3290,9 @@ class WatchlistsDatabase:
         if source_id is not None:
             where.append("si.source_id = ?")
             params.append(source_id)
+        if watchlist_id is not None:
+            where.append("sj.watchlist_id = ?")
+            params.append(int(watchlist_id))
         if status:
             where.append("si.status = ?")
             params.append(status)
@@ -2228,10 +3309,28 @@ class WatchlistsDatabase:
             where.append("si.created_at <= ?")
             params.append(until)
         if search:
-            like = f"%{search}%"
-            where.append("(si.title LIKE ? OR si.summary LIKE ? OR si.content LIKE ?)")
+            like = f"%{_escape_like_literal(str(search))}%"
+            where.append(
+                "("
+                "si.title LIKE ? ESCAPE '\\' OR "
+                "si.summary LIKE ? ESCAPE '\\' OR "
+                "si.content LIKE ? ESCAPE '\\'"
+                ")"
+            )
             params.extend([like, like, like])
+        alert_filters_requested = alert_status is not None or alert_severity is not None or alert_rule_id is not None
+        if has_alert is False and alert_filters_requested:
+            raise ValueError("alert_filters_conflict_with_has_alert_false")
+        if has_alert is not None or alert_filters_requested:
+            alert_clause, alert_params = self._build_item_alert_exists_clause(
+                alert_status=alert_status,
+                alert_severity=alert_severity,
+                alert_rule_id=alert_rule_id,
+            )
+            where.append(alert_clause if has_alert is not False else f"NOT {alert_clause}")
+            params.extend(alert_params)
         where_sql = " AND ".join(where)
+        order_sql = self._item_order_sql(sort_mode)
         total = int(
             self.backend.execute(
                 f"SELECT COUNT(*) AS cnt FROM scraped_items si JOIN scrape_jobs sj ON sj.id = si.job_id WHERE {where_sql}",  # nosec B608
@@ -2246,12 +3345,524 @@ class WatchlistsDatabase:
             FROM scraped_items si
             JOIN scrape_jobs sj ON sj.id = si.job_id
             WHERE {where_sql}
-            ORDER BY si.created_at DESC
+            ORDER BY {order_sql}
             LIMIT ? OFFSET ?
             """.format_map(locals()),  # nosec B608
             tuple(params + [limit, offset]),
         ).rows
-        return [ScrapedItemRow(**r) for r in rows], total
+        items = [ScrapedItemRow(**r) for r in rows]
+        if include_alert_summary and items:
+            summaries = self.get_item_alert_summaries(
+                [int(item.id) for item in items],
+                watchlist_id=watchlist_id,
+            )
+            for item in items:
+                item.alert_summary = summaries.get(int(item.id))
+        return items, total
+
+    # ------------------------
+    # Content alert rules and alerts
+    # ------------------------
+    @staticmethod
+    def _validate_content_alert_rule_kind(rule_kind: str) -> str:
+        value = str(rule_kind or "").strip().lower()
+        if value not in _VALID_CONTENT_ALERT_RULE_KINDS:
+            raise ValueError("invalid_content_alert_rule_kind")
+        return value
+
+    @staticmethod
+    def _validate_content_alert_match_mode(match_mode: str | None) -> str:
+        value = str(match_mode or "contains").strip().lower()
+        if value not in _VALID_CONTENT_ALERT_MATCH_MODES:
+            raise ValueError("invalid_content_alert_match_mode")
+        return value
+
+    @staticmethod
+    def _validate_content_alert_severity(severity: str | None) -> str:
+        value = str(severity or "medium").strip().lower()
+        if value not in _VALID_CONTENT_ALERT_SEVERITIES:
+            raise ValueError("invalid_content_alert_severity")
+        return value
+
+    @staticmethod
+    def _validate_content_alert_status(status: str | None) -> str:
+        value = str(status or "unread").strip().lower()
+        if value not in _VALID_CONTENT_ALERT_STATUSES:
+            raise ValueError("invalid_content_alert_status")
+        return value
+
+    @staticmethod
+    def _json_dict_or_none(value: dict[str, Any] | None, *, field_name: str) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise ValueError(f"{field_name}_must_be_object")
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+    @classmethod
+    def _validate_content_alert_pattern(cls, rule_kind: str, match_mode: str, pattern: str) -> str:
+        clean_pattern = str(pattern or "").strip()
+        if not clean_pattern:
+            raise ValueError("content_alert_pattern_required")
+        if rule_kind == "regex" or match_mode == "regex":
+            if _looks_like_nested_quantifier(clean_pattern):
+                raise ValueError("unsafe_content_alert_regex")
+            try:
+                re.compile(clean_pattern)
+            except re.error as exc:
+                raise ValueError("invalid_content_alert_regex") from exc
+        return clean_pattern
+
+    def create_content_alert_rule(
+        self,
+        *,
+        watchlist_id: int,
+        name: str,
+        rule_kind: str,
+        pattern: str,
+        match_mode: str | None = "contains",
+        severity: str | None = "medium",
+        enabled: bool = True,
+        classification: str | None = None,
+        descriptor: str | None = None,
+        entity_type: str | None = None,
+        source_constraints: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> WatchlistContentAlertRuleRow:
+        self.get_watchlist(int(watchlist_id))
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            raise ValueError("content_alert_rule_name_required")
+        clean_kind = self._validate_content_alert_rule_kind(rule_kind)
+        clean_match_mode = self._validate_content_alert_match_mode(
+            "regex" if clean_kind == "regex" and match_mode in (None, "contains") else match_mode
+        )
+        clean_pattern = self._validate_content_alert_pattern(clean_kind, clean_match_mode, pattern)
+        clean_severity = self._validate_content_alert_severity(severity)
+        source_constraints_json = self._json_dict_or_none(
+            source_constraints,
+            field_name="source_constraints",
+        )
+        metadata_json = self._json_dict_or_none(metadata, field_name="metadata")
+        now = _utcnow_iso()
+        res = self._execute_insert(
+            """
+            INSERT INTO watchlist_content_alert_rules (
+                user_id, watchlist_id, name, enabled, rule_kind, match_mode,
+                pattern, classification, descriptor, entity_type,
+                source_constraints_json, severity, metadata_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                self.user_id,
+                int(watchlist_id),
+                clean_name,
+                1 if enabled else 0,
+                clean_kind,
+                clean_match_mode,
+                clean_pattern,
+                classification,
+                descriptor,
+                entity_type,
+                source_constraints_json,
+                clean_severity,
+                metadata_json,
+                now,
+                now,
+            ),
+        )
+        new_id = self._extract_lastrowid(res)
+        if not new_id:
+            raise RuntimeError("failed_to_create_content_alert_rule")
+        return self.get_content_alert_rule(new_id, watchlist_id=int(watchlist_id))
+
+    def get_content_alert_rule(
+        self,
+        rule_id: int,
+        *,
+        watchlist_id: int | None = None,
+    ) -> WatchlistContentAlertRuleRow:
+        where = ["id = ?", "user_id = ?"]
+        params: list[Any] = [int(rule_id), self.user_id]
+        if watchlist_id is not None:
+            where.append("watchlist_id = ?")
+            params.append(int(watchlist_id))
+        row = self.backend.execute(
+            f"""
+            SELECT id, user_id, watchlist_id, name, enabled, rule_kind, match_mode,
+                   pattern, classification, descriptor, entity_type,
+                   source_constraints_json, severity, metadata_json, created_at, updated_at
+            FROM watchlist_content_alert_rules
+            WHERE {' AND '.join(where)}
+            """,  # nosec B608
+            tuple(params),
+        ).first
+        if not row:
+            raise KeyError("content_alert_rule_not_found")
+        return WatchlistContentAlertRuleRow(**row)
+
+    def list_content_alert_rules(
+        self,
+        watchlist_id: int,
+        *,
+        enabled: bool | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[WatchlistContentAlertRuleRow], int]:
+        self.get_watchlist(int(watchlist_id))
+        where = ["user_id = ?", "watchlist_id = ?"]
+        params: list[Any] = [self.user_id, int(watchlist_id)]
+        if enabled is not None:
+            where.append("enabled = ?")
+            params.append(1 if enabled else 0)
+        where_sql = " AND ".join(where)
+        total = int(
+            self.backend.execute(
+                f"SELECT COUNT(*) AS cnt FROM watchlist_content_alert_rules WHERE {where_sql}",  # nosec B608
+                tuple(params),
+            ).scalar
+            or 0
+        )
+        rows = self.backend.execute(
+            f"""
+            SELECT id, user_id, watchlist_id, name, enabled, rule_kind, match_mode,
+                   pattern, classification, descriptor, entity_type,
+                   source_constraints_json, severity, metadata_json, created_at, updated_at
+            FROM watchlist_content_alert_rules
+            WHERE {where_sql}
+            ORDER BY created_at DESC, id DESC
+            LIMIT ? OFFSET ?
+            """,  # nosec B608
+            tuple(params + [limit, offset]),
+        ).rows
+        return [WatchlistContentAlertRuleRow(**row) for row in rows], total
+
+    def update_content_alert_rule(
+        self,
+        rule_id: int,
+        *,
+        watchlist_id: int,
+        fields: dict[str, Any],
+    ) -> WatchlistContentAlertRuleRow:
+        current = self.get_content_alert_rule(int(rule_id), watchlist_id=int(watchlist_id))
+        if not fields:
+            return current
+        candidate_kind = current.rule_kind
+        candidate_match_mode = current.match_mode
+        candidate_pattern = current.pattern
+        sets: list[str] = []
+        params: list[Any] = []
+        for key in ("name", "classification", "descriptor", "entity_type"):
+            if key in fields:
+                value = fields.get(key)
+                if key == "name":
+                    value = str(value or "").strip()
+                    if not value:
+                        raise ValueError("content_alert_rule_name_required")
+                sets.append(f"{key} = ?")
+                params.append(value)
+        if "enabled" in fields:
+            sets.append("enabled = ?")
+            params.append(1 if bool(fields.get("enabled")) else 0)
+        if "rule_kind" in fields:
+            candidate_kind = self._validate_content_alert_rule_kind(fields.get("rule_kind"))
+            sets.append("rule_kind = ?")
+            params.append(candidate_kind)
+        if "match_mode" in fields:
+            candidate_match_mode = self._validate_content_alert_match_mode(fields.get("match_mode"))
+            sets.append("match_mode = ?")
+            params.append(candidate_match_mode)
+        if "pattern" in fields:
+            candidate_pattern = str(fields.get("pattern") or "")
+        if "rule_kind" in fields or "match_mode" in fields or "pattern" in fields:
+            clean_pattern = self._validate_content_alert_pattern(
+                candidate_kind,
+                candidate_match_mode,
+                candidate_pattern,
+            )
+            if "pattern" in fields:
+                sets.append("pattern = ?")
+                params.append(clean_pattern)
+        if "severity" in fields:
+            sets.append("severity = ?")
+            params.append(self._validate_content_alert_severity(fields.get("severity")))
+        if "source_constraints" in fields:
+            sets.append("source_constraints_json = ?")
+            params.append(
+                self._json_dict_or_none(
+                    fields.get("source_constraints"),
+                    field_name="source_constraints",
+                )
+            )
+        if "metadata" in fields:
+            sets.append("metadata_json = ?")
+            params.append(self._json_dict_or_none(fields.get("metadata"), field_name="metadata"))
+        if sets:
+            sets.append("updated_at = ?")
+            params.append(_utcnow_iso())
+            params.extend([int(rule_id), self.user_id, int(watchlist_id)])
+            self.backend.execute(
+                f"""
+                UPDATE watchlist_content_alert_rules
+                SET {', '.join(sets)}
+                WHERE id = ? AND user_id = ? AND watchlist_id = ?
+                """,  # nosec B608
+                tuple(params),
+            )
+        return self.get_content_alert_rule(int(rule_id), watchlist_id=int(watchlist_id))
+
+    def delete_content_alert_rule(self, rule_id: int, *, watchlist_id: int) -> bool:
+        result = self.backend.execute(
+            """
+            DELETE FROM watchlist_content_alert_rules
+            WHERE id = ? AND user_id = ? AND watchlist_id = ?
+            """,
+            (int(rule_id), self.user_id, int(watchlist_id)),
+        )
+        return bool(result.rowcount > 0)
+
+    def get_content_alert_by_dedupe_key(self, dedupe_key: str) -> WatchlistContentAlertRow | None:
+        row = self.backend.execute(
+            """
+            SELECT id, user_id, watchlist_id, rule_id, item_id, run_id, job_id, source_id,
+                   severity, status, title, snippet, matched_text, evidence_json,
+                   dedupe_key, created_at, read_at, dismissed_at
+            FROM watchlist_content_alerts
+            WHERE user_id = ? AND dedupe_key = ?
+            """,
+            (self.user_id, str(dedupe_key)),
+        ).first
+        return WatchlistContentAlertRow(**row) if row else None
+
+    def content_alert_duplicate_exists(self, dedupe_key: str) -> bool:
+        return self.get_content_alert_by_dedupe_key(dedupe_key) is not None
+
+    def create_content_alert(
+        self,
+        *,
+        watchlist_id: int,
+        rule_id: int,
+        item_id: int,
+        run_id: int,
+        job_id: int,
+        source_id: int,
+        severity: str,
+        title: str | None,
+        snippet: str | None,
+        matched_text: str | None,
+        evidence: dict[str, Any] | None,
+        dedupe_key: str,
+        status: str = "unread",
+    ) -> WatchlistContentAlertRow:
+        clean_dedupe_key = str(dedupe_key or "").strip()
+        if not clean_dedupe_key:
+            raise ValueError("content_alert_dedupe_key_required")
+        existing = self.get_content_alert_by_dedupe_key(clean_dedupe_key)
+        if existing is not None:
+            return existing
+        self.get_watchlist(int(watchlist_id))
+        self.get_content_alert_rule(int(rule_id), watchlist_id=int(watchlist_id))
+        self.get_item(int(item_id))
+        clean_severity = self._validate_content_alert_severity(severity)
+        clean_status = self._validate_content_alert_status(status)
+        evidence_json = self._json_dict_or_none(evidence or {}, field_name="evidence")
+        now = _utcnow_iso()
+        read_at = now if clean_status == "read" else None
+        dismissed_at = now if clean_status == "dismissed" else None
+        res = self._execute_insert(
+            """
+            INSERT INTO watchlist_content_alerts (
+                user_id, watchlist_id, rule_id, item_id, run_id, job_id, source_id,
+                severity, status, title, snippet, matched_text, evidence_json,
+                dedupe_key, created_at, read_at, dismissed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                self.user_id,
+                int(watchlist_id),
+                int(rule_id),
+                int(item_id),
+                int(run_id),
+                int(job_id),
+                int(source_id),
+                clean_severity,
+                clean_status,
+                title,
+                snippet,
+                matched_text,
+                evidence_json,
+                clean_dedupe_key,
+                now,
+                read_at,
+                dismissed_at,
+            ),
+        )
+        new_id = self._extract_lastrowid(res)
+        if not new_id:
+            existing_after_conflict = self.get_content_alert_by_dedupe_key(clean_dedupe_key)
+            if existing_after_conflict is not None:
+                return existing_after_conflict
+            raise RuntimeError("failed_to_create_content_alert")
+        return self.get_content_alert(new_id, watchlist_id=int(watchlist_id))
+
+    def get_content_alert(
+        self,
+        alert_id: int,
+        *,
+        watchlist_id: int | None = None,
+    ) -> WatchlistContentAlertRow:
+        where = ["id = ?", "user_id = ?"]
+        params: list[Any] = [int(alert_id), self.user_id]
+        if watchlist_id is not None:
+            where.append("watchlist_id = ?")
+            params.append(int(watchlist_id))
+        row = self.backend.execute(
+            f"""
+            SELECT id, user_id, watchlist_id, rule_id, item_id, run_id, job_id, source_id,
+                   severity, status, title, snippet, matched_text, evidence_json,
+                   dedupe_key, created_at, read_at, dismissed_at
+            FROM watchlist_content_alerts
+            WHERE {' AND '.join(where)}
+            """,  # nosec B608
+            tuple(params),
+        ).first
+        if not row:
+            raise KeyError("content_alert_not_found")
+        return WatchlistContentAlertRow(**row)
+
+    def list_content_alerts(
+        self,
+        watchlist_id: int,
+        *,
+        status: str | None = None,
+        severity: str | None = None,
+        rule_id: int | None = None,
+        source_id: int | None = None,
+        q: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[WatchlistContentAlertRow], int]:
+        self.get_watchlist(int(watchlist_id))
+        where = ["user_id = ?", "watchlist_id = ?"]
+        params: list[Any] = [self.user_id, int(watchlist_id)]
+        if status is not None:
+            where.append("status = ?")
+            params.append(self._validate_content_alert_status(status))
+        if severity is not None:
+            where.append("severity = ?")
+            params.append(self._validate_content_alert_severity(severity))
+        if rule_id is not None:
+            where.append("rule_id = ?")
+            params.append(int(rule_id))
+        if source_id is not None:
+            where.append("source_id = ?")
+            params.append(int(source_id))
+        if q is not None and q.strip():
+            escaped_query = _escape_like_literal(q.strip().lower())
+            like_pattern = f"%{escaped_query}%"
+            where.append(
+                "("
+                "LOWER(COALESCE(title, '')) LIKE ? ESCAPE '\\' OR "
+                "LOWER(COALESCE(snippet, '')) LIKE ? ESCAPE '\\' OR "
+                "LOWER(COALESCE(matched_text, '')) LIKE ? ESCAPE '\\' OR "
+                "LOWER(COALESCE(evidence_json, '')) LIKE ? ESCAPE '\\'"
+                ")"
+            )
+            params.extend([like_pattern, like_pattern, like_pattern, like_pattern])
+        where_sql = " AND ".join(where)
+        total = int(
+            self.backend.execute(
+                f"SELECT COUNT(*) AS cnt FROM watchlist_content_alerts WHERE {where_sql}",  # nosec B608
+                tuple(params),
+            ).scalar
+            or 0
+        )
+        rows = self.backend.execute(
+            f"""
+            SELECT id, user_id, watchlist_id, rule_id, item_id, run_id, job_id, source_id,
+                   severity, status, title, snippet, matched_text, evidence_json,
+                   dedupe_key, created_at, read_at, dismissed_at
+            FROM watchlist_content_alerts
+            WHERE {where_sql}
+            ORDER BY created_at DESC, id DESC
+            LIMIT ? OFFSET ?
+            """,  # nosec B608
+            tuple(params + [limit, offset]),
+        ).rows
+        return [WatchlistContentAlertRow(**row) for row in rows], total
+
+    def list_content_alerts_for_items(
+        self,
+        watchlist_id: int,
+        item_ids: list[int],
+        *,
+        limit: int = 1000,
+    ) -> dict[int, list[WatchlistContentAlertRow]]:
+        self.get_watchlist(int(watchlist_id))
+        unique_ids = list(dict.fromkeys(int(item_id) for item_id in item_ids))
+        if not unique_ids:
+            return {}
+        placeholders = ",".join("?" for _ in unique_ids)
+        rows = self.backend.execute(
+            f"""
+            SELECT id, user_id, watchlist_id, rule_id, item_id, run_id, job_id, source_id,
+                   severity, status, title, snippet, matched_text, evidence_json,
+                   dedupe_key, created_at, read_at, dismissed_at
+            FROM watchlist_content_alerts
+            WHERE user_id = ?
+              AND watchlist_id = ?
+              AND item_id IN ({placeholders})
+            ORDER BY item_id ASC, created_at ASC, id ASC
+            LIMIT ?
+            """,  # nosec B608
+            tuple([self.user_id, int(watchlist_id), *unique_ids, max(1, int(limit))]),
+        ).rows
+        grouped: dict[int, list[WatchlistContentAlertRow]] = {}
+        for row in rows:
+            alert = WatchlistContentAlertRow(**row)
+            grouped.setdefault(int(alert.item_id), []).append(alert)
+        return grouped
+
+    def update_content_alert(
+        self,
+        alert_id: int,
+        *,
+        watchlist_id: int,
+        fields: dict[str, Any],
+    ) -> WatchlistContentAlertRow:
+        current = self.get_content_alert(int(alert_id), watchlist_id=int(watchlist_id))
+        if not fields:
+            return current
+        sets: list[str] = []
+        params: list[Any] = []
+        if "status" in fields:
+            clean_status = self._validate_content_alert_status(fields.get("status"))
+            now = _utcnow_iso()
+            sets.append("status = ?")
+            params.append(clean_status)
+            if clean_status == "read":
+                sets.append("read_at = COALESCE(read_at, ?)")
+                params.append(now)
+                sets.append("dismissed_at = NULL")
+            elif clean_status == "dismissed":
+                sets.append("read_at = COALESCE(read_at, ?)")
+                params.append(now)
+                sets.append("dismissed_at = COALESCE(dismissed_at, ?)")
+                params.append(now)
+            else:
+                sets.append("read_at = NULL")
+                sets.append("dismissed_at = NULL")
+        if sets:
+            params.extend([int(alert_id), self.user_id, int(watchlist_id)])
+            self.backend.execute(
+                f"""
+                UPDATE watchlist_content_alerts
+                SET {', '.join(sets)}
+                WHERE id = ? AND user_id = ? AND watchlist_id = ?
+                """,  # nosec B608
+                tuple(params),
+            )
+        return self.get_content_alert(int(alert_id), watchlist_id=int(watchlist_id))
 
     def get_item_smart_counts(
         self,
@@ -2263,6 +3874,11 @@ class WatchlistsDatabase:
         search: str | None = None,
         since: str | None = None,
         until: str | None = None,
+        watchlist_id: int | None = None,
+        has_alert: bool | None = None,
+        alert_status: str | None = None,
+        alert_severity: str | None = None,
+        alert_rule_id: int | None = None,
         queue_run_id: int | None = None,
         today_since: str | None = None,
     ) -> dict[str, int]:
@@ -2277,6 +3893,9 @@ class WatchlistsDatabase:
         if source_id is not None:
             where.append("si.source_id = ?")
             params.append(source_id)
+        if watchlist_id is not None:
+            where.append("sj.watchlist_id = ?")
+            params.append(int(watchlist_id))
         if status:
             where.append("si.status = ?")
             params.append(status)
@@ -2290,6 +3909,17 @@ class WatchlistsDatabase:
             like = f"%{search}%"
             where.append("(si.title LIKE ? OR si.summary LIKE ? OR si.content LIKE ?)")
             params.extend([like, like, like])
+        alert_filters_requested = alert_status is not None or alert_severity is not None or alert_rule_id is not None
+        if has_alert is False and alert_filters_requested:
+            raise ValueError("alert_filters_conflict_with_has_alert_false")
+        if has_alert is not None or alert_filters_requested:
+            alert_clause, alert_params = self._build_item_alert_exists_clause(
+                alert_status=alert_status,
+                alert_severity=alert_severity,
+                alert_rule_id=alert_rule_id,
+            )
+            where.append(alert_clause if has_alert is not False else f"NOT {alert_clause}")
+            params.extend(alert_params)
 
         today_cutoff = today_since
         if not today_cutoff:
@@ -2335,6 +3965,134 @@ class WatchlistsDatabase:
             tuple(item_ids + [self.user_id]),
         ).rows
         return [ScrapedItemRow(**r) for r in rows]
+
+    def _get_watchlist_items_by_ids(self, *, watchlist_id: int, item_ids: list[int]) -> list[ScrapedItemRow]:
+        if not item_ids:
+            return []
+        unique_ids = list(dict.fromkeys(int(item_id) for item_id in item_ids))
+        placeholders = ",".join("?" for _ in unique_ids)
+        rows = self.backend.execute(
+            """
+            SELECT si.id, si.run_id, si.job_id, si.source_id, si.media_id, si.media_uuid, si.url, si.title,
+                   si.summary, si.content, si.published_at, si.tags_json, si.status, si.reviewed, si.queued_for_briefing, si.created_at
+            FROM scraped_items si
+            JOIN scrape_jobs sj ON sj.id = si.job_id
+            WHERE si.id IN ({placeholders}) AND sj.user_id = ? AND sj.watchlist_id = ?
+            """.format_map(locals()),  # nosec B608
+            tuple(unique_ids + [self.user_id, int(watchlist_id)]),
+        ).rows
+        by_id = {int(row["id"]): ScrapedItemRow(**row) for row in rows}
+        return [by_id[item_id] for item_id in unique_ids if item_id in by_id]
+
+    @staticmethod
+    def _item_patch_changes(
+        row: ScrapedItemRow,
+        *,
+        reviewed: bool | None = None,
+        status: str | None = None,
+        queued_for_briefing: bool | None = None,
+    ) -> bool:
+        if reviewed is not None and bool(row.reviewed) != bool(reviewed):
+            return True
+        if status is not None and str(row.status) != str(status):
+            return True
+        if queued_for_briefing is not None and bool(row.queued_for_briefing) != bool(queued_for_briefing):
+            return True
+        return False
+
+    def batch_update_items(
+        self,
+        *,
+        watchlist_id: int,
+        item_ids: list[int] | None = None,
+        scope: dict[str, Any] | None = None,
+        reviewed: bool | None = None,
+        status: str | None = None,
+        queued_for_briefing: bool | None = None,
+        limit: int = 500,
+    ) -> dict[str, Any]:
+        self.get_watchlist(int(watchlist_id))
+        if not item_ids and scope is None:
+            raise ValueError("batch_update_scope_required")
+        if item_ids and scope is not None:
+            raise ValueError("batch_update_scope_ambiguous")
+        if reviewed is None and status is None and queued_for_briefing is None:
+            raise ValueError("batch_update_patch_required")
+        capped_limit = max(1, int(limit))
+        failed_ids: list[int] = []
+        capped = False
+
+        if item_ids is not None:
+            unique_ids = list(dict.fromkeys(int(item_id) for item_id in item_ids))
+            process_ids = unique_ids[:capped_limit]
+            capped = len(unique_ids) > capped_limit
+            rows = self._get_watchlist_items_by_ids(
+                watchlist_id=int(watchlist_id),
+                item_ids=process_ids,
+            )
+            found_ids = {int(row.id) for row in rows}
+            failed_ids = [item_id for item_id in process_ids if item_id not in found_ids]
+        else:
+            clean_scope = self._normalize_item_filter_payload(
+                scope,
+                watchlist_id=int(watchlist_id),
+                allow_smart_filter=False,
+            )
+            rows, _ = self.list_items(
+                run_id=clean_scope.get("run_id"),
+                job_id=clean_scope.get("job_id"),
+                source_id=clean_scope.get("source_id"),
+                status=clean_scope.get("status"),
+                reviewed=clean_scope.get("reviewed"),
+                queued_for_briefing=clean_scope.get("queued_for_briefing"),
+                search=clean_scope.get("search") or clean_scope.get("q"),
+                since=clean_scope.get("since"),
+                until=clean_scope.get("until"),
+                watchlist_id=int(watchlist_id),
+                has_alert=clean_scope.get("has_alert"),
+                alert_status=clean_scope.get("alert_status"),
+                alert_severity=clean_scope.get("alert_severity"),
+                alert_rule_id=clean_scope.get("alert_rule_id"),
+                limit=capped_limit + 1,
+                offset=0,
+            )
+            capped = len(rows) > capped_limit
+            rows = rows[:capped_limit]
+
+        changed_ids: list[int] = []
+        unchanged_ids: list[int] = []
+        matched_ids = [int(row.id) for row in rows]
+        for row in rows:
+            item_id = int(row.id)
+            if self._item_patch_changes(
+                row,
+                reviewed=reviewed,
+                status=status,
+                queued_for_briefing=queued_for_briefing,
+            ):
+                self.update_item_flags(
+                    item_id,
+                    reviewed=reviewed,
+                    status=status,
+                    queued_for_briefing=queued_for_briefing,
+                )
+                changed_ids.append(item_id)
+            else:
+                unchanged_ids.append(item_id)
+
+        return {
+            "matched": len(matched_ids),
+            "changed": len(changed_ids),
+            "unchanged": len(unchanged_ids),
+            "failed": len(failed_ids),
+            "matched_ids": matched_ids,
+            "changed_ids": changed_ids,
+            "unchanged_ids": unchanged_ids,
+            "failed_ids": failed_ids,
+            "capped": capped,
+            "exhausted": not capped,
+            "limit": capped_limit,
+        }
 
     def update_item_flags(
         self,

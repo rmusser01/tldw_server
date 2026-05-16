@@ -4,13 +4,23 @@ import {
   buildRegenerateOutputRequest,
   getDeliveryStatusColor,
   getDeliveryStatusLabel,
+  getAlertCount,
+  getExcludedItemCount,
+  getIncludedItemCount,
   getOutputArtifactLabel,
   getOutputArtifactTagColor,
   getOutputDeliveryStatuses,
   getOutputFileExtension,
   getOutputMimeType,
+  getOutputReportPreset,
+  getOutputReportReadiness,
+  getOutputReportSnapshotAvailable,
   getOutputTemplateName,
   getOutputTemplateVersion,
+  getReadinessLabel,
+  getReadinessTagColor,
+  getSourceCount,
+  getWeakEvidenceWarningCount,
   isAudioOutput
 } from "../outputMetadata"
 
@@ -166,5 +176,78 @@ describe("outputMetadata helpers", () => {
 
     expect(getOutputArtifactLabel({ format: "md", type: "briefing" })).toBe("Markdown")
     expect(getOutputArtifactTagColor({ format: "md", type: "briefing" })).toBe("green")
+  })
+
+  it("extracts report evidence metadata and readiness counts defensively", () => {
+    const metadata = {
+      report_preset: "cti_osint",
+      report_snapshot_path: "watchlists/cti-evidence.json",
+      report_readiness: {
+        state: "warning",
+        score: 72,
+        warnings: [
+          {
+            code: "single_source",
+            severity: "warning",
+            message: "Report evidence only includes one source.",
+            affected_item_ids: [101]
+          }
+        ]
+      },
+      included_item_count: "3",
+      excluded_item_count: 1,
+      source_count: 2,
+      alert_count: "5",
+      weak_evidence_warning_count: 1
+    }
+
+    expect(getOutputReportPreset(metadata)).toBe("cti_osint")
+    expect(getOutputReportSnapshotAvailable(metadata)).toBe(true)
+    expect(getOutputReportReadiness(metadata)).toEqual({
+      state: "warning",
+      score: 72,
+      warnings: [
+        {
+          code: "single_source",
+          severity: "warning",
+          message: "Report evidence only includes one source.",
+          affected_item_ids: [101]
+        }
+      ]
+    })
+    expect(getIncludedItemCount(metadata)).toBe(3)
+    expect(getExcludedItemCount(metadata)).toBe(1)
+    expect(getSourceCount(metadata)).toBe(2)
+    expect(getAlertCount(metadata)).toBe(5)
+    expect(getWeakEvidenceWarningCount(metadata)).toBe(1)
+  })
+
+  it("labels readiness states with table-safe colors", () => {
+    expect(getReadinessLabel("ready")).toBe("Ready")
+    expect(getReadinessTagColor("ready")).toBe("green")
+
+    expect(getReadinessLabel("warning")).toBe("Needs review")
+    expect(getReadinessTagColor("warning")).toBe("gold")
+
+    expect(getReadinessLabel("blocked")).toBe("Blocked")
+    expect(getReadinessTagColor("blocked")).toBe("red")
+
+    expect(getReadinessLabel("legacy_live_only")).toBe("Live provenance only")
+    expect(getReadinessTagColor("legacy_live_only")).toBe("default")
+  })
+
+  it("returns safe legacy defaults when report metadata is absent or malformed", () => {
+    expect(getOutputReportPreset(null)).toBe("general_research")
+    expect(getOutputReportSnapshotAvailable({})).toBe(false)
+    expect(getOutputReportReadiness({ report_readiness: "not an object" })).toEqual({
+      state: "legacy_live_only",
+      score: 0,
+      warnings: []
+    })
+    expect(getIncludedItemCount({ included_item_count: -1 })).toBe(0)
+    expect(getExcludedItemCount({ excluded_item_count: "NaN" })).toBe(0)
+    expect(getSourceCount({ source_count: null })).toBe(0)
+    expect(getAlertCount({ alert_count: 1.5 })).toBe(0)
+    expect(getWeakEvidenceWarningCount({ weak_evidence_warning_count: undefined })).toBe(0)
   })
 })

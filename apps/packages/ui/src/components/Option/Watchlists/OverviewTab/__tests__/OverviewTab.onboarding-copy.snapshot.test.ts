@@ -13,15 +13,17 @@ describe("Overview onboarding copy contract", () => {
   it("keeps quick setup and guided-tour onboarding copy stable", () => {
     const labels = watchlistsLocale as JsonObject
 
+    expect(pick(labels, "overview.onboarding.title")).toBe("Add initial collection")
     expect(pick(labels, "overview.onboarding.pipeline")).toBe(
-      "Add Feed -> Configure Monitor -> Check Activity -> Review Articles -> View Reports"
+      "Add feeds -> Configure monitor -> Check Activity -> Review Updates -> Generate Reports"
     )
     expect(pick(labels, "overview.onboarding.cta")).toEqual({
       addFeed: "Add first feed",
       createMonitor: "Create first monitor",
-      guidedSetup: "Guided setup",
-      reviewArticles: "Open Articles"
+      guidedSetup: "Add initial collection",
+      reviewArticles: "Open Updates"
     })
+    expect(pick(labels, "overview.onboarding.quickSetup.title")).toBe("Add initial collection")
     expect(pick(labels, "overview.onboarding.quickSetup.fields")).toEqual(
       expect.objectContaining({
         sourceUrl: "Feed URL",
@@ -37,7 +39,7 @@ describe("Overview onboarding copy contract", () => {
         sources: expect.objectContaining({ title: "1. Add feeds" }),
         jobs: expect.objectContaining({ title: "2. Create monitors" }),
         runs: expect.objectContaining({ title: "3. Check activity" }),
-        items: expect.objectContaining({ title: "4. Review articles" }),
+        items: expect.objectContaining({ title: "4. Review updates" }),
         outputs: expect.objectContaining({ title: "5. Deliver reports" })
       })
     )

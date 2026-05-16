@@ -3548,6 +3548,7 @@ class CollectionsDatabase:
         limit: int = 50,
         offset: int = 0,
         job_id: int | None = None,
+        job_ids: list[int] | None = None,
         run_id: int | None = None,
         type_: str | None = None,
         workspace_tag: str | None = None,
@@ -3562,9 +3563,20 @@ class CollectionsDatabase:
             where.append("deleted = 1")
         elif not include_deleted:
             where.append("deleted = 0")
+        normalized_job_ids: list[int] | None = None
+        if job_ids is not None:
+            normalized_job_ids = sorted({int(value) for value in job_ids})
+            if not normalized_job_ids:
+                return [], 0
+            if job_id is not None and int(job_id) not in normalized_job_ids:
+                return [], 0
         if job_id is not None:
             where.append("job_id = ?")
             params.append(job_id)
+        elif normalized_job_ids is not None:
+            placeholders = ", ".join(["?"] * len(normalized_job_ids))
+            where.append(f"job_id IN ({placeholders})")
+            params.extend(normalized_job_ids)
         if run_id is not None:
             where.append("run_id = ?")
             params.append(run_id)

@@ -24,10 +24,13 @@ const mockState = vi.hoisted(() => ({
   trackWatchlistsOnboardingTelemetryMock: vi.fn(),
   setActiveTabMock: vi.fn(),
   setOutputsRunFilterMock: vi.fn(),
+  setRunsStatusFilterMock: vi.fn(),
+  setOverviewHealthMock: vi.fn(),
   openSourceFormMock: vi.fn(),
   openJobFormMock: vi.fn(),
   openRunDetailMock: vi.fn(),
-  openOutputPreviewMock: vi.fn()
+  openOutputPreviewMock: vi.fn(),
+  selectedWatchlistId: 42 as number | null
 }))
 
 vi.mock("react-i18next", () => ({
@@ -88,10 +91,13 @@ vi.mock("@/store/watchlists", () => ({
     selector({
       setActiveTab: mockState.setActiveTabMock,
       setOutputsRunFilter: mockState.setOutputsRunFilterMock,
+      setRunsStatusFilter: mockState.setRunsStatusFilterMock,
+      setOverviewHealth: mockState.setOverviewHealthMock,
       openSourceForm: mockState.openSourceFormMock,
       openJobForm: mockState.openJobFormMock,
       openRunDetail: mockState.openRunDetailMock,
-      openOutputPreview: mockState.openOutputPreviewMock
+      openOutputPreview: mockState.openOutputPreviewMock,
+      selectedWatchlistId: mockState.selectedWatchlistId
     })
 }))
 
@@ -163,6 +169,8 @@ const getPipelineDialog = () => screen.getByRole("dialog", { name: "Briefing pip
 
 const pipelineQueries = () => within(getPipelineDialog())
 
+const getQuickSetupDialog = () => screen.getByRole("dialog", { name: "Add initial collection" })
+
 const clickPipelineNext = () => {
   fireEvent.click(pipelineQueries().getByRole("button", { name: "Next" }))
 }
@@ -180,6 +188,7 @@ const selectPipelineFeed = async (label: string) => {
 describe("OverviewTab quick setup flow", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockState.selectedWatchlistId = 42
     mockState.trackWatchlistsOnboardingTelemetryMock.mockResolvedValue(undefined)
     mockState.bulkCreateSourcesMock.mockResolvedValue({
       items: [],
@@ -228,13 +237,40 @@ describe("OverviewTab quick setup flow", () => {
     localStorage.removeItem(ONBOARDING_PATH_STORAGE_KEY)
   })
 
+  it("prompts for Watchlist creation instead of auto-opening source setup when no Watchlist is selected", async () => {
+    mockState.selectedWatchlistId = null
+    mockState.fetchOverviewMock.mockResolvedValue(createOverviewPayload())
+
+    render(<OverviewTab />)
+
+    expect(await screen.findByTestId("watchlists-overview-no-watchlist")).toBeInTheDocument()
+    expect(screen.getByText("Create a Watchlist first")).toBeInTheDocument()
+    expect(screen.queryByText("Add initial collection")).not.toBeInTheDocument()
+    expect(mockState.fetchOverviewMock).not.toHaveBeenCalled()
+  })
+
+  it("frames selected-Watchlist onboarding as initial collection setup", async () => {
+    mockState.fetchOverviewMock.mockResolvedValue(createOverviewPayload())
+
+    render(<OverviewTab />)
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Add initial collection").length).toBeGreaterThan(0)
+    })
+    expect(screen.getByText("Add feeds -> Configure monitor -> Check Activity -> Review Updates -> Generate Reports")).toBeInTheDocument()
+    expect(screen.getByTestId("watchlists-overview-cta-guided-setup")).toHaveTextContent("Add initial collection")
+
+    fireEvent.click(screen.getByTestId("watchlists-overview-cta-guided-setup"))
+    expect(screen.getAllByText("Add initial collection").length).toBeGreaterThan(1)
+  }, 20_000)
+
   it("opens Feed creation directly from quick setup", async () => {
     mockState.fetchOverviewMock.mockResolvedValue(createOverviewPayload())
 
     render(<OverviewTab />)
 
     await waitFor(() => {
-      expect(screen.getByText("Quick setup")).toBeInTheDocument()
+      expect(screen.getByTestId("watchlists-overview-cta-guided-setup")).toHaveTextContent("Add initial collection")
     })
 
     fireEvent.click(screen.getByTestId("watchlists-overview-cta-add-feed"))
@@ -302,7 +338,7 @@ describe("OverviewTab quick setup flow", () => {
       type: "quick_setup_opened"
     })
     expect(
-      screen.getByText("Tip: paste a feed URL now. You can adjust feed settings later.")
+      screen.getByText("Add one or more feed URLs to this Watchlist. You can adjust feed settings later.")
     ).toBeInTheDocument()
 
     fireEvent.change(
@@ -319,7 +355,7 @@ describe("OverviewTab quick setup flow", () => {
       expect(screen.getByPlaceholderText("e.g., Morning Brief")).toBeInTheDocument()
     })
     expect(
-      screen.getByText("No cron needed: choose a preset schedule for now.")
+      screen.getByText("Choose how this Watchlist monitor runs; presets avoid cron setup first.")
     ).toBeInTheDocument()
   }, 20_000)
 
@@ -386,16 +422,22 @@ describe("OverviewTab quick setup flow", () => {
     fireEvent.click(screen.getByLabelText("Run immediately"))
     fireEvent.click(screen.getByRole("button", { name: "Next" }))
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Create setup/i })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /Create collection/i })).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole("button", { name: /Create setup/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create collection/i }))
 
     await waitFor(() => {
       expect(mockState.setActiveTabMock).toHaveBeenLastCalledWith("outputs")
     })
     expect(mockState.triggerWatchlistRunMock).not.toHaveBeenCalled()
+    expect(mockState.createWatchlistSourceMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        watchlist_id: 42
+      })
+    )
     expect(mockState.createWatchlistJobMock).toHaveBeenCalledWith(
       expect.objectContaining({
+        watchlist_id: 42,
         output_prefs: expect.objectContaining({
           template_name: "briefing_md"
         })
@@ -449,9 +491,9 @@ describe("OverviewTab quick setup flow", () => {
     fireEvent.click(screen.getByLabelText("Run immediately"))
     fireEvent.click(screen.getByRole("button", { name: "Next" }))
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Create setup/i })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /Create collection/i })).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole("button", { name: /Create setup/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create collection/i }))
 
     await waitFor(() => {
       expect(mockState.createWatchlistJobMock).toHaveBeenCalledWith(
@@ -461,6 +503,11 @@ describe("OverviewTab quick setup flow", () => {
       )
     })
     expect(mockState.bulkCreateSourcesMock).toHaveBeenCalledTimes(1)
+    expect(mockState.bulkCreateSourcesMock).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ watchlist_id: 42 })
+      ])
+    )
     expect(mockState.triggerWatchlistRunMock).not.toHaveBeenCalled()
   }, 20_000)
 
@@ -502,9 +549,9 @@ describe("OverviewTab quick setup flow", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: "Next" }))
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Create setup/i })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /Create collection/i })).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole("button", { name: /Create setup/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create collection/i }))
 
     await waitFor(() => {
       expect(mockState.createWatchlistJobMock).not.toHaveBeenCalled()
@@ -537,9 +584,9 @@ describe("OverviewTab quick setup flow", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: "Next" }))
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Create setup/i })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /Create collection/i })).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole("button", { name: /Create setup/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create collection/i }))
 
     await waitFor(() => {
       expect(mockState.setActiveTabMock).toHaveBeenLastCalledWith("runs")
@@ -581,9 +628,9 @@ describe("OverviewTab quick setup flow", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: "Next" }))
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Create setup" })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Create collection" })).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole("button", { name: "Create setup" }))
+    fireEvent.click(screen.getByRole("button", { name: "Create collection" }))
 
     await waitFor(() => {
       expect(mockState.setActiveTabMock).toHaveBeenLastCalledWith("jobs")
@@ -926,7 +973,7 @@ describe("OverviewTab quick setup flow", () => {
 
     fireEvent.click(trigger)
     await waitFor(() => {
-      expect(screen.getByText("Guided quick setup")).toBeInTheDocument()
+      expect(getQuickSetupDialog()).toBeInTheDocument()
     })
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
 

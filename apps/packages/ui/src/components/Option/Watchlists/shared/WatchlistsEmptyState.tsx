@@ -74,12 +74,12 @@ const entityConfig: Record<
   articles: {
     icon: Newspaper,
     titleKey: "watchlists:emptyState.articles.title",
-    titleDefault: "No articles yet",
+    titleDefault: "No updates yet",
     descriptionKey: "watchlists:emptyState.articles.description",
     descriptionDefault:
-      "Articles are captured content from successful monitor runs, ready for review.",
+      "Updates are captured content from successful monitor runs, ready for review.",
     primaryCtaKey: "watchlists:emptyState.articles.primaryCta",
-    primaryCtaDefault: "Set up a monitor to start capturing articles"
+    primaryCtaDefault: "Set up a monitor to start capturing updates"
   },
   reports: {
     icon: FileOutput,

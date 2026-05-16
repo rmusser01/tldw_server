@@ -2,6 +2,7 @@ import React from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi, beforeEach } from "vitest"
 import { SourceFormModal } from "../SourceFormModal"
+import { setViewport } from "../../__tests__/test-utils/viewport"
 
 const formApi = {
   setFieldsValue: vi.fn(),
@@ -42,7 +43,19 @@ vi.mock("antd", () => {
   )
   FormComponent.useForm = () => [formApi]
 
-  const Modal = ({ open, title, children, onCancel, afterOpenChange }: any) => {
+  const Modal = ({
+    open,
+    title,
+    children,
+    onCancel,
+    onOk,
+    afterOpenChange,
+    width,
+    styles,
+    okText,
+    cancelText,
+    ...rest
+  }: any) => {
     const closeRef = React.useRef<HTMLButtonElement | null>(null)
     React.useEffect(() => {
       afterOpenChange?.(open)
@@ -53,12 +66,24 @@ vi.mock("antd", () => {
 
     if (!open) return null
     return (
-      <div>
+      <div
+        data-testid={rest["data-testid"]}
+        data-width={String(width ?? "")}
+        data-body-max-height={String(styles?.body?.maxHeight ?? "")}
+      >
         <h2>{title}</h2>
         <button type="button" ref={closeRef} onClick={() => onCancel?.()}>
           Close
         </button>
         {children}
+        <div data-testid="source-form-footer">
+          <button type="button" onClick={() => onCancel?.()}>
+            {cancelText}
+          </button>
+          <button type="button" onClick={() => onOk?.()}>
+            {okText}
+          </button>
+        </div>
       </div>
     )
   }
@@ -79,9 +104,9 @@ vi.mock("antd", () => {
         {children}
       </button>
     ),
-    Alert: ({ message, description, action }: any) => (
+    Alert: ({ title, message, description, action }: any) => (
       <div>
-        <span>{message}</span>
+        <span>{title ?? message}</span>
         <span>{description}</span>
         {action}
       </div>
@@ -103,6 +128,7 @@ vi.mock("@/services/watchlists", () => ({
 describe("SourceFormModal test-source preflight", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setViewport(1024)
     formApi.validateFields.mockResolvedValue({
       url: "https://example.com/feed.xml",
       source_type: "rss"
@@ -251,5 +277,25 @@ describe("SourceFormModal test-source preflight", () => {
     })
 
     trigger.remove()
+  })
+
+  it("uses a full-width constrained dialog with reachable primary actions", () => {
+    setViewport(420)
+
+    render(
+      <SourceFormModal
+        open
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+        existingTags={[]}
+      />
+    )
+
+    const modal = screen.getByTestId("source-form-modal")
+    expect(modal).toHaveAttribute("data-width", "100vw")
+    expect(modal.getAttribute("data-body-max-height")).toContain("calc(100vh")
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Create" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Test Feed" })).toBeInTheDocument()
   })
 })

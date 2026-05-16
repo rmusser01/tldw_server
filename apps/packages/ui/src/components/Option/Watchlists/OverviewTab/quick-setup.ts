@@ -53,17 +53,26 @@ export const resolveQuickSetupSchedule = (
 }
 
 export const toQuickSetupSourcePayload = (
-  values: Pick<QuickSetupValues, "sourceName" | "sourceUrl" | "sourceType">
-): WatchlistSourceCreate => ({
-  name: String(values.sourceName || "").trim(),
-  url: String(values.sourceUrl || "").trim(),
-  source_type: values.sourceType || "rss",
-  active: true
-})
+  values: Pick<QuickSetupValues, "sourceName" | "sourceUrl" | "sourceType">,
+  watchlistId?: number | null
+): WatchlistSourceCreate => {
+  const payload: WatchlistSourceCreate = {
+    name: String(values.sourceName || "").trim(),
+    url: String(values.sourceUrl || "").trim(),
+    source_type: values.sourceType || "rss",
+    active: true
+  }
+  const normalizedWatchlistId = Number(watchlistId)
+  if (Number.isFinite(normalizedWatchlistId) && normalizedWatchlistId > 0) {
+    payload.watchlist_id = normalizedWatchlistId
+  }
+  return payload
+}
 
 export const toQuickSetupJobPayload = (
   values: Pick<QuickSetupValues, "monitorName" | "schedulePreset" | "setupGoal" | "includeAudioBriefing">,
-  sourceIds: number[]
+  sourceIds: number[],
+  watchlistId?: number | null
 ): WatchlistJobCreate => {
   const uniqueSourceIds = Array.from(
     new Set((Array.isArray(sourceIds) ? sourceIds : []).filter((id) => Number.isFinite(id) && id > 0))
@@ -73,6 +82,10 @@ export const toQuickSetupJobPayload = (
     scope: { sources: uniqueSourceIds },
     active: true,
     ...resolveQuickSetupSchedule(values.schedulePreset || "daily")
+  }
+  const normalizedWatchlistId = Number(watchlistId)
+  if (Number.isFinite(normalizedWatchlistId) && normalizedWatchlistId > 0) {
+    payload.watchlist_id = normalizedWatchlistId
   }
 
   if ((values.setupGoal || "briefing") === "briefing") {

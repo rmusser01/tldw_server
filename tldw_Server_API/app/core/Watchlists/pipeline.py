@@ -59,6 +59,7 @@ from tldw_Server_API.app.core.Watchlists.fetchers import (
     fetch_site_article_async,
     fetch_site_items_with_rules,
 )
+from tldw_Server_API.app.core.Watchlists.content_alerts import evaluate_content_alert_rules_for_item
 from tldw_Server_API.app.core.Watchlists.filters import evaluate_filters, normalize_filters
 from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
 
@@ -814,6 +815,23 @@ async def run_watchlist_job(
                                     route=str(companion_route),
                                 )
                             )
+                        if status == "ingested":
+                            try:
+                                target_watchlist_id = getattr(job, "watchlist_id", None)
+                                if target_watchlist_id is None:
+                                    source_watchlist_ids = db.list_source_watchlist_ids(int(_src.id))
+                                    target_watchlist_id = source_watchlist_ids[0] if source_watchlist_ids else None
+                                if target_watchlist_id is not None:
+                                    evaluate_content_alert_rules_for_item(
+                                        db,
+                                        watchlist_id=int(target_watchlist_id),
+                                        item=item,
+                                    )
+                            except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as alert_err:
+                                logger.debug(
+                                    "watchlist content alert evaluation failed "
+                                    f"(source_id={getattr(_src, 'id', '?')}, item_id={getattr(item, 'id', '?')}): {alert_err}"
+                                )
                     except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as rec_err:
                         logger.debug(f"record_scraped_item failed (source_id={getattr(_src, 'id', '?')}): {rec_err}")
 

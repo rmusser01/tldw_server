@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { SettingsTab } from "../SettingsTab"
 import { WATCHLISTS_HELP_DOCS } from "../../shared/help-docs"
+import { setViewport } from "../../__tests__/test-utils/viewport"
 
 const ONBOARDING_PATH_STORAGE_KEY = "watchlists:onboarding-path:v1"
 
@@ -98,8 +99,8 @@ vi.mock("antd", () => {
       {checked ? checkedChildren || "On" : unCheckedChildren || "Off"}
     </button>
   )
-  const Table = ({ dataSource = [], columns = [] }: any) => (
-    <table>
+  const Table = ({ dataSource = [], columns = [], ...rest }: any) => (
+    <table data-testid={rest["data-testid"] || "settings-clusters-table"}>
       <tbody>
         {dataSource.map((record: any, rowIndex: number) => (
           <tr key={record.id ?? rowIndex}>
@@ -183,6 +184,7 @@ describe("SettingsTab contextual help", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    setViewport(1024)
     localStorage.removeItem(ONBOARDING_PATH_STORAGE_KEY)
     delete process.env.NEXT_PUBLIC_WATCHLISTS_SHOW_INTERNAL_DIAGNOSTICS
     mocks.getWatchlistSettingsMock.mockResolvedValue({
@@ -256,5 +258,36 @@ describe("SettingsTab contextual help", () => {
     select.dispatchEvent(new Event("change", { bubbles: true }))
 
     expect(localStorage.getItem(ONBOARDING_PATH_STORAGE_KEY)).toBe("advanced")
+  })
+
+  it("renders related-topic subscriptions as constrained cards instead of a table", async () => {
+    setViewport(420)
+    mocks.fetchWatchlistJobsMock.mockResolvedValue({
+      items: [{ id: 17, name: "CVE monitor" }],
+      total: 1,
+      has_more: false
+    })
+    mocks.fetchClaimClustersMock.mockResolvedValue([
+      {
+        id: 44,
+        summary: "OpenSSL vulnerability cluster",
+        canonical_claim_text: "OpenSSL advisory",
+        member_count: 7,
+        updated_at: "2026-02-24T12:00:00Z"
+      }
+    ])
+    mocks.fetchJobClaimClustersMock.mockResolvedValue([{ cluster_id: 44 }])
+
+    render(<SettingsTab />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-clusters-constrained-list")).toBeInTheDocument()
+    })
+
+    expect(screen.queryByTestId("settings-clusters-table")).not.toBeInTheDocument()
+    expect(screen.getByText("OpenSSL vulnerability cluster")).toBeInTheDocument()
+    expect(
+      screen.getByRole("switch", { name: /Toggle subscription for OpenSSL vulnerability cluster/i })
+    ).toBeInTheDocument()
   })
 })

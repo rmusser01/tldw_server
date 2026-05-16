@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { testWatchlistSource, testWatchlistSourceDraft } from "@/services/watchlists"
 import type { JobPreviewResult } from "@/types/watchlists"
 import type { WatchlistSource, SourceType } from "@/types/watchlists"
+import { buildWatchlistsModalChrome, useWatchlistsViewport } from "../shared"
 import { mapWatchlistsError } from "../shared/watchlists-error"
 import {
   getFocusableActiveElement,
@@ -97,9 +98,11 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
   const [testErrorHint, setTestErrorHint] = React.useState<string | null>(null)
   const restoreFocusTargetRef = useRef<HTMLElement | null>(null)
   const wasOpenRef = useRef(false)
+  const { isConstrained } = useWatchlistsViewport()
 
   const isEditing = !!initialValues
   const testSourceId = typeof initialValues?.id === "number" ? initialValues.id : null
+  const modalChrome = buildWatchlistsModalChrome(isConstrained, 500)
 
   useLayoutEffect(() => {
     if (open) {
@@ -248,7 +251,10 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
       cancelText={t("common:cancel", "Cancel")}
       confirmLoading={submitting}
       destroyOnHidden
-      width={500}
+      data-testid="source-form-modal"
+      width={modalChrome.width}
+      style={modalChrome.style}
+      styles={modalChrome.styles}
     >
       <Form
         form={form}
@@ -331,7 +337,7 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
             <Alert
               type={Number(testResult.total || 0) > 0 ? "success" : "warning"}
               showIcon
-              message={t("watchlists:sources.form.testSourceSummary", "Test Summary")}
+              title={t("watchlists:sources.form.testSourceSummary", "Test Summary")}
               description={t(
                 "watchlists:sources.form.testSourceSummaryDescription",
                 "{{total}} preview item{{plural}}, {{ingestable}} ingestable, {{filtered}} filtered.",
@@ -348,7 +354,7 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
             <Alert
               type="error"
               showIcon
-              message={testError}
+              title={testError}
               description={testErrorHint || testError}
               action={(
                 <Button
