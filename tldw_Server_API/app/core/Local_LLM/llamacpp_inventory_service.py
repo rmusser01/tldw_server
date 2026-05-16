@@ -333,6 +333,42 @@ def resolve_model_id(model_id: str) -> Path:
     raise ModelNotFoundError(f"Model ID {wanted} was not found in the llama.cpp inventory.")
 
 
+def resolve_asset_id(
+    asset_id: str,
+    expected_kind: str | None = None,
+    assets: list[LlamaCppAsset] | None = None,
+) -> LlamaCppAsset:
+    """Resolve a stable asset inventory ID to an available local asset."""
+    wanted = str(asset_id or "").strip()
+    if not wanted:
+        raise ModelNotFoundError("Asset ID is required.")
+    normalized_kind = str(expected_kind or "").strip().lower() or None
+    search_pool = assets if assets is not None else scan_assets().assets
+    saved_config = _read_saved_config()
+    allowed_bases = _allowed_bases_for_config(saved_config)
+
+    for asset in search_pool:
+        if asset.asset_id != wanted:
+            continue
+        if normalized_kind and asset.kind != normalized_kind:
+            raise ModelNotFoundError(f"Asset ID {wanted} does not reference a {normalized_kind} asset.")
+        if not asset.resolved_path:
+            raise ModelNotFoundError(f"Asset ID {wanted} does not reference an available local asset.")
+        path = _canonical_path(Path(asset.resolved_path), "Asset")
+        if not path.exists():
+            raise ModelNotFoundError(f"Asset ID {wanted} does not reference an available local asset.")
+        if asset.kind in {"gguf", "mmproj"} and not path.is_file():
+            raise ModelNotFoundError(f"Asset ID {wanted} does not reference an available local asset.")
+        if asset.kind == "folder" and not path.is_dir():
+            raise ModelNotFoundError(f"Asset ID {wanted} does not reference an available local asset.")
+        if normalized_kind in {"gguf", "mmproj"} and _asset_kind_for_path(path) != normalized_kind:
+            raise ModelNotFoundError(f"Asset ID {wanted} does not reference a {normalized_kind} asset.")
+        if allowed_bases and not handler_utils.is_path_allowed(path, allowed_bases):
+            raise ServerError("Asset path is outside allowed llama.cpp paths.")
+        return asset
+    raise ModelNotFoundError(f"Asset ID {wanted} was not found.")
+
+
 def _iter_gguf_models(models_dir: Path, warnings: list[str], limit: int):
     if limit <= 0:
         return
