@@ -6,8 +6,9 @@
  */
 
 import React, { useEffect, useCallback } from 'react'
-import { Modal, Spin, Alert } from 'antd'
+import { Modal, Spin } from 'antd'
 import { useTimelineStore } from '@/store/timeline'
+import { Alert } from '@/components/ui/primitives'
 import { GraphCanvas } from './GraphCanvas'
 import { TimelineToolbar } from './TimelineToolbar'
 import { NodeInfoPanel } from './NodeInfoPanel'
@@ -106,11 +107,11 @@ export const TimelineModal: React.FC = () => {
           {error && !isLoading && (
             <div className="timeline-error">
               <Alert
-                type="error"
+                variant="error"
                 title="Failed to load timeline"
-                description={error}
-                showIcon
-              />
+              >
+                {error}
+              </Alert>
             </div>
           )}
 
@@ -123,11 +124,11 @@ export const TimelineModal: React.FC = () => {
           {!graph && !isLoading && !error && (
             <div className="timeline-empty">
               <Alert
-                type="info"
+                variant="info"
                 title="No conversation data"
-                description="This conversation doesn't have any messages yet."
-                showIcon
-              />
+              >
+                This conversation doesn't have any messages yet.
+              </Alert>
             </div>
           )}
         </div>

@@ -1,7 +1,7 @@
 ---
 id: TASK-45.44.2
 title: 'Migrate design-system product state: Ingestion, Library, and media'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-14 03:19'
 labels:
@@ -31,6 +31,12 @@ Mirror the linked GitHub product-area migration issue. Closure requires zero cur
 - [ ] #2 Implementation PR tasks are created under this child when the area is too broad for one PR.
 - [ ] #3 Backlog notes record PR links and before/after count evidence.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+- TASK-45.44.2.4 migrates TimelineModal error and empty product-state alerts from AntD Alert to the shared design-system Alert primitive, reducing the baseline from 398 to 396 total exceptions and the Ingestion/Library/media area by 2. PR: https://github.com/rmusser01/tldw_server/pull/1785
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
