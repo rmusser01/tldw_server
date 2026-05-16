@@ -252,7 +252,7 @@ git commit -m "Add llama.cpp asset inventory schema contract"
 - Modify: `tldw_Server_API/app/core/Local_LLM/llamacpp_inventory_service.py`
 - Test: `tldw_Server_API/tests/LLM_Local/test_llamacpp_asset_inventory_service.py`
 
-- [ ] **Step 1: Write failing asset discovery tests**
+- [x] **Step 1: Write failing asset discovery tests**
 
 Append:
 
@@ -305,7 +305,7 @@ def test_scan_assets_reports_stale_imported_folder_without_failing(monkeypatch, 
     assert any("missing" in warning.lower() for warning in folder.warnings)
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run:
 
@@ -317,7 +317,7 @@ Run:
 
 Expected: FAIL because `scan_assets` does not exist.
 
-- [ ] **Step 3: Implement asset scanning helpers**
+- [x] **Step 3: Implement asset scanning helpers**
 
 In `llamacpp_inventory_service.py`:
 
@@ -341,7 +341,7 @@ Implementation notes:
 - keep de-duplication by `asset_id`;
 - return assets sorted by source, kind, display name, and path for stable UI/tests.
 
-- [ ] **Step 4: Run tests to verify pass**
+- [x] **Step 4: Run tests to verify pass**
 
 Run:
 
@@ -352,7 +352,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 5: Run legacy inventory tests**
+- [x] **Step 5: Run legacy inventory tests**
 
 Run:
 
@@ -364,7 +364,7 @@ Run:
 
 Expected: PASS. If these fail because legacy inventory changed shape, fix the adapter instead of changing the tests.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Local_LLM/llamacpp_inventory_service.py \
