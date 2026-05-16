@@ -375,7 +375,7 @@ def test_rag_source_health_returns_safe_canonical_shape(monkeypatch: pytest.Monk
         "MultiDatabaseRetriever",
         lambda *_, **__: pytest.fail("source health must not instantiate retrievers"),
     )
-    monkeypatch.setattr(rag_unified, "_resolve_existing_kanban_db_path", lambda *_: None)
+    monkeypatch.setattr(rag_unified, "_resolve_existing_source_db_paths", lambda *_: {})
 
     with TestClient(app) as client:
         response = client.get("/api/v1/rag/source-health")
@@ -398,7 +398,7 @@ def test_authorized_rag_source_health_returns_safe_canonical_shape(
         "MultiDatabaseRetriever",
         lambda *_, **__: pytest.fail("source health must not instantiate retrievers"),
     )
-    monkeypatch.setattr(rag_unified, "_resolve_existing_kanban_db_path", lambda *_: None)
+    monkeypatch.setattr(rag_unified, "_resolve_existing_source_db_paths", lambda *_: {})
 
     response = authorized_client.get("/api/v1/rag/source-health")
 
@@ -431,15 +431,9 @@ Modify `tldw_Server_API/app/api/v1/endpoints/rag_unified.py`:
 )
 async def source_health_endpoint(
     current_user: User = Depends(get_request_user),
-    media_db: Any = Depends(get_media_db_for_user),
-    chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
-    prompts_db: PromptsDatabase = Depends(get_prompts_db_for_user),
 ) -> KnowledgeSourceHealthResponse:
     configured_sources = _build_source_health_configured_sources(
-        media_db=media_db,
-        chacha_db=chacha_db,
-        prompts_db=prompts_db,
-        kanban_db_path=_resolve_existing_kanban_db_path(current_user),
+        existing_paths=_resolve_existing_source_db_paths(current_user),
     )
     return KnowledgeSourceHealthResponse(
         sources=build_source_health_entries(
@@ -448,7 +442,7 @@ async def source_health_endpoint(
     )
 ```
 
-Do not instantiate `MultiDatabaseRetriever` or source-specific databases in the source-health endpoint. Derive source availability from already-resolved request dependencies and existing files that can be checked without creating directories, schema, indexes, vector stores, or records. Do not record RAG query usage and do not call search.
+Do not instantiate `MultiDatabaseRetriever` or source-specific databases in the source-health endpoint. Do not use request-scoped source DB dependencies such as `get_media_db_for_user`, `get_chacha_db_for_user`, or `get_prompts_db_for_user`. Derive source availability from existing files or metadata that can be checked without creating directories, schema, indexes, vector stores, records, or request-scoped database handles. Do not record RAG query usage and do not call search.
 
 - [ ] **Step 9: Add compatibility regression for post-query `metadata.source_status`**
 

@@ -404,30 +404,38 @@ def _resolve_source_health_user_db_base_dir() -> Path:
     return (Path(get_project_root()) / "Databases" / "user_databases").resolve(strict=False)
 
 
-def _resolve_existing_kanban_db_path(
+def _resolve_existing_source_db_paths(
     current_user: Optional[User],
     request_user_id: Optional[str] = None,
-) -> Optional[str]:
-    """Return an existing Kanban DB path without creating user directories or schema."""
+) -> dict[str, str]:
+    """Return existing source database paths without creating source storage."""
     user_id = _resolve_source_health_user_id(current_user, request_user_id)
     if user_id is None:
-        return None
-    candidate = _resolve_source_health_user_db_base_dir() / user_id / DatabasePaths.KANBAN_DB_NAME
-    return str(candidate) if candidate.is_file() else None
+        return {}
+
+    user_dir = _resolve_source_health_user_db_base_dir() / user_id
+    candidates = {
+        "media_db": user_dir / DatabasePaths.MEDIA_DB_NAME,
+        "chacha_db": user_dir / DatabasePaths.CHACHA_DB_NAME,
+        "prompts_db": user_dir / DatabasePaths.PROMPTS_SUBDIR / DatabasePaths.PROMPTS_DB_NAME,
+        "kanban_db": user_dir / DatabasePaths.KANBAN_DB_NAME,
+    }
+    return {
+        source_key: str(path)
+        for source_key, path in candidates.items()
+        if path.is_file()
+    }
 
 
 def _build_source_health_configured_sources(
     *,
-    media_db: Any,
-    chacha_db: Any,
-    prompts_db: Any,
-    kanban_db_path: Optional[str],
+    existing_paths: dict[str, str],
 ) -> set[Any]:
-    """Derive source availability from already-resolved handles and existing files."""
+    """Derive source availability from existing source database files."""
     configured: set[Any] = set()
-    if media_db is not None:
+    if "media_db" in existing_paths:
         configured.add("media_db")
-    if chacha_db is not None:
+    if "chacha_db" in existing_paths:
         configured.update(
             {
                 "notes",
@@ -437,9 +445,9 @@ def _build_source_health_configured_sources(
                 "dictionaries",
             }
         )
-    if prompts_db is not None:
+    if "prompts_db" in existing_paths:
         configured.add("prompts")
-    if kanban_db_path:
+    if "kanban_db" in existing_paths:
         configured.add("kanban")
     return configured
 
@@ -1065,16 +1073,10 @@ async def list_vlm_backends():
 )
 async def source_health_endpoint(
     current_user: User = Depends(get_request_user),
-    media_db: Any = Depends(get_media_db_for_user),
-    chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
-    prompts_db: PromptsDatabase = Depends(get_prompts_db_for_user),
 ) -> KnowledgeSourceHealthResponse:
     """Return safe pre-query readiness for canonical Knowledge QA sources."""
     configured_sources = _build_source_health_configured_sources(
-        media_db=media_db,
-        chacha_db=chacha_db,
-        prompts_db=prompts_db,
-        kanban_db_path=_resolve_existing_kanban_db_path(current_user),
+        existing_paths=_resolve_existing_source_db_paths(current_user),
     )
     return KnowledgeSourceHealthResponse(
         sources=build_source_health_entries(configured_sources=configured_sources)

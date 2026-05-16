@@ -49,18 +49,8 @@ def client_with_source_health_overrides(
     async def _no_rbac(*args: Any, **kwargs: Any) -> None:  # noqa: ARG001
         return None
 
-    class StubDB:
-        def __init__(self, db_path: str) -> None:
-            self.db_path = db_path
-
-    async def _stub_media_db() -> StubDB:
-        return StubDB("stub_media.db")
-
-    async def _stub_chacha_db() -> StubDB:
-        return StubDB("stub_chacha.db")
-
-    async def _stub_prompts_db() -> StubDB:
-        return StubDB("stub_prompts.db")
+    async def _fail_source_db_dependency() -> None:
+        raise AssertionError("source health must not instantiate source databases")
 
     monkeypatch.setattr(auth_deps, "enforce_rbac_rate_limit", _no_rbac)
 
@@ -72,9 +62,9 @@ def client_with_source_health_overrides(
     from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
     from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 
-    fastapi_app.dependency_overrides[get_media_db_for_user] = _stub_media_db
-    fastapi_app.dependency_overrides[get_chacha_db_for_user] = _stub_chacha_db
-    fastapi_app.dependency_overrides[get_prompts_db_for_user] = _stub_prompts_db
+    fastapi_app.dependency_overrides[get_media_db_for_user] = _fail_source_db_dependency
+    fastapi_app.dependency_overrides[get_chacha_db_for_user] = _fail_source_db_dependency
+    fastapi_app.dependency_overrides[get_prompts_db_for_user] = _fail_source_db_dependency
 
     with TestClient(fastapi_app, headers=auth_headers, raise_server_exceptions=False) as client:
         yield client
@@ -92,7 +82,16 @@ def test_rag_source_health_returns_safe_canonical_sources(
         raise AssertionError("source health must not instantiate retrievers")
 
     monkeypatch.setattr(rag_ep, "MultiDatabaseRetriever", fail_retriever_construction)
-    monkeypatch.setattr(rag_ep, "_resolve_existing_kanban_db_path", lambda *args, **kwargs: "stub_kanban.db")
+    monkeypatch.setattr(
+        rag_ep,
+        "_resolve_existing_source_db_paths",
+        lambda *args, **kwargs: {
+            "media_db": "stub_media.db",
+            "chacha_db": "stub_chacha.db",
+            "prompts_db": "stub_prompts.db",
+            "kanban_db": "stub_kanban.db",
+        },
+    )
 
     response = client_with_source_health_overrides.get("/api/v1/rag/source-health")
 

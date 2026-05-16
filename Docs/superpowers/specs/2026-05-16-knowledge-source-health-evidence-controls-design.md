@@ -106,7 +106,7 @@ Rules:
 - `embedding_status` reflects vector readiness only where embeddings are part of the searchable path. Use `not_applicable` for sources or configurations that are intentionally FTS-only or non-vector.
 - Generated/test/workspace artifacts stay hidden by default unless explicit workspace scope is present.
 - The contract must pass through normal auth, ownership, workspace, and visibility checks. Imported IDs or saved profiles are not access grants.
-- The contract must not instantiate search retrievers or source databases just to compute health. Source availability should come from already-resolved request dependencies or existing files/metadata that can be checked without creating directories, schema, indexes, vector stores, or records.
+- The contract must not instantiate search retrievers or source databases just to compute health. Source availability should come from existing files or metadata that can be checked without creating directories, schema, indexes, vector stores, records, or request-scoped database handles.
 
 V1 minimum:
 
