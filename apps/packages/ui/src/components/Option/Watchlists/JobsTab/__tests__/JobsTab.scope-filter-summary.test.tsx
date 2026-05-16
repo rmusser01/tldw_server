@@ -200,7 +200,7 @@ describe("JobsTab scope/filter summaries", () => {
       ],
       total: 2,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
 
@@ -208,7 +208,7 @@ describe("JobsTab scope/filter summaries", () => {
       items: [{ id: 7, name: "Daily News" }],
       total: 1,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
   })

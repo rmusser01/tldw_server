@@ -465,7 +465,7 @@ export const WatchlistSetupWizard: React.FC<WatchlistSetupWizardProps> = ({
       onCancel={onCancel}
       footer={footer}
       width={720}
-      destroyOnClose
+      destroyOnHidden
     >
       <div className="space-y-4">
         {validationError ? (

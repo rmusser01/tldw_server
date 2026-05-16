@@ -571,6 +571,11 @@ export const RunsTab: React.FC = () => {
     exportModeOptions.find((option) => option.value === runsCsvTalliesMode && !option.disabled)?.label ||
     exportModeOptions[0].label
   )
+  const exportCsvLabel = t("watchlists:runs.exportCsv", "Export CSV")
+  const exportCsvModeLabel = t("watchlists:runs.exportCsvWithMode", "{{label}} ({{mode}})", {
+    label: exportCsvLabel,
+    mode: activeExportModeLabel
+  })
 
   // Table columns
   const allColumns: ColumnsType<WatchlistRun> = [
@@ -1123,7 +1128,10 @@ export const RunsTab: React.FC = () => {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div
+          className="flex flex-wrap items-center justify-start gap-2 min-w-0 max-w-full"
+          data-testid="watchlists-runs-toolbar-actions"
+        >
           {lastRefreshedAt && (
             <Tooltip title={new Date(lastRefreshedAt).toLocaleString()}>
               <span className="text-sm text-text-muted">
@@ -1160,9 +1168,10 @@ export const RunsTab: React.FC = () => {
               icon={<Download className="h-4 w-4" />}
               onClick={() => void handleExportRunsCsv()}
               loading={exportingRunsCsv}
+              aria-label={exportCsvModeLabel}
               data-testid="runs-csv-export-button"
             >
-              {t("watchlists:runs.exportCsv", "Export CSV")} ({activeExportModeLabel})
+              {isConstrained ? exportCsvLabel : exportCsvModeLabel}
             </Button>
             <Dropdown
               menu={{

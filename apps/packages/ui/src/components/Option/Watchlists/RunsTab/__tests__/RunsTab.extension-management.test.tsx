@@ -272,6 +272,9 @@ describe("RunsTab constrained management", () => {
     expect(screen.getByRole("button", { name: /Export CSV/ })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Export options" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument()
+    expect(screen.getByTestId("watchlists-runs-toolbar-actions")).toHaveClass("flex-wrap")
+    expect(screen.getByTestId("runs-csv-export-button")).toHaveTextContent("Export CSV")
+    expect(screen.getByTestId("runs-csv-export-button")).not.toHaveTextContent("Standard CSV")
 
     const card = screen.getByTestId("watchlists-run-card-55")
     expect(within(card).getByText("Ransomware monitor")).toBeInTheDocument()
@@ -302,6 +305,7 @@ describe("RunsTab constrained management", () => {
       expect(screen.getByRole("table", { name: "Activity runs table" })).toBeInTheDocument()
     })
     expect(screen.queryByTestId("watchlists-runs-constrained-list")).not.toBeInTheDocument()
+    expect(screen.getByTestId("runs-csv-export-button")).toHaveTextContent("Export CSV (Standard CSV)")
   })
 })
 

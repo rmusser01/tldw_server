@@ -490,7 +490,7 @@ git commit -m "feat: harden watchlist constrained CRUD accessibility"
 - Modify: `backlog/tasks/task-349.3*`
 - Modify docs only if behavior or user-facing copy requires it.
 
-- [ ] **Step 1: Run focused frontend suite**
+- [x] **Step 1: Run focused frontend suite**
 
 Run:
 
@@ -509,7 +509,9 @@ bunx vitest run \
 
 Expected: all selected tests pass.
 
-- [ ] **Step 2: Run static checks**
+Recorded on Stage 6E closeout: the focused constrained-management suite passed with 8 files / 23 tests. Additional API-contract tests for scope lookup and run-detail source lookups passed with 3 files / 17 tests. `bun run test:watchlists:typecheck` passed with 1 file / 3 tests.
+
+- [x] **Step 2: Run static checks**
 
 Run:
 
@@ -519,7 +521,9 @@ git diff --check
 
 If Python files changed, run Bandit on touched Python scope. If only TypeScript/Markdown/Backlog files changed, record Bandit as not applicable.
 
-- [ ] **Step 3: Start real servers**
+Recorded on Stage 6E closeout: `git diff --check` passed. Bandit was not applicable because Stage 6E touched frontend TypeScript/TSX, tests, plan, and Backlog files only; no Python files changed.
+
+- [x] **Step 3: Start real servers**
 
 Use the real FastAPI server and real Next WebUI. Do not mock the server.
 
@@ -545,7 +549,9 @@ bun run dev -- -H 127.0.0.1 -p <web-port>
 
 If the sandbox blocks port binding, request escalation rather than switching to mocked services.
 
-- [ ] **Step 4: Seed representative data**
+Recorded on Stage 6E closeout: local port binding required escalation, then the real FastAPI app ran on `http://127.0.0.1:18011` and the real Next WebUI ran on `http://127.0.0.1:18012`. The final CDP pass used the real app and server with `RG_ENABLED=0` to keep the synthetic two-viewport sweep from exhausting local ingress limits; an earlier RG-enabled run exposed 429s after rapid repeated tab traversal, which is recorded as QA context rather than a mocked-server result.
+
+- [x] **Step 4: Seed representative data**
 
 Use real public APIs for Watchlists, sources, monitors, templates, and outputs where available. If item/run/alert setup still lacks public creation APIs, insert deterministic run/items/alerts into the server-owned Watchlists DB and document that as QA setup, not a mocked server.
 
@@ -556,7 +562,9 @@ Seed at least:
 - One source group/tag.
 - One template.
 
-- [ ] **Step 5: Run constrained CDP smoke**
+Recorded on Stage 6E closeout: real public APIs seeded representative CTI and news Watchlists, feeds, content alert rules, and monitors for browser QA. Existing Stage 5/real-server seeded outputs and templates were reused where present. Watchlist IDs 9 and 10, source IDs 13 and 14, alert rule IDs 8 and 9, and job IDs 8 and 9 were created during QA setup.
+
+- [x] **Step 5: Run constrained CDP smoke**
 
 Open `/watchlists?view=all` at `420x760` and verify:
 
@@ -574,7 +582,9 @@ Open `/watchlists?view=all` at `420x760` and verify:
 
 Capture screenshots under `/private/tmp/tldw-watchlists-stage6/`.
 
-- [ ] **Step 6: Close Backlog tasks**
+Recorded on Stage 6E closeout: final CDP/Playwright smoke opened `/watchlists?view=all` at `420x760` and `1280x900` against the real API/WebUI. Extension-sized Overview, Feeds, Monitors, Updates, Activity, Reports, Templates, and Settings all reported `rootOverflow=0` and `offenders=0`. The report recorded `consoleCount=0`, `pageErrorCount=0`, `networkFailureCount=0`, and `badResponseCount=0`. Screenshots were written under `/private/tmp/tldw-watchlists-stage6/screenshots/`; the JSON report is `/private/tmp/tldw-watchlists-stage6/stage6e-cdp-watchlists-qa.json`. Desktop view still reports a 48px global app-shell overflow caused by the persistent sidebar/header offset, not Watchlists tab content.
+
+- [x] **Step 6: Close Backlog tasks**
 
 For each Stage 6 task:
 
@@ -584,7 +594,9 @@ For each Stage 6 task:
 - Record skips/blockers.
 - Mark Done.
 
-- [ ] **Step 7: Commit Stage 6E**
+Recorded on Stage 6E closeout: `TASK-349.3.5` was marked Done with final summary and verification evidence. Prior Stage 6 child tasks were already Done with their own closeout records.
+
+- [x] **Step 7: Commit Stage 6E**
 
 ```bash
 git add \

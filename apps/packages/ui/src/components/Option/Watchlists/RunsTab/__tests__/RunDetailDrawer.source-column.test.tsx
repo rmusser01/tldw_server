@@ -245,7 +245,7 @@ describe("RunDetailDrawer source column", () => {
       items: [{ id: 5, name: "TechCrunch" }],
       total: 1,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
 
@@ -266,7 +266,7 @@ describe("RunDetailDrawer source column", () => {
       items: [],
       total: 0,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
 
@@ -293,7 +293,7 @@ describe("RunDetailDrawer source column", () => {
       items: [],
       total: 0,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
 
@@ -310,7 +310,7 @@ describe("RunDetailDrawer source column", () => {
       items: [{ id: 5, name: "TechCrunch" }],
       total: 1,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
 
@@ -346,7 +346,7 @@ describe("RunDetailDrawer source column", () => {
       items: [{ id: 5, name: "TechCrunch" }],
       total: 1,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
     mocks.getRunDetailsMock.mockResolvedValue({
@@ -367,7 +367,7 @@ describe("RunDetailDrawer source column", () => {
       items: [],
       total: 0,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
     mocks.getRunDetailsMock.mockRejectedValue({ message: "" })
@@ -388,7 +388,7 @@ describe("RunDetailDrawer source column", () => {
       items: [{ id: 5, name: "TechCrunch" }],
       total: 1,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
     mocks.getRunDetailsMock.mockResolvedValue({
@@ -416,7 +416,7 @@ describe("RunDetailDrawer source column", () => {
       items: [{ id: 5, name: "TechCrunch" }],
       total: 1,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
     mocks.getRunDetailsMock.mockResolvedValue({
@@ -448,7 +448,7 @@ describe("RunDetailDrawer source column", () => {
       items: [{ id: 5, name: "TechCrunch" }],
       total: 1,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
     mocks.getRunDetailsMock.mockResolvedValue({
@@ -478,7 +478,7 @@ describe("RunDetailDrawer source column", () => {
       items: [{ id: 5, name: "TechCrunch" }],
       total: 1,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
     mocks.fetchWatchlistOutputsMock.mockResolvedValue({

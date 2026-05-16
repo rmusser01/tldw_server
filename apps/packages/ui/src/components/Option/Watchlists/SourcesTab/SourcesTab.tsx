@@ -1723,7 +1723,7 @@ export const SourcesTab: React.FC = () => {
               </div>
             }
           >
-            <Space direction="vertical" align="center" size="middle">
+            <Space orientation="vertical" align="center" size="middle">
               <Button
                 type="primary"
                 size="large"

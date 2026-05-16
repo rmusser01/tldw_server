@@ -44,7 +44,7 @@ import { JobPreviewModal } from "./JobPreviewModal"
 import { mapWatchlistsError } from "../shared/watchlists-error"
 import { useWatchlistsViewport } from "../shared/useWatchlistsViewport"
 
-const SCOPE_CATALOG_LIMIT = 1000
+const SCOPE_CATALOG_LIMIT = 200
 const JOBS_ADVANCED_COLUMNS_STORAGE_KEY = "watchlists:jobs:advanced-columns:v1"
 
 const readStoredDisclosureState = (key: string): boolean | null => {

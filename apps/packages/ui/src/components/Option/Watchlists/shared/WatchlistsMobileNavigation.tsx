@@ -61,7 +61,7 @@ export const WatchlistsMobileNavigation: React.FC<WatchlistsMobileNavigationProp
         open={open}
         onClose={() => setOpen(false)}
         placement="bottom"
-        height="min(86vh, 680px)"
+        size="min(86vh, 680px)"
         data-testid="watchlists-constrained-nav-drawer"
       >
         <nav

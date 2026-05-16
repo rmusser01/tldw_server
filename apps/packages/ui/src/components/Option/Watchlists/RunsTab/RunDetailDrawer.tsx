@@ -56,7 +56,7 @@ type StreamConnectionState =
   | "disconnected"
   | "error"
 
-const SOURCE_LOOKUP_LIMIT = 1000
+const SOURCE_LOOKUP_LIMIT = 200
 
 /** Maps failure kind → [i18n key, fallback] pairs for the "Common causes" section */
 const COMMON_CAUSES_BY_KIND: Record<string, [string, string][]> = {
