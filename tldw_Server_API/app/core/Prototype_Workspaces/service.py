@@ -9,9 +9,9 @@ from typing import Any
 from tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo import (
     PrototypeWorkspacesRepo,
 )
+from tldw_Server_API.app.core.exceptions import PrototypeTerminalRuntimeError
 
 from .models import (
-    PrototypeTerminalRuntimeError,
     PrototypePromotionResult,
     PrototypeRuntimeStatus,
 )
@@ -117,7 +117,7 @@ class PrototypeWorkspaceService:
     ) -> dict[str, Any]:
         workspace = await self._repo.get_workspace(prototype_workspace_id)
         if not workspace:
-            raise ValueError("prototype workspace not found")
+            raise PrototypeTerminalRuntimeError("prototype workspace not found")
         if workspace.get("is_archived"):
             raise PrototypeTerminalRuntimeError("archived workspaces cannot create branch sessions")
 
@@ -128,7 +128,7 @@ class PrototypeWorkspaceService:
             or ""
         ).strip()
         if not resolved_base_snapshot_id:
-            raise ValueError("prototype workspace does not have a canonical snapshot")
+            raise PrototypeTerminalRuntimeError("prototype workspace does not have a canonical snapshot")
         await self._assert_branch_actor_active(
             actor_type=actor_type,
             actor_shared_actor_id=actor_shared_actor_id,
@@ -204,10 +204,10 @@ class PrototypeWorkspaceService:
         async with self._repo.transaction() as repo:
             session = await repo.get_session(prototype_session_id)
             if not session:
-                raise ValueError("prototype session not found")
+                raise PrototypeTerminalRuntimeError("prototype session not found")
             workspace = await repo.get_workspace(str(session["prototype_workspace_id"]))
             if not workspace:
-                raise ValueError("prototype workspace not found")
+                raise PrototypeTerminalRuntimeError("prototype workspace not found")
 
             new_snapshot_id = str(snapshot_id or f"psnap_{uuid.uuid4().hex}")
             existing_snapshot = await repo.get_snapshot(new_snapshot_id) if snapshot_id else None
@@ -272,7 +272,7 @@ class PrototypeWorkspaceService:
     ) -> dict[str, Any]:
         workspace = await self._repo.get_workspace(prototype_workspace_id)
         if not workspace:
-            raise ValueError("prototype workspace not found")
+            raise PrototypeTerminalRuntimeError("prototype workspace not found")
 
         reviewer_id = int(reviewer_user_id)
         if not self._is_promoter(workspace, reviewer_id):
@@ -280,17 +280,17 @@ class PrototypeWorkspaceService:
 
         candidate = await self._repo.get_snapshot(candidate_snapshot_id)
         if not candidate or candidate.get("prototype_workspace_id") != prototype_workspace_id:
-            raise ValueError("candidate snapshot not found in prototype workspace")
+            raise PrototypeTerminalRuntimeError("candidate snapshot not found in prototype workspace")
 
         promotion_request = None
         if promotion_request_id:
             promotion_request = await self._repo.get_promotion_request(promotion_request_id)
             if not promotion_request:
-                raise ValueError("promotion request not found")
+                raise PrototypeTerminalRuntimeError("promotion request not found")
             if promotion_request.get("prototype_workspace_id") != prototype_workspace_id:
-                raise ValueError("promotion request does not belong to prototype workspace")
+                raise PrototypeTerminalRuntimeError("promotion request does not belong to prototype workspace")
             if promotion_request.get("candidate_snapshot_id") != candidate_snapshot_id:
-                raise ValueError("promotion request candidate does not match requested candidate")
+                raise PrototypeTerminalRuntimeError("promotion request candidate does not match requested candidate")
 
         canonical_snapshot_id = str(workspace.get("canonical_snapshot_id") or "").strip()
         resolved_review_baseline_snapshot_id = str(

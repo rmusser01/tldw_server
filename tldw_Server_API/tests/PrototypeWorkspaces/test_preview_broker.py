@@ -127,14 +127,64 @@ async def test_preview_broker_reuses_active_handle_for_same_scope_target_retry(
         snapshot_id="snap_preview_base",
         runtime_target_url="http://127.0.0.1:9011",
     )
-    rows = prototype_db.execute(
-        "SELECT COUNT(*) FROM prototype_preview_handles WHERE prototype_session_id = ?",
-        (session["id"],),
-    ).fetchone()
+    first_record = await repo.get_preview_handle_record(first["preview_handle"])
+    active_record = await repo.get_active_preview_handle_for_scope(f"session:{session['id']}")
 
     assert second["preview_handle"] == first["preview_handle"]
     assert second["token"]
-    assert rows[0] == 1
+    assert first_record is not None
+    assert active_record is not None
+    assert active_record["preview_handle"] == first["preview_handle"]
+
+
+@pytest.mark.asyncio
+async def test_preview_broker_reuses_existing_session_handle_after_workspace_archive(
+    repo,
+    prototype_db,
+    preview_broker,
+):
+    workspace, _actor, session = await _seed_preview_scope(repo, prototype_db)
+
+    first = await preview_broker.issue_preview_grant(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        snapshot_id="snap_preview_base",
+        runtime_target_url="http://127.0.0.1:9011",
+    )
+    await repo.archive_workspace(workspace["id"])
+    second = await preview_broker.issue_preview_grant(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        snapshot_id="snap_preview_base",
+        runtime_target_url="http://127.0.0.1:9011",
+    )
+
+    assert second["preview_handle"] == first["preview_handle"]
+    assert second["token"]
+
+
+@pytest.mark.asyncio
+async def test_preview_broker_metadata_cannot_override_authoritative_snapshot_id(
+    repo,
+    prototype_db,
+    preview_broker,
+):
+    workspace, _actor, session = await _seed_preview_scope(repo, prototype_db)
+
+    grant = await preview_broker.issue_preview_grant(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        snapshot_id="snap_preview_base",
+        runtime_target_url="http://127.0.0.1:9011",
+        metadata={"snapshot_id": "snap_spoofed", "runtime_profile_version": "v1"},
+    )
+    record = await repo.get_preview_handle_record(grant["preview_handle"])
+    renewed = await preview_broker.renew_preview_grant(grant["preview_handle"])
+
+    assert grant["snapshot_id"] == "snap_preview_base"
+    assert renewed["snapshot_id"] == "snap_preview_base"
+    assert record is not None
+    assert record["metadata"]["snapshot_id"] == "snap_preview_base"
 
 
 @pytest.mark.asyncio

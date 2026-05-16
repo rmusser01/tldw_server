@@ -1,11 +1,11 @@
 ---
 id: TASK-389
 title: Risk Gate 3 prototype runtime jobs and preview lifecycle durability
-status: In Progress
+status: Done
 assignee:
   - Codex
 created_date: '2026-05-15 19:41'
-updated_date: '2026-05-15 20:05'
+updated_date: '2026-05-16 00:43'
 labels:
   - prototype-workspaces
   - risk-gate
@@ -72,19 +72,23 @@ Stage 5: Verification and PR closeout
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-2026-05-15: Created isolated worktree /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/prototype-risk-gate-3-runtime-durability on branch codex/prototype-risk-gate-3-runtime-durability from origin/dev 2184b2168 after PR #1719 / Risk Gate 2 was verified merged and issue #1454 was closed.
+2026-05-15: Created isolated worktree `.worktrees/prototype-risk-gate-3-runtime-durability` on branch codex/prototype-risk-gate-3-runtime-durability from origin/dev 2184b2168 after PR #1719 / Risk Gate 2 was verified merged and issue #1454 was closed.
 
-2026-05-15: Baseline verification before implementation: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/PrototypeWorkspaces -q passed with 90 passed, 5 warnings in 7.20s from the new worktree.
+2026-05-15: Baseline verification before implementation: `./.venv/bin/python -m pytest tldw_Server_API/tests/PrototypeWorkspaces -q` passed with 90 passed, 5 warnings in 7.20s from the new worktree.
 
 Implemented Risk Gate 3 runtime durability slice in worktree `.worktrees/prototype-risk-gate-3-runtime-durability`: added worker retry/terminal metadata, stable job result envelopes, retry-safe preview handle reuse for identical scope/snapshot/target/profile, retry-safe snapshot save reuse for explicit session-owned snapshot ids, and Risk Gate 3 runtime job contract docs.
 
-Focused runtime/preview/promotion suite passed: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/PrototypeWorkspaces/test_runtime_jobs.py tldw_Server_API/tests/PrototypeWorkspaces/test_preview_broker.py tldw_Server_API/tests/PrototypeWorkspaces/test_promotion_service.py -q` -> 30 passed, 5 warnings.
+Focused runtime/preview/promotion suite passed: `./.venv/bin/python -m pytest tldw_Server_API/tests/PrototypeWorkspaces/test_runtime_jobs.py tldw_Server_API/tests/PrototypeWorkspaces/test_preview_broker.py tldw_Server_API/tests/PrototypeWorkspaces/test_promotion_service.py -q` -> 30 passed, 5 warnings.
 
-Final verification after runtime profile-version fix: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/PrototypeWorkspaces -q` -> 97 passed, 5 warnings.
+Final verification after runtime profile-version fix: `./.venv/bin/python -m pytest tldw_Server_API/tests/PrototypeWorkspaces -q` -> 97 passed, 5 warnings.
 
-Security/hygiene verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Prototype_Workspaces/jobs.py tldw_Server_API/app/core/Prototype_Workspaces/jobs_worker.py tldw_Server_API/app/core/Prototype_Workspaces/models.py tldw_Server_API/app/core/Prototype_Workspaces/preview_broker.py tldw_Server_API/app/core/Prototype_Workspaces/service.py -f json -o /tmp/bandit_prototype_risk_gate_3.json` -> 0 findings; `git diff --check` -> clean.
+Security/hygiene verification: `./.venv/bin/python -m bandit -r tldw_Server_API/app/core/Prototype_Workspaces/jobs.py tldw_Server_API/app/core/Prototype_Workspaces/jobs_worker.py tldw_Server_API/app/core/Prototype_Workspaces/models.py tldw_Server_API/app/core/Prototype_Workspaces/preview_broker.py tldw_Server_API/app/core/Prototype_Workspaces/service.py -f json -o /tmp/bandit_prototype_risk_gate_3.json` -> 0 findings; `git diff --check` -> clean.
 
 Opened PR #1729: https://github.com/rmusser01/tldw_server/pull/1729
+
+2026-05-15: Addressed PR #1729 review feedback: moved prototype job exceptions to app/core/exceptions.py, made worker programming/runtime-state failures terminal with stable failure codes, persisted failure_code through WorkerSDK.error_code, generated deterministic snapshot ids for Jobs-backed snapshot saves, propagated top-level preview runtime profile versions, made session preview retry reuse tolerant of archived workspaces, prevented metadata from overriding authoritative snapshot ids, removed new raw-SQL assertions from prototype tests, and cleaned machine-specific paths from the task log.
+
+2026-05-15: Review-fix verification: `./.venv/bin/python -m pytest tldw_Server_API/tests/PrototypeWorkspaces tldw_Server_API/tests/Jobs/test_worker_sdk.py -q` -> 110 passed, 5 warnings; `./.venv/bin/python -m pytest tldw_Server_API/tests/Jobs/test_worker_sdk.py -q` -> 7 passed, 5 warnings after WorkerSDK jitter hardening; Bandit touched-scope run to `/tmp/bandit_prototype_risk_gate_3_review_fixes.json` -> 0 findings; `git diff --check` -> clean.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

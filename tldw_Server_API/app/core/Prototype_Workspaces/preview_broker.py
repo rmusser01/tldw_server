@@ -16,12 +16,12 @@ from tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo import (
     PrototypeWorkspacesRepo,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.exceptions import PrototypeTerminalRuntimeError
 
 from .models import (
     PrototypePreviewHandleRecord,
     PrototypePreviewScope,
     PrototypePreviewStatus,
-    PrototypeTerminalRuntimeError,
     actor_key_for_session,
     preview_scope_id,
 )
@@ -110,8 +110,6 @@ class PrototypePreviewBroker:
         workspace = await self._repo.get_workspace(prototype_workspace_id)
         if not workspace:
             raise PrototypeTerminalRuntimeError("prototype workspace not found")
-        if workspace.get("is_archived"):
-            raise PrototypeTerminalRuntimeError("prototype workspace is archived")
         if not str(snapshot_id or "").strip():
             raise ValueError("snapshot_id is required")
         if not str(runtime_target_url or "").strip():
@@ -149,7 +147,8 @@ class PrototypePreviewBroker:
             prototype_workspace_id=prototype_workspace_id,
             prototype_session_id=prototype_session_id,
         )
-        requested_metadata = metadata or {}
+        requested_metadata = dict(metadata or {})
+        requested_metadata.pop("snapshot_id", None)
         existing_active = await self._repo.get_active_preview_handle_for_scope(scope_id)
         if self._active_record_matches_request(
             existing_active,
@@ -162,6 +161,8 @@ class PrototypePreviewBroker:
             record = self._record_from_dict(existing_active)
             self._sync_record_cache(record)
             return await self.renew_preview_grant(record.handle_id)
+        if workspace.get("is_archived"):
+            raise PrototypeTerminalRuntimeError("prototype workspace is archived")
 
         handle_id = f"pph_{uuid.uuid4().hex}"
         now = _utc_now()
@@ -175,8 +176,8 @@ class PrototypePreviewBroker:
             target_ref=str(runtime_target_url),
             runtime_policy_profile=resolved_runtime_policy,
             metadata={
-                "snapshot_id": str(snapshot_id),
                 **requested_metadata,
+                "snapshot_id": str(snapshot_id),
             },
             created_at=now.isoformat(),
         )

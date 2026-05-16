@@ -256,6 +256,7 @@ async def test_run_non_retryable_failure_marks_failed(monkeypatch, tmp_path):
 
     class NonRetryableErr(Exception):
         retryable = False
+        failure_code = "prototype_runtime_terminal"
 
     async def handler(job_row):
         raise NonRetryableErr("boom")
@@ -268,6 +269,7 @@ async def test_run_non_retryable_failure_marks_failed(monkeypatch, tmp_path):
     assert any(c.get("retryable") is False for c in calls)
     stored = jm.get_job(int(job["id"]))
     assert stored["status"] == "failed"
+    assert stored["error_code"] == "prototype_runtime_terminal"
 
 
 @pytest.mark.asyncio

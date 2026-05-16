@@ -9,12 +9,17 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import (
+    PrototypeJobError,
+    PrototypeJobPayloadError,
+    PrototypeTerminalRuntimeError,
+)
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int as _coerce_int
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env as _jobs_manager
 
 from .jobs import PROTOTYPE_DOMAIN, PROTOTYPE_QUEUE
-from .models import PrototypeJobError, PrototypeJobPayloadError, PrototypeJobType
+from .models import PrototypeJobType
 from .service import PrototypeWorkspaceService
 
 _TERMINAL_RUNTIME_ERROR_MARKERS = (
@@ -30,9 +35,11 @@ _TERMINAL_RUNTIME_ERROR_MARKERS = (
 )
 
 _TERMINAL_PROMOTION_STATUSES = {"failed", "stale", "rejected"}
+_TERMINAL_PROGRAMMING_ERRORS = (TypeError, AttributeError, KeyError, NameError)
 
 
 def _required_int_payload(payload: dict[str, Any], key: str) -> int:
+    """Return a required integer payload value or raise a terminal payload error."""
     value = payload.get(key)
     if value is None or str(value).strip() == "":
         raise PrototypeJobPayloadError(f"{key} is required")
@@ -43,17 +50,21 @@ def _required_int_payload(payload: dict[str, Any], key: str) -> int:
 
 
 def _is_terminal_runtime_error(exc: RuntimeError) -> bool:
+    """Classify runtime errors whose messages describe non-retryable state."""
     message = str(exc).strip().lower()
     return any(marker in message for marker in _TERMINAL_RUNTIME_ERROR_MARKERS)
 
 
 def _coerce_worker_exception(exc: Exception) -> Exception:
+    """Attach stable retry metadata to exceptions crossing the Jobs boundary."""
     if hasattr(exc, "retryable") and hasattr(exc, "failure_code"):
         return exc
     if isinstance(exc, PermissionError):
         return PrototypeJobError(str(exc), retryable=False, failure_code="permission_denied")
+    if isinstance(exc, _TERMINAL_PROGRAMMING_ERRORS):
+        return PrototypeJobError(str(exc), retryable=False, failure_code="worker_terminal")
     if isinstance(exc, ValueError):
-        return PrototypeJobPayloadError(str(exc))
+        return PrototypeTerminalRuntimeError(str(exc))
     if isinstance(exc, RuntimeError) and _is_terminal_runtime_error(exc):
         return PrototypeJobError(str(exc), retryable=False, failure_code="runtime_terminal")
     return PrototypeJobError(str(exc), retryable=True, failure_code="runtime_retryable")
@@ -62,6 +73,7 @@ def _coerce_worker_exception(exc: Exception) -> Exception:
 async def _run_service_operation(
     operation: Callable[[], Awaitable[dict[str, Any]]],
 ) -> dict[str, Any]:
+    """Run a service call and normalize service exceptions for WorkerSDK."""
     try:
         return await operation()
     except asyncio.CancelledError:
@@ -77,12 +89,14 @@ def _job_result(
     retryable: bool = False,
     fields: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Build the stable result envelope persisted for prototype runtime jobs."""
     result = dict(fields or {})
     result.update({"status": status, "job_type": job_type, "retryable": retryable})
     return result
 
 
 def _promotion_job_result(job_type: str, result: dict[str, Any]) -> dict[str, Any]:
+    """Build a promotion result envelope while making terminal outcomes non-retryable."""
     status = str(result.get("status") or "").strip().lower()
     retryable = bool(result.get("retryable")) and status not in _TERMINAL_PROMOTION_STATUSES
     return _job_result(job_type, status=result.get("status") or "unknown", retryable=retryable, fields=result)
@@ -119,13 +133,16 @@ async def handle_prototype_job(
         )
 
     if job_type == PrototypeJobType.PREVIEW_BOOT.value:
+        preview_metadata = dict(payload.get("metadata") or {})
+        if payload.get("runtime_profile_version") is not None:
+            preview_metadata["runtime_profile_version"] = str(payload["runtime_profile_version"])
         grant = await _run_service_operation(
             lambda: service.boot_preview(
                 prototype_workspace_id=str(payload.get("prototype_workspace_id") or ""),
                 prototype_session_id=payload.get("prototype_session_id"),
                 snapshot_id=str(payload.get("snapshot_id") or ""),
                 runtime_target_url=str(payload.get("runtime_target_url") or ""),
-                metadata=payload.get("metadata") or {},
+                metadata=preview_metadata,
                 runtime_policy_profile=payload.get("runtime_policy_profile"),
             )
         )

@@ -49,6 +49,28 @@ class _RetryablePreviewFailureService:
         raise RuntimeError("preview runtime temporarily unavailable")
 
 
+class _RuntimeStatePreviewFailureService:
+    async def boot_preview(self, **_kwargs: Any) -> dict[str, Any]:
+        raise ValueError("prototype workspace not found")
+
+
+class _ProgrammingBugPreviewFailureService:
+    async def boot_preview(self, **_kwargs: Any) -> dict[str, Any]:
+        raise TypeError("unexpected preview argument")
+
+
+class _PreviewMetadataCaptureService:
+    def __init__(self) -> None:
+        self.kwargs: dict[str, Any] | None = None
+
+    async def boot_preview(self, **kwargs: Any) -> dict[str, Any]:
+        self.kwargs = kwargs
+        return {
+            "preview_handle": "pph_metadata",
+            "preview_url": "http://127.0.0.1/preview/pph_metadata",
+        }
+
+
 class _NoopService:
     pass
 
@@ -148,6 +170,82 @@ async def test_preview_boot_transient_runtime_failure_is_retryable_for_worker() 
 
     assert getattr(exc_info.value, "retryable", False) is True
     assert getattr(exc_info.value, "failure_code", None) == "runtime_retryable"
+
+
+@pytest.mark.asyncio
+async def test_preview_boot_runtime_state_valueerror_is_terminal_for_worker() -> None:
+    worker_module = importlib.import_module(
+        "tldw_Server_API.app.core.Prototype_Workspaces.jobs_worker"
+    )
+
+    with pytest.raises(RuntimeError, match="prototype workspace not found") as exc_info:
+        await worker_module.handle_prototype_job(
+            {
+                "job_type": "preview_boot",
+                "payload": {
+                    "prototype_workspace_id": "pw_missing",
+                    "prototype_session_id": "session_1",
+                    "snapshot_id": "snap_1",
+                    "runtime_target_url": "http://127.0.0.1:9101",
+                },
+            },
+            service=_RuntimeStatePreviewFailureService(),
+        )
+
+    assert getattr(exc_info.value, "retryable", True) is False
+    assert getattr(exc_info.value, "failure_code", None) == "runtime_terminal"
+
+
+@pytest.mark.asyncio
+async def test_preview_boot_programming_error_is_terminal_for_worker() -> None:
+    worker_module = importlib.import_module(
+        "tldw_Server_API.app.core.Prototype_Workspaces.jobs_worker"
+    )
+
+    with pytest.raises(RuntimeError, match="unexpected preview argument") as exc_info:
+        await worker_module.handle_prototype_job(
+            {
+                "job_type": "preview_boot",
+                "payload": {
+                    "prototype_workspace_id": "pw_1",
+                    "prototype_session_id": "session_1",
+                    "snapshot_id": "snap_1",
+                    "runtime_target_url": "http://127.0.0.1:9101",
+                },
+            },
+            service=_ProgrammingBugPreviewFailureService(),
+        )
+
+    assert getattr(exc_info.value, "retryable", True) is False
+    assert getattr(exc_info.value, "failure_code", None) == "worker_terminal"
+
+
+@pytest.mark.asyncio
+async def test_preview_boot_worker_propagates_top_level_runtime_profile_version() -> None:
+    worker_module = importlib.import_module(
+        "tldw_Server_API.app.core.Prototype_Workspaces.jobs_worker"
+    )
+    service = _PreviewMetadataCaptureService()
+
+    result = await worker_module.handle_prototype_job(
+        {
+            "job_type": "preview_boot",
+            "payload": {
+                "prototype_workspace_id": "pw_1",
+                "prototype_session_id": "session_1",
+                "snapshot_id": "snap_1",
+                "runtime_target_url": "http://127.0.0.1:9101",
+                "metadata": {"runtime_profile_version": "v1", "caller": "test"},
+                "runtime_profile_version": "v2",
+            },
+        },
+        service=service,
+    )
+
+    assert result["preview_handle"] == "pph_metadata"
+    assert service.kwargs is not None
+    assert service.kwargs["metadata"]["caller"] == "test"
+    assert service.kwargs["metadata"]["runtime_profile_version"] == "v2"
 
 
 @pytest.mark.asyncio
@@ -336,6 +434,36 @@ async def test_preview_boot_idempotency_distinguishes_runtime_profile_version(
 
 
 @pytest.mark.asyncio
+async def test_snapshot_save_job_derives_stable_snapshot_id_when_missing(
+    repo,
+    prototype_db,
+    prototype_jobs,
+):
+    workspace, canonical = await _seed_branch_workspace(repo, prototype_db)
+    session = await repo.create_session(
+        prototype_workspace_id=workspace["id"],
+        base_snapshot_id=canonical["snapshot_id"],
+        actor_type="internal_collaborator",
+        actor_user_id=2,
+    )
+
+    first = await prototype_jobs.enqueue_snapshot_save(
+        prototype_session_id=session["id"],
+        save_request_id="retry-save",
+        storage_ref="prototype://retry-save",
+    )
+    second = await prototype_jobs.enqueue_snapshot_save(
+        prototype_session_id=session["id"],
+        save_request_id="retry-save",
+        storage_ref="prototype://retry-save",
+    )
+
+    assert first["id"] == second["id"]
+    assert first["payload"]["snapshot_id"] == second["payload"]["snapshot_id"]
+    assert first["payload"]["snapshot_id"].startswith("psnap_")
+
+
+@pytest.mark.asyncio
 async def test_revoked_external_collaborator_cannot_reuse_branch_session(
     repo,
     prototype_db,
@@ -431,15 +559,14 @@ async def test_save_session_snapshot_reuses_existing_snapshot_for_same_snapshot_
         storage_ref="prototype://retry-safe",
         diff_summary={"step": 1},
     )
-    rows = prototype_db.execute(
-        "SELECT COUNT(*) FROM prototype_snapshots WHERE id = ?",
-        ("snap_retry_safe",),
-    ).fetchone()
+    persisted_snapshot = await repo.get_snapshot("snap_retry_safe")
     refreshed_session = await repo.get_session(session["id"])
 
     assert first["snapshot_id"] == "snap_retry_safe"
     assert second["snapshot_id"] == "snap_retry_safe"
-    assert rows[0] == 1
+    assert persisted_snapshot is not None
+    assert persisted_snapshot["snapshot_id"] == "snap_retry_safe"
+    assert persisted_snapshot["created_from_session_id"] == session["id"]
     assert refreshed_session["last_saved_snapshot_id"] == "snap_retry_safe"
 
 
