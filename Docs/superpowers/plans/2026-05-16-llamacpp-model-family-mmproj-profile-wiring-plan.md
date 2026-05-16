@@ -56,7 +56,8 @@ Create:
 Modify:
 
 - `tldw_Server_API/app/core/Local_LLM/llamacpp_inventory_service.py`
-  - Add a public asset resolver such as `resolve_asset_id(asset_id: str, expected_kind: str | None = None) -> LlamaCppAsset`.
+  - Add a public asset resolver such as `resolve_asset_id(asset_id: str, expected_kind: str | None = None, assets: list[LlamaCppAsset] | None = None) -> LlamaCppAsset`.
+  - Let callers pass a pre-scanned asset list so profile capability resolution and metadata generation do not repeat full model-directory scans.
   - Keep `resolve_model_id()` as the legacy GGUF-only helper.
 - `tldw_Server_API/app/core/Local_LLM/llamacpp_supervisor_service.py`
   - Use the new resolver before `runner.start()`.
@@ -156,11 +157,16 @@ Expected: FAIL because `resolve_asset_id()` does not exist.
 Implement in `llamacpp_inventory_service.py`:
 
 ```python
-def resolve_asset_id(asset_id: str, expected_kind: str | None = None) -> LlamaCppAsset:
+def resolve_asset_id(
+    asset_id: str,
+    expected_kind: str | None = None,
+    assets: list[LlamaCppAsset] | None = None,
+) -> LlamaCppAsset:
     wanted = str(asset_id or "").strip()
     if not wanted:
         raise ModelNotFoundError("Asset ID is required.")
-    for asset in scan_assets().assets:
+    search_pool = assets if assets is not None else scan_assets().assets
+    for asset in search_pool:
         if asset.asset_id != wanted:
             continue
         if expected_kind and asset.kind != expected_kind:
@@ -239,9 +245,19 @@ class LlamaCppResolvedProfileLaunch(BaseModel):
 Add:
 
 ```python
-def resolve_profile_launch(profile: LlamaCppProfile) -> LlamaCppResolvedProfileLaunch: ...
-def profile_capability_metadata(profile: LlamaCppProfile) -> dict[str, object]: ...
+def resolve_profile_launch(
+    profile: LlamaCppProfile,
+    assets: list[LlamaCppAsset] | None = None,
+) -> LlamaCppResolvedProfileLaunch: ...
+
+
+def profile_capability_metadata(
+    profile: LlamaCppProfile,
+    assets: list[LlamaCppAsset] | None = None,
+) -> dict[str, object]: ...
 ```
+
+When resolving multiple profiles, scan once and pass the same asset list into each helper call.
 
 Mode mapping:
 
@@ -295,7 +311,13 @@ git commit -m "feat: add llama.cpp profile capability resolver"
 Add tests that patch asset resolution and runner factory:
 
 ```python
-async def test_supervisor_starts_vision_profile_with_resolved_mmproj(tmp_path):
+async def test_supervisor_starts_vision_profile_with_resolved_mmproj(monkeypatch, tmp_path):
+    _base_path, mmproj_path = configure_supervisor_assets(
+        monkeypatch,
+        tmp_path,
+        base_asset_id="gguf:base",
+        mmproj_asset_id="mmproj:projector",
+    )
     profile = LlamaCppProfile(
         profile_id="vision",
         name="Vision",
@@ -397,6 +419,7 @@ git commit -m "feat: wire llama.cpp mmproj profiles into launch"
 
 - Create or modify: `tldw_Server_API/app/core/Local_LLM/llamacpp_profile_capabilities.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/llm_providers.py`
+- Modify if needed: `tldw_Server_API/app/core/Local_LLM/llamacpp_supervisor_service.py`
 - Test: `tldw_Server_API/tests/LLM_Local/test_llm_models_metadata_llamacpp_profiles.py`
 
 - [ ] **Step 1: Write failing metadata endpoint tests**
@@ -447,9 +470,12 @@ Expected: FAIL because managed profile metadata is not appended.
 In `llamacpp_profile_capabilities.py`, add:
 
 ```python
-def managed_profile_model_metadata(profile: LlamaCppProfile) -> dict[str, object]:
+def managed_profile_model_metadata(
+    profile: LlamaCppProfile,
+    assets: list[LlamaCppAsset] | None = None,
+) -> dict[str, object]:
     alias = profile.provider_alias or f"llamacpp:{profile.profile_id}"
-    capabilities = profile_capability_metadata(profile)
+    capabilities = profile_capability_metadata(profile, assets=assets)
     return {
         "provider": "llama.cpp",
         "model": alias,
@@ -468,13 +494,18 @@ Do not expose resolved local paths in this public metadata payload. If a profile
 
 - [ ] **Step 4: Append entries in `llm_providers.py`**
 
+Reuse the existing manager/supervisor path rather than constructing a separate `JsonLlamaCppProfileStore` in the endpoint. If the endpoint needs access to managed profiles, add a `Request` parameter to `get_models_metadata()` and read `request.app.state.llm_manager.llamacpp_supervisor`, using the same fallback pattern as `llamacpp.py` tests if needed.
+
 Add a small helper near `get_models_metadata()`:
 
 ```python
-def _managed_llamacpp_profile_metadata_entries() -> list[dict[str, Any]]:
+def _managed_llamacpp_profile_metadata_entries(supervisor: LlamaCppSupervisor | None) -> list[dict[str, Any]]:
+    if supervisor is None:
+        return []
     try:
-        store = JsonLlamaCppProfileStore(default_profile_store_path())
-        return [managed_profile_model_metadata(profile) for profile in store.list_profiles()]
+        profiles = supervisor.list_profiles()
+        assets = llamacpp_inventory_service.scan_assets().assets if profiles else []
+        return [managed_profile_model_metadata(profile, assets=assets) for profile in profiles]
     except Exception:
         logger.debug("Failed to load managed llama.cpp profiles for model metadata", exc_info=True)
         return []

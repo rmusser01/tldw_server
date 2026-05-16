@@ -4,7 +4,7 @@ title: Plan llama.cpp model-family and mmproj profile wiring
 status: Done
 assignee: []
 created_date: '2026-05-16 15:06'
-updated_date: '2026-05-16 15:14'
+updated_date: '2026-05-16 15:20'
 labels:
   - llamacpp
   - planning
@@ -40,12 +40,16 @@ Create the next implementation plan for the llama.cpp managed runtime roadmap af
 Created Docs/superpowers/plans/2026-05-16-llamacpp-model-family-mmproj-profile-wiring-plan.md as the next implementation plan for the approved llama.cpp managed runtime roadmap. The plan scopes the next slice to model-family modes, base GGUF/mmproj profile launch resolution, managed profile metadata, and minimal WebUI capability visibility. It deliberately leaves remote downloads/catalogs, full profile editing, and advanced Chat/Knowledge routing for follow-up tasks. Verification for this planning-only slice: inspected current runtime/inventory/provider/UI code on origin/dev, reviewed the plan file, and ran git diff --check successfully. Bandit skipped because this task changes only planning/task documentation. Note: origin/dev currently has a duplicate TASK-397 ID collision, so this was tracked as standalone TASK-407 instead of being linked as a child of TASK-397.
 
 PR: https://github.com/rmusser01/tldw_server/pull/1772
+
+Review follow-up: PR #1772 has three unresolved Gemini inline threads on the plan. Verified as still valid before editing: repeated scan_assets() guidance, undefined mmproj_path in a test snippet, and direct JsonLlamaCppProfileStore use in metadata helper guidance.
+
+Review follow-up fixed in plan: resolve_asset_id now accepts an optional pre-scanned asset list; profile capability helpers and managed profile metadata pass that asset list through to avoid repeated full scans; the supervisor test snippet now defines mmproj_path through a fixture helper; and metadata planning now reuses the existing llm_manager/supervisor path instead of constructing JsonLlamaCppProfileStore directly in llm_providers.py. Verification: reviewed the patched plan snippets and ran git diff --check successfully. Bandit still skipped because only docs/task files changed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added a concrete TDD implementation plan for llama.cpp model-family and mmproj profile wiring. It defines the resolver module, supervisor launch injection, metadata endpoint changes, minimal Admin UI follow-through, focused backend/frontend verification commands, Bandit expectations, and follow-up boundaries. No product code was changed in this planning slice.
+Added the llama.cpp model-family/mmproj implementation plan and addressed PR #1772 review feedback. The plan now avoids repeated asset scans, fixes the supervisor test snippet variable, and routes metadata planning through the existing supervisor/manager path. No runtime code changed in this planning PR.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
