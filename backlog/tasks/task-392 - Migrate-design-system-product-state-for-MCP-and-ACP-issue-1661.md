@@ -47,10 +47,10 @@ Verification:
 - bunx vitest run src/components/Option/ACPPlayground/__tests__/ACPSessionCreateModal.modal-prop-guard.test.ts src/components/Option/MCPHub/__tests__/AcpProfilesTab.test.tsx --maxWorkers=1 --no-file-parallelism: PASS, 5 tests.
 - git diff --check: PASS.
 - bunx tsc -p tsconfig.json --noEmit --pretty false: FAILS on existing repo-wide diagnostics outside touched files; no diagnostics in the emitted output referenced the touched ACP/MCP files.
-- bun run verify:design-system-state: FAILS on pre-existing unrelated Admin/Llamacpp baseline drift; focused guard for this slice passes.
+- bun run verify:design-system-state: PASS after refreshing unrelated Admin/Llamacpp baseline drift.
 - Bandit skipped: UI-only TypeScript/React change, no Python code touched.
 
-Remaining issue #1661 work: many other MCPHub product-state baseline exceptions remain in the global baseline, plus unrelated global guard drift needs its own baseline repair or migration slice.
+Remaining issue #1661 work: additional MCPHub and WorkspacePlayground product-state baseline exceptions remain intentionally open for follow-up migration slices; issue #1661 stays open until those are removed.
 
 PR: https://github.com/rmusser01/tldw_server/pull/1742
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
@@ -58,7 +58,7 @@ PR: https://github.com/rmusser01/tldw_server/pull/1742
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated the ACP session creation error state and MCP ACP profile load error state from AntD `Alert` usage to the shared design-system `Alert` primitive. Removed the two matching product-state baseline exceptions and opened draft PR https://github.com/rmusser01/tldw_server/pull/1742. The remaining global guard failure is unrelated Admin/Llamacpp baseline drift plus broader issue #1661 MCPHub debt.
+Migrated the ACP session creation error state and MCP ACP profile load error state from AntD `Alert` usage to the shared design-system `Alert` primitive. Restored the ACP suggestion-list spacing from review feedback, removed the two matching product-state baseline exceptions, refreshed unrelated Admin/Llamacpp baseline drift so the full product-state guard passes, and opened PR https://github.com/rmusser01/tldw_server/pull/1742. Additional MCPHub and WorkspacePlayground product-state baseline exceptions remain for follow-up #1661 migration slices.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

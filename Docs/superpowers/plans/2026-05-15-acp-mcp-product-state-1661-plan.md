@@ -22,7 +22,7 @@
 - [x] Confirm the guard state before edits.
 - [x] Record unrelated baseline noise in the Backlog task if present.
 
-Baseline note: the full guard is already red on `dev` in this worktree because unrelated Admin/Llamacpp product-state findings no longer match their stored baseline IDs. This slice will verify the touched ACP/MCP files with a focused guard invocation and document the global guard blocker rather than broadening the patch into Admin baseline repair.
+Baseline note: the full guard was red on `dev` in this worktree because unrelated Admin/Llamacpp product-state findings no longer matched their stored baseline IDs. The review-fix pass refreshed those unrelated Admin/Llamacpp baseline IDs so `bun run verify:design-system-state` passes again without migrating additional product-state surfaces.
 
 ### Stage 2: ACP Modal Alert Migration
 
@@ -54,7 +54,7 @@ Baseline note: the full guard is already red on `dev` in this worktree because u
 
 - [x] Remove the stale baseline entries for `ACPSessionCreateModal.tsx:Alert` and `AcpProfilesTab.tsx:Alert`.
 - [x] Run a focused product-state guard over the two touched source files and confirm no new blocked findings.
-- [x] Run `bun run verify:design-system-state` from `apps/packages/ui` and document the pre-existing unrelated Admin/Llamacpp baseline failure.
+- [x] Refresh the unrelated Admin/Llamacpp baseline drift and run `bun run verify:design-system-state` from `apps/packages/ui`.
 - [x] Run both focused Vitest commands from stages 2 and 3.
 - [x] Run `git diff --check`.
 - [x] Skip Bandit with an explicit UI-only rationale in the Backlog task.

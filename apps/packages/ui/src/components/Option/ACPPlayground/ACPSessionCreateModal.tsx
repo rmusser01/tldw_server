@@ -156,7 +156,7 @@ const CreationProgress: React.FC<CreationProgressProps> = ({ step, error }) => {
           title={error.message}
         >
           {error.suggestions.length > 0 ? (
-            <ul className="list-inside list-disc">
+            <ul className="mt-2 list-inside list-disc text-sm">
               {error.suggestions.map((s, i) => (
                 <li key={i}>
                   <strong>{s.action}</strong>
