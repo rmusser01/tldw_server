@@ -539,6 +539,8 @@ def _key_record_from_row(row: dict[str, Any]) -> SyncKeyRecord:
 
 
 def _attachment_from_row(row: dict[str, Any], *, stored: bool = True) -> SyncAttachment:
+    """Convert a sync_attachments row into a core attachment model."""
+
     return SyncAttachment(
         attachment_id=row["attachment_id"],
         dataset_id=row["dataset_id"],
@@ -638,6 +640,8 @@ def _key_record_fingerprint_from_row(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _attachment_fingerprint_from_create(attachment: SyncAttachmentCreate) -> dict[str, Any]:
+    """Return idempotency-comparable fields from an attachment create model."""
+
     return {
         "attachment_id": attachment.attachment_id,
         "dataset_id": attachment.dataset_id,
@@ -653,6 +657,8 @@ def _attachment_fingerprint_from_create(attachment: SyncAttachmentCreate) -> dic
 
 
 def _attachment_fingerprint_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Return idempotency-comparable fields from a stored attachment row."""
+
     return {
         "attachment_id": row["attachment_id"],
         "dataset_id": row["dataset_id"],

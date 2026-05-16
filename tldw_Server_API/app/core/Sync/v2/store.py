@@ -167,6 +167,8 @@ class SyncV2Store:
         )
 
     def store_attachment(self, attachment: SyncAttachmentCreate) -> SyncAttachment:
+        """Store or deduplicate an encrypted attachment through the DB layer."""
+
         return self.db.store_attachment(attachment)
 
     def summarize_restore_manifest_dataset(

@@ -631,6 +631,8 @@ async def upload_sync_v2_attachment(
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
 ):
+    """Validate and persist a small encrypted Sync v2 attachment upload."""
+
     try:
         request = SyncAttachmentUploadRequest.model_validate(await raw_request.json())
     except (json.JSONDecodeError, ValidationError) as exc:
