@@ -519,6 +519,33 @@ export interface PersonaVisualImportProposedPlan extends Record<string, unknown>
   renderer_import_preview?: PersonaVisualRendererImportPreview
 }
 
+export type PersonaVisualImportBundleAssetGroup =
+  | "neutral_anchor"
+  | "static_talking_sheet"
+  | "static_reaction_sheet"
+  | "animation_strips"
+  | "animation_atlas"
+
+export interface PersonaVisualImportBundleAssetSummary
+  extends Record<string, unknown> {
+  source_asset_id?: string | null
+  asset_role?: PersonaVisualAssetRole | string | null
+  asset_group?: PersonaVisualImportBundleAssetGroup | string | null
+  asset_bytes_status?: string | null
+  mime_type?: string | null
+  width?: number | null
+  height?: number | null
+  manifest_referenced?: boolean | null
+}
+
+export interface PersonaVisualImportBundleSummary extends Record<string, unknown> {
+  pack_title?: string | null
+  asset_count?: number | null
+  assets_with_bytes?: number | null
+  manifest_asset_references?: string[]
+  assets?: PersonaVisualImportBundleAssetSummary[]
+}
+
 export interface PersonaVisualImportPreviewResponse {
   preview_id: string
   job_id: string
@@ -531,7 +558,7 @@ export interface PersonaVisualImportPreviewResponse {
   archive_sha256?: string | null
   canonical_payload_fingerprint?: string | null
   schema_version?: string | null
-  bundle_summary: Record<string, unknown>
+  bundle_summary: PersonaVisualImportBundleSummary
   validation_warnings: unknown[]
   conflicts: PersonaVisualImportConflict[]
   proposed_plan: PersonaVisualImportProposedPlan

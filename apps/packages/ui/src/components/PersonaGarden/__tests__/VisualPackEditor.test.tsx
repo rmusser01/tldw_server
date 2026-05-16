@@ -4112,6 +4112,222 @@ describe("VisualPackEditor", () => {
     ).toBe(false)
   })
 
+  it("surfaces Buddy production packet asset diagnostics during import review", async () => {
+    const calls: string[] = []
+    const pack = makeVisualPack()
+    let importCommitStarts = 0
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/import-previews" &&
+        method === "POST"
+      ) {
+        return okResponse({
+          preview_id: "preview-buddy-packet",
+          job_id: "preview-job-buddy-packet",
+          portability_job_id: "portability-preview-buddy-packet",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "queued",
+          stage: "queued"
+        })
+      }
+      if (
+        path ===
+          "/api/v1/persona/profiles/persona-1/visual-packs/import-previews/preview-buddy-packet" &&
+        method === "GET"
+      ) {
+        return okResponse({
+          preview_id: "preview-buddy-packet",
+          job_id: "preview-job-buddy-packet",
+          portability_job_id: "portability-preview-buddy-packet",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "completed",
+          visual_status: "completed",
+          stage: "completed",
+          archive_sha256: "sha-buddy-packet",
+          canonical_payload_fingerprint: "fingerprint-buddy-packet",
+          schema_version: "persona_visual_pack.v1",
+          bundle_summary: {
+            pack_title: "Buddy Pipeline Packet",
+            asset_count: 6,
+            assets_with_bytes: 6,
+            manifest_asset_references: [
+              "buddy-animation-atlas",
+              "buddy-strip-required"
+            ],
+            assets: [
+              {
+                source_asset_id: "buddy-neutral-anchor",
+                asset_role: "preview",
+                asset_group: "neutral_anchor",
+                asset_bytes_status: "present",
+                mime_type: "image/png",
+                width: 512,
+                height: 512,
+                manifest_referenced: false
+              },
+              {
+                source_asset_id: "buddy-static-talking-sheet",
+                asset_role: "still_pose",
+                asset_group: "static_talking_sheet",
+                asset_bytes_status: "present",
+                mime_type: "image/png",
+                width: 1024,
+                height: 512,
+                manifest_referenced: false
+              },
+              {
+                source_asset_id: "buddy-static-reaction-sheet",
+                asset_role: "still_pose",
+                asset_group: "static_reaction_sheet",
+                asset_bytes_status: "present",
+                mime_type: "image/png",
+                width: 1024,
+                height: 512,
+                manifest_referenced: false
+              },
+              {
+                source_asset_id: "buddy-strip-required",
+                asset_role: "sprite_sheet",
+                asset_group: "animation_strips",
+                asset_bytes_status: "present",
+                mime_type: "image/png",
+                width: 1024,
+                height: 256,
+                manifest_referenced: true
+              },
+              {
+                source_asset_id: "buddy-animation-atlas",
+                asset_role: "sprite_sheet",
+                asset_group: "animation_atlas",
+                asset_bytes_status: "present",
+                mime_type: "image/png",
+                width: 1024,
+                height: 1024,
+                manifest_referenced: true
+              },
+              {
+                source_asset_id: "mystery-source",
+                asset_role: "frame",
+                asset_group: null,
+                asset_bytes_status: "present",
+                mime_type: "image/png",
+                width: 128,
+                height: 128,
+                manifest_referenced: false
+              }
+            ]
+          },
+          validation_warnings: [],
+          conflicts: [],
+          proposed_plan: { target_mode: "create_new" },
+          quota_estimate: { asset_bytes: 4096 },
+          required_choices: [],
+          target_warnings: []
+        })
+      }
+      if (
+        path ===
+          "/api/v1/persona/profiles/persona-1/visual-packs/import-previews/preview-buddy-packet/commit" &&
+        method === "POST"
+      ) {
+        importCommitStarts += 1
+        expect(parseJsonBody(init?.body)).toMatchObject({
+          trust_mode: "untrusted_import",
+          target_mode: "create_new"
+        })
+        return okResponse({
+          job_id: "import-job-buddy-packet",
+          portability_job_id: "portability-import-buddy-packet",
+          operation: "import_commit",
+          preview_id: "preview-buddy-packet",
+          target_persona_id: "persona-1",
+          status: "queued",
+          stage: "queued"
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent(
+        "draft"
+      )
+    )
+    const archive = new File(["portable archive"], "portable.tldw-persona-vpack", {
+      type: "application/octet-stream"
+    })
+    fireEvent.change(screen.getByTestId("persona-visual-import-preview-input"), {
+      target: { files: [archive] }
+    })
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-preview-status")).toHaveTextContent(
+        "queued"
+      )
+    )
+
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-refresh-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-preview-status")).toHaveTextContent(
+        "completed"
+      )
+    )
+
+    const diagnostics = screen.getByTestId(
+      "persona-visual-import-buddy-packet-diagnostics"
+    )
+    expect(diagnostics).toHaveTextContent("Buddy pipeline packet")
+    expect(diagnostics).toHaveTextContent("Neutral anchor")
+    expect(diagnostics).toHaveTextContent("Static talking sheet")
+    expect(diagnostics).toHaveTextContent("Static reaction sheet")
+    expect(diagnostics).toHaveTextContent("Animation strips")
+    expect(diagnostics).toHaveTextContent("Animation atlas")
+    expect(diagnostics).toHaveTextContent("Source material")
+    expect(diagnostics).toHaveTextContent("Runtime output")
+    expect(diagnostics).toHaveTextContent("Manifest references")
+    expect(diagnostics).toHaveTextContent("buddy-animation-atlas")
+    expect(diagnostics).toHaveTextContent("buddy-strip-required")
+    expect(diagnostics).not.toHaveTextContent("mystery-source")
+
+    const commitButton = screen.getByTestId("persona-visual-import-commit-button")
+    expect(commitButton).toBeEnabled()
+    fireEvent.click(commitButton)
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-commit-status")).toHaveTextContent(
+        "queued"
+      )
+    )
+    expect(importCommitStarts).toBe(1)
+    expect(calls.some((call) => call.includes("/activate"))).toBe(false)
+  })
+
   it("rejects unsupported visual import archive filenames before upload", async () => {
     const calls: string[] = []
     const pack = {

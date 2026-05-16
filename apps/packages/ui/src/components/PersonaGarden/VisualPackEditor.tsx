@@ -54,6 +54,8 @@ import type {
   PersonaVisualAssetRole,
   PersonaVisualAuthoredTrigger,
   PersonaVisualBuiltinStateId,
+  PersonaVisualImportBundleAssetGroup,
+  PersonaVisualImportBundleAssetSummary,
   PersonaVisualCandidate,
   PersonaVisualDuplicateTarget,
   PersonaVisualLibraryItem,
@@ -784,6 +786,127 @@ const previewRoleCategories = (
   )
   return Object.keys(categories).length ? categories : undefined
 }
+
+const BUDDY_PIPELINE_ASSET_GROUP_LABELS: Record<
+  PersonaVisualImportBundleAssetGroup,
+  string
+> = {
+  neutral_anchor: "Neutral anchor",
+  static_talking_sheet: "Static talking sheet",
+  static_reaction_sheet: "Static reaction sheet",
+  animation_strips: "Animation strips",
+  animation_atlas: "Animation atlas"
+}
+
+const BUDDY_PIPELINE_SOURCE_GROUPS = new Set<PersonaVisualImportBundleAssetGroup>([
+  "neutral_anchor",
+  "static_talking_sheet",
+  "static_reaction_sheet"
+])
+
+const BUDDY_PIPELINE_RUNTIME_GROUPS = new Set<PersonaVisualImportBundleAssetGroup>([
+  "animation_strips",
+  "animation_atlas"
+])
+
+type BuddyPipelineAssetKind = "source" | "runtime"
+
+interface BuddyPipelinePacketAssetDiagnostic {
+  sourceAssetId: string | null
+  assetRole: string | null
+  assetGroup: PersonaVisualImportBundleAssetGroup
+  assetKind: BuddyPipelineAssetKind
+  assetBytesStatus: string | null
+  mimeType: string | null
+  dimensions: string | null
+  manifestReferenced: boolean
+}
+
+interface BuddyPipelinePacketDiagnostics {
+  assets: BuddyPipelinePacketAssetDiagnostic[]
+  manifestAssetReferences: string[]
+}
+
+const getBuddyPipelineAssetGroup = (
+  value: unknown
+): PersonaVisualImportBundleAssetGroup | null => {
+  const group = previewString(value)
+  if (!group) return null
+  return Object.prototype.hasOwnProperty.call(
+    BUDDY_PIPELINE_ASSET_GROUP_LABELS,
+    group
+  )
+    ? (group as PersonaVisualImportBundleAssetGroup)
+    : null
+}
+
+const getBuddyPipelineAssetKind = (
+  group: PersonaVisualImportBundleAssetGroup
+): BuddyPipelineAssetKind =>
+  BUDDY_PIPELINE_SOURCE_GROUPS.has(group) &&
+  !BUDDY_PIPELINE_RUNTIME_GROUPS.has(group)
+    ? "source"
+    : "runtime"
+
+const getBuddyPipelineAssetDimensions = (
+  asset: PersonaVisualImportBundleAssetSummary
+): string | null => {
+  const width = previewNumber(asset.width)
+  const height = previewNumber(asset.height)
+  return width && height ? `${width}x${height}` : null
+}
+
+const getBuddyPipelinePacketDiagnostics = (
+  preview: PersonaVisualImportPreviewResponse | null
+): BuddyPipelinePacketDiagnostics | null => {
+  const summary = preview?.bundle_summary
+  if (!summary) return null
+  const manifestAssetReferences = previewStringList(
+    summary.manifest_asset_references
+  )
+  const manifestReferenceSet = new Set(manifestAssetReferences)
+  const rawAssets = Array.isArray(summary.assets) ? summary.assets : []
+  const assets = rawAssets.reduce<BuddyPipelinePacketAssetDiagnostic[]>(
+    (nextAssets, rawAsset) => {
+      if (!isRecord(rawAsset)) return nextAssets
+      const asset = rawAsset as PersonaVisualImportBundleAssetSummary
+      const assetGroup = getBuddyPipelineAssetGroup(asset.asset_group)
+      if (!assetGroup) return nextAssets
+      const sourceAssetId = previewString(asset.source_asset_id)
+      const manifestReferenced =
+        previewBoolean(asset.manifest_referenced) === true ||
+        Boolean(sourceAssetId && manifestReferenceSet.has(sourceAssetId))
+      nextAssets.push({
+        sourceAssetId,
+        assetRole: previewString(asset.asset_role),
+        assetGroup,
+        assetKind: getBuddyPipelineAssetKind(assetGroup),
+        assetBytesStatus: previewString(asset.asset_bytes_status),
+        mimeType: previewString(asset.mime_type),
+        dimensions: getBuddyPipelineAssetDimensions(asset),
+        manifestReferenced
+      })
+      return nextAssets
+    },
+    []
+  )
+  return assets.length ? { assets, manifestAssetReferences } : null
+}
+
+const getBuddyPipelineAssetDetailText = (
+  asset: BuddyPipelinePacketAssetDiagnostic,
+  manifestReferencedLabel: string
+): string =>
+  [
+    asset.sourceAssetId,
+    asset.assetRole,
+    asset.assetBytesStatus,
+    asset.mimeType,
+    asset.dimensions,
+    asset.manifestReferenced ? manifestReferencedLabel : null
+  ]
+    .filter(Boolean)
+    .join(" / ")
 
 const getRendererImportPreview = (
   preview: PersonaVisualImportPreviewResponse | null
@@ -2820,6 +2943,16 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const rendererImportPreview = getRendererImportPreview(fullImportPreview)
   const rendererImportRoleSummary =
     getRendererImportPreviewRoleSummary(rendererImportPreview)
+  const buddyPipelinePacketDiagnostics =
+    getBuddyPipelinePacketDiagnostics(fullImportPreview)
+  const buddyPipelineSourceAssets =
+    buddyPipelinePacketDiagnostics?.assets.filter(
+      (asset) => asset.assetKind === "source"
+    ) || []
+  const buddyPipelineRuntimeAssets =
+    buddyPipelinePacketDiagnostics?.assets.filter(
+      (asset) => asset.assetKind === "runtime"
+    ) || []
   const importCommitBlockers = getImportCommitBlockers(
     fullImportPreview,
     rendererImportPreview
@@ -2946,6 +3079,101 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           {importPreviewJobCopy ? (
             <div data-testid="persona-visual-import-preview-job-copy">
               {importPreviewJobCopy}
+            </div>
+          ) : null}
+          {buddyPipelinePacketDiagnostics ? (
+            <div
+              data-testid="persona-visual-import-buddy-packet-diagnostics"
+              className="rounded border border-border bg-bg p-2"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium text-text">
+                  {t("sidepanel:personaGarden.visuals.buddyPipelinePacketTitle", {
+                    defaultValue: "Buddy pipeline packet"
+                  })}
+                </span>
+                <Tag>
+                  {t("sidepanel:personaGarden.visuals.buddyPipelineAssetCount", {
+                    defaultValue: "{{count}} assets",
+                    count: buddyPipelinePacketDiagnostics.assets.length
+                  })}
+                </Tag>
+              </div>
+              {buddyPipelinePacketDiagnostics.manifestAssetReferences.length ? (
+                <div className="mt-1">
+                  {t("sidepanel:personaGarden.visuals.buddyPipelineManifestReferences", {
+                    defaultValue: "Manifest references"
+                  })}
+                  :{" "}
+                  {buddyPipelinePacketDiagnostics.manifestAssetReferences.join(
+                    ", "
+                  )}
+                </div>
+              ) : null}
+              {buddyPipelineSourceAssets.length ? (
+                <div className="mt-2">
+                  <div className="font-medium text-text">
+                    {t("sidepanel:personaGarden.visuals.buddyPipelineSourceMaterial", {
+                      defaultValue: "Source material"
+                    })}
+                  </div>
+                  <ul className="mt-1 list-disc space-y-1 pl-5">
+                    {buddyPipelineSourceAssets.map((asset, index) => (
+                      <li key={`${asset.assetGroup}-${asset.sourceAssetId || index}`}>
+                        <span className="text-text">
+                          {t(
+                            `sidepanel:personaGarden.visuals.buddyPipelineAssetGroup.${asset.assetGroup}`,
+                            {
+                              defaultValue:
+                                BUDDY_PIPELINE_ASSET_GROUP_LABELS[asset.assetGroup]
+                            }
+                          )}
+                        </span>
+                        {": "}
+                        {getBuddyPipelineAssetDetailText(
+                          asset,
+                          t(
+                            "sidepanel:personaGarden.visuals.buddyPipelineManifestReferenced",
+                            { defaultValue: "manifest referenced" }
+                          )
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {buddyPipelineRuntimeAssets.length ? (
+                <div className="mt-2">
+                  <div className="font-medium text-text">
+                    {t("sidepanel:personaGarden.visuals.buddyPipelineRuntimeOutput", {
+                      defaultValue: "Runtime output"
+                    })}
+                  </div>
+                  <ul className="mt-1 list-disc space-y-1 pl-5">
+                    {buddyPipelineRuntimeAssets.map((asset, index) => (
+                      <li key={`${asset.assetGroup}-${asset.sourceAssetId || index}`}>
+                        <span className="text-text">
+                          {t(
+                            `sidepanel:personaGarden.visuals.buddyPipelineAssetGroup.${asset.assetGroup}`,
+                            {
+                              defaultValue:
+                                BUDDY_PIPELINE_ASSET_GROUP_LABELS[asset.assetGroup]
+                            }
+                          )}
+                        </span>
+                        {": "}
+                        {getBuddyPipelineAssetDetailText(
+                          asset,
+                          t(
+                            "sidepanel:personaGarden.visuals.buddyPipelineManifestReferenced",
+                            { defaultValue: "manifest referenced" }
+                          )
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </div>
           ) : null}
           {importPreviewWarnings.length ? (
