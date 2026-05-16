@@ -5,6 +5,8 @@ import { cn } from "@/libs/utils"
 import type { RagPresetName, RagSource } from "@/services/rag/unified-rag"
 import { ALL_RAG_SOURCES, getRagSourceLabel } from "@/services/rag/sourceMetadata"
 import { AnswerModelMenu } from "./AnswerModelMenu"
+import type { KnowledgeSourceHealthState } from "../types"
+import { buildSourceHealthSummary } from "../sourceHealth"
 
 type CompactToolbarProps = {
   sources: RagSource[]
@@ -20,6 +22,8 @@ type CompactToolbarProps = {
   onGenerationModelChange: (model: string | null) => void
   contextChangedSinceLastRun: boolean
   scopeChangeDetails?: string[]
+  sourceHealth?: KnowledgeSourceHealthState
+  onRefreshSourceHealth?: () => void
   showAddSources?: boolean
   className?: string
 }
@@ -54,6 +58,8 @@ export function CompactToolbar({
   onGenerationModelChange,
   contextChangedSinceLastRun,
   scopeChangeDetails = [],
+  sourceHealth,
+  onRefreshSourceHealth,
   showAddSources = false,
   className,
 }: CompactToolbarProps) {
@@ -116,6 +122,22 @@ export function CompactToolbar({
         onGenerationProviderChange={onGenerationProviderChange}
         onGenerationModelChange={onGenerationModelChange}
       />
+
+      {sourceHealth && onRefreshSourceHealth ? (
+        <button
+          type="button"
+          onClick={onRefreshSourceHealth}
+          className="inline-flex h-7 items-center rounded-full border border-border bg-surface px-2.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text transition-colors"
+          aria-label="Refresh source health"
+          title="Refresh source health"
+        >
+          {buildSourceHealthSummary(sourceHealth)}
+        </button>
+      ) : sourceHealth ? (
+        <span className="inline-flex h-7 items-center rounded-full border border-border bg-surface px-2.5 text-[11px] font-medium text-text-muted">
+          {buildSourceHealthSummary(sourceHealth)}
+        </span>
+      ) : null}
 
       {/* Settings gear */}
       <button

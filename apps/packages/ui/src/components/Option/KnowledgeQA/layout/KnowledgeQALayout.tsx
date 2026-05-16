@@ -161,6 +161,8 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
   }
   const focusSource = knowledgeQa.focusSource ?? (() => undefined)
   const settingsPanelOpen = knowledgeQa.settingsPanelOpen ?? false
+  const sourceHealth = knowledgeQa.sourceHealth
+  const refreshSourceHealth = knowledgeQa.refreshSourceHealth ?? (async () => undefined)
 
   const isMobile = useMobile()
   const { mode, setLayoutMode, isSimple, isResearch, showPromotionToast, dismissPromotion, acceptPromotion } =
@@ -462,6 +464,8 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                   }
                   contextChangedSinceLastRun={contextChangedSinceLastRun}
                   scopeChangeDetails={scopeChangeDetails}
+                  sourceHealth={sourceHealth}
+                  onRefreshSourceHealth={refreshSourceHealth}
                   showAddSources={isMobile}
                   className={isDesktopReadyState ? "justify-center" : undefined}
                 />
@@ -491,6 +495,8 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                   }
                   contextChangedSinceLastRun={contextChangedSinceLastRun}
                   scopeChangeDetails={scopeChangeDetails}
+                  sourceHealth={sourceHealth}
+                  onRefreshSourceHealth={refreshSourceHealth}
                   onOpenSettings={() => setSettingsPanelOpen(true)}
                 />
               )}
@@ -508,6 +514,8 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                     onSelectSources={handleOpenSourceSelector}
                     onAddSources={handleAddSources}
                     hasSources={settings.sources.length > 0}
+                    selectedSources={settings.sources}
+                    sourceHealth={sourceHealth}
                     hasRecentSession={Boolean(recentHistoryItem)}
                     webFallbackEnabled={settings.enable_web_fallback}
                   />

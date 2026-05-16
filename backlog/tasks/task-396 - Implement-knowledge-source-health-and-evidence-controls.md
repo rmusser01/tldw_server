@@ -4,7 +4,7 @@ title: Implement /knowledge source health and evidence controls
 status: In Progress
 assignee: []
 created_date: '2026-05-16 00:51'
-updated_date: '2026-05-16 01:53'
+updated_date: '2026-05-16 02:19'
 labels:
   - webui
   - knowledge
@@ -37,6 +37,10 @@ Quality review fix: source-health no longer instantiates MultiDatabaseRetriever 
 Spec re-review fix: removed source DB dependencies from /api/v1/rag/source-health. The endpoint now depends only on the authenticated user and computes source availability from existing per-user DB files without creating directories, schemas, retrievers, or request-scoped DB handles. Re-ran focused backend tests (8 passed, 23 deselected), git diff --check, and Bandit touched backend scope (0 findings at /tmp/bandit_knowledge_source_health_task1_fix2.json).
 
 Task 2 frontend client/normalization implemented. Added tldw API ragSourceHealth client method, Knowledge QA source-health types/state, normalization helpers, and focused tests. Verification: vitest run sourceHealth.test.ts + tldw-api-client.rag-source-health.test.ts passed (4 tests); provider-focused vitest with KnowledgeQAProvider.feature-flags passed (5 tests total). Full UI tsc --noEmit remains blocked by existing unrelated baseline type errors in audio/chat/flashcards/playground/services tests; no sourceHealth or KnowledgeQAProvider errors appeared in the reported output. Optional ownership guard sanity check also still fails on existing OpenWebUI overlap inventory, not ragSourceHealth.
+
+Task 3 source-picker UI slice complete: provider now loads /api/v1/rag/source-health once after tldw client initialization, KnowledgeQALayout threads sourceHealth/refresh through simple and detailed /knowledge surfaces, KnowledgeContextBar and CompactToolbar render compact health summaries, source picker rows show per-source status chips and retry, and KnowledgeReadyState now surfaces health failure, unavailable selected sources, and empty-source guidance without inline creation/import. Verification: red tests failed before implementation; focused Vitest passed 38 tests across sourceHealth, tldw-api-client.rag-source-health, KnowledgeContextBar.source-health, CompactToolbar, KnowledgeQALayout.behavior, KnowledgeReadyState.activation, and KnowledgeQAProvider.feature-flags. git diff --check passed. Full UI tsc remains red on existing baseline; rg over captured output found no KnowledgeQA/sourceHealth/touched-file errors.
+
+Task 3 quality-review fixes: ready-state source-health notice now prioritizes unavailable/error selected sources over empty-source guidance and only treats sources as empty when available with explicit index_status=empty. CompactToolbar now wires onRefreshSourceHealth to a real one-line source-health retry button instead of carrying an unused prop. Verification: targeted Vitest passed CompactToolbar + KnowledgeReadyState activation (23 tests), broader Task 3 focused Vitest passed 40 tests, git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

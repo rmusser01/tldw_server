@@ -5,6 +5,7 @@ import { KnowledgeQAProvider, useKnowledgeQA } from "../KnowledgeQAProvider"
 
 const ragSearchMock = vi.fn()
 const ragSearchStreamMock = vi.fn()
+const ragSourceHealthMock = vi.fn()
 const trackMetricMock = vi.fn()
 
 vi.mock("@plasmohq/storage/hook", () => ({
@@ -34,6 +35,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     }),
     ragSearch: (...args: unknown[]) => ragSearchMock(...args),
     ragSearchStream: (...args: unknown[]) => ragSearchStreamMock(...args),
+    ragSourceHealth: (...args: unknown[]) => ragSourceHealthMock(...args),
   },
 }))
 
@@ -55,6 +57,32 @@ describe("KnowledgeQAProvider feature flags", () => {
     ragSearchStreamMock.mockImplementation(async function* () {
       yield { type: "delta", text: "stream should be disabled" }
     })
+    ragSourceHealthMock.mockResolvedValue({
+      sources: [
+        {
+          source_id: "media_db",
+          label: "Documents & Media",
+          available: true,
+          searchable: true,
+          index_status: "ready",
+          embedding_status: "not_applicable",
+        },
+      ],
+    })
+  })
+
+  it("loads source health once after mount without blocking search state", async () => {
+    render(
+      <KnowledgeQAProvider>
+        <ContextProbe />
+      </KnowledgeQAProvider>
+    )
+
+    await waitFor(() => expect(ragSourceHealthMock).toHaveBeenCalledOnce())
+    await waitFor(() =>
+      expect(latestContext?.sourceHealth.bySource.media_db?.indexStatus).toBe("ready")
+    )
+    expect(latestContext?.isSearching).toBe(false)
   })
 
   it("skips streaming path when streaming feature flag is disabled", async () => {

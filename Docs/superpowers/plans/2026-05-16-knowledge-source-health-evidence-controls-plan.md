@@ -757,7 +757,7 @@ git commit -m "feat: add knowledge source health client"
 - Test: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/CompactToolbar.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeQALayout.behavior.test.tsx`
 
-- [ ] **Step 1: Write failing KnowledgeContextBar health tests**
+- [x] **Step 1: Write failing KnowledgeContextBar health tests**
 
 Create `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeContextBar.source-health.test.tsx`:
 
@@ -792,7 +792,7 @@ Define `baseProps` using existing test props from `KnowledgeContextBar.test.tsx`
 
 Expected: FAIL because props/UI are missing.
 
-- [ ] **Step 2: Add provider state and refresh action**
+- [x] **Step 2: Add provider state and refresh action**
 
 Modify `KnowledgeQAProvider.tsx`:
 
@@ -818,7 +818,7 @@ const refreshSourceHealth = useCallback(async () => {
 
 - Trigger once after server readiness/initialization succeeds. Do not block search while it loads or fails.
 
-- [ ] **Step 3: Thread source health through layout**
+- [x] **Step 3: Thread source health through layout**
 
 Modify `KnowledgeQALayout.tsx` to pass:
 
@@ -829,7 +829,7 @@ onRefreshSourceHealth={refreshSourceHealth}
 
 to `KnowledgeContextBar`, `CompactToolbar`, `KnowledgeReadyState`, and recovery components where needed.
 
-- [ ] **Step 4: Render compact source health in context bars**
+- [x] **Step 4: Render compact source health in context bars**
 
 Modify `KnowledgeContextBar.tsx`:
 
@@ -860,7 +860,7 @@ Use existing color tokens; no new palette.
 
 Modify `CompactToolbar.tsx` with a one-line summary only. Avoid cluttering mobile toolbar.
 
-- [ ] **Step 5: Update ready/empty copy**
+- [x] **Step 5: Update ready/empty copy**
 
 Modify `KnowledgeReadyState.tsx` to prefer source health copy:
 
@@ -870,7 +870,7 @@ Modify `KnowledgeReadyState.tsx` to prefer source health copy:
 
 Do not add inline creation controls.
 
-- [ ] **Step 6: Run source picker UI tests**
+- [x] **Step 6: Run source picker UI tests**
 
 Run:
 
@@ -884,7 +884,7 @@ cd apps/packages/ui
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit source picker UI**
+- [x] **Step 7: Commit source picker UI**
 
 ```bash
 git add \

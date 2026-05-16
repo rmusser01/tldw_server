@@ -2,6 +2,8 @@ import React, { useState, useEffect } from "react"
 import { Link } from "react-router-dom"
 import { BookOpen, ChevronDown, ChevronUp, CircleHelp, Clock3, FolderPlus, HelpCircle, MessageSquare, SlidersHorizontal } from "lucide-react"
 import { cn } from "@/libs/utils"
+import type { RagSource } from "@/services/rag/unified-rag"
+import type { KnowledgeSourceHealthState } from "../types"
 
 type KnowledgeReadyStateProps = {
   suggestedPrompts: string[]
@@ -10,9 +12,70 @@ type KnowledgeReadyStateProps = {
   onSelectSources: () => void
   onAddSources?: () => void
   hasSources: boolean
+  selectedSources?: RagSource[]
+  sourceHealth?: KnowledgeSourceHealthState
   hasRecentSession: boolean
   webFallbackEnabled?: boolean
   className?: string
+}
+
+type SourceHealthNotice = {
+  message: string
+  tone: "info" | "warn"
+  actionLabel: string
+  action: "add" | "select"
+}
+
+function buildSourceHealthNotice(
+  hasSources: boolean,
+  selectedSources: RagSource[],
+  sourceHealth: KnowledgeSourceHealthState | undefined
+): SourceHealthNotice | null {
+  if (!hasSources) return null
+  if (sourceHealth?.error) {
+    return {
+      message: sourceHealth.error,
+      tone: "info",
+      actionLabel: "Select sources",
+      action: "select",
+    }
+  }
+  if (!sourceHealth || selectedSources.length === 0) return null
+
+  const selectedHealth = selectedSources
+    .map((source) => sourceHealth.bySource[source])
+    .filter((source) => source != null)
+  if (selectedHealth.length === 0) return null
+
+  const allSelectedUnavailable = selectedHealth.every(
+    (source) =>
+      !source.available ||
+      source.indexStatus === "unavailable" ||
+      source.indexStatus === "error" ||
+      (!source.searchable && source.indexStatus !== "empty")
+  )
+  if (allSelectedUnavailable) {
+    return {
+      message: "Selected sources are unavailable. Open source settings or choose a different scope.",
+      tone: "warn",
+      actionLabel: "Open source settings",
+      action: "select",
+    }
+  }
+
+  const allSelectedEmpty = selectedHealth.every(
+    (source) => source.available && source.indexStatus === "empty"
+  )
+  if (allSelectedEmpty) {
+    return {
+      message: "No searchable items yet. Open Quick Ingest or the source owner page to add content.",
+      tone: "warn",
+      actionLabel: "Open Quick Ingest",
+      action: "add",
+    }
+  }
+
+  return null
 }
 
 export function KnowledgeReadyState({
@@ -22,6 +85,8 @@ export function KnowledgeReadyState({
   onSelectSources,
   onAddSources,
   hasSources,
+  selectedSources = [],
+  sourceHealth,
   hasRecentSession,
   webFallbackEnabled = false,
   className,
@@ -29,6 +94,11 @@ export function KnowledgeReadyState({
   const isReturningUser = hasRecentSession
   const [guideExpanded, setGuideExpanded] = useState(!isReturningUser)
   const handleAddSources = onAddSources ?? onSelectSources
+  const sourceHealthNotice = buildSourceHealthNotice(
+    hasSources,
+    selectedSources,
+    sourceHealth
+  )
 
   // Collapse guide when history finishes loading and reveals a returning user
   useEffect(() => {
@@ -154,34 +224,41 @@ export function KnowledgeReadyState({
         ))}
       </div>
 
-      {!hasSources ? (
+      {sourceHealthNotice || !hasSources ? (
         <div
           className={cn(
             "mx-auto max-w-2xl rounded-lg px-4 py-3 text-left text-sm",
-            webFallbackEnabled
+            sourceHealthNotice?.tone === "info" || (!sourceHealthNotice && webFallbackEnabled)
               ? "border border-info/30 bg-info/10 text-info"
               : "border border-warn/30 bg-warn/10 text-warn"
           )}
         >
           <p>
-            {webFallbackEnabled
+            {sourceHealthNotice?.message ??
+            (webFallbackEnabled
               ? "No document sources are selected. Web fallback uses your configured server default provider."
-              : "No sources are selected. Select source categories to search, or enable web fallback."}
+              : "No sources are selected. Select source categories to search, or enable web fallback.")}
           </p>
-          <p className="mt-1">
-            Queries stay on your tldw server unless web fallback is enabled.
-          </p>
+          {!sourceHealthNotice ? (
+            <p className="mt-1">
+              Queries stay on your tldw server unless web fallback is enabled.
+            </p>
+          ) : null}
           <button
             type="button"
-            onClick={handleAddSources}
+            onClick={
+              sourceHealthNotice?.action === "select"
+                ? onSelectSources
+                : handleAddSources
+            }
             className={cn(
               "mt-2 inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
-              webFallbackEnabled
+              sourceHealthNotice?.tone === "info" || (!sourceHealthNotice && webFallbackEnabled)
                 ? "border-info/40 hover:bg-info/20"
                 : "border-warn/40 hover:bg-warn/20"
             )}
           >
-            Add sources
+            {sourceHealthNotice?.actionLabel ?? "Add sources"}
           </button>
         </div>
       ) : null}

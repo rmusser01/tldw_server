@@ -1425,11 +1425,6 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
   const defaultCharacterIdRef = useRef<number | null>(null)
   const defaultCharacterPromiseRef = useRef<Promise<number | null> | null>(null)
 
-  // Initialize client
-  useEffect(() => {
-    tldwClient.initialize().catch(console.error)
-  }, [])
-
   useEffect(() => {
     if (state.currentThreadId || state.messages.length > 0) {
       hydratedDefaultsRef.current = null
@@ -2863,6 +2858,24 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
       })
     }
   }, [])
+
+  // Initialize client and load safe pre-query source health once when ready.
+  useEffect(() => {
+    let cancelled = false
+
+    tldwClient
+      .initialize()
+      .then(() => {
+        if (!cancelled) {
+          void refreshSourceHealth()
+        }
+      })
+      .catch(console.error)
+
+    return () => {
+      cancelled = true
+    }
+  }, [refreshSourceHealth])
 
   const scrollToSource = useCallback((index: number) => {
     const element = document.getElementById(`source-card-${index}`)

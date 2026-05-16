@@ -57,6 +57,14 @@ const state = {
     mediaIds: [] as number[],
     noteIds: [] as string[],
   },
+  sourceHealth: {
+    loading: false,
+    error: null as string | null,
+    loadedAt: "2026-05-16T00:00:00Z",
+    sources: [] as unknown[],
+    bySource: {},
+  },
+  refreshSourceHealth: vi.fn(),
 }
 
 const layoutModeState = {
@@ -92,11 +100,19 @@ vi.mock("../history/HistoryPane", () => ({
 vi.mock("../context/KnowledgeContextBar", () => ({
   KnowledgeContextBar: ({
     contextChangedSinceLastRun,
+    sourceHealth,
+    onRefreshSourceHealth,
   }: {
     contextChangedSinceLastRun: boolean
+    sourceHealth?: { loadedAt: string | null }
+    onRefreshSourceHealth?: () => void
   }) => (
     <div data-testid="knowledge-context-bar">
       {contextChangedSinceLastRun ? "Scope changed" : "Scope unchanged"}
+      <span>{sourceHealth?.loadedAt ?? "No source health"}</span>
+      <button type="button" onClick={onRefreshSourceHealth}>
+        Refresh detailed source health
+      </button>
     </div>
   ),
 }))
@@ -104,11 +120,19 @@ vi.mock("../context/KnowledgeContextBar", () => ({
 vi.mock("../context/CompactToolbar", () => ({
   CompactToolbar: ({
     contextChangedSinceLastRun,
+    sourceHealth,
+    onRefreshSourceHealth,
   }: {
     contextChangedSinceLastRun: boolean
+    sourceHealth?: { loadedAt: string | null }
+    onRefreshSourceHealth?: () => void
   }) => (
     <div data-testid="knowledge-compact-toolbar">
       {contextChangedSinceLastRun ? "Scope changed" : "Scope unchanged"}
+      <span>{sourceHealth?.loadedAt ?? "No source health"}</span>
+      <button type="button" onClick={onRefreshSourceHealth}>
+        Refresh compact source health
+      </button>
     </div>
   ),
 }))
@@ -124,7 +148,15 @@ vi.mock("../composer/KnowledgeComposer", () => ({
 }))
 
 vi.mock("../empty/KnowledgeReadyState", () => ({
-  KnowledgeReadyState: () => <div data-testid="knowledge-ready-state" />,
+  KnowledgeReadyState: ({
+    sourceHealth,
+  }: {
+    sourceHealth?: { loadedAt: string | null }
+  }) => (
+    <div data-testid="knowledge-ready-state">
+      {sourceHealth?.loadedAt ?? "No source health"}
+    </div>
+  ),
 }))
 
 vi.mock("../empty/InlineRecentSessions", () => ({
@@ -184,6 +216,9 @@ describe("KnowledgeQALayout evidence-rail transitions", () => {
     state.lastSearchScope = null
     state.pinnedSourceFilters.mediaIds = []
     state.pinnedSourceFilters.noteIds = []
+    state.sourceHealth.loadedAt = "2026-05-16T00:00:00Z"
+    state.sourceHealth.error = null
+    state.refreshSourceHealth.mockClear()
     layoutModeState.mode = "simple"
     layoutModeState.isSimple = true
     layoutModeState.isResearch = false
@@ -353,5 +388,36 @@ describe("KnowledgeQALayout evidence-rail transitions", () => {
     renderLayout()
 
     expect(screen.getByText("Scope changed")).toBeInTheDocument()
+  })
+
+  it("passes source health and refresh through the simple toolbar and ready state", async () => {
+    renderLayout()
+
+    expect(screen.getByTestId("knowledge-compact-toolbar")).toHaveTextContent(
+      "2026-05-16T00:00:00Z"
+    )
+    expect(screen.getByTestId("knowledge-ready-state")).toHaveTextContent(
+      "2026-05-16T00:00:00Z"
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh compact source health" }))
+
+    expect(state.refreshSourceHealth).toHaveBeenCalledOnce()
+  })
+
+  it("passes source health and refresh through the detailed context bar", () => {
+    layoutModeState.mode = "research"
+    layoutModeState.isSimple = false
+    layoutModeState.isResearch = true
+
+    renderLayout()
+
+    expect(screen.getByTestId("knowledge-context-bar")).toHaveTextContent(
+      "2026-05-16T00:00:00Z"
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh detailed source health" }))
+
+    expect(state.refreshSourceHealth).toHaveBeenCalledOnce()
   })
 })

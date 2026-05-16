@@ -134,6 +134,36 @@ export function getSourceHealthStatusLabel(
   }
 }
 
+export function getSourceHealthChipClass(
+  health: KnowledgeSourceHealth | null | undefined
+): string {
+  const base =
+    "inline-flex shrink-0 items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium"
+  if (!health) {
+    return `${base} border-border bg-surface2 text-text-muted`
+  }
+  if (health.workspaceScoped) {
+    return `${base} border-info/30 bg-info/10 text-info`
+  }
+  switch (health.indexStatus) {
+    case "ready":
+      return health.searchable
+        ? `${base} border-success/30 bg-success/10 text-success`
+        : `${base} border-warn/30 bg-warn/10 text-warn`
+    case "indexing":
+      return `${base} border-info/30 bg-info/10 text-info`
+    case "stale":
+    case "empty":
+      return `${base} border-warn/30 bg-warn/10 text-warn`
+    case "unavailable":
+    case "error":
+      return `${base} border-danger/30 bg-danger/10 text-danger`
+    case "unknown":
+    default:
+      return `${base} border-border bg-surface2 text-text-muted`
+  }
+}
+
 export function buildSourceHealthSummary(
   state: KnowledgeSourceHealthState | null | undefined
 ): string {

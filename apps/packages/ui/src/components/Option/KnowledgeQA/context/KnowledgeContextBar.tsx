@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { getDesignSystemState } from "@/design-system"
 import type { RagPresetName, RagSource } from "@/services/rag/unified-rag"
+import type { KnowledgeSourceHealthState } from "../types"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { cn } from "@/libs/utils"
 import { Popover, Tooltip } from "antd"
@@ -26,6 +27,12 @@ import {
   isRagSource,
 } from "@/services/rag/sourceMetadata"
 import { AnswerModelMenu } from "./AnswerModelMenu"
+import {
+  EMPTY_SOURCE_HEALTH_STATE,
+  buildSourceHealthSummary,
+  getSourceHealthChipClass,
+  getSourceHealthStatusLabel,
+} from "../sourceHealth"
 
 // ---------------------------------------------------------------------------
 // Saved search profiles
@@ -140,6 +147,8 @@ type KnowledgeContextBarProps = {
   onGenerationModelChange: (model: string | null) => void
   contextChangedSinceLastRun: boolean
   scopeChangeDetails?: string[]
+  sourceHealth?: KnowledgeSourceHealthState
+  onRefreshSourceHealth?: () => void
   onOpenSettings: () => void
 }
 
@@ -454,6 +463,8 @@ export function KnowledgeContextBar({
   onGenerationModelChange,
   contextChangedSinceLastRun,
   scopeChangeDetails = [],
+  sourceHealth,
+  onRefreshSourceHealth,
   onOpenSettings,
 }: KnowledgeContextBarProps) {
   const { t } = useTranslation("knowledge")
@@ -498,6 +509,8 @@ export function KnowledgeContextBar({
       ),
     [sources]
   )
+  const sourceHealthState = sourceHealth ?? EMPTY_SOURCE_HEALTH_STATE
+  const sourceHealthSummary = buildSourceHealthSummary(sourceHealthState)
 
   const normalizedMediaIds = useMemo(
     () =>
@@ -875,6 +888,9 @@ export function KnowledgeContextBar({
             <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">
               {t("contextBar.sourceScope", "Source Scope")}
             </h3>
+            <span className="ml-auto text-[11px] text-text-muted">
+              {sourceHealthSummary}
+            </span>
             <Tooltip title="Choose which types of content to include in your search. Select categories, then optionally pick specific items within each.">
               <Info className="h-3.5 w-3.5 text-text-subtle cursor-help" />
             </Tooltip>
@@ -906,6 +922,15 @@ export function KnowledgeContextBar({
                       {t("contextBar.sourceCategories", "Source categories")}
                     </span>
                     <div className="flex items-center gap-1">
+                      {onRefreshSourceHealth ? (
+                        <button
+                          type="button"
+                          className="rounded px-1.5 py-0.5 text-[11px] text-text-muted hover:bg-hover hover:text-text transition-colors"
+                          onClick={onRefreshSourceHealth}
+                        >
+                          {t("contextBar.refreshSourceHealth", "Refresh source health")}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="rounded px-1.5 py-0.5 text-[11px] text-text-muted hover:bg-hover hover:text-text transition-colors"
@@ -925,6 +950,7 @@ export function KnowledgeContextBar({
                   <div className="space-y-1">
                     {SOURCE_OPTIONS.map((option) => {
                       const selected = normalizedSources.includes(option.key)
+                      const health = sourceHealthState.bySource[option.key]
                       return (
                         <button
                           key={option.key}
@@ -943,13 +969,23 @@ export function KnowledgeContextBar({
                               {getRagSourceDescription(option.key)}
                             </span>
                           </span>
-                          <span className="h-4 w-4 shrink-0">
-                            {selected ? <Check className="h-4 w-4" /> : null}
+                          <span className="flex shrink-0 items-center gap-1 pl-2">
+                            <span className={getSourceHealthChipClass(health)}>
+                              {getSourceHealthStatusLabel(health)}
+                            </span>
+                            <span className="h-4 w-4 shrink-0">
+                              {selected ? <Check className="h-4 w-4" /> : null}
+                            </span>
                           </span>
                         </button>
                       )
                     })}
                   </div>
+                  {sourceHealthState.error ? (
+                    <p className="mt-2 rounded-md border border-info/30 bg-info/10 px-2 py-1.5 text-[11px] text-info">
+                      {sourceHealthState.error}
+                    </p>
+                  ) : null}
                   {normalizedSources.length === 0 ? (
                     <p className="mt-2 rounded-md border border-warn/30 bg-warn/10 px-2 py-1.5 text-[11px] text-warn">
                       {t(
