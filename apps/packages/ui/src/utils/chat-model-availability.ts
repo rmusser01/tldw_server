@@ -1,8 +1,24 @@
-import { isAutoModelId } from "./resolve-api-provider"
+import {
+  isAutoModelId,
+  parseProviderQualifiedModelSelection
+} from "./resolve-api-provider"
 
 type ModelDescriptor = {
+  id?: unknown
   model?: unknown
   name?: unknown
+  provider?: unknown
+  provider_key?: unknown
+  providerKey?: unknown
+  api_provider?: unknown
+  apiProvider?: unknown
+  details?: {
+    provider?: unknown
+    provider_key?: unknown
+  }
+  metadata?: {
+    provider?: unknown
+  }
 }
 
 export const AUTO_CHAT_MODEL_ID = "auto"
@@ -84,16 +100,88 @@ export function normalizeChatModelId(value: string | null | undefined): string {
   return trimmed.replace(/^tldw:/i, "")
 }
 
+function normalizeAvailableModelId(model: ModelDescriptor): string {
+  const modelValue = String(model?.model ?? "").trim()
+  const idValue = String(model?.id ?? "").trim()
+  const nameValue = String(model?.name ?? "").trim()
+
+  if (modelValue.toLowerCase().startsWith("tldw:") && idValue) {
+    return normalizeChatModelId(idValue)
+  }
+
+  return normalizeChatModelId(modelValue || idValue || nameValue)
+}
+
+function normalizeProviderKey(model: ModelDescriptor): string | null {
+  const provider = String(
+    model?.provider ??
+      model?.provider_key ??
+      model?.providerKey ??
+      model?.api_provider ??
+      model?.apiProvider ??
+      model?.details?.provider ??
+      model?.details?.provider_key ??
+      model?.metadata?.provider ??
+      ""
+  )
+    .trim()
+    .toLowerCase()
+
+  return provider && provider !== "unknown" ? provider : null
+}
+
+function normalizeProviderQualifiedChatModelId(
+  value: string | null | undefined
+): string | null {
+  const parsed = parseProviderQualifiedModelSelection(value)
+  if (!parsed.isProviderQualified || !parsed.provider) {
+    const normalized = normalizeChatModelId(value)
+    const separatorIndex = normalized.indexOf(":")
+    if (separatorIndex <= 0 || separatorIndex === normalized.length - 1) {
+      return null
+    }
+
+    const provider = normalized.slice(0, separatorIndex).trim().toLowerCase()
+    const modelId = normalizeChatModelId(
+      normalized.slice(separatorIndex + 1).trim()
+    )
+    if (!provider || provider === "http" || provider === "https" || !modelId) {
+      return null
+    }
+    return `${provider}:${modelId}`
+  }
+
+  const modelId = normalizeChatModelId(parsed.modelId)
+  return modelId ? `${parsed.provider}:${modelId}` : null
+}
+
+function normalizeBaseChatModelId(value: string | null | undefined): string {
+  const normalized = normalizeChatModelId(value)
+  const separatorIndex = normalized.indexOf(":")
+  if (separatorIndex <= 0 || separatorIndex === normalized.length - 1) {
+    return normalized
+  }
+
+  const provider = normalized.slice(0, separatorIndex).trim().toLowerCase()
+  if (!provider || provider === "http" || provider === "https") {
+    return normalized
+  }
+
+  return normalizeChatModelId(normalized.slice(separatorIndex + 1).trim())
+}
+
 export function buildAvailableChatModelIds(
   models: ModelDescriptor[] | null | undefined
 ): Set<string> {
   const ids = new Set<string>()
   for (const model of models || []) {
-    const modelId = normalizeChatModelId(
-      String(model?.model ?? model?.name ?? "")
-    )
+    const modelId = normalizeAvailableModelId(model)
     if (modelId) {
       ids.add(modelId)
+      const provider = normalizeProviderKey(model)
+      if (provider) {
+        ids.add(`${provider}:${modelId}`)
+      }
     }
   }
   return ids
@@ -109,10 +197,22 @@ export function findUnavailableChatModel(
 
   for (const selectedModelId of selectedModelIds) {
     const normalized = normalizeChatModelId(selectedModelId)
-    if (isAutoModelId(normalized)) {
+    const providerQualified = normalizeProviderQualifiedChatModelId(
+      selectedModelId
+    )
+    const baseModelId = normalizeBaseChatModelId(selectedModelId)
+    if (isAutoModelId(normalized) || isAutoModelId(baseModelId)) {
       continue
     }
-    if (normalized && !availableModelIds.has(normalized)) {
+
+    const candidates = new Set(
+      [normalized, providerQualified, baseModelId].filter(Boolean) as string[]
+    )
+    const hasAvailableCandidate = [...candidates].some((candidate) =>
+      availableModelIds.has(candidate)
+    )
+
+    if (normalized && !hasAvailableCandidate) {
       return normalized
     }
   }

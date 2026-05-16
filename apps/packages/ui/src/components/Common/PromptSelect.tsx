@@ -301,6 +301,23 @@ export const PromptSelect: React.FC<Props> = ({
     }
   }, [dropdownOpen])
 
+  useEffect(() => {
+    if (!dropdownOpen) return
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      setDropdownOpen(false)
+      restorePromptSelectFocus()
+    }
+
+    window.addEventListener("keydown", handleEscape)
+    window.addEventListener("keyup", handleEscape)
+    return () => {
+      window.removeEventListener("keydown", handleEscape)
+      window.removeEventListener("keyup", handleEscape)
+    }
+  }, [dropdownOpen, restorePromptSelectFocus])
+
   return (
     <>
       {data && (
@@ -323,8 +340,25 @@ export const PromptSelect: React.FC<Props> = ({
               activeKey: selectedSystemPrompt
             }}
             popupRender={(menu) => (
-              <div className="bg-surface rounded-lg shadow-lg border border-border">
-                <div className="p-2 border-b border-border">
+              <div
+                className="bg-surface rounded-lg shadow-lg border border-border"
+                onKeyDown={(e) => {
+                  if (e.key !== "Escape") return
+                  setDropdownOpen(false)
+                  restorePromptSelectFocus()
+                  e.stopPropagation()
+                }}
+              >
+                <div
+                  className="p-2 border-b border-border"
+                  onKeyDownCapture={(e) => {
+                    if (e.key !== "Escape") return
+                    e.preventDefault()
+                    setDropdownOpen(false)
+                    restorePromptSelectFocus()
+                    e.stopPropagation()
+                  }}
+                >
                   <Input
                     ref={searchInputRef}
                     placeholder={t("searchPrompts", "Search prompts...")}
@@ -333,7 +367,9 @@ export const PromptSelect: React.FC<Props> = ({
                     onChange={(e) => setSearchText(e.target.value)}
                     allowClear
                     size="small"
-                    onKeyDown={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      e.stopPropagation()
+                    }}
                   />
                 </div>
                 {menu}

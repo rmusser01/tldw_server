@@ -996,6 +996,8 @@ def test_probe_vz_linux_observability_reports_log_pointers_and_vm_resources(
                             "guest_capabilities_known": "true",
                             "guest_capabilities": "exec,output_cap_v1",
                             "cpu_time_sec": "7",
+                            "cpu_count": "2",
+                            "memory_size_mb": "1024",
                             "peak_rss_mb": 128,
                             "disk_read_bytes": "2048",
                             "unexpected_detail": "not surfaced",
@@ -1034,6 +1036,8 @@ def test_probe_vz_linux_observability_reports_log_pointers_and_vm_resources(
     }
     assert vm["resource_snapshot"] == {
         "cpu_time_sec": 7,
+        "cpu_count": 2,
+        "memory_size_mb": 1024,
         "peak_rss_mb": 128,
         "disk_read_bytes": 2048,
     }

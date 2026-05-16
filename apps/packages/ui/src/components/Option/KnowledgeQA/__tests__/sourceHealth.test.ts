@@ -1,4 +1,14 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+
+const designSystemMocks = vi.hoisted(() => ({
+  READY_STATE_LABEL: "Registry Ready",
+  UNAVAILABLE_STATE_LABEL: "Registry Unavailable",
+}))
+
+vi.mock("@/design-system", () => ({
+  READY_STATE_LABEL: designSystemMocks.READY_STATE_LABEL,
+  UNAVAILABLE_STATE_LABEL: designSystemMocks.UNAVAILABLE_STATE_LABEL,
+}))
 
 import {
   buildSourceHealthSummary,
@@ -80,5 +90,46 @@ describe("Knowledge QA source health normalization", () => {
     expect(normalized.bySource.notes?.indexStatus).toBe("unknown")
     expect(normalized.bySource.notes?.embeddingStatus).toBe("unknown")
     expect(getSourceHealthStatusLabel(normalized.bySource.notes)).toBe("Unknown")
+  })
+
+  it("uses design-system registry labels for canonical ready and unavailable statuses", () => {
+    const normalized = normalizeKnowledgeSourceHealth({
+      sources: [
+        {
+          source_id: "media_db",
+          label: "Documents & Media",
+          available: true,
+          searchable: true,
+          index_status: "ready",
+          embedding_status: "ready",
+        },
+        {
+          source_id: "notes",
+          label: "Notes",
+          available: true,
+          searchable: false,
+          index_status: "ready",
+          embedding_status: "missing",
+        },
+        {
+          source_id: "prompts",
+          label: "Prompts",
+          available: false,
+          searchable: false,
+          index_status: "unavailable",
+          embedding_status: "unavailable",
+        },
+      ],
+    })
+
+    expect(getSourceHealthStatusLabel(normalized.bySource.media_db)).toBe(
+      "Registry Ready"
+    )
+    expect(getSourceHealthStatusLabel(normalized.bySource.notes)).toBe(
+      "Registry Unavailable"
+    )
+    expect(getSourceHealthStatusLabel(normalized.bySource.prompts)).toBe(
+      "Registry Unavailable"
+    )
   })
 })

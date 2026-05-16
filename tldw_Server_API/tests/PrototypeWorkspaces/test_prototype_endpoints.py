@@ -1,4 +1,5 @@
 """Integration tests for the prototype workspace API surface."""
+
 from __future__ import annotations
 
 import asyncio
@@ -29,6 +30,37 @@ def owner_user() -> User:
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+def _assert_prototype_error(
+    response,
+    *,
+    category: str,
+    frontend_state: str,
+    retryable: bool,
+) -> None:
+    detail = response.json()["detail"]
+    assert detail["category"] == category
+    assert detail["frontend_state"] == frontend_state
+    assert detail["retryable"] is retryable
+    assert isinstance(detail["message"], str)
+    assert detail["message"]
+
+
+def _assert_openapi_error_response(openapi: dict[str, Any], path: str, method: str, status_code: str) -> None:
+    schema = openapi["paths"][path][method]["responses"][status_code]["content"]["application/json"]["schema"]
+    assert schema["$ref"].endswith("/PrototypeErrorResponse")
+
+
+def _assert_openapi_error_or_validation_response(
+    openapi: dict[str, Any],
+    path: str,
+    method: str,
+    status_code: str,
+) -> None:
+    schema = openapi["paths"][path][method]["responses"][status_code]["content"]["application/json"]["schema"]
+    refs = {entry["$ref"].rsplit("/", maxsplit=1)[-1] for entry in schema["anyOf"]}
+    assert {"PrototypeErrorResponse", "HTTPValidationError"} <= refs
 
 
 def _seed_workspace(
@@ -156,6 +188,36 @@ def client(test_app: FastAPI) -> TestClient:
 
 
 class TestPrototypeWorkspaceEndpoints:
+    def test_prototype_workspace_openapi_declares_error_contract(self, test_app: FastAPI) -> None:
+        openapi = test_app.openapi()
+
+        _assert_openapi_error_response(openapi, "/api/v1/prototype-workspaces/{prototype_workspace_id}", "get", "403")
+        _assert_openapi_error_response(
+            openapi,
+            "/api/v1/prototype-workspaces/{prototype_workspace_id}/sessions",
+            "post",
+            "409",
+        )
+        _assert_openapi_error_response(openapi, "/api/v1/prototype-sessions", "post", "403")
+        _assert_openapi_error_or_validation_response(openapi, "/api/v1/prototype-sessions", "post", "422")
+        _assert_openapi_error_response(openapi, "/api/v1/prototype-promotions", "post", "404")
+        _assert_openapi_error_response(
+            openapi,
+            "/api/v1/prototype-promotions/{promotion_request_id}/review",
+            "post",
+            "403",
+        )
+        _assert_openapi_error_response(openapi, "/api/v1/prototype-previews/{preview_handle}/renew", "post", "409")
+
+    def test_request_validation_422_uses_fastapi_validation_shape(
+        self,
+        client: TestClient,
+    ) -> None:
+        resp = client.post("/api/v1/prototype-sessions", json={})
+
+        assert resp.status_code == 422
+        assert isinstance(resp.json()["detail"], list)
+
     def test_owner_can_fetch_workspace_detail_with_snapshot_and_session_inventory(
         self,
         client: TestClient,
@@ -277,7 +339,42 @@ class TestPrototypeWorkspaceEndpoints:
         )
 
         assert resp.status_code == 403
-        assert resp.json()["detail"] == "Prototype session token is no longer active"
+        _assert_prototype_error(
+            resp,
+            category="inactive_session",
+            frontend_state="session_inactive",
+            retryable=False,
+        )
+
+    def test_owner_workspace_detail_forbidden_returns_stable_error(
+        self,
+        test_app: FastAPI,
+        test_services: SimpleNamespace,
+    ) -> None:
+        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
+
+        async def _fake_non_owner() -> User:
+            return User(
+                id=2,
+                username="other",
+                email="other@test.com",
+                roles=[],
+                permissions=[],
+            )
+
+        test_app.dependency_overrides[get_request_user] = _fake_non_owner
+        client = TestClient(test_app)
+        workspace, _ = _seed_workspace(test_services, title="Forbidden detail")
+
+        resp = client.get(f"/api/v1/prototype-workspaces/{workspace['id']}")
+
+        assert resp.status_code == 403
+        _assert_prototype_error(
+            resp,
+            category="unauthorized",
+            frontend_state="unauthorized",
+            retryable=False,
+        )
 
     def test_collaborator_can_submit_promotion_request(
         self,
@@ -431,7 +528,12 @@ class TestPrototypeWorkspaceEndpoints:
         )
 
         assert resp.status_code == 403
-        assert resp.json()["detail"] == "Prototype session token is no longer active"
+        _assert_prototype_error(
+            resp,
+            category="inactive_session",
+            frontend_state="session_inactive",
+            retryable=False,
+        )
 
     def test_expired_shared_actor_cannot_submit_promotion_request(
         self,
@@ -483,7 +585,12 @@ class TestPrototypeWorkspaceEndpoints:
         )
 
         assert resp.status_code == 403
-        assert resp.json()["detail"] == "Prototype session token is no longer active"
+        _assert_prototype_error(
+            resp,
+            category="inactive_session",
+            frontend_state="session_inactive",
+            retryable=False,
+        )
 
     def test_malformed_shared_actor_expiry_cannot_submit_promotion_request(
         self,
@@ -535,7 +642,12 @@ class TestPrototypeWorkspaceEndpoints:
         )
 
         assert resp.status_code == 403
-        assert resp.json()["detail"] == "Prototype session token is no longer active"
+        _assert_prototype_error(
+            resp,
+            category="inactive_session",
+            frontend_state="session_inactive",
+            retryable=False,
+        )
 
     def test_session_share_link_mismatch_cannot_submit_promotion_request(
         self,
@@ -592,7 +704,12 @@ class TestPrototypeWorkspaceEndpoints:
         )
 
         assert resp.status_code == 403
-        assert resp.json()["detail"] == "Prototype session token is no longer active"
+        _assert_prototype_error(
+            resp,
+            category="inactive_session",
+            frontend_state="session_inactive",
+            retryable=False,
+        )
 
     def test_owner_can_review_promotion_request(
         self,
@@ -744,9 +861,7 @@ class TestPrototypeWorkspaceEndpoints:
         body = renewed.json()
         assert body["preview_handle"] == preview_grant["preview_handle"]
         assert body["expires_at"]
-        assert body["preview_url"].startswith(
-            f"/api/v1/prototype-previews/{preview_grant['preview_handle']}?"
-        )
+        assert body["preview_url"].startswith(f"/api/v1/prototype-previews/{preview_grant['preview_handle']}?")
         assert body["token"]
 
     def test_preview_grant_renewal_recovers_after_broker_memory_clear(
@@ -802,9 +917,7 @@ class TestPrototypeWorkspaceEndpoints:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         workspace, _seed_snapshot = _seed_workspace(test_services, title="Preview renewal typed error")
-        broker_module = importlib.import_module(
-            "tldw_Server_API.app.core.Prototype_Workspaces.preview_broker"
-        )
+        broker_module = importlib.import_module("tldw_Server_API.app.core.Prototype_Workspaces.preview_broker")
         missing_handle_error = getattr(broker_module, "PrototypePreviewHandleNotFound", RuntimeError)
 
         def fake_record(_preview_handle: str) -> dict[str, str]:
@@ -822,6 +935,44 @@ class TestPrototypeWorkspaceEndpoints:
         )
 
         assert renewed.status_code == 404
+        _assert_prototype_error(
+            renewed,
+            category="preview_unavailable",
+            frontend_state="preview_unavailable",
+            retryable=False,
+        )
+        assert renewed.json()["detail"]["message"] == "Prototype preview is unavailable"
+
+    def test_preview_grant_renewal_maps_runtime_error_to_stable_message(
+        self,
+        client: TestClient,
+        test_services: SimpleNamespace,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        workspace, _seed_snapshot = _seed_workspace(test_services, title="Preview renewal conflict")
+
+        def fake_record(_preview_handle: str) -> dict[str, str]:
+            return {"prototype_workspace_id": workspace["id"]}
+
+        async def fake_renew(_preview_handle: str) -> dict[str, str]:
+            raise RuntimeError("runtime target leaked: http://internal-preview-host")
+
+        monkeypatch.setattr(test_services.preview_broker, "get_preview_record", fake_record)
+        monkeypatch.setattr(test_services.preview_broker, "renew_preview_grant", fake_renew)
+
+        renewed = client.post(
+            "/api/v1/prototype-previews/ph_conflict/renew",
+            json={},
+        )
+
+        assert renewed.status_code == 409
+        _assert_prototype_error(
+            renewed,
+            category="preview_unavailable",
+            frontend_state="preview_unavailable",
+            retryable=True,
+        )
+        assert renewed.json()["detail"]["message"] == "Prototype preview renewal conflict; please retry"
 
     def test_revoked_preview_grant_renewal_returns_404(
         self,
@@ -844,6 +995,12 @@ class TestPrototypeWorkspaceEndpoints:
         )
 
         assert renewed.status_code == 404
+        _assert_prototype_error(
+            renewed,
+            category="preview_unavailable",
+            frontend_state="preview_unavailable",
+            retryable=False,
+        )
 
     def test_stale_promotion_response_shape(
         self,

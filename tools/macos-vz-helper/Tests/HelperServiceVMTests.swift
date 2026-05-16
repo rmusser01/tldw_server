@@ -31,6 +31,53 @@ import Testing
     #expect(response.details["helper_started_at"] == "2026-05-09T00:00:00Z")
 }
 
+@Test func helperServiceSurfacesResourceSnapshotInCreateStatusAndList() throws {
+    let registry = VMRegistry()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: ReadyGuestBridge()
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager,
+        helperInstanceID: "helper-test-1",
+        helperStartedAt: "2026-05-09T00:00:00Z"
+    )
+
+    let response = try service.createVM(
+        vmID: "vm-resource-details",
+        templatePath: "/tmp/template.img",
+        workspacePath: "/tmp/workspace",
+        readinessTimeoutSeconds: 5,
+        metadata: VMOwnershipMetadata(
+            owner: "tldw",
+            runtime: "vz_linux",
+            runID: "run-resource-details",
+            sessionID: "",
+            sessionMode: false,
+            templateID: "",
+            templatePath: "",
+            runManifestPath: "",
+            planningSource: "",
+            workspacePath: "",
+            createdAt: "2026-05-09T00:00:00Z",
+            networkPolicy: "deny_all"
+        )
+    )
+    let status = service.getVMStatus(vmID: "vm-resource-details")
+    let listed = service.listVMs().vms.first
+
+    for details in [response.details, status?.details, listed?.details] {
+        #expect(details?["cpu_count"] == "2")
+        #expect(details?["memory_size_mb"] == "1024")
+        let wallTime = Int(details?["wall_time_sec"] ?? "")
+        #expect(wallTime != nil)
+        #expect((wallTime ?? -1) >= 0)
+    }
+}
+
 @Test func helperServiceSurfacesGuestAgentDetailsInCreateStatusAndList() throws {
     let registry = VMRegistry()
     let guestInfo = GuestAgentInfo(

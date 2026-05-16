@@ -7,6 +7,47 @@ import type { PersonaVisualStarterPackSummary } from "@/types/persona-visuals"
 
 const { Text } = Typography
 
+type StarterReadinessTranslate = (
+  key: string,
+  options: { defaultValue: string }
+) => string
+
+export const formatStarterMetadataToken = (value: string | null | undefined): string =>
+  String(value || "")
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
+
+export const formatStarterExpectedAssetGroups = (
+  expectedAssetGroups: string[] | undefined
+): string =>
+  (expectedAssetGroups || [])
+    .map(formatStarterMetadataToken)
+    .join(", ")
+
+export const getStarterProductionStatusLabel = (
+  value: string | null | undefined,
+  t: StarterReadinessTranslate
+): string => {
+  const fallback = formatStarterMetadataToken(value)
+  if (!fallback) return ""
+  return t(`sidepanel:personaGarden.visuals.metadata.productionStatus.${value}`, {
+    defaultValue: fallback
+  })
+}
+
+export const getStarterComplexityTierLabel = (
+  value: string | null | undefined,
+  t: StarterReadinessTranslate
+): string => {
+  const fallback = formatStarterMetadataToken(value)
+  if (!fallback) return ""
+  return t(`sidepanel:personaGarden.visuals.metadata.complexityTier.${value}`, {
+    defaultValue: fallback
+  })
+}
+
 export type VisualBuddySetupChoiceCardProps = {
   selectedPersonaId: string
   selectedPersonaName: string
@@ -84,6 +125,35 @@ const getDefaultDescription = ({
     t("sidepanel:personaGarden.visuals.setup.defaultFallbackDescription", {
       defaultValue: "Copy the recommended starter as a draft."
     })
+  )
+}
+
+const renderStarterReadinessTags = (
+  starter: PersonaVisualStarterPackSummary | null | undefined,
+  t: (key: string, options: { defaultValue: string }) => string
+): React.ReactNode => {
+  if (!starter) return null
+  const productionStatus = getStarterProductionStatusLabel(
+    starter.production_status,
+    t
+  )
+  const complexityTier = getStarterComplexityTierLabel(starter.complexity_tier, t)
+  return (
+    <div className="mt-1 flex flex-wrap gap-1">
+      {productionStatus ? (
+        <Tag color={starter.production_status === "art_ready" ? "green" : "orange"}>
+          {productionStatus}
+        </Tag>
+      ) : null}
+      {complexityTier ? <Tag>{complexityTier}</Tag> : null}
+      {starter.neutral_anchor_required ? (
+        <Tag color="blue">
+          {t("sidepanel:personaGarden.visuals.setup.neutralAnchorRequired", {
+            defaultValue: "Neutral anchor required"
+          })}
+        </Tag>
+      ) : null}
+    </div>
   )
 }
 
@@ -237,6 +307,7 @@ export const VisualBuddySetupChoiceCard: React.FC<
             <span className="block">
               {formatStarterCount(starterCount, starterCatalogLoading, t)}
             </span>
+            {renderStarterReadinessTags(recommendedStarter, t)}
           </div>
           <Button
             className="mt-2 w-full justify-center"

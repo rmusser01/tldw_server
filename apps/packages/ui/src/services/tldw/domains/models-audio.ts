@@ -7,7 +7,13 @@ import type {
   LlamacppHardwareSnapshotResponse,
   LlamacppInventoryItem,
   LlamacppInventoryResponse,
+  LlamacppLifecycleActionResponse,
   LlamacppLogTailResponse,
+  LlamacppProfile,
+  LlamacppProfileCreateRequest,
+  LlamacppProfileListResponse,
+  LlamacppProfileUpdateRequest,
+  LlamacppRuntimeListResponse,
   LlamacppUseInChatResponse,
   LlamacppValidationRequest,
   LlamacppValidationResponse
@@ -406,6 +412,118 @@ export const modelsAudioMethods = {
     const query = buildQuery(lines === undefined ? {} : { lines })
     return await bgRequest<LlamacppLogTailResponse>({
       path: `/api/v1/llamacpp/logs/tail${query}`,
+      method: "GET"
+    })
+  },
+
+  async listLlamacppProfiles(): Promise<LlamacppProfileListResponse> {
+    return await bgRequest<LlamacppProfileListResponse>({
+      path: "/api/v1/llamacpp/profiles",
+      method: "GET"
+    })
+  },
+
+  async createLlamacppProfile(
+    payload: LlamacppProfileCreateRequest
+  ): Promise<LlamacppProfile> {
+    return await bgRequest<LlamacppProfile>({
+      path: "/api/v1/llamacpp/profiles",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async updateLlamacppProfile(
+    profileId: string,
+    payload: LlamacppProfileUpdateRequest
+  ): Promise<LlamacppProfile> {
+    return await bgRequest<LlamacppProfile>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}`,
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async deleteLlamacppProfile(
+    profileId: string
+  ): Promise<{ profile_id: string; deleted: boolean }> {
+    return await bgRequest<{ profile_id: string; deleted: boolean }>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}`,
+      method: "DELETE"
+    })
+  },
+
+  async startLlamacppProfile(
+    profileId: string
+  ): Promise<LlamacppLifecycleActionResponse> {
+    return await bgRequest<LlamacppLifecycleActionResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/start`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  },
+
+  async stopLlamacppProfile(
+    profileId: string
+  ): Promise<LlamacppLifecycleActionResponse> {
+    return await bgRequest<LlamacppLifecycleActionResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/stop`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  },
+
+  async pauseLlamacppProfile(
+    profileId: string
+  ): Promise<LlamacppLifecycleActionResponse> {
+    return await bgRequest<LlamacppLifecycleActionResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/pause`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  },
+
+  async resumeLlamacppProfile(
+    profileId: string
+  ): Promise<LlamacppLifecycleActionResponse> {
+    return await bgRequest<LlamacppLifecycleActionResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/resume`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  },
+
+  async useLlamacppProfileInChat(
+    profileId: string
+  ): Promise<LlamacppUseInChatResponse> {
+    return await bgRequest<LlamacppUseInChatResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/use-in-chat`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  },
+
+  async listLlamacppInstances(): Promise<LlamacppRuntimeListResponse> {
+    return await bgRequest<LlamacppRuntimeListResponse>({
+      path: "/api/v1/llamacpp/instances",
+      method: "GET"
+    })
+  },
+
+  async tailLlamacppInstanceLogs(
+    profileId: string,
+    lines?: number
+  ): Promise<LlamacppLogTailResponse> {
+    const query = buildQuery(lines === undefined ? {} : { lines })
+    return await bgRequest<LlamacppLogTailResponse>({
+      path: `/api/v1/llamacpp/instances/${encodeURIComponent(profileId)}/logs/tail${query}`,
       method: "GET"
     })
   },

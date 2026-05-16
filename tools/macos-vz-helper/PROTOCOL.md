@@ -102,6 +102,9 @@ Successful `details` dictionaries may include helper-owned generation metadata:
     "helper_started_at": "2026-05-09T00:00:00Z",
     "transport": "vsock",
     "network_policy": "deny_all",
+    "cpu_count": "2",
+    "memory_size_mb": "1024",
+    "wall_time_sec": "123",
     "guest_version": "1.0.0",
     "guest_workspace_root": "/workspace",
     "guest_capabilities_known": "true",
@@ -195,6 +198,9 @@ Response:
     "helper_started_at": "2026-05-09T00:00:00Z",
     "transport": "vsock",
     "network_policy": "deny_all",
+    "cpu_count": "2",
+    "memory_size_mb": "1024",
+    "wall_time_sec": "123",
     "guest_version": "1.0.0",
     "guest_workspace_root": "/workspace",
     "guest_capabilities_known": "true",
@@ -338,6 +344,9 @@ the unprefixed keys when `guest_*` keys are absent during mixed-version rollouts
       "details": {
         "transport": "vsock",
         "network_policy": "deny_all",
+        "cpu_count": "2",
+        "memory_size_mb": "1024",
+        "wall_time_sec": "123",
         "guest_version": "1.0.0",
         "guest_workspace_root": "/workspace",
         "guest_capabilities_known": "true",
@@ -370,6 +379,11 @@ the unprefixed keys when `guest_*` keys are absent during mixed-version rollouts
   `guest_capabilities` are diagnostic details only. Older guests may omit
   capabilities, in which case helpers report `guest_capabilities_known=false`
   instead of failing VM readiness.
+- `vz_linux` VM resource metadata is additive in protocol version `1`.
+  `cpu_count` and `memory_size_mb` are configured VM resources derived from the
+  validated `Virtualization.framework` configuration; `wall_time_sec` is
+  diagnostic uptime derived from VM metadata `created_at`. These fields are not
+  live CPU/RSS/I/O utilization counters.
 - Template validation must report `boot_mode` and `validation_strength` when the
   helper can resolve the template successfully.
 - Python remains the source of truth for sandbox sessions; the helper only reports

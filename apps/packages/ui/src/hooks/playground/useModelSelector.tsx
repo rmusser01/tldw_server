@@ -500,7 +500,13 @@ export function useModelSelector({
             mouseEnterDelay={0.5}
             styles={{ root: { maxWidth: 280 } }}
           >
-            <div className="flex items-center gap-2 text-sm">
+            <div
+              className="flex items-center gap-2 text-sm"
+              data-testid="model-selector-option"
+              data-model-key={modelKey}
+              data-model-id={modelId}
+              data-provider={providerRaw}
+            >
               <ProviderIcons provider={providerRaw} className="h-3 w-3 text-text-subtle" />
               <span className="truncate flex-1">{modelLabel}</span>
               {isRecommended && (

@@ -8,7 +8,14 @@ const apiMock = vi.hoisted(() => ({
   getLlamacppStatus: vi.fn(),
   getLlamacppInventory: vi.fn(),
   getLlamacppHardware: vi.fn(),
+  listLlamacppProfiles: vi.fn(),
+  listLlamacppInstances: vi.fn(),
   listLlamacppModels: vi.fn(),
+  startLlamacppProfile: vi.fn(),
+  stopLlamacppProfile: vi.fn(),
+  pauseLlamacppProfile: vi.fn(),
+  resumeLlamacppProfile: vi.fn(),
+  useLlamacppProfileInChat: vi.fn(),
   startLlamacppModel: vi.fn(),
   startLlamacppServer: vi.fn(),
   stopLlamacppServer: vi.fn(),
@@ -120,6 +127,62 @@ vi.mock("../LlamacppLaunchPanel", async () => {
   }
 })
 
+vi.mock("../LlamacppRuntimePanel", async () => {
+  const React = await import("react")
+
+  interface RuntimePanelProps {
+    profiles: Array<{ profile_id: string; name: string }>
+    runtimes: Array<{ profile_id: string; state: string; port?: number | null }>
+    onStart: (profileId: string) => void
+    onStop: (profileId: string) => void
+    onUseInChat: (profileId: string) => void
+  }
+
+  const LlamacppRuntimePanel = ({
+    profiles,
+    runtimes,
+    onStart,
+    onStop,
+    onUseInChat
+  }: RuntimePanelProps) => {
+    const nameByProfile = new Map(profiles.map((profile) => [profile.profile_id, profile.name]))
+    return React.createElement(
+      "section",
+      { "aria-label": "Runtime instances" },
+      runtimes.map((runtime) => {
+        const label = nameByProfile.get(runtime.profile_id) || runtime.profile_id
+        return React.createElement(
+          "div",
+          { key: runtime.profile_id },
+          React.createElement("span", null, label),
+          React.createElement("span", null, runtime.state),
+          React.createElement("span", null, runtime.port),
+          React.createElement(
+            "button",
+            { onClick: () => onStart(runtime.profile_id) },
+            `Start runtime ${runtime.profile_id}`
+          ),
+          React.createElement(
+            "button",
+            { onClick: () => onStop(runtime.profile_id) },
+            `Stop runtime ${runtime.profile_id}`
+          ),
+          React.createElement(
+            "button",
+            { onClick: () => onUseInChat(runtime.profile_id) },
+            `Use runtime ${runtime.profile_id}`
+          )
+        )
+      })
+    )
+  }
+
+  return {
+    LlamacppRuntimePanel,
+    default: LlamacppRuntimePanel
+  }
+})
+
 const mockConfig = {
   saved_config: {
     enabled: true,
@@ -177,6 +240,74 @@ const mockInventory = {
   scan_limited: false
 }
 
+const mockProfiles = {
+  profiles: [
+    {
+      profile_id: "default",
+      name: "Default runtime",
+      enabled: true,
+      mode: "chat",
+      model_id: "gguf:toy-model-id",
+      model_path: "/srv/models/gguf/toy-7b-q4_k_m.gguf",
+      host: "127.0.0.1",
+      port: 8080,
+      port_policy: "explicit",
+      server_args: {},
+      autostart: false,
+      restart_policy: {},
+      tags: []
+    },
+    {
+      profile_id: "analysis",
+      name: "Analysis runtime",
+      enabled: true,
+      mode: "chat",
+      model_id: "gguf:analysis",
+      model_path: "/srv/models/gguf/analysis.gguf",
+      host: "127.0.0.1",
+      port: 8081,
+      port_policy: "explicit",
+      server_args: {},
+      autostart: false,
+      restart_policy: {},
+      tags: []
+    }
+  ]
+}
+
+const mockRuntimes = {
+  runtimes: [
+    {
+      profile_id: "default",
+      state: "running",
+      host: "127.0.0.1",
+      port: 8080,
+      endpoint: "http://127.0.0.1:8080",
+      model_id: "gguf:toy-model-id",
+      model_path: "/srv/models/gguf/toy-7b-q4_k_m.gguf",
+      resolved_args: [],
+      restart_count: 0,
+      warnings: [],
+      health: {},
+      log_tail_available: true
+    },
+    {
+      profile_id: "analysis",
+      state: "stopped",
+      host: "127.0.0.1",
+      port: 8081,
+      endpoint: null,
+      model_id: "gguf:analysis",
+      model_path: "/srv/models/gguf/analysis.gguf",
+      resolved_args: [],
+      restart_count: 0,
+      warnings: [],
+      health: {},
+      log_tail_available: false
+    }
+  ]
+}
+
 describe("LlamacppAdminPage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -218,6 +349,39 @@ describe("LlamacppAdminPage", () => {
       cpu_count: 8,
       gpus: [],
       warnings: ["GPU probe unavailable."]
+    })
+    apiMock.listLlamacppProfiles.mockResolvedValue(mockProfiles)
+    apiMock.listLlamacppInstances.mockResolvedValue(mockRuntimes)
+    apiMock.startLlamacppProfile.mockResolvedValue({
+      profile_id: "analysis",
+      action: "start",
+      state: "running",
+      accepted: true
+    })
+    apiMock.stopLlamacppProfile.mockResolvedValue({
+      profile_id: "default",
+      action: "stop",
+      state: "stopped",
+      accepted: true
+    })
+    apiMock.pauseLlamacppProfile.mockResolvedValue({
+      profile_id: "default",
+      action: "pause",
+      state: "paused",
+      accepted: true
+    })
+    apiMock.resumeLlamacppProfile.mockResolvedValue({
+      profile_id: "default",
+      action: "resume",
+      state: "stopped",
+      accepted: true
+    })
+    apiMock.useLlamacppProfileInChat.mockResolvedValue({
+      provider: "llamacpp",
+      endpoint: "http://127.0.0.1:8080",
+      updated: true,
+      effective: true,
+      warnings: []
     })
     apiMock.startLlamacppModel.mockResolvedValue({
       status: "started",
@@ -309,6 +473,37 @@ describe("LlamacppAdminPage", () => {
     expect(await screen.findByText("Chat provider updated.")).toBeTruthy()
   })
 
+  it("renders runtime instances and routes profile lifecycle actions", async () => {
+    render(<LlamacppAdminPage />)
+
+    expect(await screen.findByLabelText("Runtime instances")).toBeTruthy()
+    expect(screen.getByText("Default runtime")).toBeTruthy()
+    expect(screen.getByText("Analysis runtime")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop runtime default" }))
+    fireEvent.click(screen.getByRole("button", { name: "Start runtime analysis" }))
+    fireEvent.click(screen.getByRole("button", { name: "Use runtime default" }))
+
+    await waitFor(() => {
+      expect(apiMock.stopLlamacppProfile).toHaveBeenCalledWith("default")
+      expect(apiMock.startLlamacppProfile).toHaveBeenCalledWith("analysis")
+      expect(apiMock.useLlamacppProfileInChat).toHaveBeenCalledWith("default")
+    })
+  })
+
+  it("keeps single-server controls when runtime instance APIs are unavailable", async () => {
+    apiMock.listLlamacppInstances.mockRejectedValueOnce(
+      new Error("Request failed: 404 (GET /api/v1/llamacpp/instances)")
+    )
+
+    render(<LlamacppAdminPage />)
+
+    expect(await screen.findByText("Inventory")).toBeTruthy()
+    expect(await screen.findByRole("button", { name: "Start Server" })).toBeTruthy()
+    expect(screen.queryByLabelText("Runtime instances")).toBeNull()
+    expect(screen.queryByText("Admin APIs not available")).toBeNull()
+  })
+
   it("shows chat wiring when status already reports a running managed server", async () => {
     apiMock.getLlamacppStatus.mockResolvedValueOnce({
       state: "running",
@@ -384,6 +579,8 @@ describe("LlamacppAdminPage", () => {
       expect(apiMock.getLlamacppStatus).toHaveBeenCalledTimes(1)
       expect(apiMock.getLlamacppInventory).toHaveBeenCalledTimes(1)
       expect(apiMock.getLlamacppHardware).toHaveBeenCalledTimes(1)
+      expect(apiMock.listLlamacppProfiles).toHaveBeenCalledTimes(1)
+      expect(apiMock.listLlamacppInstances).toHaveBeenCalledTimes(1)
     })
   })
 

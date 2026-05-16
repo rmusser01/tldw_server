@@ -571,9 +571,18 @@ test.describe("Media Ingestion Workflow", () => {
         await dismissQuickIngest(authedPage)
       }
 
-      const emptyStateTrigger = authedPage
+      let emptyStateTrigger = authedPage
         .getByRole("button", { name: /open quick ingest/i })
         .first()
+      if (!(await emptyStateTrigger.isVisible().catch(() => false))) {
+        const skipTutorial = authedPage.getByRole("button", { name: /skip for now/i }).first()
+        if (await skipTutorial.isVisible().catch(() => false)) {
+          await skipTutorial.click()
+        }
+        emptyStateTrigger = authedPage
+          .getByRole("button", { name: /open quick ingest/i })
+          .first()
+      }
       await expect(emptyStateTrigger).toBeVisible({ timeout: 15_000 })
       await emptyStateTrigger.click()
       await expect(dialog).toBeVisible({ timeout: 15_000 })

@@ -30,6 +30,12 @@ const nonEmptyString = (value: unknown): string | null => {
   return trimmed.length > 0 ? trimmed : null
 }
 
+const stripInternalModelPrefix = (value: string | null): string | null => {
+  if (!value) return null
+  const stripped = value.replace(/^tldw:/i, "").trim()
+  return stripped.length > 0 ? stripped : null
+}
+
 const normalizeProviderName = (value: unknown): string => {
   const normalized = nonEmptyString(value)?.toLowerCase() || ""
   if (!normalized) return "other"
@@ -63,10 +69,23 @@ const lowercaseField = (
 
 export const getModelId = (model: ModelSelectorDescriptor | null | undefined): string => {
   if (!model) return ""
+  const modelField = nonEmptyString(model.model)
+  const idField = nonEmptyString(model.id)
+  const nameField = nonEmptyString(model.name)
+
+  if (modelField?.toLowerCase().startsWith("tldw:")) {
+    return (
+      stripInternalModelPrefix(idField) ||
+      stripInternalModelPrefix(modelField) ||
+      stripInternalModelPrefix(nameField) ||
+      ""
+    )
+  }
+
   return (
-    nonEmptyString(model.model) ||
-    nonEmptyString(model.id) ||
-    nonEmptyString(model.name) ||
+    stripInternalModelPrefix(modelField) ||
+    stripInternalModelPrefix(idField) ||
+    stripInternalModelPrefix(nameField) ||
     ""
   )
 }

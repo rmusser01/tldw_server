@@ -73,13 +73,126 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
       screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent),
     ).toEqual([
       "Runtime",
-      "Model & Chat",
+      "Model route",
+      "Assistant",
       "MCP tools",
-      "Character / Persona",
-      "Scoped settings",
       "Run controls",
-      "Timeline",
     ]);
+  });
+
+  it("keeps first-time runtime controls discoverable when nothing is configured", () => {
+    renderInspector({
+      selectedProvider: null,
+      selectedModel: null,
+      providerRouteLabel: null,
+      messageCount: 0,
+      assistantSummary: {
+        mode: "none",
+        name: null,
+        detail: null,
+      },
+      canRegenerate: false,
+      toolSummary: {
+        state: "unavailable",
+        label: "MCP unavailable",
+        detail: "MCP tools unavailable",
+      },
+    });
+
+    expect(screen.getByText("No provider selected")).toBeInTheDocument();
+    expect(screen.getByText("No model selected")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Open model settings" }),
+    ).toBeInTheDocument();
+
+    const assistant = screen.getByRole("region", { name: "Assistant" });
+    expect(within(assistant).getByText("No assistant selected")).toBeInTheDocument();
+    expect(
+      within(assistant).getByText("No persona or character will shape replies."),
+    ).toBeInTheDocument();
+    expect(
+      within(assistant).getByRole("button", {
+        name: "Select character or persona",
+      }),
+    ).toBeInTheDocument();
+
+    const tools = screen.getByRole("region", { name: "MCP tools" });
+    expect(within(tools).getByText("MCP unavailable")).toBeInTheDocument();
+    expect(within(tools).getByText("MCP tools unavailable")).toBeInTheDocument();
+    expect(
+      within(tools).getByRole("button", { name: "Configure MCP tools" }),
+    ).toBeInTheDocument();
+    expect(
+      within(tools).queryByRole("button", { name: "MCP tool choice Auto" }),
+    ).toBeNull();
+
+    const runControls = screen.getByRole("region", { name: "Run controls" });
+    expect(within(runControls).getByText("0 messages")).toBeInTheDocument();
+    expect(within(runControls).getByText("Search closed")).toBeInTheDocument();
+    expect(within(runControls).getByText("No turn is running.")).toBeInTheDocument();
+    expect(
+      within(runControls).getByText(
+        "Regenerate becomes available after an assistant response.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("preserves existing right rail actions after regrouping", () => {
+    const props = renderInspector({
+      streaming: true,
+      runtimeStatus: "streaming",
+      canStopStreaming: true,
+      canRegenerate: false,
+      settingSummaries: [{ label: "Temperature", value: "0.7" }],
+      toolSummary: {
+        state: "available",
+        label: "MCP tools",
+        detail: "3 chat tools enabled",
+      },
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open model settings" }),
+    );
+
+    const assistant = screen.getByRole("region", { name: "Assistant" });
+    fireEvent.click(
+      within(assistant).getByRole("button", {
+        name: "Select character or persona",
+      }),
+    );
+    fireEvent.click(
+      within(assistant).getByRole("button", { name: "Manage assistant" }),
+    );
+    fireEvent.click(
+      within(assistant).getByRole("button", { name: "Open Scene Director" }),
+    );
+    fireEvent.click(
+      within(assistant).getByRole("button", { name: "Clear assistant" }),
+    );
+
+    const tools = screen.getByRole("region", { name: "MCP tools" });
+    fireEvent.click(
+      within(tools).getByRole("button", { name: "MCP tool choice Required" }),
+    );
+    fireEvent.click(
+      within(tools).getByRole("button", { name: "Configure MCP tools" }),
+    );
+
+    const runControls = screen.getByRole("region", { name: "Run controls" });
+    fireEvent.click(
+      within(runControls).getByRole("button", { name: "Stop generation" }),
+    );
+
+    expect(props.onOpenModelSettings).toHaveBeenCalledTimes(1);
+    expect(props.onOpenAssistantSelect).toHaveBeenCalledTimes(1);
+    expect(props.onInspectAssistant).toHaveBeenCalledTimes(1);
+    expect(props.onOpenSceneDirector).toHaveBeenCalledTimes(1);
+    expect(props.onClearAssistant).toHaveBeenCalledTimes(1);
+    expect(props.onToolChoiceChange).toHaveBeenCalledWith("required");
+    expect(props.onOpenMcpSettings).toHaveBeenCalledTimes(1);
+    expect(props.onStopStreaming).toHaveBeenCalledTimes(1);
+    expect(props.onRegenerate).not.toHaveBeenCalled();
   });
 
   it("derives provider and model display from provider-qualified selected model when provider is missing", () => {
@@ -100,7 +213,7 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     const props = renderInspector();
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Open Model & Chat settings" }),
+      screen.getByRole("button", { name: "Open model settings" }),
     );
     fireEvent.click(
       screen.getByRole("button", { name: "Select character or persona" }),

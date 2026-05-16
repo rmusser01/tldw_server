@@ -10,6 +10,10 @@ const getTranscriptionModelsMock = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ all_models: [] })
 )
 
+const capabilityMocks = vi.hoisted(() => ({
+  useServerCapabilities: vi.fn(),
+}))
+
 // react-i18next
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -38,8 +42,23 @@ vi.mock("antd", () => ({
       ) : null,
     { confirm: vi.fn(), destroyAll: vi.fn() }
   ),
-  Button: ({ children, onClick, disabled, type, ...props }: any) => (
-    <button onClick={onClick} disabled={disabled} data-type={type} {...props}>
+  Button: ({
+    children,
+    onClick,
+    disabled,
+    type,
+    danger,
+    size,
+    ...props
+  }: any) => (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      data-type={type}
+      data-danger={danger ? "true" : undefined}
+      data-size={size}
+      {...props}
+    >
       {children}
     </button>
   ),
@@ -59,6 +78,8 @@ vi.mock("antd", () => ({
     placeholder,
     allowClear,
     popupMatchSelectWidth,
+    showSearch,
+    loading,
     ...props
   }: any) => {
     const selectProps: any = { ...props }
@@ -140,14 +161,25 @@ vi.mock("antd", () => ({
       ))}
     </div>
   ),
-  Alert: ({ message, description, action, ...props }: any) => (
-    <div role="alert" {...props}>
-      <span>{message}</span>
+  Tooltip: ({ children }: any) => <>{children}</>,
+  Alert: ({
+    message,
+    description,
+    action,
+    children,
+    icon,
+    type,
+    showIcon,
+    ...props
+  }: any) => (
+    <div role="alert" data-alert-type={type} {...props}>
+      {showIcon ? icon : null}
+      {message ? <span>{message}</span> : null}
       {description ? <p>{description}</p> : null}
+      {children}
       {action}
     </div>
   ),
-  Tooltip: ({ children }: any) => <>{children}</>,
   Input: Object.assign(
     (props: any) => <input {...props} />,
     {
@@ -156,6 +188,7 @@ vi.mock("antd", () => ({
         onChange,
         onKeyDown,
         placeholder,
+        autoSize,
         ...props
       }: any) => (
         <textarea
@@ -171,7 +204,11 @@ vi.mock("antd", () => ({
   Tag: ({ children, ...props }: any) => <span {...props}>{children}</span>,
   Typography: {
     Title: ({ children, ...props }: any) => <div {...props}>{children}</div>,
-    Text: ({ children, ...props }: any) => <span {...props}>{children}</span>,
+    Text: ({ children, strong, ...props }: any) => (
+      <span data-strong={strong ? "true" : undefined} {...props}>
+        {children}
+      </span>
+    ),
   },
   Progress: ({ percent, ...props }: any) => (
     <div data-testid="progress" data-percent={percent} {...props} />
@@ -198,6 +235,7 @@ vi.mock("lucide-react", () => {
     "X",
     "Plus",
     "Check",
+    "CheckCircle",
     "Circle",
     "Loader2",
     "Video",
@@ -212,7 +250,11 @@ vi.mock("lucide-react", () => {
   const mocks: Record<string, any> = {}
   for (const name of iconNames) {
     mocks[name] = (props: any) => (
-      <span data-icon={name} aria-hidden={props?.["aria-hidden"]} />
+      <span
+        data-icon={name}
+        aria-hidden={props?.["aria-hidden"]}
+        className={props?.className}
+      />
     )
   }
   return mocks
@@ -240,10 +282,42 @@ vi.mock(
   "@/components/Common/QuickIngest/QueueTab/FileDropZone",
   () => ({
     FileDropZone: ({ onFilesAdded }: any) => (
-      <div data-testid="file-drop-zone">FileDropZone</div>
+      <div data-testid="file-drop-zone">
+        FileDropZone
+        <button
+          type="button"
+          onClick={() =>
+            onFilesAdded?.([
+              {
+                name: "large-audio.mp3",
+                size: 45 * 1024 * 1024,
+                type: "audio/mpeg",
+              },
+            ])
+          }
+        >
+          Add large audio file
+        </button>
+      </div>
     ),
     default: ({ onFilesAdded }: any) => (
-      <div data-testid="file-drop-zone">FileDropZone</div>
+      <div data-testid="file-drop-zone">
+        FileDropZone
+        <button
+          type="button"
+          onClick={() =>
+            onFilesAdded?.([
+              {
+                name: "large-audio.mp3",
+                size: 45 * 1024 * 1024,
+                type: "audio/mpeg",
+              },
+            ])
+          }
+        >
+          Add large audio file
+        </button>
+      </div>
     ),
   })
 )
@@ -266,6 +340,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   },
 }))
 
+vi.mock("@/hooks/useServerCapabilities", () => ({
+  useServerCapabilities: () => capabilityMocks.useServerCapabilities(),
+}))
+
 vi.mock("@/components/Common/QuickIngest/FloatingProgressWidget", () => ({
   FloatingProgressWidget: () => null,
 }))
@@ -275,6 +353,11 @@ let uuidCounter = 0
 beforeEach(() => {
   uuidCounter = 0
   getTranscriptionModelsMock.mockReset().mockResolvedValue({ all_models: [] })
+  capabilityMocks.useServerCapabilities.mockReset()
+  capabilityMocks.useServerCapabilities.mockReturnValue({
+    capabilities: { ffmpegAvailable: true },
+    loading: false,
+  })
 })
 vi.stubGlobal(
   "crypto",
@@ -546,6 +629,47 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     expect(onQuickProcess).not.toHaveBeenCalled()
   })
 
+  it("Step 1 — renders large-file guidance with the design-system alert", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={onClose} />)
+
+    await user.click(
+      screen.getByRole("button", { name: /Add large audio file/i })
+    )
+
+    const warning = await screen.findByText(/Large file/i)
+    const alert = warning.closest('[data-ds-component="Alert"]')
+    expect(alert).toBeInTheDocument()
+    expect(alert).toHaveAttribute("role", "status")
+    expect(alert).toHaveAttribute("aria-live", "polite")
+  })
+
+  it("Step 1 — renders FFmpeg media warnings with design-system state primitives", async () => {
+    capabilityMocks.useServerCapabilities.mockReturnValue({
+      capabilities: { ffmpegAvailable: false },
+      loading: false,
+    })
+
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={onClose} />)
+
+    const textarea = screen.getByPlaceholderText(/https:\/\/example\.com/i)
+    await user.type(textarea, "https://youtube.com/watch?v=test123")
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+
+    const warning = await screen.findByText(/FFmpeg is not installed/i)
+    expect(warning.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+
+    const badge = screen
+      .getByText("Video")
+      .closest('[data-ds-component="Badge"]')
+    expect(badge).toBeInTheDocument()
+    expect(badge).toHaveAttribute("data-ds-variant", "warning")
+    expect(badge?.querySelector('[data-icon="AlertTriangle"]')).toHaveClass(
+      "mr-0.5"
+    )
+  })
+
   it("Step 1 — warns when pasted URLs are duplicates after normalization", async () => {
     const user = userEvent.setup()
     render(<WizardTestHarness onClose={onClose} />)
@@ -562,6 +686,20 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     ).toBeTruthy()
     expect(screen.getByText("https://example.com/article")).toBeTruthy()
     expect(screen.getAllByText(/Already queued/i).length).toBeGreaterThanOrEqual(1)
+  })
+
+  it("Step 1 — renders detected media labels with the design-system badge", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={onClose} />)
+
+    const textarea = screen.getByPlaceholderText(/https:\/\/example\.com/i)
+    await user.type(textarea, "https://example.com/test-article")
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+
+    const badge = await screen.findByText("Web page")
+    const badgeRoot = badge.closest('[data-ds-component="Badge"]')
+    expect(badgeRoot).toBeInTheDocument()
+    expect(badgeRoot).toHaveAttribute("data-ds-variant", "info")
   })
 
   it("Step 1 — summarizes mixed valid and invalid URL paste results", async () => {

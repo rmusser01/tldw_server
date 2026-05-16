@@ -2,6 +2,7 @@ import {
   getRagSourceLabel,
   isRagSource,
 } from "@/services/rag/sourceMetadata"
+import { READY_STATE_LABEL, UNAVAILABLE_STATE_LABEL } from "@/design-system"
 import type {
   KnowledgeSourceEmbeddingStatus,
   KnowledgeSourceHealth,
@@ -117,7 +118,7 @@ export function getSourceHealthStatusLabel(
   }
   switch (health.indexStatus) {
     case "ready":
-      return health.searchable ? "Ready" : "Unavailable"
+      return health.searchable ? READY_STATE_LABEL : UNAVAILABLE_STATE_LABEL
     case "indexing":
       return "Indexing"
     case "stale":
@@ -125,7 +126,7 @@ export function getSourceHealthStatusLabel(
     case "empty":
       return "Empty"
     case "unavailable":
-      return "Unavailable"
+      return UNAVAILABLE_STATE_LABEL
     case "error":
       return "Error"
     case "unknown":

@@ -1119,7 +1119,18 @@ describe("VisualPackEditor", () => {
           asset_count: 2,
           total_bytes: 1024,
           tags: ["alt", "starter"],
-          license_label: "bundled-alt"
+          license_label: "bundled-alt",
+          complexity_tier: "intermediate",
+          production_status: "scaffold",
+          neutral_anchor_required: true,
+          expected_asset_groups: [
+            "neutral_anchor",
+            "static_talking_reaction_sheet"
+          ],
+          animation_coverage_notes: [
+            "Scaffold fixture only; replace with authored reactions.",
+            "Secondary motion pass still needs review."
+          ]
         }
       ]
     }
@@ -1175,6 +1186,28 @@ describe("VisualPackEditor", () => {
     expect(picker).toHaveTextContent("sprite_frames")
     expect(picker).toHaveTextContent("alt")
     expect(picker).toHaveTextContent("bundled-alt")
+    expect(picker).toHaveTextContent(/scaffold/i)
+    expect(picker).toHaveTextContent(/intermediate/i)
+    expect(picker).toHaveTextContent(/neutral anchor/i)
+    expect(picker).toHaveTextContent(/static talking reaction sheet/i)
+    expect(picker).toHaveTextContent("Scaffold fixture only")
+    expect(picker).toHaveTextContent("Secondary motion pass still needs review")
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.metadata.productionStatus.scaffold",
+      expect.objectContaining({ defaultValue: "Scaffold" })
+    )
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.metadata.complexityTier.intermediate",
+      expect.objectContaining({ defaultValue: "Intermediate" })
+    )
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.setup.neutralAnchorRequired",
+      expect.objectContaining({ defaultValue: "Neutral anchor required" })
+    )
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.setup.expectedAssetsLabel",
+      expect.objectContaining({ defaultValue: "Expected assets:" })
+    )
 
     fireEvent.click(within(picker).getByTestId("persona-visual-copy-starter-alt-starter"))
 

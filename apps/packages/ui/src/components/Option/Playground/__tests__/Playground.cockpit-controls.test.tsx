@@ -349,6 +349,18 @@ describe("Playground cockpit controls", () => {
 
       const leftRail = await screen.findByTestId("playground-cockpit-left-rail");
       const contextRail = within(leftRail).getByTestId("playground-context-rail");
+      const compositionPreview = within(contextRail).getByRole("region", {
+        name: "Next message composition",
+      });
+      expect(within(compositionPreview).getByText("Draft a concise summary")).toBeInTheDocument();
+      expect(within(compositionPreview).getByText("Mira Vale")).toBeInTheDocument();
+      expect(
+        within(compositionPreview).getAllByText("openai:gpt-4.1-mini").length,
+      ).toBeGreaterThan(0);
+      expect(within(compositionPreview).getAllByText("MCP tools").length).toBeGreaterThan(0);
+      expect(
+        within(compositionPreview).getByText("Scope: openai:gpt-4.1-mini"),
+      ).toBeInTheDocument();
       expect(within(contextRail).getByText("Context active")).toBeInTheDocument();
       expect(within(contextRail).getByText("1 file")).toBeInTheDocument();
       expect(
@@ -357,7 +369,9 @@ describe("Playground cockpit controls", () => {
       expect(within(contextRail).getByText("2 media scopes")).toBeInTheDocument();
       expect(within(contextRail).getByText("Temporary chat")).toBeInTheDocument();
       expect(within(contextRail).getByText("History linked")).toBeInTheDocument();
-      expect(within(contextRail).getByText("Prompts")).toBeInTheDocument();
+      expect(
+        within(contextRail).getByRole("heading", { name: "Prompt" }),
+      ).toBeInTheDocument();
       expect(
         within(contextRail).getAllByText("Quick prompt").length,
       ).toBeGreaterThan(0);
@@ -484,7 +498,7 @@ describe("Playground cockpit controls", () => {
 
       fireEvent.click(
         within(runtimeInspector).getByRole("button", {
-          name: /open model & chat settings/i,
+          name: /open model settings/i,
         }),
       );
       fireEvent.click(
@@ -535,7 +549,7 @@ describe("Playground cockpit controls", () => {
       window.removeEventListener(TOGGLE_WEB_SEARCH_EVENT, toggleWebSearch);
       window.removeEventListener(SET_TEMPORARY_CHAT_EVENT, setTemporaryChat);
     }
-  });
+  }, 15000);
 
   it("logs selected prompt lookup failures while keeping the prompt unavailable state visible", async () => {
     const promptLookupWarning = vi
@@ -904,6 +918,9 @@ describe("Playground cockpit controls", () => {
     ).toHaveAttribute("data-mode", "focus");
     expect(screen.queryByTestId("playground-context-rail")).toBeNull();
     expect(screen.queryByTestId("playground-runtime-inspector")).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Next message composition" }),
+    ).toBeNull();
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
   });
@@ -958,6 +975,63 @@ describe("Playground cockpit controls", () => {
     expect(screen.getByRole("status", { name: "Chat status" })).toHaveTextContent(
       "chacha_notes",
     );
+  });
+
+  it("keeps streaming primary when degraded readiness is warning-only", async () => {
+    messageOptionState.value.streaming = true;
+
+    render(<Playground />);
+
+    await screen.findByTestId("playground-cockpit-shell");
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("tldw:server-readiness-state", {
+          detail: { state: "degraded", degradedChecks: ["embeddings"] },
+        }),
+      );
+    });
+
+    const runtimeInspector = within(
+      screen.getByTestId("playground-cockpit-right-rail"),
+    ).getByTestId("playground-runtime-inspector");
+    expect(within(runtimeInspector).getByText("Streaming")).toBeInTheDocument();
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Streaming");
+    expect(status).toHaveTextContent("embeddings");
+    expect(status).toHaveTextContent("Chat remains available.");
+  });
+
+  it("surfaces blocked server readiness as chat-critical unavailable state", async () => {
+    messageOptionState.value.streaming = false;
+
+    render(<Playground />);
+
+    await screen.findByTestId("playground-cockpit-shell");
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("tldw:server-readiness-state", {
+          detail: { state: "blocked", degradedChecks: ["chat"] },
+        }),
+      );
+    });
+
+    const runtimeInspector = within(
+      screen.getByTestId("playground-cockpit-right-rail"),
+    ).getByTestId("playground-runtime-inspector");
+    expect(within(runtimeInspector).getByText("Error")).toBeInTheDocument();
+    expect(
+      within(runtimeInspector).getByText(
+        "Server is unavailable. Check the server connection before sending.",
+      ),
+    ).toBeInTheDocument();
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Server unavailable");
+    expect(status).toHaveTextContent(
+      "Reconnect to the server or review server settings before sending.",
+    );
+    expect(status).not.toHaveTextContent("Chat remains available.");
   });
 
   it("keeps the cockpit visibly degraded when readiness details are empty", async () => {

@@ -43,6 +43,7 @@ import {
 } from "./tabs"
 import { LlamaCppAdvancedControls } from "./LlamaCppAdvancedControls"
 import { resolveSelectedSystemPromptContent } from "../system-prompt-utils"
+import { normalizeCurrentChatModelSettingValue } from "./current-chat-model-settings-values"
 
 type Props = {
   open: boolean
@@ -420,11 +421,15 @@ export const CurrentChatModelSettings = ({
 
       Object.keys(values).forEach((key) => {
         if (!isChatModelSettingKey(key)) return
+        const normalizedValue = normalizeCurrentChatModelSettingValue(
+          key,
+          values[key]
+        )
         if (targetSettingsScope) {
-          updateScopedSetting(targetSettingsScope, key, values[key])
+          updateScopedSetting(targetSettingsScope, key, normalizedValue)
           return
         }
-        updateSetting(key, values[key])
+        updateSetting(key, normalizedValue)
       })
 
       const base = actorSettings ?? createDefaultActorSettings()
@@ -853,7 +858,10 @@ export const CurrentChatModelSettings = ({
             form={form}
             layout="vertical"
             onFinish={(values) => {
-              saveSettings(values)
+              saveSettings({
+                ...form.getFieldsValue(true),
+                ...values
+              })
               setOpen(false)
             }}
             onValuesChange={(changedValues) => {

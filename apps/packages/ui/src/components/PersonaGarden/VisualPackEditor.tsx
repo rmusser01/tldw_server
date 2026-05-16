@@ -87,7 +87,12 @@ import {
   classifyPersonaVisualGenerationReadiness,
   type PersonaVisualGenerationReadinessView
 } from "./personaVisualGenerationReadiness"
-import { VisualBuddySetupChoiceCard } from "./VisualBuddySetupChoiceCard"
+import {
+  formatStarterExpectedAssetGroups,
+  getStarterComplexityTierLabel,
+  getStarterProductionStatusLabel,
+  VisualBuddySetupChoiceCard
+} from "./VisualBuddySetupChoiceCard"
 import { VisualPackReusePanel } from "./VisualPackReusePanel"
 
 type VisualPackEditorProps = {
@@ -2968,38 +2973,96 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           data-testid="persona-visual-starter-picker"
           className="space-y-2"
         >
-          {starterPacks.map((starter) => (
-            <div
-              key={starter.id}
-              className="rounded border border-border bg-bg p-2 text-xs"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <div className="font-medium text-text">{starter.title}</div>
-                  <div className="mt-1 text-text-muted">{starter.description}</div>
-                </div>
-                <Tag>{starter.renderer_type}</Tag>
-              </div>
-              <div className="mt-2 flex flex-wrap gap-1">
-                {starter.tags.map((tag) => (
-                  <Tag key={tag}>{tag}</Tag>
-                ))}
-                <Tag>{starter.license_label}</Tag>
-              </div>
-              <Button
-                data-testid={`persona-visual-copy-starter-${starter.id}`}
-                className="mt-2"
-                size="small"
-                type="primary"
-                icon={<Copy className="h-3.5 w-3.5" />}
-                loading={copyingStarterId === starter.id}
-                disabled={Boolean(copyingStarterId)}
-                onClick={() => void handleCopyStarterPack(starter.id)}
+          {starterPacks.map((starter) => {
+            const productionStatus = getStarterProductionStatusLabel(
+              starter.production_status,
+              t
+            )
+            const complexityTier = getStarterComplexityTierLabel(
+              starter.complexity_tier,
+              t
+            )
+            const expectedAssetGroups = formatStarterExpectedAssetGroups(
+              starter.expected_asset_groups
+            )
+            const animationCoverageNotes = (
+              starter.animation_coverage_notes || []
+            ).join("; ")
+            return (
+              <div
+                key={starter.id}
+                className="rounded border border-border bg-bg p-2 text-xs"
               >
-                Copy as draft
-              </Button>
-            </div>
-          ))}
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <div className="font-medium text-text">{starter.title}</div>
+                    <div className="mt-1 text-text-muted">{starter.description}</div>
+                  </div>
+                  <Tag>{starter.renderer_type}</Tag>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {productionStatus ? (
+                    <Tag color={starter.production_status === "art_ready" ? "green" : "orange"}>
+                      {productionStatus}
+                    </Tag>
+                  ) : null}
+                  {complexityTier ? <Tag>{complexityTier}</Tag> : null}
+                  {starter.neutral_anchor_required ? (
+                    <Tag color="blue">
+                      {t(
+                        "sidepanel:personaGarden.visuals.setup.neutralAnchorRequired",
+                        {
+                          defaultValue: "Neutral anchor required"
+                        }
+                      )}
+                    </Tag>
+                  ) : null}
+                  {starter.tags.map((tag) => (
+                    <Tag key={tag}>{tag}</Tag>
+                  ))}
+                  <Tag>{starter.license_label}</Tag>
+                </div>
+                {expectedAssetGroups ? (
+                  <div className="mt-2 text-[11px] leading-5 text-text-muted">
+                    <span className="font-medium text-text">
+                      {t(
+                        "sidepanel:personaGarden.visuals.setup.expectedAssetsLabel",
+                        {
+                          defaultValue: "Expected assets:"
+                        }
+                      )}{" "}
+                    </span>
+                    {expectedAssetGroups}
+                  </div>
+                ) : null}
+                {animationCoverageNotes ? (
+                  <div className="mt-1 text-[11px] leading-5 text-text-muted">
+                    <span className="font-medium text-text">
+                      {t(
+                        "sidepanel:personaGarden.visuals.setup.coverageLabel",
+                        {
+                          defaultValue: "Coverage:"
+                        }
+                      )}{" "}
+                    </span>
+                    {animationCoverageNotes}
+                  </div>
+                ) : null}
+                <Button
+                  data-testid={`persona-visual-copy-starter-${starter.id}`}
+                  className="mt-2"
+                  size="small"
+                  type="primary"
+                  icon={<Copy className="h-3.5 w-3.5" />}
+                  loading={copyingStarterId === starter.id}
+                  disabled={Boolean(copyingStarterId)}
+                  onClick={() => void handleCopyStarterPack(starter.id)}
+                >
+                  Copy as draft
+                </Button>
+              </div>
+            )
+          })}
         </div>
       </Modal>
 
