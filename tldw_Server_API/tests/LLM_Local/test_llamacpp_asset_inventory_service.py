@@ -86,3 +86,28 @@ def test_scan_assets_reports_stale_imported_folder_without_failing(monkeypatch, 
     folder = next(asset for asset in result.assets if asset.kind == "folder")
     assert folder.resolved_path == str(missing)
     assert any("missing" in warning.lower() for warning in folder.warnings)
+
+
+@pytest.mark.unit
+def test_scan_assets_adds_inferred_mmproj_candidates_with_warnings(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    base = models_dir / "llava-7b-Q4_K_M.gguf"
+    projector = models_dir / "mmproj-llava-7b-f16.gguf"
+    base.write_text("base")
+    projector.write_text("projector")
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(models_dir),
+    )
+
+    result = llamacpp_inventory_service.scan_assets(limit=500)
+
+    base_asset = next(asset for asset in result.assets if asset.kind == "gguf")
+    projector_asset = next(asset for asset in result.assets if asset.kind == "mmproj")
+    assert projector_asset.asset_id in base_asset.mmproj_asset_ids
+    assert base_asset.asset_id in projector_asset.base_model_asset_ids
+    assert any("inferred" in warning.lower() for warning in base_asset.warnings)

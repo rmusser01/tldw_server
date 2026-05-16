@@ -379,7 +379,7 @@ git commit -m "Add llama.cpp local asset discovery"
 - Modify: `tldw_Server_API/app/core/Local_LLM/llamacpp_inventory_service.py`
 - Test: `tldw_Server_API/tests/LLM_Local/test_llamacpp_asset_inventory_service.py`
 
-- [ ] **Step 1: Write failing pairing tests**
+- [x] **Step 1: Write failing pairing tests**
 
 Append:
 
@@ -409,7 +409,7 @@ def test_scan_assets_adds_inferred_mmproj_candidates_with_warnings(monkeypatch, 
     assert any("inferred" in warning.lower() for warning in base_asset.warnings)
 ```
 
-- [ ] **Step 2: Run test to verify failure**
+- [x] **Step 2: Run test to verify failure**
 
 Run:
 
@@ -420,7 +420,7 @@ Run:
 
 Expected: FAIL because candidate pairing is not populated.
 
-- [ ] **Step 3: Implement conservative pairing**
+- [x] **Step 3: Implement conservative pairing**
 
 Add a helper such as `_attach_mmproj_candidates(assets: list[LlamaCppAsset]) -> None`.
 
@@ -433,7 +433,7 @@ Rules:
 - Never remove or hide assets because pairing is ambiguous.
 - Never auto-populate profile `mmproj_model_id` from candidate metadata.
 
-- [ ] **Step 4: Run pairing and service tests**
+- [x] **Step 4: Run pairing and service tests**
 
 Run:
 
@@ -444,7 +444,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Local_LLM/llamacpp_inventory_service.py \

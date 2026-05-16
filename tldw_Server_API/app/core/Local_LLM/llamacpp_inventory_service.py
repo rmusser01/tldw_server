@@ -28,6 +28,14 @@ _CTX_RE = re.compile(r"(?:^|[-_.])(?:ctx|context)[-_.]?(\d{3,6})(?:[-_.]|$)", re
 _REGISTERED_PATH_DELIMITERS = {",", os.pathsep}
 _ASSET_SOURCE_ORDER = {"registered_path": 0, "models_dir": 1, "imported_folder": 2}
 _ASSET_KIND_ORDER = {"folder": 0, "gguf": 1, "mmproj": 2, "unknown": 3}
+_PAIRING_DROP_TOKENS = {
+    "bf16",
+    "f16",
+    "f32",
+    "gguf",
+    "mmproj",
+    "projector",
+}
 
 
 def model_id_for_path(path: Path) -> str:
@@ -106,6 +114,7 @@ def scan_assets(config_state: dict[str, Any] | None = None, limit: int = 500) ->
                     )
                 )
 
+    _attach_mmproj_candidates(assets)
     assets.sort(
         key=lambda asset: (
             _ASSET_SOURCE_ORDER.get(asset.source, 99),
@@ -407,6 +416,52 @@ def _capabilities_for_asset(kind: str) -> list[str]:
     if kind == "gguf":
         return ["unknown"]
     return []
+
+
+def _attach_mmproj_candidates(assets: list[LlamaCppAsset]) -> None:
+    by_parent: dict[Path, list[LlamaCppAsset]] = {}
+    for asset in assets:
+        if asset.kind not in {"gguf", "mmproj"} or not asset.resolved_path:
+            continue
+        by_parent.setdefault(Path(asset.resolved_path).parent, []).append(asset)
+
+    for grouped_assets in by_parent.values():
+        base_assets = [asset for asset in grouped_assets if asset.kind == "gguf"]
+        projector_assets = [asset for asset in grouped_assets if asset.kind == "mmproj"]
+        if not base_assets or not projector_assets:
+            continue
+
+        for base_asset in base_assets:
+            base_tokens = _pairing_tokens(base_asset.display_name)
+            candidates = [
+                projector
+                for projector in projector_assets
+                if len(projector_assets) == 1 or base_tokens.intersection(_pairing_tokens(projector.display_name))
+            ]
+            for projector in candidates:
+                if projector.asset_id not in base_asset.mmproj_asset_ids:
+                    base_asset.mmproj_asset_ids.append(projector.asset_id)
+                if base_asset.asset_id not in projector.base_model_asset_ids:
+                    projector.base_model_asset_ids.append(base_asset.asset_id)
+            if candidates:
+                _append_unique_warning(
+                    base_asset.warnings,
+                    "mmproj pairing is inferred; verify the projector before launching vision profiles.",
+                )
+
+
+def _pairing_tokens(value: str) -> set[str]:
+    tokens = {token for token in re.split(r"[^a-zA-Z0-9]+", value.lower()) if token}
+    return {
+        token
+        for token in tokens
+        if token not in _PAIRING_DROP_TOKENS and not _QUANT_RE.fullmatch(token) and not _PARAM_RE.fullmatch(token)
+    }
+
+
+def _append_unique_warning(warnings: list[str], warning: str) -> None:
+    if warning not in warnings:
+        warnings.append(warning)
 
 
 def _item_for_path(
