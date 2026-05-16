@@ -1,5 +1,5 @@
 import React from "react"
-import { Skeleton, Spin } from "antd"
+import { Skeleton } from "antd"
 import { Loader2 } from "lucide-react"
 import { cn } from "@/libs/utils"
 
@@ -161,10 +161,6 @@ export const LoadingState = React.forwardRef<HTMLDivElement, LoadingStateProps>(
       />
     )
 
-    const renderInline = () => (
-      <Spin size="small" className="inline-flex items-center" />
-    )
-
     const renderContent = () => {
       switch (mode) {
         case "spinner":
@@ -190,7 +186,7 @@ export const LoadingState = React.forwardRef<HTMLDivElement, LoadingStateProps>(
             </div>
           )
         case "inline":
-          return renderInline()
+          return renderSpinner()
         case "skeleton":
         default:
           return renderSkeleton()
@@ -211,6 +207,25 @@ export const LoadingState = React.forwardRef<HTMLDivElement, LoadingStateProps>(
               {source.label || source.key}
             </span>
           ))}
+        </div>
+      )
+    }
+
+    if (mode === "inline" && !fullscreen && !overlay) {
+      return (
+        <div
+          ref={ref}
+          className={cn("inline-flex items-center gap-2", className)}
+          style={style}
+          data-testid={dataTestId}
+          data-ds-component="LoadingState"
+        >
+          {renderContent()}
+          {label && (
+            <span className={cn("text-text-muted", sizeStyles.text)}>
+              {label}
+            </span>
+          )}
         </div>
       )
     }

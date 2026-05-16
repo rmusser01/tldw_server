@@ -174,6 +174,26 @@ describe("HealthStatus design-system states", () => {
     expect(screen.getAllByText(/Raw response from/).length).toBeGreaterThan(0)
   })
 
+  it("renders connected status through the design-system alert primitive", async () => {
+    await renderHealth()
+
+    const connectedTitle = await screen.findByText(/Connected to/)
+
+    expect(connectedTitle.closest('[data-ds-component="Alert"]')).not.toBeNull()
+  })
+
+  it("renders the no-server guidance through the design-system alert primitive", async () => {
+    clientMock.getConfig.mockResolvedValue({
+      serverUrl: ""
+    })
+
+    await renderHealth()
+
+    const guidanceTitle = await screen.findByText("Don’t have a server yet?")
+
+    expect(guidanceTitle.closest('[data-ds-component="Alert"]')).not.toBeNull()
+  })
+
   it("renders Degraded when only part of the health surface is failing", async () => {
     apiSendMock.mockImplementation(({ path }: { path: string }) =>
       Promise.resolve(
@@ -202,6 +222,11 @@ describe("HealthStatus design-system states", () => {
     await waitFor(() => {
       expect(screen.getAllByText(designSystemLabels.loading).length).toBeGreaterThan(0)
     })
+    expect(await screen.findByText(/Checking/)).toBeInTheDocument()
+    expect(screen.getByTestId("health-check-core-loading")).toHaveAttribute(
+      "data-ds-component",
+      "LoadingState"
+    )
   })
 
   it("renders Unavailable for unreachable connection callouts", async () => {
