@@ -27,7 +27,9 @@ from tldw_Server_API.app.core.Persona.visual_service import (
     PersonaVisualServiceError,
 )
 from tldw_Server_API.app.core.Persona.visual_starter_fixtures import (
+    DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID,
     DEFAULT_PERSONA_VISUAL_STARTER_PACKS,
+    LEGACY_PERSONA_VISUAL_STARTER_PACK_ID,
     PersonaVisualStarterPack,
 )
 from tldw_Server_API.app.core.Persona.visuals import (
@@ -269,6 +271,11 @@ class PersonaVisualStarterCatalogService:
 
     def _get_starter(self, starter_pack_id: str) -> PersonaVisualStarterPack:
         starter_id = str(starter_pack_id or "").strip()
+        if (
+            starter_id == LEGACY_PERSONA_VISUAL_STARTER_PACK_ID
+            and starter_id not in self._starter_packs
+        ):
+            starter_id = DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID
         starter = self._starter_packs.get(starter_id)
         if starter is None:
             raise PersonaVisualStarterCatalogError(

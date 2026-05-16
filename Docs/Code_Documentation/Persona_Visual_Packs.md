@@ -208,11 +208,39 @@ Runtime state triggers are transient session behavior; library reuse is a
 durable draft-creation action that must preserve review and explicit activation
 semantics.
 
-## Bundled Starter Pack Catalog
+## Bundled Starter Catalog Scaffolds
 
-Bundled starter packs are immutable server fixtures for first-run or recovery
-flows. They are not global Persona Visual pack rows, shared library entries, or
-runtime assets. Listing the catalog returns safe fixture metadata only.
+Bundled starter catalog entries are immutable server fixtures for first-run or
+recovery flows. They are not global Persona Visual pack rows, shared library
+entries, runtime assets, final character artwork, or completed animation packs.
+Listing the catalog returns safe fixture metadata only.
+
+The current bundled catalog exposes nine starter IDs in stable order:
+
+1. `research-buddy-basic`
+2. `migu-marker-basic`
+3. `minimal-helper-basic`
+4. `study-desk-intermediate`
+5. `tool-helper-intermediate`
+6. `object-creature-intermediate`
+7. `lofi-study-intricate`
+8. `action-guide-intricate`
+9. `elaborate-persona-intricate`
+
+These map to the approved basic, intermediate, and intricate tiers from the
+Persona Buddy default catalog design, but this slice only adds backend catalog
+scaffolds. The included PNGs are deliberately tiny deterministic fixtures, and
+the manifest animations are metadata examples that validate state/asset copying;
+they are not the final generated/imported buddy art or expressive animation
+frames. Real default buddy assets still need to be created through the approved
+neutral-pose-to-animation pipeline and can replace these fixture assets without
+changing the catalog copy contract.
+
+The scaffold fixtures establish stable copy-to-draft behavior, required-state
+coverage, custom-state examples, and an atlas-backed example while preserving
+the same explicit activation rule as user-created packs. The legacy
+`research-buddy-starter` id remains accepted as a compatibility alias for the
+research buddy scaffold, but it is not listed as a tenth catalog item.
 
 Copying a bundled starter pack creates a normal user-owned draft pack attached
 to the selected target persona. The copy path validates the fixture manifest and

@@ -14,6 +14,8 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Persona.visual_library_service import PersonaVisualLibraryServiceError
 from tldw_Server_API.app.core.Persona.visual_starter_fixtures import (
     DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID,
+    DEFAULT_PERSONA_VISUAL_STARTER_PACK_IDS,
+    LEGACY_PERSONA_VISUAL_STARTER_PACK_ID,
 )
 
 
@@ -193,6 +195,8 @@ def test_get_persona_visual_starter_pack_detail(persona_db: CharactersRAGDB) -> 
     payload = response.json()
     assert payload["id"] == DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID
     assert payload["manifest"]["renderer_type"] == "sprite_frames"
+    assert "catalog:scaffold" in payload["tags"]
+    assert "scaffold" in payload["description"].lower()
     assert payload["assets"][0]["mime_type"] == "image/png"
 
 
@@ -354,13 +358,18 @@ def test_list_persona_visual_starter_packs(persona_db: CharactersRAGDB) -> None:
 
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert [item["id"] for item in payload["starter_packs"]] == [
-        DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID
-    ]
+    assert [item["id"] for item in payload["starter_packs"]] == list(
+        DEFAULT_PERSONA_VISUAL_STARTER_PACK_IDS
+    )
+    assert LEGACY_PERSONA_VISUAL_STARTER_PACK_ID not in {
+        item["id"] for item in payload["starter_packs"]
+    }
     starter = payload["starter_packs"][0]
-    assert starter["title"] == "Research Buddy Starter"
+    assert starter["title"] == "Research Buddy Basic"
     assert starter["renderer_type"] == "sprite_frames"
     assert starter["asset_count"] == 1
+    assert "catalog:scaffold" in starter["tags"]
+    assert "scaffold" in starter["description"].lower()
     assert {"idle", "listening", "thinking", "speaking", "error"}.issubset(
         set(starter["states_offered"])
     )
@@ -391,7 +400,7 @@ def test_copy_visual_starter_pack_creates_draft_without_activation(
 
         assert response.status_code == 201, response.text
         payload = response.json()
-        assert payload["title"] == "Research Buddy Starter"
+        assert payload["title"] == "Research Buddy Basic"
         assert payload["persona_id"] == persona_id
         assert payload["status"] == "draft"
         assert payload["provenance"] == "imported"
@@ -399,7 +408,7 @@ def test_copy_visual_starter_pack_creates_draft_without_activation(
         assert payload["active_at"] is None
         assert len(payload["assets"]) == 1
         assert payload["assets"][0]["provenance"] == "imported"
-        assert "starter_idle" not in str(payload["manifest"])
+        assert "neutral" not in str(payload["manifest"])
         assert persona_db.get_active_persona_visual_pack(
             persona_id=persona_id,
             user_id="1",
