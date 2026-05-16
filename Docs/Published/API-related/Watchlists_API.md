@@ -97,6 +97,8 @@ Outputs:
 - `GET /outputs`
 - `GET /outputs/{output_id}`
 - `GET /outputs/{output_id}/download`
+- `GET /outputs/{output_id}/evidence`
+- `GET /outputs/{output_id}/readiness`
 
 Content alerts:
 - `GET /{watchlist_id}/content-alert-rules`
@@ -492,6 +494,139 @@ Output provenance:
 - New outputs include `metadata.watchlist_id`, `metadata.job_id`, `metadata.run_id`, `metadata.item_ids`, and `metadata.version`.
 - `GET /outputs?watchlist_id=<id>` filters by the Watchlist's jobs. Older outputs that do not yet carry `metadata.watchlist_id` are still returned when their stored `job_id` belongs to the requested Watchlist.
 - `GET /outputs?run_id=<id>` and `GET /outputs?job_id=<id>` remain supported and can be combined with `watchlist_id`.
+
+Stage 5 defensible report fields on `POST /outputs`:
+- `item_ids`: explicit included item IDs from the run. Use queued Updates (`queued_for_briefing=true`) when generating a defensible report.
+- `report_preset`: `auto`, `cti_osint`, `news_briefing`, or `general_research`. `auto` resolves from the Watchlist domain when available.
+- `include_evidence_table`: include immutable evidence rows in the render context. Default `true`.
+- `include_excluded_items`: capture same-run excluded/unselected items in the evidence snapshot. Default `true`.
+- `require_reviewed_items`: warn when included Updates have not been reviewed. Default `false`.
+- `allow_weak_evidence`: allow generation when readiness is `warning`. Set `false` to reject weak evidence with `422 report_readiness_warning`.
+- `template_name` and `template_version`: render a stored Watchlists template. Built-in Stage 5 templates include `cti_osint_report_markdown` and `news_briefing_markdown`.
+
+Create a CTI/OSINT report from queued Updates:
+```json
+{
+  "run_id": 456,
+  "item_ids": [1001, 1002],
+  "title": "Healthcare ransomware activity - May 15",
+  "format": "md",
+  "report_preset": "cti_osint",
+  "template_name": "cti_osint_report_markdown",
+  "include_evidence_table": true,
+  "include_excluded_items": true,
+  "allow_weak_evidence": true
+}
+```
+
+Create a news briefing with source-diversity and recency context:
+```json
+{
+  "run_id": 789,
+  "item_ids": [2101, 2104, 2108],
+  "title": "Election litigation briefing",
+  "format": "md",
+  "report_preset": "news_briefing",
+  "template_name": "news_briefing_markdown",
+  "include_evidence_table": true,
+  "include_excluded_items": true
+}
+```
+
+Stage 5 output metadata includes:
+- `report_preset`
+- `report_schema_version`
+- `report_snapshot_path`
+- `report_readiness` with `state`, `score`, and `warnings`
+- `included_item_count`
+- `excluded_item_count`
+- `excluded_item_total_count`
+- `excluded_items_truncated`
+- `source_count`
+- `missing_source_count`
+- `alert_count`
+- `critical_alert_count`
+- `weak_evidence_warning_count`
+
+Readiness states:
+- `ready`: report has included evidence and no readiness warnings.
+- `warning`: report can be generated, but users should review caveats before relying on it.
+- `blocked`: report cannot be generated without included evidence.
+- `legacy_live_only`: older output without an immutable snapshot; the server can only expose current metadata/readiness.
+
+Readiness warning codes currently include:
+- `no_included_items`: no items were selected for the report.
+- `single_source`: only one source is represented.
+- `missing_source_provenance`: one or more included items lack source provenance.
+- `unreviewed_items`: included items were queued but not reviewed.
+- `no_alert_evidence`: CTI report has no matching content alert evidence.
+- `stale_news`: news briefing contains stale included updates.
+- `legacy_live_only`: output predates immutable evidence snapshots.
+
+Fetch immutable report evidence:
+```bash
+curl "$BASE/api/v1/watchlists/outputs/9001/evidence" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Response shape:
+```json
+{
+  "output_id": 9001,
+  "immutable_snapshot": true,
+  "readiness": {
+    "state": "warning",
+    "score": 76,
+    "warnings": [
+      {
+        "code": "single_source",
+        "severity": "warning",
+        "message": "Only one source is represented.",
+        "affected_item_ids": [1001]
+      }
+    ]
+  },
+  "snapshot": {
+    "schema_version": 1,
+    "snapshot_id": "watchlist-report-...",
+    "generated_at": "2026-05-15T12:00:00Z",
+    "preset": "cti_osint",
+    "included_items": [
+      {
+        "id": 1001,
+        "title": "Vendor advisory confirms exploitation",
+        "url": "https://vendor.example/cve",
+        "source_name": "Vendor Advisory",
+        "published_at": "2026-05-15T10:00:00Z",
+        "summary": "Active exploitation against edge devices.",
+        "reviewed": true,
+        "queued_for_briefing": true,
+        "alerts": [
+          {
+            "rule_name": "Critical CVE",
+            "severity": "critical",
+            "matched_text": "CVE-2026-1234"
+          }
+        ]
+      }
+    ],
+    "excluded_items": [
+      {
+        "id": 1003,
+        "title": "Background market note",
+        "reason": "not_queued_for_report"
+      }
+    ],
+    "source_summary": {"unique_source_count": 2, "missing_source_count": 0},
+    "included_count": 1,
+    "excluded_count": 1,
+    "alert_count": 1,
+    "critical_alert_count": 1
+  }
+}
+```
+
+`GET /outputs/{output_id}/readiness` returns only the `readiness` object. For legacy outputs without `metadata.report_snapshot_path`, `/evidence` returns `immutable_snapshot=false`, `snapshot=null`, and `readiness.state="legacy_live_only"`.
 
 Create a report plus TTS variant output (`type=tts_audio`, `format=mp3`):
 ```json

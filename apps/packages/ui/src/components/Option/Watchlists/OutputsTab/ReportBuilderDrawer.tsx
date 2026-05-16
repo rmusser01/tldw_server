@@ -32,6 +32,9 @@ interface PreflightWarning {
 
 const DEFAULT_PAGE_SIZE = 200
 
+const formatCountLabel = (count: number, singular: string, plural = `${singular}s`) =>
+  `${count} ${count === 1 ? singular : plural}`
+
 const presetForWatchlist = (
   watchlist: WatchlistContainer | null | undefined
 ): WatchlistReportPreset => {
@@ -428,16 +431,10 @@ export const ReportBuilderDrawer: React.FC<ReportBuilderDrawerProps> = ({
               />
             )}
             <div className="text-sm text-text-muted">
-              {t("watchlists:reports.builder.queuedCount", "{{count}} queued update{{plural}}", {
-                count: queuedItems.length,
-                plural: queuedItems.length === 1 ? "" : "s"
-              })}
+              {formatCountLabel(queuedItems.length, "queued update")}
             </div>
             <div className="text-sm text-text-muted">
-              {t("watchlists:reports.builder.sourceCount", "{{count}} source{{plural}}", {
-                count: sourceCount,
-                plural: sourceCount === 1 ? "" : "s"
-              })}
+              {formatCountLabel(sourceCount, "source")}
             </div>
             {preflightWarnings.length > 0 ? (
               <div className="space-y-2">
@@ -461,10 +458,7 @@ export const ReportBuilderDrawer: React.FC<ReportBuilderDrawerProps> = ({
             </div>
             {excludedItems.length > 0 ? (
               <div className="text-sm text-text-muted">
-                {t("watchlists:reports.builder.excludedCount", "{{count}} update{{plural}} not queued", {
-                  count: excludedItems.length,
-                  plural: excludedItems.length === 1 ? "" : "s"
-                })}
+                {formatCountLabel(excludedItems.length, "update")} not queued
               </div>
             ) : (
               <div className="text-sm text-text-muted">

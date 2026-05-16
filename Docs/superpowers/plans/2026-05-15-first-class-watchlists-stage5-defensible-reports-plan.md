@@ -888,7 +888,7 @@ git commit -m "feat: add watchlist report builder"
 - Modify as needed: locale files touched by Stage 5D
 - Update: `backlog/tasks/<stage-5-task-files>`
 
-- [ ] **Step 1: Add or update report presets**
+- [x] **Step 1: Add or update report presets**
 
 Preserve existing template names where possible. If new templates are needed, add:
 
@@ -910,7 +910,9 @@ Preserve existing template names where possible. If new templates are needed, ad
 
 Templates must consume `report.readiness`, `report.source_summary`, `report.included_items`, and `report.excluded_items` from the output context.
 
-- [ ] **Step 2: Document API**
+Completed in `tldw_Server_API/app/core/Watchlists/template_store.py` with built-in `cti_osint_report_markdown` and `news_briefing_markdown` presets. Focused template coverage verifies readiness, source diversity, alert evidence, excluded trails, and follow-up links render from report context.
+
+- [x] **Step 2: Document API**
 
 Update API docs with:
 
@@ -925,7 +927,9 @@ Update API docs with:
 
 Mirror `Docs/Published/API-related/Watchlists_API.md`.
 
-- [ ] **Step 3: Run full focused verification**
+Completed in `Docs/API-related/Watchlists_API.md` and mirrored to `Docs/Published/API-related/Watchlists_API.md`. The docs now cover Stage 5 output request fields, report presets, evidence/readiness endpoints, evidence metadata, readiness warning codes, legacy live-only behavior, and CTI/news examples.
+
+- [x] **Step 3: Run full focused verification**
 
 Backend:
 
@@ -974,7 +978,15 @@ python -m bandit -r \
 
 Expected: no new findings in touched code.
 
-- [ ] **Step 4: Real-server CDP smoke**
+Recorded verification:
+
+- Backend focused pytest: `22 passed, 5 warnings`.
+- Frontend focused Vitest: `7` files and `30` tests passed.
+- `git diff --check`: passed.
+- API docs mirror check: `cmp -s Docs/API-related/Watchlists_API.md Docs/Published/API-related/Watchlists_API.md` passed.
+- Bandit touched backend scope: exit `0`, no findings in touched scope; metrics reported zero high/medium/low findings.
+
+- [x] **Step 4: Real-server CDP smoke**
 
 Use the real server and real WebUI. Do not mock the server.
 
@@ -998,7 +1010,32 @@ Minimum smoke:
 
 Record observed console/network errors in the Backlog task. Rate-limit warnings from rapid dev reloads are acceptable only if the flow remains usable and the issue is documented as a follow-up.
 
-- [ ] **Step 5: Close Backlog tasks**
+Recorded real-server CDP smoke:
+
+- Real FastAPI: `http://127.0.0.1:18102`.
+- Real Next WebUI: `http://127.0.0.1:18180`.
+- Route verified: `/watchlists?view=all&tab=outputs`.
+- CDP result: `/private/tmp/tldw-watchlists-stage5-18102/cdp-results.json` with `ok: true`, no page errors, and no request failures.
+- Screenshots:
+  - `/private/tmp/tldw-watchlists-stage5-18102/watchlists-desktop-loaded.png`
+  - `/private/tmp/tldw-watchlists-stage5-18102/watchlists-cti-evidence-preview.png`
+  - `/private/tmp/tldw-watchlists-stage5-18102/watchlists-constrained-reports.png`
+  - `/private/tmp/tldw-watchlists-stage5-18102/watchlists-constrained-report-builder.png`
+  - `/private/tmp/tldw-watchlists-stage5-18102/watchlists-news-evidence-preview-constrained.png`
+- Downloaded real API response body after UI download click:
+  - `/private/tmp/tldw-watchlists-stage5-18102/cti-report-20260516025818.md`
+
+QA notes:
+
+- No mocked server was used. Report creation, preview evidence, readiness, and download verification ran through the real WebUI and real FastAPI.
+- Seed data was created through real API objects where public APIs exist; deterministic run/items/alerts were inserted directly into the server-owned Watchlists SQLite DB because the product does not yet expose a public create-item API for QA setup.
+- The live server used the worktree user database path for Watchlists despite the temporary `USER_DB_BASE_DIR` environment override. That did not mock or bypass the running server, but it is a configuration-precedence note for future QA isolation.
+- Rapid repeated CDP attempts hit the real in-memory rate limit during debugging; final smoke used a restarted real API instance.
+- The sandbox denied non-escalated binding to `127.0.0.1:18102`, so the final API server was started with approved escalation.
+- The CDP harness verified the real `/api/v1/watchlists/outputs/{id}/download` response because the UI download path uses a Blob/object URL. It also used a short Zustand-store fallback only after attempting the Ant Select UI because the dropdown portal became unstable after drawer/download interactions.
+- Observed console warnings were existing Ant Design warnings: `Modal destroyOnClose`, `Alert message`, and static `message` context. No page errors or request failures were recorded.
+
+- [x] **Step 5: Close Backlog tasks**
 
 For each Stage 5 task:
 
@@ -1008,7 +1045,9 @@ For each Stage 5 task:
 - Add final summary.
 - Mark Done.
 
-- [ ] **Step 6: Commit Stage 5E**
+Stage 5E Backlog task `TASK-349.2.5` was updated with acceptance criteria, verification notes, known QA notes, and final summary.
+
+- [x] **Step 6: Commit Stage 5E**
 
 Commit:
 

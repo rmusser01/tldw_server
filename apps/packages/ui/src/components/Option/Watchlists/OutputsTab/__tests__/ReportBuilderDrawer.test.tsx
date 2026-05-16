@@ -21,6 +21,11 @@ const uiMocks = vi.hoisted(() => ({
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (_key: string, defaultValue?: unknown, options?: Record<string, unknown>) => {
+      if (typeof defaultValue === "object" && defaultValue) {
+        const optionValue = defaultValue as Record<string, unknown>
+        const template = typeof optionValue.defaultValue === "string" ? optionValue.defaultValue : _key
+        return template.replace(/\{\{(\w+)\}\}/g, (_, token) => String(optionValue[token] ?? ""))
+      }
       if (typeof defaultValue !== "string") return _key
       if (!options) return defaultValue
       return defaultValue.replace(/\{\{(\w+)\}\}/g, (_, token) => String(options[token] ?? ""))
@@ -275,6 +280,8 @@ describe("ReportBuilderDrawer", () => {
     )
 
     expect(await screen.findByText("1 queued update")).toBeInTheDocument()
+    expect(screen.getByText("1 source")).toBeInTheDocument()
+    expect(screen.getByText("1 update not queued")).toBeInTheDocument()
     expect(screen.getByText("No alert evidence")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Proceed with warnings" })).toBeInTheDocument()
 
