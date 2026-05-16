@@ -115,6 +115,7 @@ def normalize_persona_visual_candidate_provenance(value: Any) -> dict[str, Any]:
 
 
 def _normalize_generation_mode(value: Any, recipe: Any) -> str | None:
+    """Return a supported generation mode, inferring recipe-backed when needed."""
     mode = str(value or "").strip()
     if mode in _ALLOWED_GENERATION_MODES:
         return mode
@@ -124,6 +125,7 @@ def _normalize_generation_mode(value: Any, recipe: Any) -> str | None:
 
 
 def _normalize_recipe_provenance(value: Any) -> dict[str, Any]:
+    """Normalize the recipe subsection to the bounded review-safe fields."""
     if not isinstance(value, Mapping):
         return {}
     recipe: dict[str, Any] = {}
@@ -140,6 +142,7 @@ def _normalize_recipe_provenance(value: Any) -> dict[str, Any]:
 
 
 def _normalize_review_checks(value: Any) -> list[str]:
+    """Return bounded review-check strings after safety normalization."""
     if not isinstance(value, list):
         return []
     checks: list[str] = []
@@ -154,6 +157,7 @@ def _normalize_review_checks(value: Any) -> list[str]:
 
 
 def _safe_provenance_text(value: Any, *, max_length: int) -> str | None:
+    """Return normalized text or a redaction marker for unsafe provenance values."""
     if value is None:
         return None
     text = str(value).strip()
@@ -170,12 +174,14 @@ def _safe_provenance_text(value: Any, *, max_length: int) -> str | None:
 
 
 def _contains_secret_value(text: str, collapsed: str) -> bool:
+    """Detect explicit auth-key shapes and high-entropy standalone tokens."""
     if any(pattern.search(text) or pattern.search(collapsed) for pattern in _SECRET_VALUE_PATTERNS):
         return True
     return _looks_like_single_token_secret(collapsed)
 
 
 def _looks_like_single_token_secret(value: str) -> bool:
+    """Return true for long standalone values that resemble opaque credentials."""
     if not _TOKENISH_VALUE_PATTERN.fullmatch(value):
         return False
     character_classes = (
