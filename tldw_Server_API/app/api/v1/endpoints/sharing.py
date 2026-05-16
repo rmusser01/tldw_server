@@ -21,6 +21,12 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, rbac_rate_limit
 from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 
+from ..schemas.prototype_workspace_schemas import (
+    PrototypeErrorCategory,
+    PrototypeErrorResponse,
+    PrototypeFrontendState,
+    prototype_error_detail,
+)
 from ..schemas.sharing_schemas import (
     AdminShareListResponse,
     AuditEventResponse,
@@ -51,6 +57,40 @@ from ..schemas.sharing_schemas import (
 router = APIRouter(prefix="/sharing", tags=["sharing"])
 _SHARED_CHAT_ERROR_MESSAGE = "Chat request failed"
 _SHARED_CHAT_ERRORS_MESSAGE = "One or more internal pipeline errors were suppressed."
+_PROTOTYPE_LINK_ERROR_RESPONSES: dict[int, dict[str, Any]] = {
+    status.HTTP_403_FORBIDDEN: {
+        "model": PrototypeErrorResponse,
+        "description": "Prototype link requires credentials or the workspace/session is unavailable.",
+    },
+    status.HTTP_404_NOT_FOUND: {
+        "model": PrototypeErrorResponse,
+        "description": "Prototype link is invalid, unavailable, exhausted, or cannot be resumed.",
+    },
+    status.HTTP_422_UNPROCESSABLE_ENTITY: {
+        "model": PrototypeErrorResponse,
+        "description": "Prototype link exchange request is semantically invalid.",
+    },
+}
+
+
+def _prototype_http_error(
+    *,
+    status_code: int,
+    category: PrototypeErrorCategory,
+    message: str,
+    frontend_state: PrototypeFrontendState,
+    retryable: bool = False,
+) -> HTTPException:
+    """Build a prototype-link HTTPException with stable machine-readable detail."""
+    return HTTPException(
+        status_code=status_code,
+        detail=prototype_error_detail(
+            category=category,
+            message=message,
+            frontend_state=frontend_state,
+            retryable=retryable,
+        ),
+    )
 
 
 # ── Lazy service construction ──
@@ -147,6 +187,8 @@ def _coerce_int(value: Any) -> int | None:
 async def _get_owned_prototype_workspace(
     prototype_workspace_id: str,
     owner_user_id: Any,
+    *,
+    use_prototype_error_contract: bool = False,
 ) -> dict[str, Any]:
     """Return a prototype workspace only when the expected owner matches."""
     repo = await _maybe_await(_get_prototype_repo())
@@ -154,6 +196,13 @@ async def _get_owned_prototype_workspace(
     expected_owner_id = _coerce_int(owner_user_id)
     actual_owner_id = _coerce_int(workspace.get("owner_user_id")) if workspace else None
     if not workspace or expected_owner_id is None or actual_owner_id != expected_owner_id:
+        if use_prototype_error_contract:
+            raise _prototype_http_error(
+                status_code=status.HTTP_404_NOT_FOUND,
+                category="invalid_or_unavailable_link",
+                message="Prototype link is unavailable",
+                frontend_state="link_unavailable",
+            )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
     return workspace
 
@@ -950,6 +999,7 @@ async def public_verify_password(
     "/public/{token}/prototype-session",
     response_model=PrototypeLinkExchangeResponse,
     summary="Exchange a prototype private link for an external collaborator session",
+    responses=_PROTOTYPE_LINK_ERROR_RESPONSES,
 )
 async def public_prototype_session_exchange(
     token: str,
@@ -968,18 +1018,26 @@ async def public_prototype_session_exchange(
     audit = _get_audit_service()
     validated = await svc.validate_token(token, allow_exhausted=True)
     if not validated:
-        raise HTTPException(status_code=404, detail="Resource not found")
+        raise _prototype_http_error(
+            status_code=status.HTTP_404_NOT_FOUND,
+            category="invalid_or_unavailable_link",
+            message="Prototype link is unavailable",
+            frontend_state="link_unavailable",
+        )
 
     resource_type = str(validated.get("resource_type") or "").strip().lower()
     prototype_workspace_id = str(validated.get("resource_id") or "").strip()
     if resource_type != ResourceType.PROTOTYPE_WORKSPACE.value or not prototype_workspace_id:
-        raise HTTPException(
+        raise _prototype_http_error(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Share token is not a prototype workspace link",
+            category="invalid_request",
+            message="Share token is not a prototype workspace link",
+            frontend_state="invalid_request",
         )
     await _get_owned_prototype_workspace(
         prototype_workspace_id=prototype_workspace_id,
         owner_user_id=validated.get("owner_user_id"),
+        use_prototype_error_contract=True,
     )
 
     resume_cookie_value = request.cookies.get(PROTOTYPE_SHARED_ACTOR_COOKIE)
@@ -1002,22 +1060,41 @@ async def public_prototype_session_exchange(
                 user_agent=request.headers.get("user-agent"),
             )
             if not password_ok:
-                raise HTTPException(status_code=403, detail="Invalid password")
+                raise _prototype_http_error(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    category="invalid_password",
+                    message="Prototype link password is invalid",
+                    frontend_state="password_rejected",
+                    retryable=True,
+                )
         else:
             if not can_resume_without_password:
-                raise HTTPException(status_code=403, detail="Password required")
+                raise _prototype_http_error(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    category="password_required",
+                    message="Prototype link password is required",
+                    frontend_state="password_required",
+                    retryable=True,
+                )
 
     if not can_resume_without_password and not str(body.display_name or "").strip():
-        raise HTTPException(
+        raise _prototype_http_error(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="display_name is required for first-time sessions",
+            category="invalid_request",
+            message="display_name is required for first-time sessions",
+            frontend_state="invalid_request",
         )
 
     claimed_new_use = False
     if not can_resume_without_password:
         claimed_new_use = await svc.claim_token_use(validated["id"])
         if not claimed_new_use:
-            raise HTTPException(status_code=404, detail="Resource not found")
+            raise _prototype_http_error(
+                status_code=status.HTTP_404_NOT_FOUND,
+                category="invalid_or_unavailable_link",
+                message="Prototype link is unavailable",
+                frontend_state="link_unavailable",
+            )
 
     claim_released = False
     provisioning_succeeded = False
@@ -1036,11 +1113,26 @@ async def public_prototype_session_exchange(
             await svc.release_token_use(validated["id"])
             claim_released = True
         if exc.code == "workspace_not_found":
-            raise HTTPException(status_code=404, detail="Prototype workspace not found") from exc
+            raise _prototype_http_error(
+                status_code=status.HTTP_404_NOT_FOUND,
+                category="invalid_or_unavailable_link",
+                message="Prototype link is unavailable",
+                frontend_state="link_unavailable",
+            ) from exc
         if exc.code == "workspace_archived":
-            raise HTTPException(status_code=403, detail="Prototype workspace is archived") from exc
+            raise _prototype_http_error(
+                status_code=status.HTTP_403_FORBIDDEN,
+                category="workspace_unavailable",
+                message="Prototype workspace is archived",
+                frontend_state="workspace_unavailable",
+            ) from exc
         if exc.code == "resume_required":
-            raise HTTPException(status_code=404, detail="Resource not found") from exc
+            raise _prototype_http_error(
+                status_code=status.HTTP_404_NOT_FOUND,
+                category="invalid_or_unavailable_link",
+                message="Prototype link is unavailable",
+                frontend_state="link_unavailable",
+            ) from exc
         raise
     except Exception:
         if claimed_new_use and not claim_released:

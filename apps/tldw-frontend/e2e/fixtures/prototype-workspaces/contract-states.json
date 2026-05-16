@@ -1,7 +1,7 @@
 {
-  "version": 1,
+  "version": 2,
   "source": "Docs/API-related/Prototype_Workspaces_Contract_Matrix.md",
-  "riskGate": "Risk Gate 1 draft",
+  "riskGate": "Risk Gate 4 frozen",
   "states": [
     {
       "state": "invalid_link",
@@ -9,7 +9,14 @@
       "stableErrorCategory": "invalid_or_unavailable_link",
       "frontendStateBucket": "Link unavailable",
       "retryable": false,
-      "mockResponse": { "detail": "Prototype link is unavailable" }
+      "mockResponse": {
+        "detail": {
+          "category": "invalid_or_unavailable_link",
+          "message": "Prototype link is unavailable",
+          "frontend_state": "link_unavailable",
+          "retryable": false
+        }
+      }
     },
     {
       "state": "expired_link",
@@ -17,7 +24,14 @@
       "stableErrorCategory": "invalid_or_unavailable_link",
       "frontendStateBucket": "Link unavailable",
       "retryable": false,
-      "mockResponse": { "detail": "Prototype link is unavailable" }
+      "mockResponse": {
+        "detail": {
+          "category": "invalid_or_unavailable_link",
+          "message": "Prototype link is unavailable",
+          "frontend_state": "link_unavailable",
+          "retryable": false
+        }
+      }
     },
     {
       "state": "revoked_link",
@@ -25,7 +39,14 @@
       "stableErrorCategory": "invalid_or_unavailable_link",
       "frontendStateBucket": "Link unavailable",
       "retryable": false,
-      "mockResponse": { "detail": "Prototype link is unavailable" }
+      "mockResponse": {
+        "detail": {
+          "category": "invalid_or_unavailable_link",
+          "message": "Prototype link is unavailable",
+          "frontend_state": "link_unavailable",
+          "retryable": false
+        }
+      }
     },
     {
       "state": "exhausted_link",
@@ -33,7 +54,14 @@
       "stableErrorCategory": "invalid_or_unavailable_link",
       "frontendStateBucket": "Link unavailable",
       "retryable": false,
-      "mockResponse": { "detail": "Prototype link is unavailable" }
+      "mockResponse": {
+        "detail": {
+          "category": "invalid_or_unavailable_link",
+          "message": "Prototype link is unavailable",
+          "frontend_state": "link_unavailable",
+          "retryable": false
+        }
+      }
     },
     {
       "state": "password_required",
@@ -41,7 +69,14 @@
       "stableErrorCategory": "password_required",
       "frontendStateBucket": "Password required",
       "retryable": true,
-      "mockResponse": { "detail": "Prototype link password is required" }
+      "mockResponse": {
+        "detail": {
+          "category": "password_required",
+          "message": "Prototype link password is required",
+          "frontend_state": "password_required",
+          "retryable": true
+        }
+      }
     },
     {
       "state": "bad_password",
@@ -49,7 +84,14 @@
       "stableErrorCategory": "invalid_password",
       "frontendStateBucket": "Password rejected",
       "retryable": true,
-      "mockResponse": { "detail": "Prototype link password is invalid" }
+      "mockResponse": {
+        "detail": {
+          "category": "invalid_password",
+          "message": "Prototype link password is invalid",
+          "frontend_state": "password_rejected",
+          "retryable": true
+        }
+      }
     },
     {
       "state": "archived_workspace",
@@ -57,7 +99,14 @@
       "stableErrorCategory": "workspace_unavailable",
       "frontendStateBucket": "Workspace unavailable",
       "retryable": false,
-      "mockResponse": { "detail": "Prototype workspace is archived" }
+      "mockResponse": {
+        "detail": {
+          "category": "workspace_unavailable",
+          "message": "Prototype workspace is archived",
+          "frontend_state": "workspace_unavailable",
+          "retryable": false
+        }
+      }
     },
     {
       "state": "missing_workspace",
@@ -65,7 +114,14 @@
       "stableErrorCategory": "invalid_or_unavailable_link",
       "frontendStateBucket": "Link unavailable",
       "retryable": false,
-      "mockResponse": { "detail": "Prototype link is unavailable" }
+      "mockResponse": {
+        "detail": {
+          "category": "invalid_or_unavailable_link",
+          "message": "Prototype link is unavailable",
+          "frontend_state": "link_unavailable",
+          "retryable": false
+        }
+      }
     },
     {
       "state": "owner_mismatch",
@@ -73,7 +129,14 @@
       "stableErrorCategory": "invalid_or_unavailable_link",
       "frontendStateBucket": "Link unavailable",
       "retryable": false,
-      "mockResponse": { "detail": "Prototype link is unavailable" }
+      "mockResponse": {
+        "detail": {
+          "category": "invalid_or_unavailable_link",
+          "message": "Prototype link is unavailable",
+          "frontend_state": "link_unavailable",
+          "retryable": false
+        }
+      }
     },
     {
       "state": "inactive_session",
@@ -81,7 +144,14 @@
       "stableErrorCategory": "inactive_session",
       "frontendStateBucket": "Session inactive",
       "retryable": false,
-      "mockResponse": { "detail": "Prototype session token is no longer active" }
+      "mockResponse": {
+        "detail": {
+          "category": "inactive_session",
+          "message": "Prototype session token is no longer active",
+          "frontend_state": "session_inactive",
+          "retryable": false
+        }
+      }
     },
     {
       "state": "bootstrap_failed",
@@ -89,15 +159,29 @@
       "stableErrorCategory": "bootstrap_failed",
       "frontendStateBucket": "Setup failed",
       "retryable": true,
-      "mockResponse": { "detail": "Prototype branch session could not be created" }
+      "mockResponse": {
+        "detail": {
+          "category": "bootstrap_failed",
+          "message": "Prototype branch session could not be created",
+          "frontend_state": "setup_failed",
+          "retryable": true
+        }
+      }
     },
     {
       "state": "preview_unavailable",
-      "httpStatus": 503,
+      "httpStatus": 404,
       "stableErrorCategory": "preview_unavailable",
       "frontendStateBucket": "Preview unavailable",
-      "retryable": true,
-      "mockResponse": { "detail": "Prototype preview is unavailable" }
+      "retryable": false,
+      "mockResponse": {
+        "detail": {
+          "category": "preview_unavailable",
+          "message": "Prototype preview is unavailable",
+          "frontend_state": "preview_unavailable",
+          "retryable": false
+        }
+      }
     },
     {
       "state": "stale_promotion",
@@ -105,7 +189,14 @@
       "stableErrorCategory": "stale_promotion",
       "frontendStateBucket": "Promotion stale",
       "retryable": false,
-      "mockResponse": { "detail": "Prototype promotion request is stale" }
+      "mockResponse": {
+        "detail": {
+          "category": "stale_promotion",
+          "message": "Prototype promotion request is stale",
+          "frontend_state": "promotion_stale",
+          "retryable": false
+        }
+      }
     },
     {
       "state": "promotion_conflict",
@@ -113,7 +204,14 @@
       "stableErrorCategory": "promotion_conflict",
       "frontendStateBucket": "Promotion conflict",
       "retryable": false,
-      "mockResponse": { "detail": "Prototype promotion request conflicts with canonical state" }
+      "mockResponse": {
+        "detail": {
+          "category": "promotion_conflict",
+          "message": "Prototype promotion request conflicts with canonical state",
+          "frontend_state": "promotion_conflict",
+          "retryable": false
+        }
+      }
     },
     {
       "state": "promotion_validation_failed",
@@ -121,7 +219,14 @@
       "stableErrorCategory": "promotion_validation_failed",
       "frontendStateBucket": "Promotion failed",
       "retryable": true,
-      "mockResponse": { "detail": "Prototype promotion validation failed" }
+      "mockResponse": {
+        "detail": {
+          "category": "promotion_validation_failed",
+          "message": "Prototype promotion validation failed",
+          "frontend_state": "promotion_failed",
+          "retryable": true
+        }
+      }
     }
   ],
   "routeStateAuditChecklist": [

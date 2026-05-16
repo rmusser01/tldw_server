@@ -12,6 +12,9 @@ from ....core.AuthNZ.User_DB_Handling import User, get_request_user
 from ....core.AuthNZ.repos.prototype_workspaces_repo import InactivePrototypeSharedActorError
 from ..schemas.prototype_workspace_schemas import (
     PrototypeCollaboratorSessionCreateRequest,
+    PrototypeErrorCategory,
+    PrototypeErrorResponse,
+    PrototypeFrontendState,
     PrototypePreviewGrantResponse,
     PrototypePreviewRenewRequest,
     PrototypePromotionCreateRequest,
@@ -23,9 +26,34 @@ from ..schemas.prototype_workspace_schemas import (
     PrototypeWorkspaceDetailResponse,
     PrototypeWorkspaceResponse,
     PrototypeWorkspaceSessionCreateRequest,
+    prototype_error_detail,
 )
 
 router = APIRouter(tags=["prototype-workspaces"])
+
+_PROTOTYPE_ERROR_RESPONSE_MODELS: dict[int, dict[str, Any]] = {
+    status.HTTP_403_FORBIDDEN: {
+        "model": PrototypeErrorResponse,
+        "description": "Prototype request is not authorized or the collaborator session is inactive.",
+    },
+    status.HTTP_404_NOT_FOUND: {
+        "model": PrototypeErrorResponse,
+        "description": "Prototype workspace, session, snapshot, promotion, or preview resource is unavailable.",
+    },
+    status.HTTP_409_CONFLICT: {
+        "model": PrototypeErrorResponse,
+        "description": "Prototype request conflicts with workspace, preview, bootstrap, or promotion state.",
+    },
+    status.HTTP_422_UNPROCESSABLE_ENTITY: {
+        "model": PrototypeErrorResponse,
+        "description": "Prototype request is syntactically valid but semantically invalid for this workspace.",
+    },
+}
+
+
+def _prototype_error_responses(*status_codes: int) -> dict[int, dict[str, Any]]:
+    """Return OpenAPI response metadata for prototype contract errors."""
+    return {status_code: _PROTOTYPE_ERROR_RESPONSE_MODELS[status_code] for status_code in status_codes}
 
 
 def _get_repo() -> Any:
@@ -131,10 +159,32 @@ def _coerce_user_id(user: User) -> int:
     try:
         return int(user.id)
     except (TypeError, ValueError) as exc:
-        raise HTTPException(
+        raise _prototype_http_error(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Authenticated user id is not compatible with prototype workspaces",
+            category="unauthorized",
+            message="Authenticated user id is not compatible with prototype workspaces",
+            frontend_state="unauthorized",
         ) from exc
+
+
+def _prototype_http_error(
+    *,
+    status_code: int,
+    category: PrototypeErrorCategory,
+    message: str,
+    frontend_state: PrototypeFrontendState,
+    retryable: bool = False,
+) -> HTTPException:
+    """Build a prototype workspace HTTPException with stable machine-readable detail."""
+    return HTTPException(
+        status_code=status_code,
+        detail=prototype_error_detail(
+            category=category,
+            message=message,
+            frontend_state=frontend_state,
+            retryable=retryable,
+        ),
+    )
 
 
 def _epoch_to_iso8601(epoch: int | None) -> str | None:
@@ -185,9 +235,11 @@ def _coerce_optional_int(value: Any) -> int | None:
 
 def _inactive_prototype_session_error() -> HTTPException:
     """Build the stable response for inactive external collaborator sessions."""
-    return HTTPException(
+    return _prototype_http_error(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail="Prototype session token is no longer active",
+        category="inactive_session",
+        message="Prototype session token is no longer active",
+        frontend_state="session_inactive",
     )
 
 
@@ -223,27 +275,46 @@ def _branch_session_http_error(exc: ValueError | RuntimeError) -> HTTPException:
     """Map expected branch-session domain failures to stable HTTP responses."""
     detail = str(exc).lower()
     if "not found" in detail:
-        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prototype workspace not found")
+        return _prototype_http_error(
+            status_code=status.HTTP_404_NOT_FOUND,
+            category="missing",
+            message="Prototype workspace not found",
+            frontend_state="missing",
+        )
     if "archived" in detail:
-        return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Prototype workspace is archived")
-    if "revoked" in detail or "expired" in detail:
-        return HTTPException(
+        return _prototype_http_error(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Prototype session token is no longer active",
+            category="workspace_unavailable",
+            message="Prototype workspace is archived",
+            frontend_state="workspace_unavailable",
+        )
+    if "revoked" in detail or "expired" in detail:
+        return _prototype_http_error(
+            status_code=status.HTTP_403_FORBIDDEN,
+            category="inactive_session",
+            message="Prototype session token is no longer active",
+            frontend_state="session_inactive",
         )
     if "canonical snapshot" in detail or "base_snapshot_id" in detail:
-        return HTTPException(
+        return _prototype_http_error(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Prototype workspace is not ready for branch sessions",
+            category="conflict",
+            message="Prototype workspace is not ready for branch sessions",
+            frontend_state="conflict",
         )
     if isinstance(exc, ValueError):
-        return HTTPException(
+        return _prototype_http_error(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Invalid prototype branch session request",
+            category="invalid_request",
+            message="Invalid prototype branch session request",
+            frontend_state="invalid_request",
         )
-    return HTTPException(
+    return _prototype_http_error(
         status_code=status.HTTP_409_CONFLICT,
-        detail="Prototype branch session could not be created",
+        category="bootstrap_failed",
+        message="Prototype branch session could not be created",
+        frontend_state="setup_failed",
+        retryable=True,
     )
 
 
@@ -278,6 +349,7 @@ async def _build_workspace_detail_response(repo: Any, workspace: dict[str, Any])
     response_model=PrototypeWorkspaceResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a prototype workspace",
+    responses=_prototype_error_responses(status.HTTP_403_FORBIDDEN),
 )
 async def create_prototype_workspace(
     body: PrototypeWorkspaceCreateRequest,
@@ -304,6 +376,7 @@ async def create_prototype_workspace(
     response_model=PrototypeWorkspaceDetailResponse,
     status_code=status.HTTP_200_OK,
     summary="Get prototype workspace detail for the owner workspace view",
+    responses=_prototype_error_responses(status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND),
 )
 async def get_prototype_workspace(
     prototype_workspace_id: str,
@@ -313,11 +386,21 @@ async def get_prototype_workspace(
     """Return owner-visible prototype workspace detail and branch inventory."""
     workspace = await repo.get_workspace(prototype_workspace_id)
     if not workspace:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prototype workspace not found")
+        raise _prototype_http_error(
+            status_code=status.HTTP_404_NOT_FOUND,
+            category="missing",
+            message="Prototype workspace not found",
+            frontend_state="missing",
+        )
 
     owner_user_id = int(workspace["owner_user_id"])
     if _coerce_user_id(user) != owner_user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the owner can view prototype workspace detail")
+        raise _prototype_http_error(
+            status_code=status.HTTP_403_FORBIDDEN,
+            category="unauthorized",
+            message="Only the owner can view prototype workspace detail",
+            frontend_state="unauthorized",
+        )
 
     return await _build_workspace_detail_response(repo, workspace)
 
@@ -327,6 +410,12 @@ async def get_prototype_workspace(
     response_model=PrototypeSessionJobResponse,
     status_code=status.HTTP_202_ACCEPTED,
     summary="Create or reuse an owner branch session",
+    responses=_prototype_error_responses(
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+        status.HTTP_409_CONFLICT,
+        status.HTTP_422_UNPROCESSABLE_ENTITY,
+    ),
 )
 async def create_owner_branch_session(
     prototype_workspace_id: str,
@@ -339,11 +428,21 @@ async def create_owner_branch_session(
     """Create or reuse an owner branch session and enqueue its bootstrap job."""
     workspace = await repo.get_workspace(prototype_workspace_id)
     if not workspace:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prototype workspace not found")
+        raise _prototype_http_error(
+            status_code=status.HTTP_404_NOT_FOUND,
+            category="missing",
+            message="Prototype workspace not found",
+            frontend_state="missing",
+        )
 
     owner_user_id = int(workspace["owner_user_id"])
     if _coerce_user_id(user) != owner_user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the owner can create branch sessions")
+        raise _prototype_http_error(
+            status_code=status.HTTP_403_FORBIDDEN,
+            category="unauthorized",
+            message="Only the owner can create branch sessions",
+            frontend_state="unauthorized",
+        )
 
     request_nonce = _request_nonce_or_new(body.request_nonce)
     try:
@@ -379,6 +478,12 @@ async def create_owner_branch_session(
     response_model=PrototypeSessionJobResponse,
     status_code=status.HTTP_202_ACCEPTED,
     summary="Create or reuse an external collaborator branch session",
+    responses=_prototype_error_responses(
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+        status.HTTP_409_CONFLICT,
+        status.HTTP_422_UNPROCESSABLE_ENTITY,
+    ),
 )
 async def create_external_branch_session(
     body: PrototypeCollaboratorSessionCreateRequest,
@@ -389,7 +494,7 @@ async def create_external_branch_session(
     """Create or reuse an external collaborator branch session from a session token."""
     token_payload = access_service.decode_session_token(body.session_token)
     if not token_payload:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid prototype session token")
+        raise _inactive_prototype_session_error()
 
     prototype_workspace_id = str(token_payload["prototype_workspace_id"])
     shared_actor_id = str(token_payload["shared_actor_id"])
@@ -434,6 +539,11 @@ async def create_external_branch_session(
     response_model=PrototypePromotionRequestResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a prototype promotion request",
+    responses=_prototype_error_responses(
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+        status.HTTP_422_UNPROCESSABLE_ENTITY,
+    ),
 )
 async def create_promotion_request(
     body: PrototypePromotionCreateRequest,
@@ -443,22 +553,36 @@ async def create_promotion_request(
     """Create a promotion request for an external collaborator-owned snapshot."""
     token_payload = access_service.decode_session_token(body.session_token)
     if not token_payload:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid prototype session token")
+        raise _inactive_prototype_session_error()
     if str(token_payload["prototype_workspace_id"]) != body.prototype_workspace_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Session token does not match prototype workspace")
+        raise _prototype_http_error(
+            status_code=status.HTTP_403_FORBIDDEN,
+            category="unauthorized",
+            message="Session token does not match prototype workspace",
+            frontend_state="unauthorized",
+        )
 
     session = await repo.get_session(body.prototype_session_id)
     if not session:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prototype session not found")
+        raise _prototype_http_error(
+            status_code=status.HTTP_404_NOT_FOUND,
+            category="missing",
+            message="Prototype session not found",
+            frontend_state="missing",
+        )
     if str(session.get("prototype_workspace_id")) != body.prototype_workspace_id:
-        raise HTTPException(
+        raise _prototype_http_error(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Prototype session does not belong to the requested workspace",
+            category="invalid_request",
+            message="Prototype session does not belong to the requested workspace",
+            frontend_state="invalid_request",
         )
     if str(session.get("actor_shared_actor_id") or "") != str(token_payload["shared_actor_id"]):
-        raise HTTPException(
+        raise _prototype_http_error(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Session token does not authorize promotion requests for this branch session",
+            category="unauthorized",
+            message="Session token does not authorize promotion requests for this branch session",
+            frontend_state="unauthorized",
         )
     await _assert_external_promotion_actor_active(
         repo,
@@ -468,21 +592,32 @@ async def create_promotion_request(
 
     candidate_snapshot = await repo.get_snapshot(body.candidate_snapshot_id)
     if not candidate_snapshot:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prototype snapshot not found")
+        raise _prototype_http_error(
+            status_code=status.HTTP_404_NOT_FOUND,
+            category="missing",
+            message="Prototype snapshot not found",
+            frontend_state="missing",
+        )
     if str(candidate_snapshot.get("prototype_workspace_id")) != body.prototype_workspace_id:
-        raise HTTPException(
+        raise _prototype_http_error(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Prototype snapshot does not belong to the requested workspace",
+            category="invalid_request",
+            message="Prototype snapshot does not belong to the requested workspace",
+            frontend_state="invalid_request",
         )
     if str(candidate_snapshot.get("created_from_session_id") or "") != body.prototype_session_id:
-        raise HTTPException(
+        raise _prototype_http_error(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Prototype snapshot does not belong to the requested branch session",
+            category="unauthorized",
+            message="Prototype snapshot does not belong to the requested branch session",
+            frontend_state="unauthorized",
         )
     if str(candidate_snapshot.get("author_shared_actor_id") or "") != str(token_payload["shared_actor_id"]):
-        raise HTTPException(
+        raise _prototype_http_error(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Session token does not authorize promotion requests for this snapshot",
+            category="unauthorized",
+            message="Session token does not authorize promotion requests for this snapshot",
+            frontend_state="unauthorized",
         )
 
     try:
@@ -502,6 +637,7 @@ async def create_promotion_request(
     response_model=PrototypePromotionReviewResponse,
     status_code=status.HTTP_200_OK,
     summary="Review a prototype promotion request",
+    responses=_prototype_error_responses(status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND),
 )
 async def review_promotion_request(
     promotion_request_id: str,
@@ -513,16 +649,28 @@ async def review_promotion_request(
     """Review a promotion request and promote or reject the candidate snapshot."""
     promotion_request = await repo.get_promotion_request(promotion_request_id)
     if not promotion_request:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prototype promotion request not found")
+        raise _prototype_http_error(
+            status_code=status.HTTP_404_NOT_FOUND,
+            category="missing",
+            message="Prototype promotion request not found",
+            frontend_state="missing",
+        )
 
     workspace = await repo.get_workspace(str(promotion_request["prototype_workspace_id"]))
     if not workspace:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prototype workspace not found")
+        raise _prototype_http_error(
+            status_code=status.HTTP_404_NOT_FOUND,
+            category="missing",
+            message="Prototype workspace not found",
+            frontend_state="missing",
+        )
     reviewer_user_id = _coerce_user_id(user)
     if not service._is_promoter(workspace, reviewer_user_id):
-        raise HTTPException(
+        raise _prototype_http_error(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Reviewer does not have promotion permissions",
+            category="unauthorized",
+            message="Reviewer does not have promotion permissions",
+            frontend_state="unauthorized",
         )
 
     if body.decision == "reject":
@@ -533,7 +681,12 @@ async def review_promotion_request(
             review_notes=body.review_notes,
         )
         if not updated:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prototype promotion request not found")
+            raise _prototype_http_error(
+                status_code=status.HTTP_404_NOT_FOUND,
+                category="missing",
+                message="Prototype promotion request not found",
+                frontend_state="missing",
+            )
         return PrototypePromotionReviewResponse(
             status="rejected",
             prototype_workspace_id=str(updated["prototype_workspace_id"]),
@@ -558,6 +711,11 @@ async def review_promotion_request(
     response_model=PrototypePreviewGrantResponse,
     status_code=status.HTTP_200_OK,
     summary="Renew a prototype preview grant",
+    responses=_prototype_error_responses(
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+        status.HTTP_409_CONFLICT,
+    ),
 )
 async def renew_preview_grant(
     preview_handle: str,
@@ -572,13 +730,28 @@ async def renew_preview_grant(
     if not record:
         record = await preview_broker.get_preview_record_async(preview_handle)
     if not record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prototype preview handle not found")
+        raise _prototype_http_error(
+            status_code=status.HTTP_404_NOT_FOUND,
+            category="preview_unavailable",
+            message="Prototype preview handle not found",
+            frontend_state="preview_unavailable",
+        )
 
     workspace = await repo.get_workspace(str(record["prototype_workspace_id"]))
     if not workspace:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prototype workspace not found")
+        raise _prototype_http_error(
+            status_code=status.HTTP_404_NOT_FOUND,
+            category="preview_unavailable",
+            message="Prototype workspace not found",
+            frontend_state="preview_unavailable",
+        )
     if _coerce_user_id(user) != int(workspace["owner_user_id"]):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the owner can renew prototype previews")
+        raise _prototype_http_error(
+            status_code=status.HTTP_403_FORBIDDEN,
+            category="unauthorized",
+            message="Only the owner can renew prototype previews",
+            frontend_state="unauthorized",
+        )
 
     from tldw_Server_API.app.core.Prototype_Workspaces.preview_broker import (
         PrototypePreviewHandleNotFound,
@@ -587,8 +760,19 @@ async def renew_preview_grant(
     try:
         renewed = await preview_broker.renew_preview_grant(preview_handle)
     except PrototypePreviewHandleNotFound as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise _prototype_http_error(
+            status_code=status.HTTP_404_NOT_FOUND,
+            category="preview_unavailable",
+            message=str(exc),
+            frontend_state="preview_unavailable",
+        ) from exc
     except RuntimeError as exc:
         detail = str(exc)
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail) from exc
+        raise _prototype_http_error(
+            status_code=status.HTTP_409_CONFLICT,
+            category="preview_unavailable",
+            message=detail,
+            frontend_state="preview_unavailable",
+            retryable=True,
+        ) from exc
     return PrototypePreviewGrantResponse.model_validate(renewed)
