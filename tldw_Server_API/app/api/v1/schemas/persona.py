@@ -5,7 +5,7 @@ Scaffold only - minimal models to enable endpoint stubs.
 """
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
@@ -33,6 +33,11 @@ PersonaVisualStarterComplexityTier = Literal["basic", "intermediate", "intricate
 PersonaVisualStarterProductionStatus = Literal["scaffold", "art_ready"]
 PersonaVisualCandidateStatus = Literal["review", "accepted", "rejected", "failed"]
 PersonaVisualCandidateReviewStatus = Literal["accepted", "rejected", "failed"]
+PersonaVisualStarterRecipeText = Annotated[str, Field(min_length=1, max_length=320)]
+PersonaVisualStarterRecipeItems = Annotated[
+    list[PersonaVisualStarterRecipeText],
+    Field(min_length=1, max_length=12),
+]
 PersonaVisualPortabilityOperation = Literal["export", "import_preview", "import_commit"]
 PersonaSetupEventType = Literal[
     "setup_started",
@@ -293,11 +298,18 @@ class PersonaVisualStarterAssetResponse(BaseModel):
 
 
 class PersonaVisualStarterProductionRecipeResponse(BaseModel):
-    identity_brief: str
-    neutral_anchor: str
-    static_sheet: str
-    animation_outputs: list[str] = Field(default_factory=list)
-    review_checks: list[str] = Field(default_factory=list)
+    identity_brief: PersonaVisualStarterRecipeText
+    neutral_anchor: PersonaVisualStarterRecipeText
+    static_sheet: PersonaVisualStarterRecipeText
+    animation_outputs: PersonaVisualStarterRecipeItems
+    review_checks: PersonaVisualStarterRecipeItems
+
+    @field_validator("review_checks")
+    @classmethod
+    def validate_review_checks(cls, value: list[str]) -> list[str]:
+        if "neutral_identity_consistency" not in value:
+            raise ValueError("review_checks must include neutral_identity_consistency")
+        return value
 
 
 class PersonaVisualStarterPackResponse(BaseModel):

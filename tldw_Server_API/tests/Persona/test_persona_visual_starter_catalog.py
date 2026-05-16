@@ -8,7 +8,9 @@ from typing import Any
 
 import pytest
 from PIL import Image
+from pydantic import ValidationError
 
+from tldw_Server_API.app.api.v1.schemas.persona import PersonaVisualStarterProductionRecipeResponse
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Persona.visual_manifest_assets import (
@@ -71,6 +73,16 @@ def _assert_recipe_shape(recipe: dict[str, Any], *, expected_output: str) -> Non
     assert recipe["static_sheet"].strip()
     assert expected_output in recipe["animation_outputs"]
     assert "neutral_identity_consistency" in recipe["review_checks"]
+
+
+def _valid_recipe_payload() -> dict[str, object]:
+    return {
+        "identity_brief": "Keep the starter identity consistent.",
+        "neutral_anchor": "Start from a neutral front-facing anchor.",
+        "static_sheet": "Author the required static sheet.",
+        "animation_outputs": ["required_state_loops"],
+        "review_checks": ["neutral_identity_consistency"],
+    }
 
 
 @pytest.fixture()
@@ -230,6 +242,25 @@ def test_list_starter_packs_rejects_malformed_production_metadata(
 
     assert exc_info.value.code == "invalid_starter_fixture"
     assert exc_info.value.details["starter_pack_id"] == malformed.id
+
+
+@pytest.mark.parametrize(
+    "patch",
+    (
+        {"identity_brief": ""},
+        {"neutral_anchor": "x" * 321},
+        {"animation_outputs": []},
+        {"animation_outputs": ["required_state_loops"] * 13},
+        {"animation_outputs": ["x" * 321]},
+        {"review_checks": ["transparent_background"]},
+    ),
+)
+def test_production_recipe_response_enforces_catalog_bounds(patch: dict[str, object]) -> None:
+    payload = _valid_recipe_payload()
+    payload.update(patch)
+
+    with pytest.raises(ValidationError):
+        PersonaVisualStarterProductionRecipeResponse.model_validate(payload)
 
 
 def test_get_starter_pack_accepts_legacy_research_buddy_alias(

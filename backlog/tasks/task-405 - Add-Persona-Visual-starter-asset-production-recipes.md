@@ -51,9 +51,9 @@ Docs/superpowers/plans/2026-05-16-persona-visual-production-recipes-plan.md
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added immutable `PersonaVisualStarterProductionRecipe` metadata to bundled starter fixtures and exposed it through starter catalog summaries/details. Recipes describe identity brief, neutral anchor guidance, static talking/reaction sheet guidance, expected animation outputs, and review checks for each starter. Service validation keeps recipes immutable, bounded, non-empty, and explicitly requires the neutral identity consistency review check.
 
-Updated Persona starter response schemas and docs so the recipe contract is clear to API clients and future authored-asset generation/review flows. Copy-to-draft behavior is unchanged.
+Updated Persona starter response schemas and docs so the recipe contract is clear to API clients and future authored-asset generation/review flows. Review follow-up aligned the response schema with the catalog validation bounds for non-empty recipe text, bounded recipe item lists, bounded item text, and the required neutral identity consistency review check. Copy-to-draft behavior is unchanged.
 
-Verification: focused Persona Visual starter/API pytest passed 88 tests; py_compile passed for touched backend/schema modules; Bandit JSON report for touched backend/schema modules had zero results; git diff --check passed.
+Verification: focused Persona Visual starter/API pytest passed 94 tests; py_compile passed for touched backend/schema modules; Bandit JSON report for touched backend/schema modules had zero results; git diff --check passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
