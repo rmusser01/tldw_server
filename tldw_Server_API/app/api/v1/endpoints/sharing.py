@@ -21,10 +21,6 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, rbac_rate_limit
 from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 
-from ..utils.prototype_error_contract import (
-    PROTOTYPE_LINK_ERROR_RESPONSES,
-    prototype_http_error,
-)
 from ..schemas.sharing_schemas import (
     AdminShareListResponse,
     AuditEventResponse,
@@ -51,6 +47,10 @@ from ..schemas.sharing_schemas import (
     VerifyPasswordRequest,
     VerifyPasswordResponse,
 )
+from ..utils.prototype_error_contract import (
+    PROTOTYPE_LINK_ERROR_RESPONSES,
+    prototype_http_error,
+)
 
 router = APIRouter(prefix="/sharing", tags=["sharing"])
 _SHARED_CHAT_ERROR_MESSAGE = "Chat request failed"
@@ -58,6 +58,7 @@ _SHARED_CHAT_ERRORS_MESSAGE = "One or more internal pipeline errors were suppres
 
 
 # ── Lazy service construction ──
+
 
 def _get_repo():
     """Lazily construct the SharedWorkspaceRepo from the AuthNZ DB pool."""
@@ -114,6 +115,7 @@ _cached_audit_service: ShareAuditService | None = None  # noqa: F821
 
 def _get_audit_service():
     from tldw_Server_API.app.core.Sharing.share_audit_service import ShareAuditService
+
     global _cached_audit_service
     if _cached_audit_service is None:
         _cached_audit_service = ShareAuditService()
@@ -254,6 +256,7 @@ def _check_public_rate_limit(request: Request) -> None:
 
 # ── Scope membership validation helper ──
 
+
 async def _validate_user_has_share_access(share: dict, user: User) -> None:
     """Verify the user belongs to the team/org that a share targets."""
     if share["owner_user_id"] == user.id:
@@ -275,10 +278,12 @@ async def _validate_user_has_share_access(share: dict, user: User) -> None:
 
 # ── Workspace ownership verification helper ──
 
+
 async def _verify_workspace_ownership(workspace_id: str, user: User) -> None:
     """Verify the user owns the workspace before sharing it."""
     try:
         from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user_id
+
         db = await get_chacha_db_for_user_id(user.id)
         ws = db.get_workspace(workspace_id)
         if ws is None:
@@ -291,6 +296,7 @@ async def _verify_workspace_ownership(workspace_id: str, user: User) -> None:
     except Exception as exc:
         # In single-user mode, workspace validation may not be available
         from ....core.AuthNZ.settings import get_settings
+
         if get_settings().auth_mode == "single_user":
             logger.warning("Workspace ownership check skipped in single-user mode")
             return
@@ -370,9 +376,7 @@ async def list_workspace_shares(
     user: User = Depends(get_request_user),
 ):
     repo = await _maybe_await(_get_repo())
-    shares = await repo.list_shares_for_workspace(
-        workspace_id, user.id, include_revoked=include_revoked
-    )
+    shares = await repo.list_shares_for_workspace(workspace_id, user.id, include_revoked=include_revoked)
     return ShareListResponse(shares=[ShareResponse(**s) for s in shares], total=len(shares))
 
 
@@ -475,14 +479,16 @@ async def shared_with_me(
         shares = await repo.list_shares_for_scope("team", tid)
         for s in shares:
             if s["owner_user_id"] != user.id:
-                items.append(SharedWithMeItem(
-                    share_id=s["id"],
-                    workspace_id=s["workspace_id"],
-                    owner_user_id=s["owner_user_id"],
-                    access_level=s["access_level"],
-                    allow_clone=s["allow_clone"],
-                    shared_at=s.get("created_at"),
-                ))
+                items.append(
+                    SharedWithMeItem(
+                        share_id=s["id"],
+                        workspace_id=s["workspace_id"],
+                        owner_user_id=s["owner_user_id"],
+                        access_level=s["access_level"],
+                        allow_clone=s["allow_clone"],
+                        shared_at=s.get("created_at"),
+                    )
+                )
 
     for oid in org_ids:
         shares = await repo.list_shares_for_scope("org", oid)
@@ -490,19 +496,22 @@ async def shared_with_me(
             if s["owner_user_id"] != user.id:
                 # Deduplicate by share_id
                 if not any(i.share_id == s["id"] for i in items):
-                    items.append(SharedWithMeItem(
-                        share_id=s["id"],
-                        workspace_id=s["workspace_id"],
-                        owner_user_id=s["owner_user_id"],
-                        access_level=s["access_level"],
-                        allow_clone=s["allow_clone"],
-                        shared_at=s.get("created_at"),
-                    ))
+                    items.append(
+                        SharedWithMeItem(
+                            share_id=s["id"],
+                            workspace_id=s["workspace_id"],
+                            owner_user_id=s["owner_user_id"],
+                            access_level=s["access_level"],
+                            allow_clone=s["allow_clone"],
+                            shared_at=s.get("created_at"),
+                        )
+                    )
 
     # Batch-populate workspace names from each owner's ChaChaNotes DB
     if items:
         try:
             from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_owner
+
             owner_ids = {item.owner_user_id for item in items}
             owner_dbs: dict[int, Any] = {}
             for oid in owner_ids:
@@ -574,6 +583,7 @@ async def clone_shared_workspace(
 
     # Generate a job ID for async clone tracking
     import uuid as _uuid
+
     job_id = str(_uuid.uuid4())
 
     await audit.log(
@@ -667,6 +677,7 @@ async def list_shared_workspace_sources(
     await _validate_user_has_share_access(share, user)
 
     from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_owner
+
     db = await get_chacha_db_for_owner(share["owner_user_id"])
     sources = db.list_workspace_sources(share["workspace_id"])
     return [
@@ -704,6 +715,7 @@ async def get_shared_workspace_media(
 
     # Verify media_id is a source in this workspace
     from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_owner
+
     chacha_db = await get_chacha_db_for_owner(share["owner_user_id"])
     sources = chacha_db.list_workspace_sources(share["workspace_id"])
     source_media_ids = {s.get("media_id") for s in sources}
@@ -1244,7 +1256,8 @@ async def admin_update_config(
     repo = await _maybe_await(_get_repo())
     for key, value in body.config.items():
         await repo.set_config(
-            key, value,
+            key,
+            value,
             scope_type=body.scope_type,
             scope_id=body.scope_id,
             updated_by=user.id,

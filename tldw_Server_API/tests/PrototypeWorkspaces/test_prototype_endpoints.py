@@ -1,4 +1,5 @@
 """Integration tests for the prototype workspace API surface."""
+
 from __future__ import annotations
 
 import asyncio
@@ -860,9 +861,7 @@ class TestPrototypeWorkspaceEndpoints:
         body = renewed.json()
         assert body["preview_handle"] == preview_grant["preview_handle"]
         assert body["expires_at"]
-        assert body["preview_url"].startswith(
-            f"/api/v1/prototype-previews/{preview_grant['preview_handle']}?"
-        )
+        assert body["preview_url"].startswith(f"/api/v1/prototype-previews/{preview_grant['preview_handle']}?")
         assert body["token"]
 
     def test_preview_grant_renewal_recovers_after_broker_memory_clear(
@@ -918,9 +917,7 @@ class TestPrototypeWorkspaceEndpoints:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         workspace, _seed_snapshot = _seed_workspace(test_services, title="Preview renewal typed error")
-        broker_module = importlib.import_module(
-            "tldw_Server_API.app.core.Prototype_Workspaces.preview_broker"
-        )
+        broker_module = importlib.import_module("tldw_Server_API.app.core.Prototype_Workspaces.preview_broker")
         missing_handle_error = getattr(broker_module, "PrototypePreviewHandleNotFound", RuntimeError)
 
         def fake_record(_preview_handle: str) -> dict[str, str]:

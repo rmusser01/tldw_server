@@ -1,4 +1,5 @@
 """Integration tests for public prototype private-link exchange."""
+
 from __future__ import annotations
 
 import asyncio
@@ -98,12 +99,8 @@ def exchange_db():
     migration_077_create_sharing_tables(conn)
     migration_087_expand_share_tokens_resource_type_for_prototypes(conn)
     migration_086_create_prototype_workspace_tables(conn)
-    conn.execute(
-        "INSERT INTO users (id, username, email, password_hash) VALUES (1, 'owner', 'owner@test.com', 'hash')"
-    )
-    conn.execute(
-        "INSERT INTO users (id, username, email, password_hash) VALUES (2, 'other', 'other@test.com', 'hash')"
-    )
+    conn.execute("INSERT INTO users (id, username, email, password_hash) VALUES (1, 'owner', 'owner@test.com', 'hash')")
+    conn.execute("INSERT INTO users (id, username, email, password_hash) VALUES (2, 'other', 'other@test.com', 'hash')")
     conn.commit()
     yield conn
     conn.close()

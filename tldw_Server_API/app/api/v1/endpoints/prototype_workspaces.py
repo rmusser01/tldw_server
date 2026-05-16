@@ -1,4 +1,5 @@
 """Prototype workspace collaboration endpoints."""
+
 from __future__ import annotations
 
 import inspect
@@ -8,9 +9,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from ....core.AuthNZ.User_DB_Handling import User, get_request_user
 from ....core.AuthNZ.repos.prototype_workspaces_repo import InactivePrototypeSharedActorError
-from ..utils.prototype_error_contract import prototype_error_responses, prototype_http_error
+from ....core.AuthNZ.User_DB_Handling import User, get_request_user
 from ..schemas.prototype_workspace_schemas import (
     PrototypeCollaboratorSessionCreateRequest,
     PrototypePreviewGrantResponse,
@@ -25,6 +25,7 @@ from ..schemas.prototype_workspace_schemas import (
     PrototypeWorkspaceResponse,
     PrototypeWorkspaceSessionCreateRequest,
 )
+from ..utils.prototype_error_contract import prototype_error_responses, prototype_http_error
 
 router = APIRouter(tags=["prototype-workspaces"])
 
@@ -138,6 +139,7 @@ def _coerce_user_id(user: User) -> int:
             message="Authenticated user id is not compatible with prototype workspaces",
             frontend_state="unauthorized",
         ) from exc
+
 
 def _epoch_to_iso8601(epoch: int | None) -> str | None:
     """Convert a JWT epoch timestamp into an ISO-8601 string for persisted sessions."""
