@@ -26,6 +26,61 @@ export type PlaygroundCockpitShellProps = {
   children: React.ReactNode;
 };
 
+type CockpitTooltipPlacement = "bottom" | "left" | "right" | "top";
+
+type CockpitTooltipButtonProps =
+  React.ButtonHTMLAttributes<HTMLButtonElement> & {
+    children: React.ReactNode;
+    tooltip: string;
+    tooltipId?: string;
+    tooltipPlacement?: CockpitTooltipPlacement;
+    wrapperClassName?: string;
+  };
+
+const tooltipPlacementClassNames: Record<CockpitTooltipPlacement, string> = {
+  bottom: "left-1/2 top-full mt-2 -translate-x-1/2",
+  left: "right-full top-1/2 mr-2 -translate-y-1/2",
+  right: "left-full top-1/2 ml-2 -translate-y-1/2",
+  top: "bottom-full left-1/2 mb-2 -translate-x-1/2",
+};
+
+const CockpitTooltipButton = ({
+  children,
+  className,
+  tooltip,
+  tooltipId: tooltipIdProp,
+  tooltipPlacement = "top",
+  wrapperClassName,
+  ...buttonProps
+}: CockpitTooltipButtonProps) => {
+  const generatedTooltipId = React.useId();
+  const tooltipId = tooltipIdProp ?? generatedTooltipId;
+  const describedBy = buttonProps["aria-describedby"];
+  const ariaDescribedBy =
+    typeof describedBy === "string" && describedBy.trim().length > 0
+      ? `${describedBy} ${tooltipId}`
+      : tooltipId;
+
+  return (
+    <span className={`group relative inline-flex ${wrapperClassName ?? ""}`}>
+      <button
+        {...buttonProps}
+        aria-describedby={ariaDescribedBy}
+        className={className}
+      >
+        {children}
+      </button>
+      <span
+        id={tooltipId}
+        role="tooltip"
+        className={`pointer-events-none absolute z-50 whitespace-nowrap rounded-md border border-border bg-surface px-2 py-1 text-[11px] font-medium text-text opacity-0 shadow-md transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 ${tooltipPlacementClassNames[tooltipPlacement]}`}
+      >
+        {tooltip}
+      </span>
+    </span>
+  );
+};
+
 const resolveVisibleMobilePanel = (
   resolvedMobilePanel: PlaygroundCockpitMobilePanel,
   leftRailVisible: boolean,
@@ -340,35 +395,39 @@ export const PlaygroundCockpitShell = ({
 
       <div className={`${bodyClassName} relative`}>
         {!focusMode && !leftRailVisible ? (
-          <button
+          <CockpitTooltipButton
             type="button"
             data-testid="playground-cockpit-left-rail-restore"
             aria-label={restoreContextSidechannelLabel}
             aria-controls="playground-cockpit-left-rail"
             aria-expanded="false"
-            title={restoreContextSidechannelLabel}
             onClick={() => onLeftRailVisibleChange?.(true)}
-            className="absolute left-2 top-2 z-20 hidden min-h-[32px] items-center gap-1 rounded-md border border-border bg-surface2 px-2 py-1 text-xs font-medium text-text shadow-sm hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus lg:inline-flex"
+            tooltip={restoreContextSidechannelLabel}
+            tooltipPlacement="right"
+            wrapperClassName="absolute left-2 top-2 z-20 hidden lg:inline-flex"
+            className="inline-flex min-h-[32px] items-center gap-1 rounded-md border border-border bg-surface2 px-2 py-1 text-xs font-medium text-text shadow-sm hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
           >
             <PanelLeftOpen className="h-3.5 w-3.5" aria-hidden="true" />
             <span>{t("cockpit.context", "Context")}</span>
-          </button>
+          </CockpitTooltipButton>
         ) : null}
 
         {!focusMode && !rightRailVisible ? (
-          <button
+          <CockpitTooltipButton
             type="button"
             data-testid="playground-cockpit-right-rail-restore"
             aria-label={restoreRuntimeSidechannelLabel}
             aria-controls="playground-cockpit-right-rail"
             aria-expanded="false"
-            title={restoreRuntimeSidechannelLabel}
             onClick={() => onRightRailVisibleChange?.(true)}
-            className="absolute right-2 top-2 z-20 hidden min-h-[32px] items-center gap-1 rounded-md border border-border bg-surface2 px-2 py-1 text-xs font-medium text-text shadow-sm hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus lg:inline-flex"
+            tooltip={restoreRuntimeSidechannelLabel}
+            tooltipPlacement="left"
+            wrapperClassName="absolute right-2 top-2 z-20 hidden lg:inline-flex"
+            className="inline-flex min-h-[32px] items-center gap-1 rounded-md border border-border bg-surface2 px-2 py-1 text-xs font-medium text-text shadow-sm hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
           >
             <span>{t("cockpit.runtime", "Runtime")}</span>
             <PanelRightOpen className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
+          </CockpitTooltipButton>
         ) : null}
 
         {showLeftRail && (
@@ -382,17 +441,18 @@ export const PlaygroundCockpitShell = ({
               <span className="font-semibold text-text">
                 {t("cockpit.context", "Context")}
               </span>
-              <button
+              <CockpitTooltipButton
                 type="button"
                 aria-label={collapseContextSidechannelLabel}
                 aria-controls="playground-cockpit-left-rail"
                 aria-expanded="true"
-                title={collapseContextSidechannelLabel}
                 onClick={() => onLeftRailVisibleChange?.(false)}
+                tooltip={collapseContextSidechannelLabel}
+                tooltipPlacement="left"
                 className="inline-flex min-h-[28px] min-w-[28px] items-center justify-center rounded-md border border-border bg-surface2 text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
               >
                 <PanelLeftClose className="h-3.5 w-3.5" aria-hidden="true" />
-              </button>
+              </CockpitTooltipButton>
             </div>
             <div className="min-w-0">{leftRail}</div>
           </aside>
@@ -420,17 +480,18 @@ export const PlaygroundCockpitShell = ({
               <span className="font-semibold text-text">
                 {t("cockpit.runtime", "Runtime")}
               </span>
-              <button
+              <CockpitTooltipButton
                 type="button"
                 aria-label={collapseRuntimeSidechannelLabel}
                 aria-controls="playground-cockpit-right-rail"
                 aria-expanded="true"
-                title={collapseRuntimeSidechannelLabel}
                 onClick={() => onRightRailVisibleChange?.(false)}
+                tooltip={collapseRuntimeSidechannelLabel}
+                tooltipPlacement="left"
                 className="inline-flex min-h-[28px] min-w-[28px] items-center justify-center rounded-md border border-border bg-surface2 text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
               >
                 <PanelRightClose className="h-3.5 w-3.5" aria-hidden="true" />
-              </button>
+              </CockpitTooltipButton>
             </div>
             <div className="min-w-0">{rightRail}</div>
           </aside>

@@ -386,6 +386,40 @@ const closeSearchContextIfOpen = async (page: Page) => {
   }
 };
 
+const assertVisibleTooltipForControl = async (
+  page: Page,
+  control: Locator,
+  expectedText: string
+) => {
+  const describedBy = await control.getAttribute('aria-describedby');
+  expect(describedBy).toBeTruthy();
+  const describedByIds = (describedBy ?? '').split(/\s+/).filter(Boolean);
+  expect(describedByIds.length).toBeGreaterThan(0);
+
+  let tooltip: Locator | null = null;
+  for (const id of describedByIds) {
+    const candidate = page.locator(`[id=${JSON.stringify(id)}]`);
+    if ((await candidate.count()) === 0) continue;
+
+    const role = await candidate.getAttribute('role');
+    const text = (await candidate.textContent())?.trim();
+    if (role === 'tooltip' && text === expectedText) {
+      tooltip = candidate;
+      break;
+    }
+  }
+
+  expect(
+    tooltip,
+    `Expected aria-describedby (${describedByIds.join(
+      ', '
+    )}) to include tooltip text "${expectedText}"`
+  ).not.toBeNull();
+  await control.hover();
+  await expect(tooltip!).toHaveText(expectedText);
+  await expect(tooltip!).toHaveCSS('opacity', '1');
+};
+
 const getDesktopContextRail = (page: Page): Locator =>
   page.getByTestId('playground-cockpit-left-rail').getByTestId('playground-context-rail');
 
@@ -681,6 +715,84 @@ test.describe('/chat cockpit real-server parity', () => {
     const source = readFileSync(testInfo.file, 'utf8');
     const forbiddenCall = ['page', 'route'].join('.') + '(';
     expect(source).not.toContain(forbiddenCall);
+  });
+
+  test('keeps sidechannel tooltip controls side-local against the running server', async ({
+    page,
+    request,
+  }, testInfo) => {
+    test.setTimeout(90_000);
+
+    const health = await apiGet<any>(request, '/api/v1/health');
+    assertHealthResponse(health);
+    const chatModelSelection = await getConfiguredChatModelSelection(request);
+
+    await seedRealServerConfig(page, { selectedModel: chatModelSelection });
+    await page.setViewportSize({ width: 1440, height: 960 });
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+
+    await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
+      timeout: 60_000,
+    });
+    await assertNoBlockingServerDialog(page);
+    await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
+    await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
+
+    const collapseContextSidechannel = page
+      .getByTestId('playground-cockpit-left-rail')
+      .getByRole('button', { name: 'Collapse context sidechannel' });
+    await collapseContextSidechannel.evaluate((element) => {
+      const probe = document.createElement('span');
+      probe.id = 'playground-cockpit-describedby-probe';
+      probe.textContent = 'Extra sidechannel description';
+      element.insertAdjacentElement('beforebegin', probe);
+      const describedBy = element.getAttribute('aria-describedby');
+      element.setAttribute('aria-describedby', [probe.id, describedBy].filter(Boolean).join(' '));
+    });
+    await assertVisibleTooltipForControl(
+      page,
+      collapseContextSidechannel,
+      'Collapse context sidechannel'
+    );
+    await collapseContextSidechannel.click();
+    await expect(page.getByTestId('playground-cockpit-left-rail')).toHaveCount(0);
+    await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
+    await expect(page.getByTestId('playground-collapsed-composition-summary')).toHaveCount(0);
+
+    const restoreContextSidechannel = page.getByTestId('playground-cockpit-left-rail-restore');
+    await assertVisibleTooltipForControl(
+      page,
+      restoreContextSidechannel,
+      'Restore context sidechannel'
+    );
+    await page.screenshot({
+      path: testInfo.outputPath('chat-cockpit-context-restore-side-tooltip.png'),
+      fullPage: true,
+    });
+    await restoreContextSidechannel.click();
+    await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
+
+    const collapseRuntimeSidechannel = page
+      .getByTestId('playground-cockpit-right-rail')
+      .getByRole('button', { name: 'Collapse runtime sidechannel' });
+    await assertVisibleTooltipForControl(
+      page,
+      collapseRuntimeSidechannel,
+      'Collapse runtime sidechannel'
+    );
+    await collapseRuntimeSidechannel.click();
+    await expect(page.getByTestId('playground-cockpit-right-rail')).toHaveCount(0);
+    await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
+    await expect(page.getByTestId('playground-collapsed-composition-summary')).toHaveCount(0);
+
+    const restoreRuntimeSidechannel = page.getByTestId('playground-cockpit-right-rail-restore');
+    await assertVisibleTooltipForControl(
+      page,
+      restoreRuntimeSidechannel,
+      'Restore runtime sidechannel'
+    );
+    await restoreRuntimeSidechannel.click();
+    await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
   });
 
   test('uses the running server and keeps cockpit/focus controls working', async ({
