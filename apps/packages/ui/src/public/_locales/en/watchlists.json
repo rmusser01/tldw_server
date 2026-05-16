@@ -68,6 +68,39 @@
   "alerts_validation_required": {
     "message": "Name and pattern are required"
   },
+  "alerts_updateRuleSuccess": {
+    "message": "Content alert rule updated."
+  },
+  "alerts_updateRuleError": {
+    "message": "Failed to update content alert rule."
+  },
+  "alerts_deleteConfirmTitle": {
+    "message": "Delete content alert rule?"
+  },
+  "alerts_deleteConfirmContent": {
+    "message": "This removes the rule and keeps existing alert history."
+  },
+  "alerts_deleteSuccess": {
+    "message": "Content alert rule deleted."
+  },
+  "alerts_deleteError": {
+    "message": "Failed to delete content alert rule."
+  },
+  "alerts_updateAlertSuccess": {
+    "message": "Alert updated."
+  },
+  "alerts_updateAlertError": {
+    "message": "Failed to update alert."
+  },
+  "alerts_totalItems": {
+    "message": "{{total}} alerts"
+  },
+  "alerts_filters_search": {
+    "message": "Search alerts"
+  },
+  "alerts_ids_job": {
+    "message": "Monitor #{{id}}"
+  },
   "overview_alertHealth_title": {
     "message": "Alerts and health"
   },
@@ -3434,11 +3467,14 @@
   "items_savedViews_imported": {
     "message": "Imported {{count}} saved view{{plural}}."
   },
+  "items_savedViews_importPartialError": {
+    "message": "{{count}} saved view{{plural}} could not be imported and can be retried."
+  },
   "items_savedViews_importError": {
     "message": "Failed to import saved views."
   },
   "items_alertSummary_total": {
-    "message": "{{count}} match{{plural}}"
+    "message": "{{count}} {{label}}"
   },
   "items_alertSummary_openAlerts": {
     "message": "Open Alerts"

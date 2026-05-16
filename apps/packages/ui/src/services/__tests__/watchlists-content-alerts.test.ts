@@ -81,11 +81,12 @@ describe("watchlist content alert service contract", () => {
       severity: "critical",
       rule_id: 7,
       source_id: 11,
+      q: "active exploitation",
       page: 1,
       size: 50
     })
     expect(mocks.bgRequest).toHaveBeenLastCalledWith({
-      path: "/api/v1/watchlists/42/alerts?status=unread&severity=critical&rule_id=7&source_id=11&page=1&size=50",
+      path: "/api/v1/watchlists/42/alerts?status=unread&severity=critical&rule_id=7&source_id=11&q=active+exploitation&page=1&size=50",
       method: "GET"
     })
 

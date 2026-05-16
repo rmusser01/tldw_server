@@ -245,6 +245,18 @@ export const SettingsTab: React.FC = () => {
 
   const renderClusterSubscriptions = () => {
     if (isConstrained) {
+      if (clustersLoading) {
+        return (
+          <div
+            className="space-y-2"
+            data-testid="settings-clusters-constrained-loading"
+          >
+            <Skeleton active paragraph={{ rows: 2 }} title={false} />
+            <Skeleton active paragraph={{ rows: 2 }} title={false} />
+          </div>
+        )
+      }
+
       return (
         <div
           className="space-y-2"

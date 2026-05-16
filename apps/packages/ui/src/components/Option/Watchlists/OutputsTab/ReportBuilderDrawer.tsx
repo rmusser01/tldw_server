@@ -117,6 +117,7 @@ export const ReportBuilderDrawer: React.FC<ReportBuilderDrawerProps> = ({
     setFormat("md")
     setIncludeEvidenceTable(true)
     setIncludeExcludedItems(true)
+    setTemplateName(null)
   }, [open, selectedWatchlist])
 
   useEffect(() => {
@@ -391,7 +392,7 @@ export const ReportBuilderDrawer: React.FC<ReportBuilderDrawerProps> = ({
             </Checkbox>
           </div>
 
-          {loadingQueue && queuedItems.length > 0 ? (
+          {loadingQueue ? (
             <div className="py-6 text-center"><Spin /></div>
           ) : queuedItems.length > 0 ? (
             <div className="rounded-lg border border-border bg-surface p-3 space-y-2">

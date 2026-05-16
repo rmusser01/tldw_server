@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useState } from "react"
+import React, { useCallback, useEffect, useRef, useState } from "react"
 import {
   Alert,
   Button,
   Modal,
+  Pagination,
   Space,
   Switch,
   Table,
@@ -114,6 +115,7 @@ export const JobsTab: React.FC = () => {
     const stored = readStoredDisclosureState(JOBS_ADVANCED_COLUMNS_STORAGE_KEY)
     return stored ?? false
   })
+  const previousSelectedWatchlistIdRef = useRef<number | null>(selectedWatchlistId)
 
   // Fetch jobs
   const loadJobs = useCallback(async () => {
@@ -141,6 +143,14 @@ export const JobsTab: React.FC = () => {
   }, [jobsPage, jobsPageSize, selectedWatchlistId, setJobs, setJobsLoading, t])
 
   // Initial load
+  useEffect(() => {
+    if (previousSelectedWatchlistIdRef.current === selectedWatchlistId) return
+    previousSelectedWatchlistIdRef.current = selectedWatchlistId
+    if (jobsPage !== 1) {
+      setJobsPage(1)
+    }
+  }, [jobsPage, selectedWatchlistId, setJobsPage])
+
   useEffect(() => {
     loadJobs()
   }, [loadJobs])
@@ -735,6 +745,21 @@ export const JobsTab: React.FC = () => {
       <div className="text-xs text-text-subtle">
         {t("watchlists:jobs.totalItems", "{{total}} monitors", { total: jobsTotal })}
       </div>
+      {jobsTotal > jobsPageSize && (
+        <Pagination
+          current={jobsPage}
+          pageSize={jobsPageSize}
+          total={jobsTotal}
+          showSizeChanger
+          showTotal={(total) => t("watchlists:jobs.totalItems", "{{total}} monitors", { total })}
+          onChange={(page, pageSize) => {
+            setJobsPage(page)
+            if (pageSize !== jobsPageSize) {
+              setJobsPageSize(pageSize)
+            }
+          }}
+        />
+      )}
     </div>
   )
 

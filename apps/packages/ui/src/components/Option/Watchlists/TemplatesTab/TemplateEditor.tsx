@@ -256,12 +256,14 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
       setAvailableRuns([])
       return
     }
+    let active = true
     fetchWatchlistRuns({
       watchlist_id: selectedWatchlistId ?? undefined,
       q: "completed",
       size: 20
     })
       .then((res) => {
+        if (!active) return
         setAvailableRuns(
           (res.items || []).map((r) => ({
             id: r.id,
@@ -270,8 +272,13 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
         )
       })
       .catch(() => {
+        if (!active) return
         setAvailableRuns([])
       })
+
+    return () => {
+      active = false
+    }
   }, [open, selectedWatchlistId])
 
   const handleLoadSelectedVersion = async () => {

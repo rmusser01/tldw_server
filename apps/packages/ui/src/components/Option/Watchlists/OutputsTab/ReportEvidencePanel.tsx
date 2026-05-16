@@ -69,6 +69,7 @@ export const ReportEvidencePanel: React.FC<ReportEvidencePanelProps> = ({
 
   const snapshot = response?.snapshot ?? null
   const readiness = response?.readiness ?? snapshot?.readiness ?? null
+  const readinessWarnings = Array.isArray(readiness?.warnings) ? readiness.warnings : []
 
   const includedColumns: ColumnsType<WatchlistReportEvidenceItem> = useMemo(
     () => [
@@ -262,7 +263,7 @@ export const ReportEvidencePanel: React.FC<ReportEvidencePanelProps> = ({
   }
 
   if (!response.immutable_snapshot || !snapshot) {
-    const warning = response.readiness.warnings[0]
+    const warning = readinessWarnings[0]
     return (
       <Alert
         type="info"
@@ -326,9 +327,9 @@ export const ReportEvidencePanel: React.FC<ReportEvidencePanelProps> = ({
         </div>
       </div>
 
-      {readiness?.warnings?.length ? (
+      {readinessWarnings.length ? (
         <div className="space-y-2">
-          {readiness.warnings.map((warning) => (
+          {readinessWarnings.map((warning) => (
             <Alert
               key={`${warning.code}-${warning.message}`}
               type={warning.severity === "blocking" ? "error" : "warning"}

@@ -3719,6 +3719,7 @@ class WatchlistsDatabase:
         severity: str | None = None,
         rule_id: int | None = None,
         source_id: int | None = None,
+        q: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[WatchlistContentAlertRow], int]:
@@ -3737,6 +3738,24 @@ class WatchlistsDatabase:
         if source_id is not None:
             where.append("source_id = ?")
             params.append(int(source_id))
+        if q is not None and q.strip():
+            escaped_query = (
+                q.strip()
+                .lower()
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+            )
+            like_pattern = f"%{escaped_query}%"
+            where.append(
+                "("
+                "LOWER(COALESCE(title, '')) LIKE ? ESCAPE '\\' OR "
+                "LOWER(COALESCE(snippet, '')) LIKE ? ESCAPE '\\' OR "
+                "LOWER(COALESCE(matched_text, '')) LIKE ? ESCAPE '\\' OR "
+                "LOWER(COALESCE(evidence_json, '')) LIKE ? ESCAPE '\\'"
+                ")"
+            )
+            params.extend([like_pattern, like_pattern, like_pattern, like_pattern])
         where_sql = " AND ".join(where)
         total = int(
             self.backend.execute(

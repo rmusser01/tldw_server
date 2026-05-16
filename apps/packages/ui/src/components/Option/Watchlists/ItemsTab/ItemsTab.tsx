@@ -1775,7 +1775,7 @@ export const ItemsTab: React.FC = () => {
     if (selectedWatchlistId == null || legacyViewPresets.length === 0) return
     setImportingLocalViews(true)
     try {
-      const createdViews = await Promise.all(
+      const results = await Promise.allSettled(
         legacyViewPresets.map((preset) =>
           createWatchlistItemView(
             selectedWatchlistId,
@@ -1783,15 +1783,40 @@ export const ItemsTab: React.FC = () => {
           )
         )
       )
+      const createdViews = results
+        .filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof createWatchlistItemView>>> =>
+          result.status === "fulfilled"
+        )
+        .map((result) => result.value)
+      const failedCount = results.length - createdViews.length
       const importedPresets = createdViews.map(toItemsViewPresetFromServer)
       setViewPresets((prev) => normalizeViewPresets([...importedPresets, ...prev]))
-      setLegacyViewPresets([])
-      message.success(
-        t("watchlists:items.savedViews.imported", "Imported {{count}} saved view{{plural}}.", {
-          count: importedPresets.length,
-          plural: importedPresets.length === 1 ? "" : "s"
-        })
+      const importedIds = new Set(
+        legacyViewPresets
+          .filter((_, index) => results[index]?.status === "fulfilled")
+          .map((preset) => preset.id)
       )
+      setLegacyViewPresets((prev) => prev.filter((preset) => !importedIds.has(preset.id)))
+      if (importedPresets.length > 0) {
+        message.success(
+          t("watchlists:items.savedViews.imported", "Imported {{count}} saved view{{plural}}.", {
+            count: importedPresets.length,
+            plural: importedPresets.length === 1 ? "" : "s"
+          })
+        )
+      }
+      if (failedCount > 0) {
+        message.warning(
+          t(
+            "watchlists:items.savedViews.importPartialError",
+            "{{count}} saved view{{plural}} could not be imported and can be retried.",
+            {
+              count: failedCount,
+              plural: failedCount === 1 ? "" : "s"
+            }
+          )
+        )
+      }
     } catch (error) {
       console.error("Failed to import local item saved views:", error)
       message.error(
@@ -2947,10 +2972,10 @@ export const ItemsTab: React.FC = () => {
                         >
                           {t(
                             "watchlists:items.alertSummary.total",
-                            "{{count}} match{{plural}}",
+                            "{{count}} {{label}}",
                             {
                               count: selectedItem.alert_summary?.total || 0,
-                              plural: selectedItem.alert_summary?.total === 1 ? "" : "es"
+                              label: selectedItem.alert_summary?.total === 1 ? "match" : "matches"
                             }
                           )}
                         </Tag>

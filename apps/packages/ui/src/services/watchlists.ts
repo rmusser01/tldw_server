@@ -186,6 +186,7 @@ export interface FetchContentAlertsParams {
   severity?: WatchlistContentAlertSeverity
   rule_id?: number
   source_id?: number
+  q?: string
   page?: number
   size?: number
 }

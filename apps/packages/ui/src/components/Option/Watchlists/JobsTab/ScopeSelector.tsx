@@ -43,6 +43,8 @@ export const ScopeSelector: React.FC<ScopeSelectorProps> = ({
 
   // Load data on mount
   useEffect(() => {
+    let active = true
+
     const fetchSourceOptions = async (): Promise<WatchlistSource[]> => {
       const allSources: WatchlistSource[] = []
       let page = 1
@@ -73,16 +75,22 @@ export const ScopeSelector: React.FC<ScopeSelectorProps> = ({
           fetchWatchlistGroups({ page: 1, size: 200 }),
           fetchWatchlistTags({ page: 1, size: 200 })
         ])
+        if (!active) return
         setSources(sourcesRes)
         setGroups(groupsRes.items || [])
         setTags(tagsRes.items || [])
       } catch (err) {
+        if (!active) return
         console.error("Failed to load scope data:", err)
       } finally {
-        setLoading(false)
+        if (active) setLoading(false)
       }
     }
     loadData()
+
+    return () => {
+      active = false
+    }
   }, [watchlistId])
 
   // Sync active tab when value changes

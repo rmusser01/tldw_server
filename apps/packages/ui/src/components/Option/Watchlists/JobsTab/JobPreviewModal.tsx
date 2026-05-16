@@ -29,6 +29,13 @@ export const JobPreviewModal: React.FC<JobPreviewModalProps> = ({
   const { isConstrained } = useWatchlistsViewport()
   const modalChrome = buildWatchlistsModalChrome(isConstrained, 800)
 
+  const formatPreviewReason = (item: PreviewItem): string => {
+    const reasonType = item.matched_filter_type ? String(item.matched_filter_type) : ""
+    const reasonId = item.matched_filter_id != null ? `#${item.matched_filter_id}` : ""
+    const reasonKey = item.matched_filter_key ?? ""
+    return [reasonType, reasonId, reasonKey].filter(Boolean).join(" ")
+  }
+
   useLayoutEffect(() => {
     if (open) {
       if (!wasOpenRef.current) {
@@ -87,13 +94,7 @@ export const JobPreviewModal: React.FC<JobPreviewModalProps> = ({
       key: "reason",
       width: 220,
       render: (_, record) => {
-        if (!record.matched_filter_key && !record.matched_filter_type && record.matched_filter_id == null) {
-          return "-"
-        }
-        const reasonType = record.matched_filter_type ? String(record.matched_filter_type) : "filter"
-        const reasonId = record.matched_filter_id != null ? `#${record.matched_filter_id}` : ""
-        const reasonKey = record.matched_filter_key ?? ""
-        return [reasonType, reasonId, reasonKey].filter(Boolean).join(" ")
+        return formatPreviewReason(record) || "-"
       }
     },
     {
@@ -112,12 +113,7 @@ export const JobPreviewModal: React.FC<JobPreviewModalProps> = ({
         <div className="space-y-2" data-testid="job-preview-constrained-list">
           {items.map((item, index) => {
             const title = item.title || item.url || "-"
-            const reasonType = item.matched_filter_type
-              ? String(item.matched_filter_type)
-              : "filter"
-            const reasonId = item.matched_filter_id != null ? `#${item.matched_filter_id}` : ""
-            const reasonKey = item.matched_filter_key ?? ""
-            const reason = [reasonType, reasonId, reasonKey].filter(Boolean).join(" ")
+            const reason = formatPreviewReason(item)
             return (
               <div
                 key={`${item.source_id}-${item.url ?? index}`}

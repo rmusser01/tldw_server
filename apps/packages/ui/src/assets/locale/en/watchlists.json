@@ -538,6 +538,15 @@
     "noWatchlist": "Select a Watchlist to manage content alert rules and review matching items.",
     "loadRulesError": "Failed to load content alert rules",
     "loadAlertsError": "Failed to load content alerts",
+    "updateRuleSuccess": "Content alert rule updated.",
+    "updateRuleError": "Failed to update content alert rule.",
+    "deleteConfirmTitle": "Delete content alert rule?",
+    "deleteConfirmContent": "This removes the rule and keeps existing alert history.",
+    "deleteSuccess": "Content alert rule deleted.",
+    "deleteError": "Failed to delete content alert rule.",
+    "updateAlertSuccess": "Alert updated.",
+    "updateAlertError": "Failed to update alert.",
+    "totalItems": "{{total}} alerts",
     "validation": {
       "required": "Name and pattern are required",
       "saveFailed": "Failed to save content alert rule"
@@ -556,7 +565,7 @@
       "severity": "Severity",
       "rule": "Rule",
       "sourceId": "Source ID",
-      "search": "Search loaded alerts",
+      "search": "Search alerts",
       "allRules": "All rules",
       "allSeverity": "All severity"
     },
@@ -568,7 +577,7 @@
     "ids": {
       "item": "Item #{{id}}",
       "run": "Run #{{id}}",
-      "job": "Job #{{id}}"
+      "job": "Monitor #{{id}}"
     }
   },
   "healthBar": {
@@ -1390,6 +1399,7 @@
       "updateError": "Failed to update saved view.",
       "importLocal": "Import local views",
       "imported": "Imported {{count}} saved view{{plural}}.",
+      "importPartialError": "{{count}} saved view{{plural}} could not be imported and can be retried.",
       "importError": "Failed to import saved views.",
       "deleteTitle": "Delete saved view?",
       "deleteDescription": "Delete saved view \"{{name}}\"?",
@@ -1419,7 +1429,7 @@
       "selectionCleared": "No update selected."
     },
     "alertSummary": {
-      "total": "{{count}} match{{plural}}",
+      "total": "{{count}} {{label}}",
       "openAlerts": "Open Alerts"
     }
   },

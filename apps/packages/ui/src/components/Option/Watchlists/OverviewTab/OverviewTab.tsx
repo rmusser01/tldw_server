@@ -246,7 +246,7 @@ export const OverviewTab: React.FC = () => {
     }
   }, [loadOverview])
 
-  const quickSetupAutoShownRef = useRef(false)
+  const quickSetupAutoShownWatchlistRef = useRef<number | null>(null)
 
   useLayoutEffect(() => {
     if (quickSetupOpen) {
@@ -342,11 +342,12 @@ export const OverviewTab: React.FC = () => {
 
   // Auto-open Quick Setup for first-time users with no sources
   useEffect(() => {
-    const autoShownKey = "watchlists:quickSetup:autoshown:v1"
+    if (selectedWatchlistId == null) return
+    const autoShownKey = `watchlists:quickSetup:autoshown:v1:${selectedWatchlistId}`
 
     // If the wizard is already open, mark as shown to prevent re-opening after close
     if (quickSetupOpen) {
-      quickSetupAutoShownRef.current = true
+      quickSetupAutoShownWatchlistRef.current = selectedWatchlistId
       try {
         localStorage.setItem(autoShownKey, "1")
       } catch {
@@ -358,8 +359,7 @@ export const OverviewTab: React.FC = () => {
     if (
       !data ||
       data.sources.total !== 0 ||
-      selectedWatchlistId == null ||
-      quickSetupAutoShownRef.current ||
+      quickSetupAutoShownWatchlistRef.current === selectedWatchlistId ||
       onboardingPath !== "beginner"
     ) {
       return
@@ -367,14 +367,14 @@ export const OverviewTab: React.FC = () => {
 
     try {
       if (localStorage.getItem(autoShownKey)) {
-        quickSetupAutoShownRef.current = true
+        quickSetupAutoShownWatchlistRef.current = selectedWatchlistId
         return
       }
       localStorage.setItem(autoShownKey, "1")
-      quickSetupAutoShownRef.current = true
+      quickSetupAutoShownWatchlistRef.current = selectedWatchlistId
       openQuickSetup()
     } catch {
-      quickSetupAutoShownRef.current = true
+      quickSetupAutoShownWatchlistRef.current = selectedWatchlistId
       openQuickSetup()
     }
   }, [data, quickSetupOpen, onboardingPath, openQuickSetup, selectedWatchlistId])

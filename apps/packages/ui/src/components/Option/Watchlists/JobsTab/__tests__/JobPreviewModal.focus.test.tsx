@@ -80,6 +80,14 @@ const buildJob = () => ({
   created_at: "2026-02-18T00:00:00Z"
 })
 
+const matchesViewportQuery = (query: string, width: number): boolean => {
+  const maxWidth = query.match(/max-width:\s*(\d+)px/)
+  const minWidth = query.match(/min-width:\s*(\d+)px/)
+  if (maxWidth && width > Number(maxWidth[1])) return false
+  if (minWidth && width < Number(minWidth[1])) return false
+  return Boolean(maxWidth || minWidth)
+}
+
 const setViewport = (width: number) => {
   Object.defineProperty(window, "innerWidth", {
     configurable: true,
@@ -89,7 +97,7 @@ const setViewport = (width: number) => {
     configurable: true,
     writable: true,
     value: vi.fn().mockImplementation((query: string) => ({
-      matches: width < 768,
+      matches: matchesViewportQuery(query, width),
       media: query,
       onchange: null,
       addListener: vi.fn(),

@@ -3,6 +3,7 @@ import {
   Alert,
   Button,
   Dropdown,
+  Pagination,
   Progress,
   Select,
   Space,
@@ -156,6 +157,7 @@ export const RunsTab: React.FC = () => {
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const previousVisibleRunsStatusRef = useRef<Map<number, string>>(new Map())
   const hasRunsAnnouncementBaselineRef = useRef(false)
+  const previousSelectedWatchlistIdRef = useRef<number | null>(selectedWatchlistId)
 
   // Fetch runs
   const loadRuns = useCallback(async (showLoading = true) => {
@@ -246,6 +248,17 @@ export const RunsTab: React.FC = () => {
   }, [selectedWatchlistId])
 
   // Initial load
+  useEffect(() => {
+    if (previousSelectedWatchlistIdRef.current === selectedWatchlistId) return
+    previousSelectedWatchlistIdRef.current = selectedWatchlistId
+    if (runsJobFilter != null) {
+      setRunsJobFilter(null)
+    }
+    if (runsPage !== 1) {
+      setRunsPage(1)
+    }
+  }, [runsJobFilter, runsPage, selectedWatchlistId, setRunsJobFilter, setRunsPage])
+
   useEffect(() => {
     loadRuns()
     loadJobs()
@@ -1052,6 +1065,21 @@ export const RunsTab: React.FC = () => {
       <div className="text-xs text-text-subtle">
         {t("watchlists:runs.totalItems", "{{total}} runs", { total: runsTotal })}
       </div>
+      {runsTotal > runsPageSize && (
+        <Pagination
+          current={runsPage}
+          pageSize={runsPageSize}
+          total={runsTotal}
+          showSizeChanger
+          showTotal={(total) => t("watchlists:runs.totalItems", "{{total}} runs", { total })}
+          onChange={(page, pageSize) => {
+            setRunsPage(page)
+            if (pageSize !== runsPageSize) {
+              setRunsPageSize(pageSize)
+            }
+          }}
+        />
+      )}
     </div>
   )
 

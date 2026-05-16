@@ -5,6 +5,7 @@ import {
   Descriptions,
   Drawer,
   Empty,
+  Pagination,
   Spin,
   Switch,
   Table,
@@ -855,6 +856,21 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
       <div className="text-xs text-text-subtle">
         {t("watchlists:runs.detail.itemsTotal", "{{total}} items", { total: itemsTotal })}
       </div>
+      {itemsTotal > itemsPageSize && (
+        <Pagination
+          current={itemsPage}
+          pageSize={itemsPageSize}
+          total={itemsTotal}
+          showSizeChanger
+          showTotal={(total) => t("watchlists:runs.detail.itemsTotal", "{{total}} items", { total })}
+          onChange={(page, pageSize) => {
+            setItemsPage(page)
+            if (pageSize !== itemsPageSize) {
+              setItemsPageSize(pageSize)
+            }
+          }}
+        />
+      )}
     </div>
   )
 

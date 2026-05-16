@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react"
-import { Alert, Button, Empty, Input, Select, Switch, Tag, Tooltip } from "antd"
+import { Alert, Button, Empty, Input, Modal, Pagination, Select, Switch, Tag, Tooltip, message } from "antd"
 import {
   BellRing,
   CheckCircle2,
@@ -31,6 +31,8 @@ import type {
 
 type AlertStatusFilter = WatchlistContentAlertStatus | "all"
 type SeverityFilter = WatchlistContentAlertSeverity | "all"
+const ALERTS_PAGE_SIZE = 50
+const ALERTS_FILTER_DEBOUNCE_MS = 300
 
 interface RuleFormState {
   id: number | null
@@ -120,20 +122,15 @@ const severityColor = (severity: WatchlistContentAlertSeverity): string => {
   return "default"
 }
 
-const matchesSearch = (alert: WatchlistContentAlert, query: string): boolean => {
-  const normalized = query.trim().toLowerCase()
-  if (!normalized) return true
-  const evidence = alert.evidence || {}
-  return [
-    alert.title,
-    alert.snippet,
-    alert.matched_text,
-    evidence.source_name,
-    evidence.url,
-    evidence.source_url
-  ]
-    .filter((value): value is string => typeof value === "string")
-    .some((value) => value.toLowerCase().includes(normalized))
+const useDebouncedValue = <T,>(value: T, delayMs: number): T => {
+  const [debounced, setDebounced] = useState(value)
+
+  useEffect(() => {
+    const timer = globalThis.setTimeout(() => setDebounced(value), delayMs)
+    return () => globalThis.clearTimeout(timer)
+  }, [delayMs, value])
+
+  return debounced
 }
 
 export const AlertsTab: React.FC = () => {
@@ -154,7 +151,11 @@ export const AlertsTab: React.FC = () => {
   const [ruleFilter, setRuleFilter] = useState<string>("all")
   const [sourceFilterText, setSourceFilterText] = useState("")
   const [searchText, setSearchText] = useState("")
+  const [alertsPage, setAlertsPage] = useState(1)
+  const [alertsTotal, setAlertsTotal] = useState(0)
   const [updatingAlertId, setUpdatingAlertId] = useState<number | null>(null)
+  const debouncedSourceFilterText = useDebouncedValue(sourceFilterText, ALERTS_FILTER_DEBOUNCE_MS)
+  const debouncedSearchText = useDebouncedValue(searchText, ALERTS_FILTER_DEBOUNCE_MS)
 
   const loadRules = useCallback(async () => {
     if (selectedWatchlistId == null) return
@@ -179,30 +180,31 @@ export const AlertsTab: React.FC = () => {
         status: statusFilter === "all" ? undefined : statusFilter,
         severity: severityFilter === "all" ? undefined : severityFilter,
         rule_id: ruleFilter === "all" ? undefined : Number(ruleFilter),
-        source_id: toNumberFilter(sourceFilterText),
-        page: 1,
-        size: 50
+        source_id: toNumberFilter(debouncedSourceFilterText),
+        q: debouncedSearchText.trim() || undefined,
+        page: alertsPage,
+        size: ALERTS_PAGE_SIZE
       })
       setAlerts(Array.isArray(response.items) ? response.items : [])
+      setAlertsTotal(Number(response.total || 0))
     } catch {
       setError(t("watchlists:alerts.loadAlertsError", "Failed to load content alerts"))
     } finally {
       setAlertsLoading(false)
     }
-  }, [ruleFilter, selectedWatchlistId, severityFilter, sourceFilterText, statusFilter, t])
+  }, [alertsPage, debouncedSearchText, debouncedSourceFilterText, ruleFilter, selectedWatchlistId, severityFilter, statusFilter, t])
 
   useEffect(() => {
     void loadRules()
   }, [loadRules])
 
   useEffect(() => {
+    setAlertsPage(1)
+  }, [debouncedSearchText, debouncedSourceFilterText, ruleFilter, selectedWatchlistId, severityFilter, statusFilter])
+
+  useEffect(() => {
     void loadAlerts()
   }, [loadAlerts])
-
-  const filteredAlerts = useMemo(
-    () => alerts.filter((alert) => matchesSearch(alert, searchText)),
-    [alerts, searchText]
-  )
 
   const ruleOptions = useMemo(
     () => [
@@ -271,15 +273,45 @@ export const AlertsTab: React.FC = () => {
 
   const toggleRule = useCallback(async (rule: WatchlistContentAlertRule, enabled: boolean) => {
     if (selectedWatchlistId == null) return
-    await updateWatchlistContentAlertRule(selectedWatchlistId, rule.id, { enabled })
-    await loadRules()
-  }, [loadRules, selectedWatchlistId])
+    try {
+      await updateWatchlistContentAlertRule(selectedWatchlistId, rule.id, { enabled })
+      await loadRules()
+      message.success(
+        t("watchlists:alerts.updateRuleSuccess", "Content alert rule updated.")
+      )
+    } catch (err) {
+      console.error("Failed to update content alert rule:", err)
+      message.error(
+        t("watchlists:alerts.updateRuleError", "Failed to update content alert rule.")
+      )
+    }
+  }, [loadRules, selectedWatchlistId, t])
 
   const deleteRule = useCallback(async (rule: WatchlistContentAlertRule) => {
     if (selectedWatchlistId == null) return
-    await deleteWatchlistContentAlertRule(selectedWatchlistId, rule.id)
-    await loadRules()
-  }, [loadRules, selectedWatchlistId])
+    Modal.confirm({
+      title: t("watchlists:alerts.deleteConfirmTitle", "Delete content alert rule?"),
+      content: t(
+        "watchlists:alerts.deleteConfirmContent",
+        "This removes the rule and keeps existing alert history.",
+        { name: rule.name }
+      ),
+      okText: t("common:delete", "Delete"),
+      okButtonProps: { danger: true },
+      cancelText: t("common:cancel", "Cancel"),
+      onOk: async () => {
+        try {
+          await deleteWatchlistContentAlertRule(selectedWatchlistId, rule.id)
+          await loadRules()
+          await loadAlerts()
+          message.success(t("watchlists:alerts.deleteSuccess", "Content alert rule deleted."))
+        } catch (err) {
+          console.error("Failed to delete content alert rule:", err)
+          message.error(t("watchlists:alerts.deleteError", "Failed to delete content alert rule."))
+        }
+      }
+    })
+  }, [loadAlerts, loadRules, selectedWatchlistId, t])
 
   const updateAlertStatus = useCallback(async (alert: WatchlistContentAlert, status: WatchlistContentAlertStatus) => {
     if (selectedWatchlistId == null) return
@@ -287,10 +319,14 @@ export const AlertsTab: React.FC = () => {
     try {
       await updateWatchlistContentAlert(selectedWatchlistId, alert.id, { status })
       await loadAlerts()
+      message.success(t("watchlists:alerts.updateAlertSuccess", "Alert updated."))
+    } catch (err) {
+      console.error("Failed to update content alert:", err)
+      message.error(t("watchlists:alerts.updateAlertError", "Failed to update alert."))
     } finally {
       setUpdatingAlertId(null)
     }
-  }, [loadAlerts, selectedWatchlistId])
+  }, [loadAlerts, selectedWatchlistId, t])
 
   if (selectedWatchlistId == null) {
     return (
@@ -509,39 +545,54 @@ export const AlertsTab: React.FC = () => {
             aria-label={t("watchlists:alerts.filters.status", "Alert status")}
             value={statusFilter}
             options={STATUS_OPTIONS}
-            onChange={(value) => setStatusFilter(value as AlertStatusFilter)}
+            onChange={(value) => {
+              setAlertsPage(1)
+              setStatusFilter(value as AlertStatusFilter)
+            }}
           />
           <Select
             aria-label={t("watchlists:alerts.filters.severity", "Severity")}
             value={severityFilter}
             options={[{ value: "all", label: t("watchlists:alerts.filters.allSeverity", "All severity") }, ...SEVERITY_OPTIONS]}
-            onChange={(value) => setSeverityFilter(value as SeverityFilter)}
+            onChange={(value) => {
+              setAlertsPage(1)
+              setSeverityFilter(value as SeverityFilter)
+            }}
           />
           <Select
             aria-label={t("watchlists:alerts.filters.rule", "Rule")}
             value={ruleFilter}
             options={ruleOptions}
-            onChange={(value) => setRuleFilter(String(value))}
+            onChange={(value) => {
+              setAlertsPage(1)
+              setRuleFilter(String(value))
+            }}
           />
           <Input
             aria-label={t("watchlists:alerts.filters.sourceId", "Source ID")}
             value={sourceFilterText}
-            onChange={(event) => setSourceFilterText(event.currentTarget.value)}
+            onChange={(event) => {
+              setAlertsPage(1)
+              setSourceFilterText(event.currentTarget.value)
+            }}
             placeholder={t("watchlists:alerts.filters.sourceId", "Source ID")}
           />
           <Input
-            aria-label={t("watchlists:alerts.filters.search", "Search loaded alerts")}
+            aria-label={t("watchlists:alerts.filters.search", "Search alerts")}
             value={searchText}
-            onChange={(event) => setSearchText(event.currentTarget.value)}
-            placeholder={t("watchlists:alerts.filters.search", "Search loaded alerts")}
+            onChange={(event) => {
+              setAlertsPage(1)
+              setSearchText(event.currentTarget.value)
+            }}
+            placeholder={t("watchlists:alerts.filters.search", "Search alerts")}
           />
         </div>
 
         <div className="mt-4 grid gap-3">
-          {filteredAlerts.length === 0 && !alertsLoading ? (
+          {alerts.length === 0 && !alertsLoading ? (
             <Empty description={t("watchlists:alerts.emptyInbox", "No content alerts match these filters.")} />
           ) : (
-            filteredAlerts.map((alert) => {
+            alerts.map((alert) => {
               const sourceName = alert.evidence?.source_name || `Source ${alert.source_id}`
               const sourceUrl = alert.evidence?.source_url || null
               const itemUrl = alert.evidence?.url || null
@@ -585,7 +636,7 @@ export const AlertsTab: React.FC = () => {
                       <div className="flex flex-wrap gap-2 text-xs text-text-muted">
                         <span>{t("watchlists:alerts.ids.item", "Item #{{id}}", { id: alert.item_id })}</span>
                         <span>{t("watchlists:alerts.ids.run", "Run #{{id}}", { id: alert.run_id })}</span>
-                        <span>{t("watchlists:alerts.ids.job", "Job #{{id}}", { id: alert.job_id })}</span>
+                        <span>{t("watchlists:alerts.ids.job", "Monitor #{{id}}", { id: alert.job_id })}</span>
                       </div>
                     </div>
                     <div className="flex shrink-0 flex-wrap gap-2">
@@ -613,6 +664,17 @@ export const AlertsTab: React.FC = () => {
             })
           )}
         </div>
+        {alertsTotal > ALERTS_PAGE_SIZE && (
+          <Pagination
+            className="mt-4"
+            current={alertsPage}
+            pageSize={ALERTS_PAGE_SIZE}
+            total={alertsTotal}
+            showSizeChanger={false}
+            showTotal={(total) => t("watchlists:alerts.totalItems", "{{total}} alerts", { total })}
+            onChange={setAlertsPage}
+          />
+        )}
       </section>
     </div>
   )

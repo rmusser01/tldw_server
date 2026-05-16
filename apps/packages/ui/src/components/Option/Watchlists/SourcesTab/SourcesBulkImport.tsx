@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Alert, Button, Modal, Select, Space, Switch, Table, Tag, Upload, message } from "antd"
 import type { RcFile } from "antd/es/upload/interface"
 import { UploadCloud } from "lucide-react"
@@ -142,6 +142,7 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
   const [retryingFailedOnly, setRetryingFailedOnly] = useState(false)
   const { isConstrained } = useWatchlistsViewport()
   const modalChrome = buildWatchlistsModalChrome(isConstrained, 900)
+  const existingUrlsRequestRef = useRef(0)
 
   const resetState = useCallback(() => {
     setActive(true)
@@ -158,7 +159,10 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
   }, [defaultGroupId])
 
   const loadExistingUrls = useCallback(async (): Promise<string[]> => {
+    const requestId = existingUrlsRequestRef.current + 1
+    existingUrlsRequestRef.current = requestId
     setExistingUrlsLoading(true)
+    setExistingUrlsLoaded(false)
     try {
       const urls: string[] = []
       let page = 1
@@ -178,10 +182,12 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
         }
         page += 1
       }
+      if (existingUrlsRequestRef.current !== requestId) return []
       setExistingUrls(urls)
       setExistingUrlsLoaded(true)
       return urls
     } catch (err) {
+      if (existingUrlsRequestRef.current !== requestId) return []
       console.error("Failed to load existing sources for import preview:", err)
       setExistingUrlsLoaded(true)
       message.warning(
@@ -192,15 +198,19 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
       )
       return []
     } finally {
-      setExistingUrlsLoading(false)
+      if (existingUrlsRequestRef.current === requestId) {
+        setExistingUrlsLoading(false)
+      }
     }
   }, [t, watchlistId])
 
   useEffect(() => {
     if (!open) {
+      existingUrlsRequestRef.current += 1
       resetState()
       return
     }
+    resetState()
     void loadExistingUrls()
   }, [loadExistingUrls, open, resetState])
 

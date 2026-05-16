@@ -5,6 +5,7 @@ import {
   Empty,
   Input,
   Modal,
+  Pagination,
   Select,
   Space,
   Switch,
@@ -1539,6 +1540,21 @@ export const SourcesTab: React.FC = () => {
       <div className="text-xs text-text-subtle">
         {t("watchlists:sources.totalItems", "{{total}} sources", { total: sourcesTotal })}
       </div>
+      {sourcesTotal > sourcesPageSize && (
+        <Pagination
+          current={sourcesPage}
+          pageSize={sourcesPageSize}
+          total={sourcesTotal}
+          showSizeChanger
+          showTotal={(total) => t("watchlists:sources.totalItems", "{{total}} sources", { total })}
+          onChange={(page, pageSize) => {
+            setSourcesPage(page)
+            if (pageSize !== sourcesPageSize) {
+              setSourcesPageSize(pageSize)
+            }
+          }}
+        />
+      )}
     </div>
   )
 

@@ -202,6 +202,20 @@ def test_content_alert_inbox_filters_detail_and_review_state(client_with_user):
     assert listed_body["items"][0]["id"] == alert_id
     assert listed_body["items"][0]["evidence"]["url"] == "https://example.com/advisory/cve-2026-1234"
 
+    searched = client.get(
+        f"/api/v1/watchlists/{watchlist['id']}/alerts",
+        params={"q": "exploitation observed"},
+    )
+    assert searched.status_code == 200, searched.text
+    assert searched.json()["total"] == 1
+
+    no_match = client.get(
+        f"/api/v1/watchlists/{watchlist['id']}/alerts",
+        params={"q": "unrelated topic"},
+    )
+    assert no_match.status_code == 200, no_match.text
+    assert no_match.json()["total"] == 0
+
     detail = client.get(f"/api/v1/watchlists/{watchlist['id']}/alerts/{alert_id}")
     assert detail.status_code == 200, detail.text
     assert detail.json()["matched_text"] == "CVE-2026-1234"

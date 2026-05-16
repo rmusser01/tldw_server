@@ -6827,6 +6827,12 @@ async def list_content_alerts(
     severity: str | None = Query(None),
     rule_id: int | None = Query(None, ge=1),
     source_id: int | None = Query(None, ge=1),
+    q: str | None = Query(
+        None,
+        min_length=1,
+        max_length=200,
+        description="Search alert title, snippet, matched text, or evidence",
+    ),
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_request_user),
@@ -6842,6 +6848,7 @@ async def list_content_alerts(
             severity=severity,
             rule_id=rule_id,
             source_id=source_id,
+            q=q,
             limit=limit,
             offset=offset,
         )
