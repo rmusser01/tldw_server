@@ -1119,7 +1119,17 @@ describe("VisualPackEditor", () => {
           asset_count: 2,
           total_bytes: 1024,
           tags: ["alt", "starter"],
-          license_label: "bundled-alt"
+          license_label: "bundled-alt",
+          complexity_tier: "intermediate",
+          production_status: "scaffold",
+          neutral_anchor_required: true,
+          expected_asset_groups: [
+            "neutral_anchor",
+            "static_talking_reaction_sheet"
+          ],
+          animation_coverage_notes: [
+            "Scaffold fixture only; replace with authored reactions."
+          ]
         }
       ]
     }
@@ -1175,6 +1185,11 @@ describe("VisualPackEditor", () => {
     expect(picker).toHaveTextContent("sprite_frames")
     expect(picker).toHaveTextContent("alt")
     expect(picker).toHaveTextContent("bundled-alt")
+    expect(picker).toHaveTextContent(/scaffold/i)
+    expect(picker).toHaveTextContent(/intermediate/i)
+    expect(picker).toHaveTextContent(/neutral anchor/i)
+    expect(picker).toHaveTextContent(/static talking reaction sheet/i)
+    expect(picker).toHaveTextContent("Scaffold fixture only")
 
     fireEvent.click(within(picker).getByTestId("persona-visual-copy-starter-alt-starter"))
 

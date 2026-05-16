@@ -229,6 +229,13 @@ export interface PersonaVisualStarterPackAssetSummary {
   byte_size: number
 }
 
+export type PersonaVisualStarterComplexityTier =
+  | "basic"
+  | "intermediate"
+  | "intricate"
+
+export type PersonaVisualStarterProductionStatus = "scaffold" | "art_ready"
+
 export interface PersonaVisualStarterPackSummary {
   id: string
   title: string
@@ -240,6 +247,11 @@ export interface PersonaVisualStarterPackSummary {
   total_bytes: number
   tags: string[]
   license_label: string
+  complexity_tier: PersonaVisualStarterComplexityTier
+  production_status: PersonaVisualStarterProductionStatus
+  neutral_anchor_required: boolean
+  expected_asset_groups: string[]
+  animation_coverage_notes: string[]
 }
 
 export interface PersonaVisualStarterPackDetail
