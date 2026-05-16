@@ -10,8 +10,8 @@ export interface AlertProps {
   variant?: AlertVariant
   /** Optional title displayed prominently */
   title?: React.ReactNode
-  /** Alert content/message */
-  children: React.ReactNode
+  /** Optional alert content/message */
+  children?: React.ReactNode
   /** Custom icon (defaults to variant-appropriate icon) */
   icon?: React.ReactNode
   /** Primary action button */
@@ -107,6 +107,8 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
   ) => {
     const config = variantConfig[variant]
     const DefaultIcon = config.icon
+    const hasContent =
+      children !== null && children !== undefined && children !== false && children !== ""
 
     return (
       <div
@@ -132,9 +134,11 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
           {title && (
             <p className={cn("text-sm font-medium", config.text)}>{title}</p>
           )}
-          <div className={cn("text-sm", config.text, title && "mt-1")}>
-            {children}
-          </div>
+          {hasContent && (
+            <div className={cn("text-sm", config.text, title && "mt-1")}>
+              {children}
+            </div>
+          )}
 
           {(action || secondaryAction) && (
             <div className="mt-2 flex flex-wrap items-center gap-2">

@@ -1,6 +1,5 @@
 import React from "react"
 import {
-  Alert,
   Button,
   Card,
   Divider,
@@ -29,6 +28,7 @@ import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { bgRequest } from "@/services/background-proxy"
 import { PageShell } from "@/components/Common/PageShell"
 import WorkspaceConnectionGate from "@/components/Common/WorkspaceConnectionGate"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 import { formatFileSize } from "@/utils/format"
 import {
@@ -807,9 +807,8 @@ export const ContentTypePicker: React.FC<ContentTypePickerProps> = ({
         </div>
 
         {includeAll && (
-          <Alert
-            type="info"
-            showIcon
+          <DesignSystemAlert
+            variant="info"
             title={t("settings:chatbooksPlayground.includeAllHint", {
               defaultValue: "All {{label}} will be included.",
               label: label.toLowerCase()
@@ -857,9 +856,8 @@ export const ContentTypePicker: React.FC<ContentTypePickerProps> = ({
             </Space>
 
             {showTruncatedWarning && (
-              <Alert
-                type="warning"
-                showIcon
+              <DesignSystemAlert
+                variant="warning"
                 title={t("settings:chatbooksPlayground.resultsTruncated", {
                   defaultValue:
                     "Results limited to the first {{limit}} items. Refine filters to narrow the list.",
@@ -925,29 +923,27 @@ export const ContentTypePicker: React.FC<ContentTypePickerProps> = ({
         )}
 
         {query.isError && !suppressAuthErrors && (
-          <Alert
-            type="warning"
-            showIcon
+          <DesignSystemAlert
+            variant="warning"
             title={t(
               "settings:chatbooksPlayground.loadError",
               "Unable to load items"
             )}
-            description={
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm">{loadErrorDescription}</p>
-                  <p className="mt-1 text-xs text-text-muted">{loadErrorHint}</p>
-                </div>
-                <Button
-                  size="small"
-                  onClick={() => {
-                    void query.refetch()
-                  }}>
-                  {t("common:retry", { defaultValue: "Retry" })}
-                </Button>
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm">{loadErrorDescription}</p>
+                <p className="mt-1 text-xs text-text-muted">{loadErrorHint}</p>
               </div>
-            }
-          />
+              <Button
+                size="small"
+                onClick={() => {
+                  void query.refetch()
+                }}>
+                {t("common:retry", { defaultValue: "Retry" })}
+              </Button>
+            </div>
+          </DesignSystemAlert>
         )}
       </div>
     </Card>
@@ -1859,18 +1855,18 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
 
       <div className="flex flex-col gap-4">
         {!isOnline && (
-          <Alert
-            type="info"
-            showIcon
+          <DesignSystemAlert
+            variant="info"
             title={t(
               "settings:chatbooksPlayground.serverOffline",
               "Server connection required"
             )}
-            description={t(
+          >
+            {t(
               "settings:chatbooksPlayground.serverOfflineHint",
               "Connect to your tldw server in Settings to browse and select content for export."
             )}
-          />
+          </DesignSystemAlert>
         )}
         {exportPickerConfig.map((config) => {
           const generatedDisabled =
@@ -2020,20 +2016,19 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
           </Upload.Dragger>
 
           {previewLoading && (
-            <Alert
-              type="info"
-              showIcon
+            <DesignSystemAlert
+              variant="info"
               title={t("settings:chatbooksPlayground.previewLoading", "Previewing chatbook...")}
             />
           )}
 
           {previewError && (
-            <Alert
-              type="error"
-              showIcon
+            <DesignSystemAlert
+              variant="error"
               title={t("settings:chatbooksPlayground.previewError", "Preview failed")}
-              description={previewError}
-            />
+            >
+              {previewError}
+            </DesignSystemAlert>
           )}
 
           {previewManifest && (
@@ -2114,13 +2109,13 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
                 </div>
               </div>
               {Boolean(openwebuiPreview.warnings?.length) && (
-                <Alert
-                  type="warning"
-                  showIcon
+                <DesignSystemAlert
+                  variant="warning"
                   className="mt-3"
                   title={t("settings:chatbooksPlayground.openwebuiWarnings", "Import warnings")}
-                  description={openwebuiPreview.warnings.slice(0, 3).join("\n")}
-                />
+                >
+                  {openwebuiPreview.warnings.slice(0, 3).join("\n")}
+                </DesignSystemAlert>
               )}
             </Card>
           )}
@@ -2184,39 +2179,39 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
               </div>
 
               {selectedOpenWebUIUser && (
-                <Alert
-                  type="info"
-                  showIcon
+                <DesignSystemAlert
+                  variant="info"
                   className="mt-3"
                   title={t("settings:chatbooksPlayground.openwebuiDbDestination", "Destination")}
-                  description={`Destination: OpenWebUI / ${
+                >
+                  {`Destination: OpenWebUI / ${
                     selectedOpenWebUIUser.display_label || selectedOpenWebUIUser.source_user_id
                   } (${selectedOpenWebUIUser.source_user_id}) / source folders`}
-                />
+                </DesignSystemAlert>
               )}
 
-              <Alert
-                type="warning"
-                showIcon
+              <DesignSystemAlert
+                variant="warning"
                 className="mt-3"
                 title={t(
                   "settings:chatbooksPlayground.openwebuiDbAttachmentRefs",
                   "Files and images"
                 )}
-                description={t(
+              >
+                {t(
                   "settings:chatbooksPlayground.openwebuiDbAttachmentRefsDescription",
                   "Files, images, and artifacts import as metadata references first. Use attachment hydration below to copy images and register supported files from your OpenWebUI data root."
                 )}
-              />
+              </DesignSystemAlert>
 
               {Boolean(openwebuiDbPreview.warnings?.length) && (
-                <Alert
-                  type="warning"
-                  showIcon
+                <DesignSystemAlert
+                  variant="warning"
                   className="mt-3"
                   title={t("settings:chatbooksPlayground.openwebuiWarnings", "Import warnings")}
-                  description={openwebuiDbPreview.warnings.slice(0, 3).join("\n")}
-                />
+                >
+                  {openwebuiDbPreview.warnings.slice(0, 3).join("\n")}
+                </DesignSystemAlert>
               )}
             </Card>
           )}
@@ -2361,9 +2356,8 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
               </div>
 
               {hydrationPreview && !hydrationPreviewIsCurrent && (
-                <Alert
-                  type="info"
-                  showIcon
+                <DesignSystemAlert
+                  variant="info"
                   className="mt-3"
                   title={t(
                     "settings:chatbooksPlayground.openwebuiHydrationPreviewStale",
@@ -2373,16 +2367,16 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
               )}
 
               {hydrationPreviewError && (
-                <Alert
-                  type="error"
-                  showIcon
+                <DesignSystemAlert
+                  variant="error"
                   className="mt-3"
                   title={t(
                     "settings:chatbooksPlayground.openwebuiHydrationPreviewError",
                     "Attachment preview failed"
                   )}
-                  description={hydrationPreviewError}
-                />
+                >
+                  {hydrationPreviewError}
+                </DesignSystemAlert>
               )}
 
               {hydrationPreview && (
@@ -2463,74 +2457,72 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
                   </div>
 
                   {Boolean(hydrationWarnings.length) && (
-                    <Alert
-                      type="warning"
-                      showIcon
+                    <DesignSystemAlert
+                      variant="warning"
                       className="mt-3"
                       title={t(
                         "settings:chatbooksPlayground.openwebuiHydrationWarnings",
                         "Hydration warnings"
                       )}
-                      description={hydrationWarnings.slice(0, 3).join("\n")}
-                    />
+                    >
+                      {hydrationWarnings.slice(0, 3).join("\n")}
+                    </DesignSystemAlert>
                   )}
                 </div>
               )}
 
               {hydrationJobError && (
-                <Alert
-                  type="error"
-                  showIcon
+                <DesignSystemAlert
+                  variant="error"
                   className="mt-3"
                   title={t(
                     "settings:chatbooksPlayground.openwebuiHydrationJobError",
                     "Hydration job failed"
                   )}
-                  description={hydrationJobError}
-                />
+                >
+                  {hydrationJobError}
+                </DesignSystemAlert>
               )}
 
               {hydrationJob && (
-                <Alert
-                  type={hydrationJob.status === "failed" ? "error" : "info"}
-                  showIcon
+                <DesignSystemAlert
+                  variant={hydrationJob.status === "failed" ? "error" : "info"}
                   className="mt-3"
                   title={t(
                     "settings:chatbooksPlayground.openwebuiHydrationJobStatus",
                     "Hydration job"
                   )}
-                  description={
-                    <div className="flex flex-col gap-1">
-                      <Space wrap>
-                        {hydrationJob.job_id && <Tag>{hydrationJob.job_id}</Tag>}
-                        {hydrationJob.status && <Tag>{hydrationJob.status}</Tag>}
-                        <Button
-                          size="small"
-                          onClick={() => void handleRefreshHydrationJob()}
-                          loading={hydrationJobLoading}
-                        >
-                          {t(
-                            "settings:chatbooksPlayground.refresh",
-                            "Refresh"
-                          )}
-                        </Button>
-                      </Space>
-                      {hydrationJobSummary && (
-                        <Text type="secondary">
-                          {t(
-                            "settings:chatbooksPlayground.openwebuiHydrationJobSummary",
-                            {
-                              defaultValue:
-                                "Hydrated {{images}} images and registered {{media}} files.",
-                              images: hydrationJobSummary.hydrated_images ?? 0,
-                              media: hydrationJobSummary.registered_media_files ?? 0
-                            }
-                          )}
-                        </Text>
-                      )}
-                    </div>
-                  }
-                />
+                >
+                  <div className="flex flex-col gap-1">
+                    <Space wrap>
+                      {hydrationJob.job_id && <Tag>{hydrationJob.job_id}</Tag>}
+                      {hydrationJob.status && <Tag>{hydrationJob.status}</Tag>}
+                      <Button
+                        size="small"
+                        onClick={() => void handleRefreshHydrationJob()}
+                        loading={hydrationJobLoading}
+                      >
+                        {t(
+                          "settings:chatbooksPlayground.refresh",
+                          "Refresh"
+                        )}
+                      </Button>
+                    </Space>
+                    {hydrationJobSummary && (
+                      <Text type="secondary">
+                        {t(
+                          "settings:chatbooksPlayground.openwebuiHydrationJobSummary",
+                          {
+                            defaultValue:
+                              "Hydrated {{images}} images and registered {{media}} files.",
+                            images: hydrationJobSummary.hydrated_images ?? 0,
+                            media: hydrationJobSummary.registered_media_files ?? 0
+                          }
+                        )}
+                      </Text>
+                    )}
+                  </div>
+                </DesignSystemAlert>
               )}
             </Card>
           )}
@@ -2614,9 +2606,8 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
       )}
 
       {!isOpenWebUIImport && previewManifest && previewTypes.length === 0 && (
-        <Alert
-          type="info"
-          showIcon
+        <DesignSystemAlert
+          variant="info"
           title={t(
             "settings:chatbooksPlayground.previewNoTypes",
             "Preview did not return item details."
@@ -2674,12 +2665,12 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
       </div>
 
       {jobsError && (
-        <Alert
-          type="warning"
-          showIcon
+        <DesignSystemAlert
+          variant="warning"
           title={t("settings:chatbooksPlayground.jobsError", "Unable to load jobs")}
-          description={jobsError}
-        />
+        >
+          {jobsError}
+        </DesignSystemAlert>
       )}
 
       <Card title={t("settings:chatbooksPlayground.exportJobs", "Export jobs")}>
@@ -2869,9 +2860,8 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
         </div>
 
         {!canUseChatbooks && (
-          <Alert
-            type="warning"
-            showIcon
+          <DesignSystemAlert
+            variant="warning"
             title={t(
               "settings:chatbooksPlayground.unavailable",
               "Chatbooks is not available on this server."

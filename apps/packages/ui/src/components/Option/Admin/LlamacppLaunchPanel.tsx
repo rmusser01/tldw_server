@@ -1,6 +1,5 @@
 import React from "react"
 import {
-  Alert,
   Button,
   Card,
   Input,
@@ -11,6 +10,7 @@ import {
   Switch,
   Typography
 } from "antd"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import type { LlamacppServerArgsInput } from "@/utils/build-llamacpp-server-args"
 import { CollapsibleSection } from "./CollapsibleSection"
 import { ServerArgsEditor } from "./ServerArgsEditor"
@@ -135,21 +135,21 @@ export const LlamacppLaunchPanel: React.FC<LlamacppLaunchPanelProps> = ({
           </Text>
         )}
 
-        {presetNotice && <Alert type="success" showIcon title={presetNotice} />}
+        {presetNotice && (
+          <DesignSystemAlert variant="success" title={presetNotice} />
+        )}
 
         {hardwareWarnings.length > 0 && (
-          <Alert
-            type="warning"
-            showIcon
+          <DesignSystemAlert
+            variant="warning"
             title="Hardware guidance"
-            description={
-              <Space orientation="vertical" size={2}>
-                {hardwareWarnings.map((warning) => (
-                  <Text key={warning}>{warning}</Text>
-                ))}
-              </Space>
-            }
-          />
+          >
+            <Space orientation="vertical" size={2}>
+              {hardwareWarnings.map((warning) => (
+                <Text key={warning}>{warning}</Text>
+              ))}
+            </Space>
+          </DesignSystemAlert>
         )}
 
         <div className="rounded-lg border border-border p-4">
@@ -663,27 +663,28 @@ export const LlamacppLaunchPanel: React.FC<LlamacppLaunchPanelProps> = ({
         </Space>
 
         {!selectedModelId && (
-          <Alert type="info" showIcon title="Select a model from inventory before launching." />
+          <DesignSystemAlert
+            variant="info"
+            title="Select a model from inventory before launching."
+          />
         )}
         {inventoryUnavailable && (
-          <Alert
-            type="warning"
-            showIcon
+          <DesignSystemAlert
+            variant="warning"
             title="Inventory is unavailable, launch is disabled until models load."
           />
         )}
         {isRunning && (
-          <Alert
-            type="info"
-            showIcon
+          <DesignSystemAlert
+            variant="info"
             title="Server is already running. Stop it first to start with new settings."
           />
         )}
         {chatAction?.notice && (
-          <Alert type="success" showIcon title={chatAction.notice} />
+          <DesignSystemAlert variant="success" title={chatAction.notice} />
         )}
         {chatAction?.warnings?.map((warning) => (
-          <Alert key={warning} type="warning" showIcon title={warning} />
+          <DesignSystemAlert key={warning} variant="warning" title={warning} />
         ))}
       </Space>
     </Card>

@@ -139,6 +139,14 @@ if (!(globalThis as any).ResizeObserver) {
   }
 }
 
+const expectInsideDesignSystemAlert = (text: string | RegExp) => {
+  const node = screen.getByText(text)
+  expect(node.closest('[data-ds-component="Alert"]')).toHaveAttribute(
+    "data-ds-component",
+    "Alert"
+  )
+}
+
 describe("ChatbooksPlaygroundPage OpenWebUI import mode", () => {
   const originalMatchMedia = window.matchMedia
 
@@ -431,6 +439,7 @@ describe("ChatbooksPlaygroundPage OpenWebUI import mode", () => {
       expect(screen.getByText("Referenced files")).toBeInTheDocument()
       expect(screen.getByText("Missing 1 source file")).toBeInTheDocument()
     })
+    expectInsideDesignSystemAlert("Hydration warnings")
 
     fireEvent.click(runButton)
 
@@ -599,5 +608,6 @@ describe("ChatbooksPlaygroundPage OpenWebUI import mode", () => {
     expect(screen.getByRole("switch", { name: "Process supported files" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Preview attachments" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Run hydration job" })).toBeDisabled()
+    expectInsideDesignSystemAlert("Chatbooks is not available on this server.")
   }, 10000)
 })

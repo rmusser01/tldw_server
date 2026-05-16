@@ -38,6 +38,14 @@ if (!(globalThis as any).ResizeObserver) {
   }
 }
 
+const expectInsideDesignSystemAlert = (text: string | RegExp) => {
+  const node = screen.getByText(text)
+  expect(node.closest('[data-ds-component="Alert"]')).toHaveAttribute(
+    "data-ds-component",
+    "Alert"
+  )
+}
+
 describe("ContentTypePicker load error state", () => {
   const originalMatchMedia = window.matchMedia
 
@@ -93,6 +101,7 @@ describe("ContentTypePicker load error state", () => {
     )
 
     expect(screen.getByText("Unable to load items")).toBeInTheDocument()
+    expectInsideDesignSystemAlert("Unable to load items")
     expect(screen.getByText(/GET \[server-endpoint\]/i)).toBeInTheDocument()
     expect(screen.getByText(/\[redacted-path\]/i)).toBeInTheDocument()
     expect(
