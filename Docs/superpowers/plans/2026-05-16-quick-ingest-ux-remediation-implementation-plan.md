@@ -187,7 +187,7 @@ Expected: commit contains only the active-path map.
 - Test: `apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx`
 - Test: `apps/tldw-frontend/e2e/workflows/media-ingest.spec.ts`
 
-- [ ] **Step 1: Write failing shared wizard test for first-open purpose copy**
+- [x] **Step 1: Write failing shared wizard test for first-open purpose copy**
 
 Add a test to `QuickIngestWizardModal.integration.test.tsx` that renders the Add step and expects:
 
@@ -199,7 +199,7 @@ expect(screen.getByText(/Knowledge/i)).toBeInTheDocument()
 
 Use the existing test harness in that file rather than creating a new harness.
 
-- [ ] **Step 2: Run the failing test**
+- [x] **Step 2: Run the failing test**
 
 Run:
 
@@ -209,7 +209,7 @@ bunx vitest run apps/packages/ui/src/components/Common/QuickIngest/__tests__/Qui
 
 Expected: the new assertion fails because the purpose/destination copy is not present yet.
 
-- [ ] **Step 3: Add concise first-time copy to Add step**
+- [x] **Step 3: Add concise first-time copy to Add step**
 
 Modify `AddContentStep.tsx` near the file/URL input area. Keep the copy short and specific:
 
@@ -224,7 +224,7 @@ Modify `AddContentStep.tsx` near the file/URL input area. Keep the copy short an
 
 Keep it outside Advanced options and below the main input heading/drop zone area.
 
-- [ ] **Step 4: Align launcher terminology without removing power-user speed**
+- [x] **Step 4: Align launcher terminology without removing power-user speed**
 
 In `QuickIngestButton.tsx`, align visible text, title, and aria label around one concept. Prefer:
 
@@ -234,7 +234,7 @@ In `QuickIngestButton.tsx`, align visible text, title, and aria label around one
 
 Do not remove the existing queued badge or `Process queued items` CTA.
 
-- [ ] **Step 5: Fix the double-tilde review estimate if still present**
+- [x] **Step 5: Fix the double-tilde review estimate if still present**
 
 In `ReviewStep.tsx`, make only one layer own approximate formatting. If `estimatedTimeLabel` already includes `~`, remove the leading `~` from the translation default:
 
@@ -242,7 +242,7 @@ In `ReviewStep.tsx`, make only one layer own approximate formatting. If `estimat
 "{{count}} items | {{preset}} preset | {{time}} estimated"
 ```
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 Run:
 
@@ -252,7 +252,7 @@ bunx vitest run apps/packages/ui/src/components/Common/QuickIngest/__tests__/Qui
 
 Expected: quick-ingest integration tests pass. If the layout test glob does not exist, record the missing path and run the exact Quick Ingest test file only.
 
-- [ ] **Step 7: Browser-check WebUI Add step**
+- [x] **Step 7: Browser-check WebUI Add step**
 
 Run the WebUI using the repo's normal command, or reuse an existing local server:
 
@@ -267,7 +267,7 @@ Open `/media`, launch Quick Ingest, and verify:
 - invalid URL and valid URL behavior still match the old flow
 - "Use defaults & process" remains visible after a valid item
 
-- [ ] **Step 8: Commit the clarity change**
+- [x] **Step 8: Commit the clarity change**
 
 Run:
 
