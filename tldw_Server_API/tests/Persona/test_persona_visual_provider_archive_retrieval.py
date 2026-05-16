@@ -22,6 +22,7 @@ def _ready_handoff(
     *,
     archive_sha256: str,
     resource_uri: str = "mcp://provider/resources/pack",
+    media_type: str = CANONICAL_PERSONA_VISUAL_ARCHIVE_MEDIA_TYPE,
 ) -> dict[str, object]:
     return {
         "ready": True,
@@ -37,7 +38,7 @@ def _ready_handoff(
             "source_type": "mcp_resource",
             "mcp_resource_uri": resource_uri,
             "sha256": archive_sha256,
-            "media_type": CANONICAL_PERSONA_VISUAL_ARCHIVE_MEDIA_TYPE,
+            "media_type": media_type,
         },
         "diagnostics": {"blockers": [], "warnings": []},
         "blockers": [],
@@ -91,6 +92,42 @@ def test_materialize_provider_archive_import_preview_handoff_writes_job_payload(
     assert str(archive_path) not in str(result["diagnostics"])
 
 
+def test_materialize_provider_archive_import_preview_handoff_accepts_case_insensitive_media_type(
+    tmp_path: Path,
+) -> None:
+    """Treat compatible archive media types as case-insensitive metadata."""
+    archive_bytes = b"portable persona visual archive"
+
+    result = materialize_provider_archive_import_preview_handoff(
+        _ready_handoff(
+            archive_sha256=sha256_bytes(archive_bytes),
+            media_type=CANONICAL_PERSONA_VISUAL_ARCHIVE_MEDIA_TYPE.upper(),
+        ),
+        resource_reader=lambda uri: archive_bytes,
+        staging_root=tmp_path,
+    )
+
+    assert result["ready"] is True
+    assert result["archive"]["media_type"] == CANONICAL_PERSONA_VISUAL_ARCHIVE_MEDIA_TYPE
+
+
+def test_materialize_provider_archive_import_preview_handoff_accepts_bytearray_chunks(
+    tmp_path: Path,
+) -> None:
+    """Allow bytearray chunks from resource readers because they are bytes-like."""
+    archive_bytes = b"portable persona visual archive"
+
+    result = materialize_provider_archive_import_preview_handoff(
+        _ready_handoff(archive_sha256=sha256_bytes(archive_bytes)),
+        resource_reader=lambda uri: [bytearray(archive_bytes[:8]), bytearray(archive_bytes[8:])],
+        staging_root=tmp_path,
+    )
+
+    assert result["ready"] is True
+    archive_path = Path(str(result["job_payload"]["archive_path"]))
+    assert archive_path.read_bytes() == archive_bytes
+
+
 def test_materialize_provider_archive_import_preview_handoff_fails_closed_for_blocked_handoff(
     tmp_path: Path,
 ) -> None:
@@ -111,6 +148,40 @@ def test_materialize_provider_archive_import_preview_handoff_fails_closed_for_bl
     assert result["ready"] is False
     assert "handoff_not_ready" in _codes(result)
     assert list(tmp_path.iterdir()) == []
+
+
+def test_materialize_provider_archive_import_preview_handoff_redacts_upstream_diagnostics(
+    tmp_path: Path,
+) -> None:
+    """Keep upstream diagnostic codes without reflecting caller-provided messages."""
+    handoff = _ready_handoff(archive_sha256=sha256_bytes(b"archive"))
+    handoff["ready"] = False
+    handoff["blockers"] = [
+        {
+            "code": "provider_failed",
+            "message": "file:///Users/alice/secret-pack token=abc123",
+        }
+    ]
+    handoff["warnings"] = [
+        {
+            "code": "provider_warning",
+            "message": "mcp://provider/resources/private-pack",
+        }
+    ]
+
+    result = materialize_provider_archive_import_preview_handoff(
+        handoff,
+        resource_reader=lambda uri: b"archive",
+        staging_root=tmp_path,
+    )
+
+    assert result["ready"] is False
+    assert "provider_failed" in _codes(result)
+    serialized = str(result)
+    assert "file:///Users/alice" not in serialized
+    assert "token=abc123" not in serialized
+    assert "mcp://provider/resources/private-pack" not in serialized
+    assert "Provider archive handoff reported a diagnostic." in serialized
 
 
 def test_materialize_provider_archive_import_preview_handoff_rejects_checksum_mismatch(

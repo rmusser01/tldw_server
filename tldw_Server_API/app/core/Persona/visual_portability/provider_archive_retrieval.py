@@ -12,11 +12,11 @@ activate packs, change renderers, or expose raw provider content in diagnostics.
 from __future__ import annotations
 
 import hashlib
-import os
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, Callable, cast
 
+from tldw_Server_API.app.core.exceptions import DownloadError
 from tldw_Server_API.app.core.Persona.visual_jobs import (
     PERSONA_VISUAL_PACK_IMPORT_PREVIEW_JOB_TYPE,
     build_visual_pack_import_preview_payload,
@@ -27,11 +27,19 @@ from .constants import PERSONA_VISUAL_PACK_EXTENSION
 from .provider_envelope import COMPATIBLE_PERSONA_VISUAL_ARCHIVE_MEDIA_TYPES
 
 
-ProviderArchiveResourceReader = Callable[[str], bytes | bytearray | Iterable[bytes]]
+ProviderArchiveResourceReader = Callable[
+    [str],
+    bytes | bytearray | Iterable[bytes | bytearray],
+]
 
 _SHA256_HEX_LENGTH = 64
 _SAFE_ID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-")
 _MAX_ID_LENGTH = 128
+_COMPATIBLE_ARCHIVE_MEDIA_TYPES = {
+    media_type.lower()
+    for media_type in COMPATIBLE_PERSONA_VISUAL_ARCHIVE_MEDIA_TYPES
+}
+_UPSTREAM_DIAGNOSTIC_MESSAGE = "Provider archive handoff reported a diagnostic."
 
 
 def materialize_provider_archive_import_preview_handoff(
@@ -79,7 +87,10 @@ def materialize_provider_archive_import_preview_handoff(
 
     resource_uri = _safe_resource_uri(archive.get("mcp_resource_uri") if archive else None)
     expected_sha256 = _safe_sha256(archive.get("sha256") if archive else None)
-    media_type = _safe_text(archive.get("media_type") if archive else None, max_length=120)
+    media_type = _safe_text(
+        archive.get("media_type") if archive else None,
+        max_length=120,
+    ).lower()
     if not archive or archive.get("source_type") != "mcp_resource" or not resource_uri:
         blockers.append(
             _diagnostic(
@@ -94,7 +105,7 @@ def materialize_provider_archive_import_preview_handoff(
                 "Portable archive SHA-256 checksum is required.",
             )
         )
-    if media_type not in COMPATIBLE_PERSONA_VISUAL_ARCHIVE_MEDIA_TYPES:
+    if media_type not in _COMPATIBLE_ARCHIVE_MEDIA_TYPES:
         blockers.append(
             _diagnostic(
                 "unsupported_archive_media_type",
@@ -112,7 +123,7 @@ def materialize_provider_archive_import_preview_handoff(
     expected_sha256 = cast(str, expected_sha256)
 
     archive_path = _materialized_archive_path(
-        staging_root=Path(staging_root),
+        staging_root=staging_root,
         user_id=user_id,
         preview_id=preview_id,
         request_id=request_id,
@@ -169,7 +180,7 @@ def materialize_provider_archive_import_preview_handoff(
     }
 
 
-class _ProviderArchiveRetrievalError(Exception):
+class _ProviderArchiveRetrievalError(DownloadError):
     """Trace-safe retrieval failure with a stable diagnostic code."""
 
     def __init__(self, code: str, message: str) -> None:
@@ -200,7 +211,7 @@ def _write_resource_archive(
         size_bytes = 0
         with archive_path.open("wb") as file_obj:
             for chunk in chunks:
-                if not isinstance(chunk, bytes):
+                if not isinstance(chunk, (bytes, bytearray)):
                     raise _ProviderArchiveRetrievalError(
                         "archive_resource_invalid",
                         "Retrieved archive resource must yield bytes.",
@@ -229,7 +240,9 @@ def _write_resource_archive(
     return size_bytes, digest.hexdigest()
 
 
-def _resource_chunks(value: bytes | bytearray | Iterable[bytes]) -> Iterable[bytes]:
+def _resource_chunks(
+    value: bytes | bytearray | Iterable[bytes | bytearray],
+) -> Iterable[bytes | bytearray]:
     """Return byte chunks from a reader result or raise a trace-safe error."""
     if isinstance(value, bytes):
         return (value,)
@@ -261,7 +274,7 @@ def _materialized_archive_path(
         f"{user_id}\0{preview_id}\0{request_id}\0{resource_uri}".encode("utf-8")
     ).hexdigest()[:24]
     filename = f"{fingerprint}{PERSONA_VISUAL_PACK_EXTENSION}"
-    return Path(staging_root).resolve(strict=False) / filename
+    return staging_root.resolve(strict=False) / filename
 
 
 def _blocked_result(
@@ -300,9 +313,8 @@ def _diagnostics_list(value: Any) -> list[dict[str, str]]:
         if not isinstance(item, Mapping):
             continue
         code = _safe_code(item.get("code"))
-        message = _safe_text(item.get("message"), max_length=300)
-        if code and message:
-            diagnostics.append(_diagnostic(code, message))
+        if code:
+            diagnostics.append(_diagnostic(code, _UPSTREAM_DIAGNOSTIC_MESSAGE))
     return diagnostics
 
 
@@ -387,8 +399,6 @@ def _safe_text(value: Any, *, max_length: int) -> str:
 def _remove_file(path: Path) -> None:
     """Remove a partial materialized archive without surfacing filesystem details."""
     try:
-        os.remove(path)
-    except FileNotFoundError:
-        return
+        path.unlink(missing_ok=True)
     except OSError:
         return
