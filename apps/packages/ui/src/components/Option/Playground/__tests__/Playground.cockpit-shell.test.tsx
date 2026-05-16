@@ -364,16 +364,32 @@ describe("Playground cockpit shell", () => {
     const contextRail = await screen.findByTestId(
       "playground-cockpit-left-rail",
     );
-
-    fireEvent.click(
-      within(contextRail).getByRole("button", {
-        name: /collapse context sidechannel/i,
-      }),
+    const collapseContextButton = within(contextRail).getByRole("button", {
+      name: /collapse context sidechannel/i,
+    });
+    const collapseContextTooltip = screen.getByRole("tooltip", {
+      name: "Collapse context sidechannel",
+    });
+    expect(collapseContextButton).toHaveAttribute(
+      "aria-describedby",
+      collapseContextTooltip.id,
     );
+
+    fireEvent.click(collapseContextButton);
 
     await waitFor(() => {
       expect(screen.queryByTestId("playground-cockpit-left-rail")).toBeNull();
     });
+    const restoreContextButton = screen.getByRole("button", {
+      name: /restore context sidechannel/i,
+    });
+    const restoreContextTooltip = screen.getByRole("tooltip", {
+      name: "Restore context sidechannel",
+    });
+    expect(restoreContextButton).toHaveAttribute(
+      "aria-describedby",
+      restoreContextTooltip.id,
+    );
     expect(storageState.values.get("playgroundChatContextRailVisible")).toBe(
       false,
     );
@@ -383,9 +399,7 @@ describe("Playground cockpit shell", () => {
       screen.queryByTestId("playground-collapsed-composition-summary"),
     ).toBeNull();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /restore context sidechannel/i }),
-    );
+    fireEvent.click(restoreContextButton);
 
     await waitFor(() => {
       expect(
@@ -399,15 +413,35 @@ describe("Playground cockpit shell", () => {
     const runtimeRailAfterRestore = screen.getByTestId(
       "playground-cockpit-right-rail",
     );
-    fireEvent.click(
-      within(runtimeRailAfterRestore).getByRole("button", {
+    const collapseRuntimeButton = within(runtimeRailAfterRestore).getByRole(
+      "button",
+      {
         name: /collapse runtime sidechannel/i,
-      }),
+      },
     );
+    const collapseRuntimeTooltip = screen.getByRole("tooltip", {
+      name: "Collapse runtime sidechannel",
+    });
+    expect(collapseRuntimeButton).toHaveAttribute(
+      "aria-describedby",
+      collapseRuntimeTooltip.id,
+    );
+
+    fireEvent.click(collapseRuntimeButton);
 
     await waitFor(() => {
       expect(screen.queryByTestId("playground-cockpit-right-rail")).toBeNull();
     });
+    const restoreRuntimeButton = screen.getByRole("button", {
+      name: /restore runtime sidechannel/i,
+    });
+    const restoreRuntimeTooltip = screen.getByRole("tooltip", {
+      name: "Restore runtime sidechannel",
+    });
+    expect(restoreRuntimeButton).toHaveAttribute(
+      "aria-describedby",
+      restoreRuntimeTooltip.id,
+    );
     expect(storageState.values.get("playgroundChatRuntimeRailVisible")).toBe(
       false,
     );
@@ -418,9 +452,7 @@ describe("Playground cockpit shell", () => {
       screen.queryByTestId("playground-collapsed-composition-summary"),
     ).toBeNull();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /restore runtime sidechannel/i }),
-    );
+    fireEvent.click(restoreRuntimeButton);
 
     await waitFor(() => {
       expect(
@@ -469,8 +501,8 @@ describe("Playground cockpit shell", () => {
       }),
     );
 
-    expect(messageOptionState.value.regenerateLastMessage).toHaveBeenCalledTimes(
-      1,
-    );
+    expect(
+      messageOptionState.value.regenerateLastMessage,
+    ).toHaveBeenCalledTimes(1);
   });
 });
