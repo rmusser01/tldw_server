@@ -1128,7 +1128,8 @@ describe("VisualPackEditor", () => {
             "static_talking_reaction_sheet"
           ],
           animation_coverage_notes: [
-            "Scaffold fixture only; replace with authored reactions."
+            "Scaffold fixture only; replace with authored reactions.",
+            "Secondary motion pass still needs review."
           ]
         }
       ]
@@ -1190,6 +1191,23 @@ describe("VisualPackEditor", () => {
     expect(picker).toHaveTextContent(/neutral anchor/i)
     expect(picker).toHaveTextContent(/static talking reaction sheet/i)
     expect(picker).toHaveTextContent("Scaffold fixture only")
+    expect(picker).toHaveTextContent("Secondary motion pass still needs review")
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.metadata.productionStatus.scaffold",
+      expect.objectContaining({ defaultValue: "Scaffold" })
+    )
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.metadata.complexityTier.intermediate",
+      expect.objectContaining({ defaultValue: "Intermediate" })
+    )
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.setup.neutralAnchorRequired",
+      expect.objectContaining({ defaultValue: "Neutral anchor required" })
+    )
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.setup.expectedAssetsLabel",
+      expect.objectContaining({ defaultValue: "Expected assets:" })
+    )
 
     fireEvent.click(within(picker).getByTestId("persona-visual-copy-starter-alt-starter"))
 

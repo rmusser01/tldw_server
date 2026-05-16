@@ -89,7 +89,8 @@ import {
 } from "./personaVisualGenerationReadiness"
 import {
   formatStarterExpectedAssetGroups,
-  formatStarterMetadataToken,
+  getStarterComplexityTierLabel,
+  getStarterProductionStatusLabel,
   VisualBuddySetupChoiceCard
 } from "./VisualBuddySetupChoiceCard"
 import { VisualPackReusePanel } from "./VisualPackReusePanel"
@@ -2973,11 +2974,13 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           className="space-y-2"
         >
           {starterPacks.map((starter) => {
-            const productionStatus = formatStarterMetadataToken(
-              starter.production_status
+            const productionStatus = getStarterProductionStatusLabel(
+              starter.production_status,
+              t
             )
-            const complexityTier = formatStarterMetadataToken(
-              starter.complexity_tier
+            const complexityTier = getStarterComplexityTierLabel(
+              starter.complexity_tier,
+              t
             )
             const expectedAssetGroups = formatStarterExpectedAssetGroups(
               starter.expected_asset_groups
