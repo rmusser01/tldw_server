@@ -159,7 +159,7 @@ type PersonaVisualManagementSummary = {
     failed: number
   }
   attentionCounts: {
-    invalidSelectedManifest: number
+    invalidPackCount: number
     reviewCandidates: number
     failedCandidates: number
     unavailableLibraryItems: number

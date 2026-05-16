@@ -38,6 +38,7 @@ Write a Persona/Buddy design spec for the post-setup Persona Visual management e
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added `Docs/superpowers/specs/2026-05-16-persona-visual-post-setup-management-design.md`.
 - Created GitHub tracking issue #1769 under the Persona/Buddy epic #1510.
+- Review follow-up: renamed the aggregate attention model field from `invalidSelectedManifest` to `invalidPackCount` to match the rest of the count-based summary fields.
 - Verified with `git diff --check`.
 - Bandit skipped because this slice only changes documentation and Backlog task metadata.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
@@ -45,7 +46,7 @@ Write a Persona/Buddy design spec for the post-setup Persona Visual management e
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Design completed for a post-setup Persona Visual management UX centered on the existing Persona Garden Visuals surface. The spec keeps the work parallel to PR #1767 and recommends a first implementation slice for a pure shared UI management-summary/attention model.
+Design completed for a post-setup Persona Visual management UX centered on the existing Persona Garden Visuals surface. The spec keeps the work parallel to PR #1767 and recommends a first implementation slice for a pure shared UI management-summary/attention model with aggregate count naming for attention states.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
