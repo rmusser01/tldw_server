@@ -1,7 +1,7 @@
 ---
 id: TASK-390
 title: Add launchd-drill entitlement signing support
-status: In Progress
+status: Done
 labels:
 - sandbox
 - macos
@@ -13,6 +13,8 @@ modified_files:
 - tools/macos-vz-helper/Tests/test_vz_helperctl.py
 - tools/macos-vz-helper/README.md
 - tools/macos-vz-helper/macos-vz-helper.entitlements
+references:
+- https://github.com/rmusser01/tldw_server/pull/1747
 ---
 
 ## Description
