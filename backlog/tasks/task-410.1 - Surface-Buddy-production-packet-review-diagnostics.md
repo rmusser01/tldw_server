@@ -4,7 +4,7 @@ title: Surface Buddy production packet review diagnostics
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-16 21:18'
+updated_date: '2026-05-16 21:56'
 labels:
   - persona
   - buddy
@@ -39,6 +39,8 @@ Implement the Persona Garden review surface for Buddy animation pipeline packet 
 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented a Persona Garden import-preview diagnostics panel for recognized Buddy production packet asset groups. The panel reads the existing bundle_summary asset diagnostics, distinguishes source material from runtime outputs, shows manifest references, and ignores unknown/null asset groups. Import commit and activation behavior are unchanged.
+
+PR #1802 review fix sweep: verified and fixed the zero-dimension rendering guard, collision-safe diagnostic row keys, and exhaustive Buddy asset-kind classification map. Qodo/CodeRabbit findings were still valid against the PR code.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -47,6 +49,8 @@ Implemented a Persona Garden import-preview diagnostics panel for recognized Bud
 Persona Garden now surfaces Buddy production packet diagnostics during import review, backed by typed bundle_summary fields and focused Vitest coverage. Validation: red/green focused test, full VisualPackEditor Vitest file, git diff --check. Typecheck was attempted with tsc --noEmit -p apps/packages/ui/tsconfig.json and failed on existing repo-wide baseline errors outside this slice. Bandit skipped because this change only touches TypeScript/UI and Backlog metadata.
 
 A filtered tsc output check for VisualPackEditor/persona-visuals produced no touched-file type errors.
+
+Review fix validation: focused Buddy packet regression test passed, full VisualPackEditor Vitest file passed, git diff --check passed, and filtered tsc output for VisualPackEditor/persona-visuals stayed empty despite repo-wide baseline typecheck failures.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

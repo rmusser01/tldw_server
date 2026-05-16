@@ -798,18 +798,15 @@ const BUDDY_PIPELINE_ASSET_GROUP_LABELS: Record<
   animation_atlas: "Animation atlas"
 }
 
-const BUDDY_PIPELINE_SOURCE_GROUPS = new Set<PersonaVisualImportBundleAssetGroup>([
-  "neutral_anchor",
-  "static_talking_sheet",
-  "static_reaction_sheet"
-])
-
-const BUDDY_PIPELINE_RUNTIME_GROUPS = new Set<PersonaVisualImportBundleAssetGroup>([
-  "animation_strips",
-  "animation_atlas"
-])
-
 type BuddyPipelineAssetKind = "source" | "runtime"
+
+const BUDDY_PIPELINE_ASSET_KIND = {
+  neutral_anchor: "source",
+  static_talking_sheet: "source",
+  static_reaction_sheet: "source",
+  animation_strips: "runtime",
+  animation_atlas: "runtime"
+} satisfies Record<PersonaVisualImportBundleAssetGroup, BuddyPipelineAssetKind>
 
 interface BuddyPipelinePacketAssetDiagnostic {
   sourceAssetId: string | null
@@ -843,17 +840,14 @@ const getBuddyPipelineAssetGroup = (
 const getBuddyPipelineAssetKind = (
   group: PersonaVisualImportBundleAssetGroup
 ): BuddyPipelineAssetKind =>
-  BUDDY_PIPELINE_SOURCE_GROUPS.has(group) &&
-  !BUDDY_PIPELINE_RUNTIME_GROUPS.has(group)
-    ? "source"
-    : "runtime"
+  BUDDY_PIPELINE_ASSET_KIND[group]
 
 const getBuddyPipelineAssetDimensions = (
   asset: PersonaVisualImportBundleAssetSummary
 ): string | null => {
   const width = previewNumber(asset.width)
   const height = previewNumber(asset.height)
-  return width && height ? `${width}x${height}` : null
+  return width !== null && height !== null ? `${width}x${height}` : null
 }
 
 const getBuddyPipelinePacketDiagnostics = (
@@ -3119,7 +3113,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                   </div>
                   <ul className="mt-1 list-disc space-y-1 pl-5">
                     {buddyPipelineSourceAssets.map((asset, index) => (
-                      <li key={`${asset.assetGroup}-${asset.sourceAssetId || index}`}>
+                      <li
+                        key={`${asset.assetGroup}-${asset.sourceAssetId ?? "unknown"}-${index}`}
+                      >
                         <span className="text-text">
                           {t(
                             `sidepanel:personaGarden.visuals.buddyPipelineAssetGroup.${asset.assetGroup}`,
@@ -3151,7 +3147,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                   </div>
                   <ul className="mt-1 list-disc space-y-1 pl-5">
                     {buddyPipelineRuntimeAssets.map((asset, index) => (
-                      <li key={`${asset.assetGroup}-${asset.sourceAssetId || index}`}>
+                      <li
+                        key={`${asset.assetGroup}-${asset.sourceAssetId ?? "unknown"}-${index}`}
+                      >
                         <span className="text-text">
                           {t(
                             `sidepanel:personaGarden.visuals.buddyPipelineAssetGroup.${asset.assetGroup}`,

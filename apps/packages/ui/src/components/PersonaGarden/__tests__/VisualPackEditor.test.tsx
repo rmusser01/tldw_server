@@ -4175,7 +4175,7 @@ describe("VisualPackEditor", () => {
                 asset_group: "neutral_anchor",
                 asset_bytes_status: "present",
                 mime_type: "image/png",
-                width: 512,
+                width: 0,
                 height: 512,
                 manifest_referenced: false
               },
@@ -4312,6 +4312,7 @@ describe("VisualPackEditor", () => {
     expect(diagnostics).toHaveTextContent("Source material")
     expect(diagnostics).toHaveTextContent("Runtime output")
     expect(diagnostics).toHaveTextContent("Manifest references")
+    expect(diagnostics).toHaveTextContent("0x512")
     expect(diagnostics).toHaveTextContent("buddy-animation-atlas")
     expect(diagnostics).toHaveTextContent("buddy-strip-required")
     expect(diagnostics).not.toHaveTextContent("mystery-source")
