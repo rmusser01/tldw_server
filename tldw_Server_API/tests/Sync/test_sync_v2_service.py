@@ -1607,7 +1607,7 @@ def test_store_attachment_rejects_forbidden_domain_oversize_and_plaintext_policy
             attachment_id="attachment-oversized-ciphertext",
             content_type="application/octet-stream",
             size_bytes=12,
-            payload_ciphertext="x" * 8193,
+            payload_ciphertext="x" * 4097,
             payload_hash="sha256:oversized-ciphertext",
             encryption_policy="client_private_v1",
         )

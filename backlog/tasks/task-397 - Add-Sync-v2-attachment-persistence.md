@@ -44,10 +44,10 @@ Persist small encrypted Sync v2 attachment payloads server-side behind /api/v1/s
 
 <!-- SECTION:NOTES:BEGIN -->
 - Added `Docs/superpowers/plans/2026-05-16-sync-v2-attachment-persistence.md`.
-- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_store.py tldw_Server_API/tests/Sync/test_sync_v2_service.py tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py -q` passed with 86 tests.
-- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -q -r tldw_Server_API/app/api/v1/endpoints/sync.py tldw_Server_API/app/core/DB_Management/Sync_DB.py tldw_Server_API/app/core/Sync/v2/models.py tldw_Server_API/app/core/Sync/v2/service.py tldw_Server_API/app/core/Sync/v2/store.py` passed; Bandit printed existing `nosec encountered` warnings for annotated SQL lines but returned success.
+- Verification: `python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_store.py tldw_Server_API/tests/Sync/test_sync_v2_service.py tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py -q` passed with 86 tests.
+- Verification: `python -m bandit -q -r tldw_Server_API/app/api/v1/endpoints/sync.py tldw_Server_API/app/core/DB_Management/Sync_DB.py tldw_Server_API/app/core/Sync/v2/models.py tldw_Server_API/app/core/Sync/v2/service.py tldw_Server_API/app/core/Sync/v2/store.py` passed; Bandit printed existing `nosec encountered` warnings for annotated SQL lines but returned success.
 - Verification: `git diff --check` passed.
-- PR review follow-up: addressed Gemini comments by validating actual ciphertext text length against the attachment cap, short-circuiting duplicate attachment retries before the insert path, and aggregating attachment manifest counts/size classes in SQL. Re-ran focused Sync v2 pytest, Bandit, and diff checks successfully.
+- PR review follow-up: addressed Gemini/Qodo/CodeRabbit comments by validating actual ciphertext text length against the attachment cap, offloading the async endpoint's sync store call, deriving duplicate insert status from DB rowcount, aggregating attachment manifest counts/size classes in SQL, and removing local absolute paths from task verification notes. Re-ran focused Sync v2 pytest, Bandit, and diff checks successfully.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

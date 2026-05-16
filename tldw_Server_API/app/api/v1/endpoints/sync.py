@@ -645,7 +645,8 @@ async def upload_sync_v2_attachment(
             },
         ) from exc
     try:
-        attachment = service.store_attachment(
+        attachment = await asyncio.to_thread(
+            service.store_attachment,
             user_id=_sync_user_id(user),
             dataset_id=request.dataset_id,
             domain=request.domain,

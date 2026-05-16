@@ -917,9 +917,9 @@ def _ciphertext_exceeds_attachment_limit(
     payload_ciphertext: str,
     max_attachment_bytes: int,
 ) -> bool:
-    """Return whether textual ciphertext is implausibly large for the binary cap."""
+    """Return whether persisted ciphertext text exceeds the attachment cap."""
 
-    return len(payload_ciphertext.encode("utf-8")) > max_attachment_bytes * 2
+    return len(payload_ciphertext.encode("utf-8")) > max_attachment_bytes
 
 
 def _call_adapter_evaluate(

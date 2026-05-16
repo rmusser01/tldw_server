@@ -1503,7 +1503,33 @@ class SyncDatabase:
                 attachment.domain,
                 connection=conn,
             )
-            existing = _first(
+            insert_result = self.execute(
+                """
+                INSERT INTO sync_attachments (
+                    attachment_id, dataset_id, domain, entity_id, content_type,
+                    size_bytes, payload_ciphertext, payload_hash, encryption_policy,
+                    metadata_json, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (dataset_id, attachment_id) DO NOTHING
+                """,
+                (
+                    attachment.attachment_id,
+                    attachment.dataset_id,
+                    attachment.domain,
+                    attachment.entity_id,
+                    attachment.content_type,
+                    attachment.size_bytes,
+                    attachment.payload_ciphertext,
+                    attachment.payload_hash,
+                    attachment.encryption_policy,
+                    encode_json(attachment.metadata, default={}),
+                    now,
+                ),
+                connection=conn,
+            )
+            inserted = insert_result.rowcount > 0
+            row = _first(
                 self.execute(
                     """
                     SELECT * FROM sync_attachments
@@ -1513,46 +1539,6 @@ class SyncDatabase:
                     connection=conn,
                 )
             )
-            if existing is not None:
-                inserted = False
-                row = existing
-            else:
-                self.execute(
-                    """
-                    INSERT INTO sync_attachments (
-                        attachment_id, dataset_id, domain, entity_id, content_type,
-                        size_bytes, payload_ciphertext, payload_hash, encryption_policy,
-                        metadata_json, created_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT (dataset_id, attachment_id) DO NOTHING
-                    """,
-                    (
-                        attachment.attachment_id,
-                        attachment.dataset_id,
-                        attachment.domain,
-                        attachment.entity_id,
-                        attachment.content_type,
-                        attachment.size_bytes,
-                        attachment.payload_ciphertext,
-                        attachment.payload_hash,
-                        attachment.encryption_policy,
-                        encode_json(attachment.metadata, default={}),
-                        now,
-                    ),
-                    connection=conn,
-                )
-                inserted = True
-                row = _first(
-                    self.execute(
-                        """
-                        SELECT * FROM sync_attachments
-                         WHERE dataset_id = ? AND attachment_id = ?
-                        """,
-                        (attachment.dataset_id, attachment.attachment_id),
-                        connection=conn,
-                    )
-                )
             if row is None:
                 raise SyncStoreError(
                     "Sync attachment insert did not produce a retrievable record"
