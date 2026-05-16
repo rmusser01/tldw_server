@@ -11,8 +11,10 @@ priority: medium
 ordinal: 347
 documentation:
 - Docs/superpowers/specs/2026-05-16-buddy-animation-pipeline-design.md
+- Docs/superpowers/plans/2026-05-16-buddy-animation-pipeline-catalog-metadata-plan.md
 modified_files:
 - Docs/superpowers/specs/2026-05-16-buddy-animation-pipeline-design.md
+- Docs/superpowers/plans/2026-05-16-buddy-animation-pipeline-catalog-metadata-plan.md
 references:
 - https://github.com/rmusser01/tldw_server/issues/1787
 - https://github.com/rmusser01/tldw_server/issues/1510
