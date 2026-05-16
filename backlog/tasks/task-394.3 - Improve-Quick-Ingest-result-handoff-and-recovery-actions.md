@@ -1,9 +1,10 @@
 ---
 id: TASK-394.3
 title: Improve Quick Ingest result handoff and recovery actions
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-16 00:43'
+updated_date: '2026-05-16 02:37'
 labels:
   - quick-ingest
   - ux
@@ -28,6 +29,12 @@ Execute implementation plan Task 3: improve success handoff, remove/retry behavi
 - [ ] #2 Remove/retry/recovery actions are functional or honestly constrained
 - [ ] #3 Partial success and failure outcomes are clear and recoverable
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Started Task 3 in quick-ingest UX remediation branch. Scope: result handoff, skipped/duplicate copy, and removal of no-op recovery actions in the shared Quick Ingest wizard.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
