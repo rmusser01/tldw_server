@@ -1,10 +1,10 @@
 ---
 id: TASK-397.2
 title: Implement llama.cpp managed runtime stage 1
-status: In Progress
+status: Done
 assignee: []
 created_date: 2026-05-16 01:43
-updated_date: 2026-05-16 03:36
+updated_date: 2026-05-16 04:36
 labels:
 - llamacpp
 - local-llm
@@ -18,7 +18,22 @@ documentation:
 parent_task_id: TASK-397
 priority: high
 modified_files:
+- Docs/superpowers/specs/2026-05-16-llamacpp-managed-runtime-roadmap-design.md
 - Docs/superpowers/plans/2026-05-16-llamacpp-managed-runtime-stage1-implementation-plan.md
+- backlog/tasks/task-397 - Design-llama.cpp-managed-runtime-roadmap.md
+- backlog/tasks/task-397.1 - Plan-llama.cpp-managed-runtime-implementation.md
+- backlog/tasks/task-397.2 - Implement-llama.cpp-managed-runtime-stage-1.md
+- tldw_Server_API/app/api/v1/endpoints/llamacpp.py
+- tldw_Server_API/app/api/v1/schemas/llamacpp_admin_schemas.py
+- tldw_Server_API/app/core/Local_LLM/LLM_Inference_Manager.py
+- tldw_Server_API/app/core/Local_LLM/llamacpp_runtime_models.py
+- tldw_Server_API/app/core/Local_LLM/llamacpp_profile_store.py
+- tldw_Server_API/app/core/Local_LLM/llamacpp_process_runner.py
+- tldw_Server_API/app/core/Local_LLM/llamacpp_supervisor_service.py
+- tldw_Server_API/tests/LLM_Local/test_llamacpp_profile_store.py
+- tldw_Server_API/tests/LLM_Local/test_llamacpp_process_runner.py
+- tldw_Server_API/tests/LLM_Local/test_llamacpp_supervisor_service.py
+- tldw_Server_API/tests/LLM_Local/test_llamacpp_runtime_api.py
 - apps/packages/ui/src/types/llamacpp-admin.ts
 - apps/packages/ui/src/services/tldw/domains/models-audio.ts
 - apps/packages/ui/src/services/tldw/TldwApiClient.ts
@@ -41,8 +56,8 @@ Implement the approved Stage 1 llama.cpp managed runtime plan: backend profile p
 - [x] #2 Single-instance process runner can start, stop, report status, and tail owned logs without per-instance atexit or signal handlers.
 - [x] #3 Supervisor can manage multiple profiles with per-profile locking, explicit lifecycle actions, and synchronous cleanup integration.
 - [x] #4 Admin profile/runtime APIs are admin-only and V1 llama.cpp endpoints remain compatible through the default profile.
-- [ ] #5 Minimal WebUI client/types/runtime panel can display multiple instances and lifecycle actions while degrading on unsupported servers.
-- [ ] #6 Focused backend/frontend tests, diff checks, and Bandit for touched Python code are run or documented with clear blockers.
+- [x] #5 Minimal WebUI client/types/runtime panel can display multiple instances and lifecycle actions while degrading on unsupported servers.
+- [x] #6 Focused backend/frontend tests, diff checks, and Bandit for touched Python code are run or documented with clear blockers.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -65,22 +80,26 @@ Task 3 review fixes: made profile create/update/delete and default profile ensur
 Task 3 second quality review fixes: validated profile update payloads through LlamaCppProfile before persistence, added supervisor-wide store write serialization, and changed profile deletion to await runner.stop before removing runner/profile ownership. Verification: focused supervisor pytest reported 12 passed; touched llama.cpp regression slice reported 67 passed; py_compile passed; Bandit on supervisor/manager had no findings; git diff --check passed.
 
 Task 4: added admin llama.cpp profile and instance APIs, per-profile lifecycle actions, instance log tailing, supervisor resolver/error mapping, and V1 default-profile routing for start-by-model, stop/status, logs, and use-in-chat while preserving handler/manager fallback compatibility. Verification: runtime API pytest reported 4 passed; Task 4 compatibility set reported 38 passed; broader llama.cpp backend slice reported 84 passed; py_compile passed; Bandit on endpoint/supervisor had no findings; git diff --check passed.
-<!-- SECTION:NOTES:END -->
 
-## Definition of Done
-<!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
-<!-- DOD:END -->
+Task 6: final verification completed. Focused backend llama.cpp pytest reported 114 passed with 5 warnings. Focused frontend Vitest reported 20 passed across 5 files. Bandit /tmp/bandit_llamacpp_runtime_stage1.json had no errors and no high/medium findings; new/changed llama.cpp files reported zero findings, with only three existing low-severity Llamafile_Handler findings outside this slice. git diff --check passed; branch status was ahead 14 and behind 8 before verification-note updates.
 
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 4 review fixes: added profile-scoped use-in-chat, routed V1 start_server and inference through the supervisor default profile when available, made fresh default stop idempotent, and added regression coverage for split-brain and start-by-model to inference behavior. Verification: focused runtime/supervisor pytest 21 passed; broader llama.cpp backend slice 89 passed; py_compile passed; Bandit /tmp/bandit_llamacpp_runtime_api_review_fix.json had no errors/results; git diff --check passed.
 
 Task 5: added llama.cpp profile/runtime TypeScript types, client methods for profile CRUD/lifecycle/instance logs, a compact Admin runtime panel, and runtime-plane loading/actions in LlamacppAdminPage with 404/503 fallback to the legacy single-server controls. Verification: Task 5 Vitest set reported 20 passed. Package-level tsc --noEmit was attempted but remains blocked by existing repo-wide TypeScript test debt outside this slice.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Stage 1 delivered durable llama.cpp profiles, an independent process runner, a multi-profile supervisor, admin profile/runtime APIs with V1 default-profile compatibility, and a minimal Admin runtime panel. Verification is recorded in the implementation plan and task notes; package-level TypeScript remains blocked by existing repo-wide test debt outside this slice.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->

@@ -118,7 +118,7 @@ Do not modify:
 - Modify: `tldw_Server_API/app/api/v1/schemas/llamacpp_admin_schemas.py`
 - Test: `tldw_Server_API/tests/LLM_Local/test_llamacpp_profile_store.py`
 
-- [ ] **Step 1: Write failing profile-store tests**
+- [x] **Step 1: Write failing profile-store tests**
 
 Add tests for:
 
@@ -145,7 +145,7 @@ Define a local `profile()` test helper that returns a valid
 `LlamaCppProfile`. Avoid relying on implementation defaults for fields that are
 central to a test assertion.
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run:
 
@@ -156,7 +156,7 @@ Run:
 
 Expected: FAIL because store/models do not exist.
 
-- [ ] **Step 3: Add runtime models**
+- [x] **Step 3: Add runtime models**
 
 Implement minimal models:
 
@@ -201,7 +201,7 @@ class LlamaCppProfileNotFoundError(LlamaCppProfileStoreError): ...
 class LlamaCppProfileConflictError(LlamaCppProfileStoreError): ...
 ```
 
-- [ ] **Step 4: Add JSON profile store**
+- [x] **Step 4: Add JSON profile store**
 
 Implement:
 
@@ -225,7 +225,7 @@ def default_profile_store_path() -> Path:
     return setup_manager.get_config_file_path().expanduser().resolve().with_name("llamacpp_profiles.json")
 ```
 
-- [ ] **Step 5: Add API schemas**
+- [x] **Step 5: Add API schemas**
 
 In `llamacpp_admin_schemas.py`, add request/response schemas that mirror the
 internal model without exposing store internals:
@@ -238,7 +238,7 @@ internal model without exposing store internals:
 - `LlamaCppRuntimeListResponse`
 - `LlamaCppLifecycleActionResponse`
 
-- [ ] **Step 6: Run profile-store tests**
+- [x] **Step 6: Run profile-store tests**
 
 Run:
 
@@ -269,7 +269,7 @@ git commit -m "feat: add llama.cpp profile store"
 - Test: `tldw_Server_API/tests/LLM_Local/test_llamacpp_process_runner.py`
 - Existing reference: `tldw_Server_API/app/core/Local_LLM/handler_utils.py`
 
-- [ ] **Step 1: Write failing runner tests**
+- [x] **Step 1: Write failing runner tests**
 
 Test command construction, path checks, port policy, and independent stop:
 
@@ -286,7 +286,7 @@ async def test_runner_starts_without_stopping_other_runner(tmp_path, monkeypatch
 Patch `asyncio.create_subprocess_exec` and `wait_for_http_ready` so no real
 llama-server binary is required.
 
-- [ ] **Step 2: Run runner tests to verify failure**
+- [x] **Step 2: Run runner tests to verify failure**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
@@ -295,7 +295,7 @@ llama-server binary is required.
 
 Expected: FAIL because the runner module does not exist.
 
-- [ ] **Step 3: Implement runner**
+- [x] **Step 3: Implement runner**
 
 Create `LlamaCppProcessRunner` with:
 
@@ -318,7 +318,7 @@ Start by moving only reusable, low-risk logic from `LlamaCppHandler`:
 
 Do not register signal handlers or atexit hooks in the runner.
 
-- [ ] **Step 4: Keep existing handler compatible**
+- [x] **Step 4: Keep existing handler compatible**
 
 Either:
 
@@ -329,7 +329,7 @@ Either:
 Prefer delegation only if tests remain focused and the patch stays readable.
 Preserve all existing `LlamaCppHandler` public methods.
 
-- [ ] **Step 5: Run old and new runner tests**
+- [x] **Step 5: Run old and new runner tests**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
@@ -340,7 +340,7 @@ Preserve all existing `LlamaCppHandler` public methods.
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add \
@@ -445,7 +445,7 @@ if it also has async shutdown for future lifespan integration.
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add \
@@ -562,7 +562,7 @@ Task 4 review fix coverage:
 - `start-by-model` followed by V1 inference on the supervisor default profile
 - fresh `stop_server` idempotency when no default profile exists
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add \
@@ -671,7 +671,7 @@ and `build-llamacpp-server-args`. A package-level `tsc --noEmit` run was also
 attempted, but it remains blocked by existing repo-wide TypeScript test debt
 outside this llama.cpp slice.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add \
@@ -692,7 +692,7 @@ git commit -m "feat: add llama.cpp runtime panel"
 - Modify only files touched by earlier tasks if verification requires fixes.
 - Update `backlog/tasks/task-397.1 - Plan-llama.cpp-managed-runtime-implementation.md` or follow-up implementation task records with final verification notes.
 
-- [ ] **Step 1: Run focused backend tests**
+- [x] **Step 1: Run focused backend tests**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
@@ -709,7 +709,10 @@ git commit -m "feat: add llama.cpp runtime panel"
 
 Expected: PASS.
 
-- [ ] **Step 2: Run focused frontend tests**
+Verification: focused backend llama.cpp pytest reported 114 passed and 5
+warnings.
+
+- [x] **Step 2: Run focused frontend tests**
 
 ```bash
 bunx vitest run \
@@ -721,7 +724,9 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 3: Run Bandit on touched backend paths**
+Verification: focused frontend Vitest set reported 20 passed across 5 files.
+
+- [x] **Step 3: Run Bandit on touched backend paths**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit \
@@ -733,7 +738,13 @@ Expected: no new high/medium findings in touched code. If Bandit reports
 subprocess usage, verify commands use argument lists and no shell; add
 `# nosec` only with a narrow explanation when the finding is expected.
 
-- [ ] **Step 4: Run diff checks**
+Verification: Bandit wrote `/tmp/bandit_llamacpp_runtime_stage1.json` with no
+errors and no high/medium findings. The new/changed endpoint, profile store,
+process runner, runtime models, and supervisor files all reported zero findings.
+The only findings were three existing low-severity findings in
+`tldw_Server_API/app/core/Local_LLM/Llamafile_Handler.py`.
+
+- [x] **Step 4: Run diff checks**
 
 ```bash
 git diff --check
@@ -742,7 +753,11 @@ git status --short
 
 Expected: no whitespace errors. Status should show only intentional files.
 
-- [ ] **Step 5: Commit verification notes**
+Verification: `git diff --check` passed. `git status --short --branch` showed
+branch `codex/llamacpp-runtime-plan-clean` ahead 14 and behind 8 relative to
+`origin/dev`, with no uncommitted changes before this verification-note update.
+
+- [x] **Step 5: Commit verification notes**
 
 If verification fixes changed files, commit them:
 
