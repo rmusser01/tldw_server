@@ -1454,6 +1454,7 @@
       "generate": "Generate defensible report",
       "created": "Generated defensible report.",
       "createError": "Failed to generate report.",
+      "loadingQueue": "Loading queued updates",
       "emptyQueue": "No queued updates found for this run.",
       "excludedTrail": "Excluded trail",
       "excludedCount": "{{count}} update{{plural}} not queued",

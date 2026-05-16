@@ -509,14 +509,29 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     setWatchlistsError(null)
     try {
       const response = await fetchWatchlists({ page: 1, size: 100 })
-      setWatchlists(Array.isArray(response.items) ? response.items : [])
+      const items = Array.isArray(response.items) ? response.items : []
+      setWatchlists(items)
+      const hasValidSelection =
+        selectedWatchlistId != null && items.some((watchlist) => watchlist.id === selectedWatchlistId)
+      const nextSelectedWatchlistId =
+        items.length === 0 ? null : hasValidSelection ? selectedWatchlistId : items[0]?.id ?? null
+      if (nextSelectedWatchlistId !== selectedWatchlistId) {
+        setSelectedWatchlistId(nextSelectedWatchlistId)
+      }
     } catch (err) {
       console.error("Failed to load Watchlists:", err)
       setWatchlistsError(t("watchlists:containers.fetchError", "Failed to load Watchlists"))
     } finally {
       setWatchlistsLoading(false)
     }
-  }, [setWatchlists, setWatchlistsError, setWatchlistsLoading, t])
+  }, [
+    selectedWatchlistId,
+    setSelectedWatchlistId,
+    setWatchlists,
+    setWatchlistsError,
+    setWatchlistsLoading,
+    t
+  ])
 
   useEffect(() => {
     void loadWatchlists()

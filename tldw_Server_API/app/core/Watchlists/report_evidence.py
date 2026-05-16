@@ -1,3 +1,11 @@
+"""Build immutable evidence snapshots for generated Watchlists reports.
+
+The helpers in this module normalize scraped item rows, source metadata, alert
+matches, and report-readiness signals into JSON-safe structures that can be
+persisted alongside generated outputs. Snapshot construction is deliberately
+side-effect free; endpoint code owns storage and authorization.
+"""
+
 from __future__ import annotations
 
 import hashlib

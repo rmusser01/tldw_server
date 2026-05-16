@@ -244,9 +244,9 @@ describe("ReportBuilderDrawer", () => {
     )
 
     await screen.findByText("Select a run to generate a report.")
-    fireEvent.click(screen.getByRole("button", { name: "Generate defensible report" }))
+    expect(screen.getByRole("button", { name: "Generate defensible report" })).toBeDisabled()
 
-    expect(uiMocks.messageError).toHaveBeenCalledWith("Select a run to generate a report.")
+    expect(uiMocks.messageError).not.toHaveBeenCalled()
     expect(serviceMocks.createWatchlistOutput).not.toHaveBeenCalled()
   })
 

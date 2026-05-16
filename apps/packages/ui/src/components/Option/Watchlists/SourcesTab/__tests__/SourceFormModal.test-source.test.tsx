@@ -2,6 +2,7 @@ import React from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi, beforeEach } from "vitest"
 import { SourceFormModal } from "../SourceFormModal"
+import { setViewport } from "../../__tests__/test-utils/viewport"
 
 const formApi = {
   setFieldsValue: vi.fn(),
@@ -123,27 +124,6 @@ vi.mock("@/services/watchlists", () => ({
   testWatchlistSource: (...args: unknown[]) => mocks.testWatchlistSource(...args),
   testWatchlistSourceDraft: (...args: unknown[]) => mocks.testWatchlistSourceDraft(...args)
 }))
-
-const setViewport = (width: number) => {
-  Object.defineProperty(window, "innerWidth", {
-    configurable: true,
-    value: width
-  })
-  Object.defineProperty(window, "matchMedia", {
-    configurable: true,
-    writable: true,
-    value: vi.fn().mockImplementation((query: string) => ({
-      matches: width < 768,
-      media: query,
-      onchange: null,
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn()
-    }))
-  })
-}
 
 describe("SourceFormModal test-source preflight", () => {
   beforeEach(() => {

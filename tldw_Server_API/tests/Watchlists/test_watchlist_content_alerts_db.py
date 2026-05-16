@@ -181,6 +181,15 @@ def test_content_alert_rule_validation_and_watchlist_scoping(tmp_path):
             pattern="[",
         )
 
+    with pytest.raises(ValueError, match="unsafe_content_alert_regex"):
+        db.create_content_alert_rule(
+            watchlist_id=int(first.id),
+            name="Unsafe regex",
+            rule_kind="regex",
+            match_mode="regex",
+            pattern="(a+)+$",
+        )
+
     rule = db.create_content_alert_rule(
         watchlist_id=int(first.id),
         name="Ransomware",

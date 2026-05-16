@@ -83,6 +83,7 @@ vi.mock("antd", () => {
     Empty,
     Modal: { confirm: (...args: unknown[]) => mocks.modalConfirmMock(...args) },
     Space: ({ children }: any) => <>{children}</>,
+    Spin: () => <div role="status">Loading</div>,
     Table,
     Tooltip: ({ children }: any) => <>{children}</>,
     message: {
@@ -172,6 +173,20 @@ describe("TemplatesTab constrained management", () => {
       expect(screen.getByRole("table", { name: "Templates table" })).toBeInTheDocument()
     })
     expect(screen.queryByTestId("watchlists-templates-constrained-list")).not.toBeInTheDocument()
+  })
+
+  it("shows constrained loading feedback before templates arrive", () => {
+    setViewport(420)
+    mocks.storeStateRef.current = baseState({
+      templates: [],
+      templatesLoading: true
+    })
+
+    render(<TemplatesTab />)
+
+    expect(screen.getByTestId("watchlists-templates-constrained-loading")).toBeInTheDocument()
+    expect(screen.getByRole("status")).toBeInTheDocument()
+    expect(screen.queryByText("No templates yet")).not.toBeInTheDocument()
   })
 
   it("keeps duplicate template names distinct by format in constrained cards", async () => {

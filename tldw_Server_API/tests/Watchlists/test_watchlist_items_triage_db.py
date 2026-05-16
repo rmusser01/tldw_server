@@ -142,6 +142,49 @@ def test_list_items_supports_server_authoritative_sort_modes(tmp_path):
         db.list_items(watchlist_id=watchlist_id, sort="novelty_desc", limit=10, offset=0)
 
 
+def test_list_items_search_treats_like_wildcards_literally(tmp_path):
+    db = _make_db(tmp_path)
+    seeded = _seed_review_queue(db)
+    watchlist_id = int(seeded["watchlist"].id)
+    job_id = int(seeded["job"].id)
+    run_id = int(seeded["run"].id)
+    source_id = int(seeded["sources"][0].id)
+
+    literal = db.record_scraped_item(
+        run_id=run_id,
+        job_id=job_id,
+        source_id=source_id,
+        media_id=None,
+        media_uuid=None,
+        url="https://example.com/literal-wildcards",
+        title="Literal 100%_match advisory",
+        summary="Contains literal SQL wildcard characters.",
+        content="literal wildcard content",
+        published_at="2026-05-16T08:00:00+00:00",
+        tags=["wildcard"],
+        status="ingested",
+    )
+    db.record_scraped_item(
+        run_id=run_id,
+        job_id=job_id,
+        source_id=source_id,
+        media_id=None,
+        media_uuid=None,
+        url="https://example.com/wildcard-near-miss",
+        title="Literal 100XXmatch advisory",
+        summary="Should not match escaped percent underscore query.",
+        content="near miss content",
+        published_at="2026-05-16T09:00:00+00:00",
+        tags=["wildcard"],
+        status="ingested",
+    )
+
+    rows, total = db.list_items(watchlist_id=watchlist_id, search="100%_match", limit=10, offset=0)
+
+    assert total == 1
+    assert [int(row.id) for row in rows] == [int(literal.id)]
+
+
 def test_list_items_filters_by_content_alert_context_and_summarizes_alerts(tmp_path):
     db = _make_db(tmp_path)
     seeded = _seed_review_queue(db)

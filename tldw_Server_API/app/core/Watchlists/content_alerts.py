@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any, Protocol
 
+import regex as regex_engine
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import (
@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.DB_Management.Watchlists_DB import (
 )
 from tldw_Server_API.app.core.Monitoring.notification_service import get_notification_service
 
+CONTENT_ALERT_REGEX_TIMEOUT_SECONDS = 0.05
 
 _CONTENT_ALERT_NONCRITICAL_EXCEPTIONS = (
     OSError,
@@ -26,7 +27,7 @@ _CONTENT_ALERT_NONCRITICAL_EXCEPTIONS = (
     KeyError,
     AttributeError,
     json.JSONDecodeError,
-    re.error,
+    regex_engine.error,
 )
 
 
@@ -60,7 +61,19 @@ def _match_rule(rule: WatchlistContentAlertRuleRow, text: str) -> tuple[int, int
     if not pattern:
         return None
     if rule.rule_kind == "regex" or rule.match_mode == "regex":
-        match = re.search(pattern, text, flags=re.IGNORECASE)
+        try:
+            match = regex_engine.search(
+                pattern,
+                text,
+                flags=regex_engine.IGNORECASE,
+                timeout=CONTENT_ALERT_REGEX_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            logger.warning("Content alert regex timed out for rule {}", rule.id)
+            return None
+        except regex_engine.error:
+            logger.warning("Content alert regex failed for rule {}", rule.id)
+            return None
         if not match:
             return None
         return match.start(), match.end(), match.group(0)

@@ -107,6 +107,7 @@ export const ReportBuilderDrawer: React.FC<ReportBuilderDrawerProps> = ({
   const [includeExcludedItems, setIncludeExcludedItems] = useState(true)
   const [loadingRuns, setLoadingRuns] = useState(false)
   const [loadingQueue, setLoadingQueue] = useState(false)
+  const [queueLoaded, setQueueLoaded] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [isConstrained, setIsConstrained] = useState(false)
 
@@ -173,10 +174,12 @@ export const ReportBuilderDrawer: React.FC<ReportBuilderDrawerProps> = ({
     if (!open || selectedRunId == null) {
       setQueuedItems([])
       setAllRunItems([])
+      setQueueLoaded(false)
       return
     }
     let cancelled = false
     setLoadingQueue(true)
+    setQueueLoaded(false)
     Promise.all([
       fetchScrapedItems({
         watchlist_id: selectedWatchlist?.id,
@@ -207,7 +210,10 @@ export const ReportBuilderDrawer: React.FC<ReportBuilderDrawerProps> = ({
         }
       })
       .finally(() => {
-        if (!cancelled) setLoadingQueue(false)
+        if (!cancelled) {
+          setLoadingQueue(false)
+          setQueueLoaded(true)
+        }
       })
     return () => {
       cancelled = true
@@ -215,8 +221,8 @@ export const ReportBuilderDrawer: React.FC<ReportBuilderDrawerProps> = ({
   }, [open, selectedRunId, selectedWatchlist?.id])
 
   const preflightWarnings = useMemo(
-    () => buildPreflightWarnings(preset, queuedItems),
-    [preset, queuedItems]
+    () => (!queueLoaded || loadingQueue ? [] : buildPreflightWarnings(preset, queuedItems)),
+    [loadingQueue, preset, queueLoaded, queuedItems]
   )
   const hasBlockingWarning = preflightWarnings.some((warning) => warning.severity === "blocking")
   const hasNonBlockingWarnings = preflightWarnings.some((warning) => warning.severity === "warning")
@@ -286,7 +292,7 @@ export const ReportBuilderDrawer: React.FC<ReportBuilderDrawerProps> = ({
           type="primary"
           onClick={handleGenerate}
           loading={generating}
-          disabled={Boolean(selectedRunId != null && (hasBlockingWarning || loadingQueue))}
+          disabled={selectedRunId == null || hasBlockingWarning || loadingQueue}
         >
           {generateLabel}
         </Button>
@@ -392,7 +398,7 @@ export const ReportBuilderDrawer: React.FC<ReportBuilderDrawerProps> = ({
             </Checkbox>
           </div>
 
-          {loadingQueue ? (
+          {loadingRuns || loadingQueue || (selectedRunId != null && !queueLoaded) ? (
             <div className="py-6 text-center"><Spin /></div>
           ) : queuedItems.length > 0 ? (
             <div className="rounded-lg border border-border bg-surface p-3 space-y-2">
@@ -432,7 +438,9 @@ export const ReportBuilderDrawer: React.FC<ReportBuilderDrawerProps> = ({
               />
             )}
             <div className="text-sm text-text-muted">
-              {formatCountLabel(queuedItems.length, "queued update")}
+              {loadingRuns || loadingQueue || (selectedRunId != null && !queueLoaded)
+                ? t("watchlists:reports.builder.loadingQueue", "Loading queued updates")
+                : formatCountLabel(queuedItems.length, "queued update")}
             </div>
             <div className="text-sm text-text-muted">
               {formatCountLabel(sourceCount, "source")}

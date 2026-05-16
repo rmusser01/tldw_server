@@ -4,6 +4,7 @@ import {
   Empty,
   Modal,
   Space,
+  Spin,
   Table,
   Tooltip,
   message
@@ -385,7 +386,16 @@ export const TemplatesTab: React.FC = () => {
         </Empty>
       ) : (
         isConstrained ? (
-          renderConstrainedTemplateList()
+          templatesLoading ? (
+            <div
+              className="flex justify-center py-6"
+              data-testid="watchlists-templates-constrained-loading"
+            >
+              <Spin size="small" />
+            </div>
+          ) : (
+            renderConstrainedTemplateList()
+          )
         ) : (
           <Table
             dataSource={safeTemplates}

@@ -101,10 +101,21 @@ _VALID_ITEM_SAVED_VIEW_FILTER_KEYS = {
     "smart_filter",
 }
 _VALID_ITEM_SAVED_VIEW_SMART_FILTERS = {"all", "today", "today_unread", "todayUnread", "unread", "reviewed", "queued"}
+_NESTED_REGEX_QUANTIFIER_RE = re.compile(
+    r"\((?:[^()\\]|\\.)*(?:\*|\+|\{\d+(?:,\d*)?\})(?:[^()\\]|\\.)*\)\s*(?:\*|\+|\{\d+(?:,\d*)?\})"
+)
 
 
 def _utcnow_iso() -> str:
     return datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+
+
+def _escape_like_literal(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _looks_like_nested_quantifier(pattern: str) -> bool:
+    return bool(_NESTED_REGEX_QUANTIFIER_RE.search(pattern))
 
 
 @dataclass
@@ -3298,8 +3309,14 @@ class WatchlistsDatabase:
             where.append("si.created_at <= ?")
             params.append(until)
         if search:
-            like = f"%{search}%"
-            where.append("(si.title LIKE ? OR si.summary LIKE ? OR si.content LIKE ?)")
+            like = f"%{_escape_like_literal(str(search))}%"
+            where.append(
+                "("
+                "si.title LIKE ? ESCAPE '\\' OR "
+                "si.summary LIKE ? ESCAPE '\\' OR "
+                "si.content LIKE ? ESCAPE '\\'"
+                ")"
+            )
             params.extend([like, like, like])
         alert_filters_requested = alert_status is not None or alert_severity is not None or alert_rule_id is not None
         if has_alert is False and alert_filters_requested:
@@ -3388,6 +3405,8 @@ class WatchlistsDatabase:
         if not clean_pattern:
             raise ValueError("content_alert_pattern_required")
         if rule_kind == "regex" or match_mode == "regex":
+            if _looks_like_nested_quantifier(clean_pattern):
+                raise ValueError("unsafe_content_alert_regex")
             try:
                 re.compile(clean_pattern)
             except re.error as exc:
@@ -3739,13 +3758,7 @@ class WatchlistsDatabase:
             where.append("source_id = ?")
             params.append(int(source_id))
         if q is not None and q.strip():
-            escaped_query = (
-                q.strip()
-                .lower()
-                .replace("\\", "\\\\")
-                .replace("%", "\\%")
-                .replace("_", "\\_")
-            )
+            escaped_query = _escape_like_literal(q.strip().lower())
             like_pattern = f"%{escaped_query}%"
             where.append(
                 "("

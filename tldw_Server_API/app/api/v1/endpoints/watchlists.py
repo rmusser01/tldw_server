@@ -41,6 +41,7 @@ from fastapi import (
 )
 from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from loguru import logger
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import FileResponse
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, resolve_user_id_for_request, User
 
@@ -56,6 +57,7 @@ from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.scope_context import get_scope as _get_scope
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.exceptions import TemplateValidationError
@@ -635,15 +637,20 @@ def _source_response_from_row(db: WatchlistsDatabase, row: Any) -> Source:
     )
 
 
-@router.get("", response_model=WatchlistsListResponse, summary="List Watchlists")
+@router.get(
+    "",
+    response_model=WatchlistsListResponse,
+    summary="List Watchlists",
+    dependencies=[Depends(rbac_rate_limit("watchlists.read"))],
+)
 async def list_watchlists(
     status_filter: str | None = Query(None, alias="status"),
     include_deleted: bool = Query(False),
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
-):
+    db: WatchlistsDatabase = Depends(get_watchlists_db_for_user),
+) -> WatchlistsListResponse:
     _ = current_user
     try:
         db.ensure_default_watchlist()
@@ -669,12 +676,18 @@ async def list_watchlists(
     )
 
 
-@router.post("", response_model=WatchlistContainer, status_code=status.HTTP_201_CREATED, summary="Create Watchlist")
+@router.post(
+    "",
+    response_model=WatchlistContainer,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create Watchlist",
+    dependencies=[Depends(rbac_rate_limit("watchlists.create"))],
+)
 async def create_watchlist(
     payload: WatchlistCreateRequest = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
-):
+    db: WatchlistsDatabase = Depends(get_watchlists_db_for_user),
+) -> WatchlistContainer:
     _ = current_user
     try:
         row = db.create_watchlist(
@@ -1158,14 +1171,16 @@ def _build_report_snapshot_filename(output_title: str, ts: str) -> str:
     return f"{stem}.json"
 
 
-def _write_report_snapshot_for_user(user_id: int, filename: str, snapshot: dict[str, Any]) -> None:
+async def _write_report_snapshot_for_user(user_id: int, filename: str, snapshot: dict[str, Any]) -> None:
     path = _resolve_output_path_for_user(user_id, filename)
-    path.write_text(json.dumps(snapshot, ensure_ascii=False, sort_keys=True, indent=2), encoding="utf-8")
+    payload = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, indent=2)
+    await run_in_threadpool(path.write_text, payload, encoding="utf-8")
 
 
-def _load_report_snapshot_for_user(user_id: int, storage_name: str) -> dict[str, Any]:
+async def _load_report_snapshot_for_user(user_id: int, storage_name: str) -> dict[str, Any]:
     path = _resolve_output_path_for_user(user_id, storage_name)
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    raw_payload = await run_in_threadpool(path.read_text, encoding="utf-8")
+    payload = json.loads(raw_payload)
     if not isinstance(payload, dict):
         raise ValueError("report_snapshot_invalid")
     return payload
@@ -5796,7 +5811,7 @@ async def create_output(
         report_snapshot["output_id"] = int(row.id)
         report_snapshot_filename = _build_report_snapshot_filename(title, ts)
         report_snapshot_path = _resolve_output_path_for_user(user_id, report_snapshot_filename)
-        _write_report_snapshot_for_user(user_id, report_snapshot_filename, report_snapshot)
+        await _write_report_snapshot_for_user(user_id, report_snapshot_filename, report_snapshot)
         created_snapshot_paths.append(report_snapshot_path)
         metadata.update(
             _report_metadata_from_snapshot(
@@ -6197,7 +6212,7 @@ def _get_watchlist_output_row_or_404(collections_db: Any, output_id: int) -> tup
     return row, metadata
 
 
-def _load_output_report_evidence_payload(
+async def _load_output_report_evidence_payload(
     *,
     user_id: int,
     output_id: int,
@@ -6212,7 +6227,7 @@ def _load_output_report_evidence_payload(
             "readiness": build_legacy_live_only_readiness(),
         }
     try:
-        snapshot = _load_report_snapshot_for_user(user_id, str(snapshot_path))
+        snapshot = await _load_report_snapshot_for_user(user_id, str(snapshot_path))
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="report_snapshot_missing") from exc
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
@@ -6236,12 +6251,13 @@ def _load_output_report_evidence_payload(
     "/outputs/{output_id}/evidence",
     response_model=WatchlistOutputEvidenceResponse,
     summary="Get immutable report evidence for a Watchlists output",
+    dependencies=[Depends(rbac_rate_limit("watchlists.outputs"))],
 )
 async def get_output_evidence(
     output_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    collections_db = Depends(get_collections_db_for_user),
-):
+    collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
+) -> dict[str, Any]:
     collections_db.purge_expired_outputs()
     row, metadata = _get_watchlist_output_row_or_404(collections_db, output_id)
     output = _row_to_output(row)
@@ -6254,19 +6270,20 @@ async def get_output_evidence(
         error_status=500,
         invalid_detail="invalid user_id",
     )
-    return _load_output_report_evidence_payload(user_id=user_id, output_id=output_id, metadata=metadata)
+    return await _load_output_report_evidence_payload(user_id=user_id, output_id=output_id, metadata=metadata)
 
 
 @router.get(
     "/outputs/{output_id}/readiness",
     response_model=WatchlistReportReadiness,
     summary="Get report readiness for a Watchlists output",
+    dependencies=[Depends(rbac_rate_limit("watchlists.outputs"))],
 )
 async def get_output_readiness(
     output_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    collections_db = Depends(get_collections_db_for_user),
-):
+    collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
+) -> dict[str, Any]:
     collections_db.purge_expired_outputs()
     row, metadata = _get_watchlist_output_row_or_404(collections_db, output_id)
     output = _row_to_output(row)
@@ -6279,7 +6296,7 @@ async def get_output_readiness(
         error_status=500,
         invalid_detail="invalid user_id",
     )
-    payload = _load_output_report_evidence_payload(user_id=user_id, output_id=output_id, metadata=metadata)
+    payload = await _load_output_report_evidence_payload(user_id=user_id, output_id=output_id, metadata=metadata)
     return payload["readiness"]
 
 

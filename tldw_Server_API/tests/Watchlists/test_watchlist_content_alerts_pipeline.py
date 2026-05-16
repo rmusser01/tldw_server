@@ -5,11 +5,11 @@ from typing import Any
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
+from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistContentAlertRuleRow, WatchlistsDatabase
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.Watchlists import pipeline as wl_pipeline
-from tldw_Server_API.app.core.Watchlists.content_alerts import evaluate_content_alert_rules_for_item
+from tldw_Server_API.app.core.Watchlists.content_alerts import _match_rule, evaluate_content_alert_rules_for_item
 
 
 pytestmark = pytest.mark.unit
@@ -81,6 +81,26 @@ def _seed_item(
 class _FailingNotifier:
     def notify_or_batch(self, payload: dict[str, Any]) -> str:
         raise RuntimeError("notification sink unavailable")
+
+
+def test_match_rule_times_out_legacy_catastrophic_regex():
+    rule = WatchlistContentAlertRuleRow(
+        id=99,
+        user_id="123",
+        watchlist_id=42,
+        name="Legacy unsafe regex",
+        enabled=1,
+        rule_kind="regex",
+        match_mode="regex",
+        pattern="(a+)+$",
+        severity="high",
+        source_constraints_json=None,
+        metadata_json=None,
+        created_at="2026-05-16T00:00:00+00:00",
+        updated_at="2026-05-16T00:00:00+00:00",
+    )
+
+    assert _match_rule(rule, f"{'a' * 25_000}!") is None
 
 
 def test_evaluate_content_alert_rules_creates_evidence_alert_and_notification(tmp_path):

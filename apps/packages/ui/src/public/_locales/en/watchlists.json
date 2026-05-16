@@ -1319,6 +1319,9 @@
   "reports_builder_generate": {
     "message": "Generate defensible report"
   },
+  "reports_builder_loadingQueue": {
+    "message": "Loading queued updates"
+  },
   "reports_builder_emptyQueue": {
     "message": "No queued updates found for this run."
   },

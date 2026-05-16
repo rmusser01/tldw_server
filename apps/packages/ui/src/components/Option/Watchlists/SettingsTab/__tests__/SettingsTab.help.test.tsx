@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { SettingsTab } from "../SettingsTab"
 import { WATCHLISTS_HELP_DOCS } from "../../shared/help-docs"
+import { setViewport } from "../../__tests__/test-utils/viewport"
 
 const ONBOARDING_PATH_STORAGE_KEY = "watchlists:onboarding-path:v1"
 
@@ -177,27 +178,6 @@ vi.mock("@/utils/humanize-milliseconds", () => ({
 vi.mock("@/utils/dateFormatters", () => ({
   formatRelativeTime: () => "just now"
 }))
-
-const setViewport = (width: number) => {
-  Object.defineProperty(window, "innerWidth", {
-    configurable: true,
-    value: width
-  })
-  Object.defineProperty(window, "matchMedia", {
-    configurable: true,
-    writable: true,
-    value: vi.fn().mockImplementation((query: string) => ({
-      matches: width < 768,
-      media: query,
-      onchange: null,
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn()
-    }))
-  })
-}
 
 describe("SettingsTab contextual help", () => {
   const originalDiagnosticsFlag = process.env.NEXT_PUBLIC_WATCHLISTS_SHOW_INTERNAL_DIAGNOSTICS

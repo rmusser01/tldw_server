@@ -315,6 +315,7 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
 
     await waitFor(() => expect(mocks.fetchWatchlistsMock).toHaveBeenCalledWith({ page: 1, size: 100 }))
     await waitFor(() => expect(mocks.state.setWatchlists).toHaveBeenCalledWith([container]))
+    await waitFor(() => expect(mocks.state.setSelectedWatchlistId).toHaveBeenCalledWith(container.id))
     view.rerender(<WatchlistsPlaygroundPage />)
 
     expect(await screen.findByRole("heading", { name: "Healthcare ransomware" })).toBeInTheDocument()

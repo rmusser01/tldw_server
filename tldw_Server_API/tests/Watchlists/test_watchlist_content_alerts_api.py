@@ -176,6 +176,18 @@ def test_content_alert_rule_endpoints_crud_and_validation(client_with_user):
     assert invalid.status_code == 400
     assert "invalid_content_alert_regex" in invalid.text
 
+    unsafe = client.post(
+        f"/api/v1/watchlists/{watchlist_id}/content-alert-rules",
+        json={
+            "name": "Unsafe regex",
+            "rule_kind": "regex",
+            "match_mode": "regex",
+            "pattern": "(a+)+$",
+        },
+    )
+    assert unsafe.status_code == 400
+    assert "unsafe_content_alert_regex" in unsafe.text
+
     deleted = client.delete(f"/api/v1/watchlists/{watchlist_id}/content-alert-rules/{created_body['id']}")
     assert deleted.status_code == 200, deleted.text
     assert deleted.json() == {"deleted": True}
