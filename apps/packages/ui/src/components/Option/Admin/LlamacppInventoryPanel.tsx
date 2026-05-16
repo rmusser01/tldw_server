@@ -1,12 +1,17 @@
 import React from "react"
-import { Alert, Button, Card, Input, List, Space, Tag, Typography } from "antd"
+import { Button, Card, Input, List, Space, Tag, Typography } from "antd"
 import { RefreshCw } from "lucide-react"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import type {
   LlamacppInventoryItem,
   LlamacppInventoryResponse
 } from "@/types/llamacpp-admin"
 
 const { Text } = Typography
+const passiveAlertProps = {
+  role: "status",
+  "aria-live": "polite"
+} as const
 
 interface LlamacppInventoryPanelProps {
   inventory: LlamacppInventoryResponse | null
@@ -75,7 +80,7 @@ export const LlamacppInventoryPanel: React.FC<LlamacppInventoryPanelProps> = ({
       }
     >
       <Space orientation="vertical" size="middle" className="w-full">
-        {error && <Alert type="error" showIcon title={error} />}
+        {error && <DesignSystemAlert variant="error" title={error} />}
 
         <Space.Compact className="w-full">
           <Input
@@ -95,13 +100,18 @@ export const LlamacppInventoryPanel: React.FC<LlamacppInventoryPanelProps> = ({
         </Space.Compact>
 
         {inventory?.warnings.map((warning) => (
-          <Alert key={warning} type="warning" showIcon title={warning} />
+          <DesignSystemAlert
+            key={warning}
+            variant="warning"
+            {...passiveAlertProps}
+            title={warning}
+          />
         ))}
 
         {inventory?.scan_limited && (
-          <Alert
-            type="warning"
-            showIcon
+          <DesignSystemAlert
+            variant="warning"
+            {...passiveAlertProps}
             title="Inventory scan limit reached"
           />
         )}

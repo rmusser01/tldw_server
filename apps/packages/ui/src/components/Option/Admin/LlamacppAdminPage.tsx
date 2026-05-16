@@ -1,7 +1,8 @@
 import React from "react"
-import { Alert, Space, Typography } from "antd"
+import { Space, Typography } from "antd"
 import { useTranslation } from "react-i18next"
 import { PageShell } from "@/components/Common/PageShell"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type {
   LlamacppConfigResponse,
@@ -24,6 +25,10 @@ import { LlamacppLaunchPanel } from "./LlamacppLaunchPanel"
 import { LlamacppReadinessPanel } from "./LlamacppReadinessPanel"
 
 const { Title, Text } = Typography
+const passiveAlertProps = {
+  role: "status",
+  "aria-live": "polite"
+} as const
 
 type LlamacppStatus = {
   backend?: string
@@ -412,35 +417,34 @@ export const LlamacppAdminPage: React.FC = () => {
     <PageShell>
       <Space orientation="vertical" size="large" className="w-full py-6">
         {adminGuard && (
-          <Alert
-            type="warning"
-            showIcon
+          <DesignSystemAlert
+            variant="warning"
+            {...passiveAlertProps}
             title={
               adminGuard === "forbidden"
                 ? t("settings:admin.adminGuardForbiddenTitle", "Admin access required")
                 : t("settings:admin.adminGuardNotFoundTitle", "Admin APIs not available")
             }
-            description={
-              <span>
-                {adminGuard === "forbidden"
-                  ? t(
-                      "settings:admin.adminGuardForbiddenBody",
-                      "Sign in as an admin user on your tldw server to access these controls."
-                    )
-                  : t(
-                      "settings:admin.adminGuardNotFoundBody",
-                      "This tldw server does not expose the admin endpoints."
-                    )}{" "}
-                <a
-                  href="https://github.com/rmusser01/tldw_server#documentation--resources"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {t("settings:admin.adminGuardLearnMore", "Learn more")}
-                </a>
-              </span>
-            }
-          />
+          >
+            <span>
+              {adminGuard === "forbidden"
+                ? t(
+                    "settings:admin.adminGuardForbiddenBody",
+                    "Sign in as an admin user on your tldw server to access these controls."
+                  )
+                : t(
+                    "settings:admin.adminGuardNotFoundBody",
+                    "This tldw server does not expose the admin endpoints."
+                  )}{" "}
+              <a
+                href="https://github.com/rmusser01/tldw_server#documentation--resources"
+                target="_blank"
+                rel="noreferrer"
+              >
+                {t("settings:admin.adminGuardLearnMore", "Learn more")}
+              </a>
+            </span>
+          </DesignSystemAlert>
         )}
 
         <div>

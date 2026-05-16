@@ -1,8 +1,13 @@
 import React from "react"
-import { Alert, Card, Descriptions, Space, Tag, Typography } from "antd"
+import { Card, Descriptions, Space, Tag, Typography } from "antd"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import type { LlamacppConfigResponse } from "@/types/llamacpp-admin"
 
 const { Text } = Typography
+const passiveAlertProps = {
+  role: "status",
+  "aria-live": "polite"
+} as const
 
 interface LlamacppReadinessPanelProps {
   config: LlamacppConfigResponse | null
@@ -71,45 +76,48 @@ export const LlamacppReadinessPanel: React.FC<LlamacppReadinessPanelProps> = ({
           </Descriptions>
 
           {config.restart_required && (
-            <Alert
-              type="warning"
-              showIcon
+            <DesignSystemAlert
+              variant="warning"
+              {...passiveAlertProps}
               title="API server restart required"
-              description={
-                <Space wrap size="small">
-                  {config.restart_reasons.length > 0 ? (
-                    config.restart_reasons.map((reason) => (
-                      <Tag key={reason} color="orange">
-                        {reason}
-                      </Tag>
-                    ))
-                  ) : (
-                    <Text type="secondary">Saved config differs from active runtime.</Text>
-                  )}
-                </Space>
-              }
-            />
+            >
+              <Space wrap size="small">
+                {config.restart_reasons.length > 0 ? (
+                  config.restart_reasons.map((reason) => (
+                    <Tag key={reason} color="orange">
+                      {reason}
+                    </Tag>
+                  ))
+                ) : (
+                  <Text type="secondary">Saved config differs from active runtime.</Text>
+                )}
+              </Space>
+            </DesignSystemAlert>
           )}
 
           {envOverrides.length > 0 && (
-            <Alert
-              type="warning"
-              showIcon
+            <DesignSystemAlert
+              variant="warning"
+              {...passiveAlertProps}
               title="Environment overrides are active"
-              description={
-                <Space wrap size="small">
-                  {envOverrides.map(([key]) => (
-                    <Tag key={key} color="gold">
-                      {key} override
-                    </Tag>
-                  ))}
-                </Space>
-              }
-            />
+            >
+              <Space wrap size="small">
+                {envOverrides.map(([key]) => (
+                  <Tag key={key} color="gold">
+                    {key} override
+                  </Tag>
+                ))}
+              </Space>
+            </DesignSystemAlert>
           )}
 
           {config.warnings.map((warning) => (
-            <Alert key={warning} type="info" showIcon title={warning} />
+            <DesignSystemAlert
+              key={warning}
+              variant="info"
+              {...passiveAlertProps}
+              title={warning}
+            />
           ))}
         </Space>
       )}

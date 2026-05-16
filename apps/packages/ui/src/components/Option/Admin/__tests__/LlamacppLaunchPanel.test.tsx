@@ -43,6 +43,11 @@ describe("LlamacppLaunchPanel", () => {
     )
 
     expect(screen.getByText("GPU probe unavailable.")).toBeTruthy()
+    const guidanceAlert = screen
+      .getByText("Hardware guidance")
+      .closest('[data-ds-component="Alert"]')
+    expect(guidanceAlert).toHaveAttribute("role", "status")
+    expect(guidanceAlert).toHaveAttribute("aria-live", "polite")
     expect(screen.getByText("Other Options")).toBeTruthy()
     expect(screen.getByText("Multimodal (vision)")).toBeTruthy()
     expect(screen.getByText("Speculative decoding")).toBeTruthy()
