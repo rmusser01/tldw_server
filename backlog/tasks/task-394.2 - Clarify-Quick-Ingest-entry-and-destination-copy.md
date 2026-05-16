@@ -1,9 +1,10 @@
 ---
 id: TASK-394.2
 title: Clarify Quick Ingest entry and destination copy
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-16 00:42'
+updated_date: '2026-05-16 01:47'
 labels:
   - quick-ingest
   - ux
@@ -28,6 +29,12 @@ Execute implementation plan Task 2: improve first-time clarity, destination expe
 - [ ] #2 First-time and returning-user flows keep the same quick path with better recognition over recall
 - [ ] #3 Accessible labels and keyboard/focus behavior are preserved or improved
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Task 2 started on branch codex/quick-ingest-ux-remediation after Task 1 path-map review approval. Scope: first-time clarity copy, entry terminology consistency, optional review estimate cleanup, focused tests, and browser verification.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
