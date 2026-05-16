@@ -89,16 +89,19 @@ tools/macos-vz-helper/scripts/vz-helperctl.py launchd-drill \
   --log-dir "$runtime_dir/logs" \
   --plist-output "$runtime_dir/${label}.plist" \
   --label "$label" \
+  --entitlements tools/macos-vz-helper/macos-vz-helper.entitlements \
   --write-plist \
   --create-dirs \
   --skip-smoke
 ```
 
 Omit `--skip-smoke` and add `--bundle /path/to/canonical/bundle` to run the
-real `vz_linux` host smoke through the launchd-managed helper. Keep drill labels
-isolated and plist paths private; the drill refuses to take over a service that
-is already loaded before bootstrap because cleanup ownership would be
-ambiguous.
+real `vz_linux` host smoke through the launchd-managed helper. When
+`--entitlements` is provided, the drill signs the helper after the
+already-loaded preflight and before bootstrap so a failed signing step does not
+leave a launchd service running. Keep drill labels isolated and plist paths
+private; the drill refuses to take over a service that is already loaded before
+bootstrap because cleanup ownership would be ambiguous.
 
 These commands never run automatically from `plist`, `status`, `smoke`, or
 server startup. They are operator-owned scaffolding and do not validate host
@@ -115,5 +118,5 @@ For real host E2E smoke, prefer the managed wrapper:
 ```bash
 tools/macos-vz-helper/scripts/vz-helperctl.py smoke \
   --bundle /path/to/canonical/bundle \
-  --entitlements /path/to/helper.entitlements
+  --entitlements tools/macos-vz-helper/macos-vz-helper.entitlements
 ```

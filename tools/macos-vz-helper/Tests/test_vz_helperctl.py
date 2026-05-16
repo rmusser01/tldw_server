@@ -50,6 +50,16 @@ def test_default_helper_uses_debug_build_path():
     )
 
 
+def test_default_entitlements_template_includes_virtualization():
+    helperctl = load_helperctl()
+
+    entitlements_path = helperctl.HELPER_PACKAGE_DIR / "macos-vz-helper.entitlements"
+    entitlements = plistlib.loads(entitlements_path.read_bytes())
+
+    CASE.assertIs(entitlements["com.apple.security.virtualization"], True)
+    CASE.assertIs(entitlements["com.apple.security.get-task-allow"], True)
+
+
 def test_protocol_version_loads_from_helper_client():
     from tldw_Server_API.app.core.Sandbox.macos_virtualization import helper_client
 
@@ -883,6 +893,110 @@ def test_launchd_drill_runs_smoke_after_ping_before_bootout(tmp_path: Path) -> N
     )
 
 
+def test_launchd_drill_signs_helper_with_entitlements_before_bootstrap(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    helper, socket_path, log_dir, plist_path = _make_launchd_drill_inputs(tmp_path)
+    entitlements = tmp_path / "helper.entitlements"
+    entitlements.write_text("<plist/>", encoding="utf-8")
+    calls: list[str] = []
+    status_command = "launchctl print gui/501/org.tldw.test"
+
+    def launchd_runner(argv: list[str], **kwargs: Any) -> int:
+        command = " ".join(argv)
+        calls.append(command)
+        if command == status_command and calls.count(status_command) == 1:
+            return 3
+        return 0
+
+    def signing_runner(argv: list[str], **kwargs: Any) -> int:
+        calls.append("sign " + " ".join(argv))
+        return 0
+
+    results = helperctl.run_launchd_drill(
+        helper_path=helper,
+        socket_path=socket_path,
+        log_dir=log_dir,
+        plist_path=plist_path,
+        label="org.tldw.test",
+        uid=501,
+        write_plist=True,
+        create_dirs=True,
+        launchd_runner=launchd_runner,
+        signing_runner=signing_runner,
+        entitlements_path=entitlements,
+        ping_checker=lambda path: helperctl.CheckResult(ok=True),
+    )
+
+    result_names = [name for name, _ in results]
+    CASE.assertLess(result_names.index("helper_signing"), result_names.index("launchd_bootstrap"))
+    CASE.assertIn(("helper_signing", helperctl.CheckResult(ok=True)), results)
+    CASE.assertEqual(
+        calls[:3],
+        [
+            status_command,
+            f"sign codesign --force --sign - --entitlements {entitlements} {helper}",
+            f"launchctl bootstrap gui/501 {plist_path}",
+        ],
+    )
+
+
+def test_launchd_drill_signing_failure_aborts_before_bootstrap(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    helper, socket_path, log_dir, plist_path = _make_launchd_drill_inputs(tmp_path)
+    entitlements = tmp_path / "helper.entitlements"
+    entitlements.write_text("<plist/>", encoding="utf-8")
+    calls: list[str] = []
+    status_command = "launchctl print gui/501/org.tldw.test"
+
+    def launchd_runner(argv: list[str], **kwargs: Any) -> int:
+        command = " ".join(argv)
+        calls.append(command)
+        if command == status_command:
+            return 3
+        return 0
+
+    def signing_runner(argv: list[str], **kwargs: Any) -> int:
+        calls.append("sign " + " ".join(argv))
+        return 2
+
+    results = helperctl.run_launchd_drill(
+        helper_path=helper,
+        socket_path=socket_path,
+        log_dir=log_dir,
+        plist_path=plist_path,
+        label="org.tldw.test",
+        uid=501,
+        write_plist=True,
+        create_dirs=True,
+        launchd_runner=launchd_runner,
+        signing_runner=signing_runner,
+        entitlements_path=entitlements,
+        ping_checker=lambda path: helperctl.CheckResult(ok=True),
+    )
+
+    CASE.assertEqual(
+        results,
+        [
+            (
+                "launchd_preflight",
+                helperctl.CheckResult(
+                    ok=True,
+                    reason="launchd_service_absent",
+                    message="gui/501/org.tldw.test",
+                ),
+            ),
+            ("helper_signing", helperctl.CheckResult(ok=False, reason="helper_codesign_failed")),
+        ],
+    )
+    CASE.assertEqual(
+        calls,
+        [
+            status_command,
+            f"sign codesign --force --sign - --entitlements {entitlements} {helper}",
+        ],
+    )
+
+
 def test_launchd_drill_refuses_already_loaded_service_without_bootout(tmp_path: Path) -> None:
     helperctl = load_helperctl()
     helper, socket_path, log_dir, plist_path = _make_launchd_drill_inputs(tmp_path)
@@ -1377,6 +1491,29 @@ def test_launchd_drill_cli_bundle_with_skip_smoke_passes_no_bundle(
 
     CASE.assertEqual(code, 0)
     CASE.assertIsNone(captured["bundle_path"])
+
+
+def test_launchd_drill_cli_passes_entitlements(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    entitlements = tmp_path / "helper.entitlements"
+    captured: dict[str, Any] = {}
+
+    def fake_run_launchd_drill(**kwargs: Any) -> list[tuple[str, helperctl.CheckResult]]:
+        captured.update(kwargs)
+        return [("launchd_preflight", helperctl.CheckResult(ok=True))]
+
+    monkeypatch.setattr(helperctl, "run_launchd_drill", fake_run_launchd_drill)
+
+    code = helperctl.main(
+        ["launchd-drill", "--skip-smoke", "--entitlements", str(entitlements)]
+    )
+
+    CASE.assertEqual(code, 0)
+    CASE.assertEqual(captured["entitlements_path"], entitlements)
 
 
 def test_launchd_bootstrap_requires_existing_plist_without_write(tmp_path: Path) -> None:
