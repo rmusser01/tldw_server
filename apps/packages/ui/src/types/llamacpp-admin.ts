@@ -153,6 +153,11 @@ export type LlamacppProfileMode =
   | "rerank"
   | "server_generic"
 
+export type LlamacppCapabilityKey = "chat" | "vision" | "embeddings" | "rerank"
+export type LlamacppModalityDirection = "input" | "output"
+export type LlamacppCapabilityMap = Partial<Record<LlamacppCapabilityKey, boolean>>
+export type LlamacppModalities = Partial<Record<LlamacppModalityDirection, string[]>>
+
 export type LlamacppPortPolicy = "explicit" | "autoselect"
 
 export type LlamacppRuntimeState =
@@ -171,6 +176,11 @@ export interface LlamacppProfile {
   model_id?: string | null
   model_path?: string | null
   mmproj_model_id?: string | null
+  mmproj_path?: string | null
+  mmproj_display_name?: string | null
+  capabilities?: LlamacppCapabilityMap
+  modalities?: LlamacppModalities
+  capability_warnings?: string[]
   host: string
   port: number
   port_policy: LlamacppPortPolicy
@@ -182,7 +192,18 @@ export interface LlamacppProfile {
 }
 
 export type LlamacppProfileCreateRequest = Partial<
-  Omit<LlamacppProfile, "profile_id" | "server_args" | "restart_policy" | "tags">
+  Omit<
+    LlamacppProfile,
+    | "profile_id"
+    | "server_args"
+    | "restart_policy"
+    | "tags"
+    | "mmproj_path"
+    | "mmproj_display_name"
+    | "capabilities"
+    | "modalities"
+    | "capability_warnings"
+  >
 > & {
   profile_id?: string | null
   name: string
@@ -192,7 +213,15 @@ export type LlamacppProfileCreateRequest = Partial<
 }
 
 export type LlamacppProfileUpdateRequest = Partial<
-  Omit<LlamacppProfile, "profile_id">
+  Omit<
+    LlamacppProfile,
+    | "profile_id"
+    | "mmproj_path"
+    | "mmproj_display_name"
+    | "capabilities"
+    | "modalities"
+    | "capability_warnings"
+  >
 >
 
 export interface LlamacppProfileListResponse {
@@ -208,6 +237,12 @@ export interface LlamacppRuntime {
   endpoint?: string | null
   model_id?: string | null
   model_path?: string | null
+  mmproj_model_id?: string | null
+  mmproj_path?: string | null
+  mmproj_display_name?: string | null
+  capabilities?: LlamacppCapabilityMap
+  modalities?: LlamacppModalities
+  capability_warnings?: string[]
   resolved_args: string[]
   started_at?: string | null
   stopped_at?: string | null
