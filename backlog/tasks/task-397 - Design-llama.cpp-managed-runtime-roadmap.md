@@ -4,7 +4,7 @@ title: Design llama.cpp managed runtime roadmap
 status: In Progress
 assignee: []
 created_date: '2026-05-16 01:20'
-updated_date: '2026-05-16 01:23'
+updated_date: '2026-05-16 01:29'
 labels:
   - llamacpp
   - design
@@ -43,6 +43,8 @@ Created Docs/superpowers/specs/2026-05-16-llamacpp-managed-runtime-roadmap-desig
 Local consistency review completed: checked the spec for the requested compatibility/default-profile, download deferral, mmproj, supervisor, profile, and testing coverage. `git diff --check -- Docs/superpowers/specs/2026-05-16-llamacpp-managed-runtime-roadmap-design.md backlog/tasks/task-397\ -\ Design-llama.cpp-managed-runtime-roadmap.md` passed with no output.
 
 Bandit not run for this task because the current change is documentation/backlog only and touches no Python code.
+
+Spec critique pass completed before implementation planning. Added design clarifications for backend-owned persistence vs config.txt, admin-only/deployment-global scope, multi-user provider-wiring constraints, asset identity and symlink allowlist handling, explicit port policy, default-profile migration behavior, per-profile lifecycle locking, shutdown/orphan behavior, reserved mode flags, local folder import semantics, and extra E2E coverage for duplicate ports and V1 wrapper behavior.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
