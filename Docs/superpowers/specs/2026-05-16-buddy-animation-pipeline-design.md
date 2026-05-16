@@ -237,10 +237,11 @@ front-loaded.
 ## Manifest State Catalog Semantics
 
 The current runtime already supports custom states through `state_catalog` and
-`authored_triggers`. The production design should treat this as the state-catalog
-V2 semantics for sprite-frame packs, whether it remains an additive
-`manifest_version: 1` extension or later becomes a wire-level manifest version
-bump.
+`authored_triggers`. The production design should treat this as the
+state-catalog V2 semantics for sprite-frame packs, but the immediate
+implementation should not bump the wire-level manifest version. In this slice,
+"V2 semantics" means a documented production contract over the existing
+`manifest_version: 1` sprite-frame renderer.
 
 The compatibility rule is:
 
@@ -250,6 +251,8 @@ The compatibility rule is:
 - `states` may map built-in states and declared custom states to animations.
 - `fallbacks` define how custom states degrade to built-in states.
 - `authored_triggers` map runtime signals to built-in or custom states.
+- `custom_state_variants` means timed runtime loops or frame mappings for
+  declared custom states, not static source-sheet cells by themselves.
 
 If a future implementation introduces `manifest_version: 2` for sprite-frame
 packs, the renderer capability endpoint must advertise both versions during

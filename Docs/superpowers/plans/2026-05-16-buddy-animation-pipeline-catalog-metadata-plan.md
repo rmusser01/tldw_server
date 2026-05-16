@@ -24,15 +24,25 @@ Do not generate final Buddy images in this slice. Do not change runtime renderin
 
 ## Files And Responsibilities
 
+- Create: `tldw_Server_API/app/core/Persona/visual_starter_recipe_taxonomy.py`
+  - Owns shared taxonomy constants for starter expected asset groups, static
+    source groups, and timed animation output IDs.
+  - Keeps fixture validation and API schema validation from drifting.
+
 - Modify: `tldw_Server_API/app/core/Persona/visual_starter_fixtures.py`
   - Owns immutable bundled starter catalog fixture definitions and production recipes.
-  - Add explicit pipeline taxonomy constants.
   - Remove `static_talking_reaction_sheet` from `animation_outputs`.
   - Keep `static_talking_reaction_sheet` in `expected_asset_groups` where appropriate.
 
+- Modify: `tldw_Server_API/app/core/Persona/visual_starter_catalog.py`
+  - Owns service-level starter fixture validation.
+  - Reject recipe `animation_outputs` that are static/source asset groups before
+    invalid fixture metadata reaches API response construction.
+
 - Modify: `tldw_Server_API/app/api/v1/schemas/persona.py`
   - Owns API response validation for starter production recipes.
-  - Add validation that recipe `animation_outputs` use supported timed-output IDs and do not include static asset groups.
+  - Reuse the shared taxonomy to validate that recipe `animation_outputs` use
+    supported timed-output IDs and do not include static asset groups.
 
 - Modify: `tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py`
   - Owns focused starter catalog fixture/service validation.
@@ -57,15 +67,15 @@ Do not generate final Buddy images in this slice. Do not change runtime renderin
 ## Task 1: Add Pipeline Taxonomy Tests
 
 **Files:**
+- Create: `tldw_Server_API/app/core/Persona/visual_starter_recipe_taxonomy.py`
 - Modify: `tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py`
-- Modify: `tldw_Server_API/app/core/Persona/visual_starter_fixtures.py`
 
 - [ ] **Step 1: Write failing taxonomy tests**
 
-Add imports from `visual_starter_fixtures.py` for the new constants that will be implemented in Step 3:
+Add imports from the new taxonomy module for the constants that will be implemented in Step 3:
 
 ```python
-from tldw_Server_API.app.core.Persona.visual_starter_fixtures import (
+from tldw_Server_API.app.core.Persona.visual_starter_recipe_taxonomy import (
     BUDDY_VISUAL_ANIMATION_OUTPUT_IDS,
     BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS,
     BUDDY_VISUAL_STATIC_SOURCE_ASSET_GROUP_IDS,
@@ -133,13 +143,20 @@ Run:
   -v
 ```
 
-Expected: fail because the taxonomy constants do not exist and the current recipes include `static_talking_reaction_sheet` in some `animation_outputs`.
+Expected: fail because the taxonomy module/constants do not exist and the current recipes include `static_talking_reaction_sheet` in some `animation_outputs`.
 
-- [ ] **Step 3: Add taxonomy constants**
+- [ ] **Step 3: Add the shared taxonomy module**
 
-In `tldw_Server_API/app/core/Persona/visual_starter_fixtures.py`, add constants near the existing expected asset group constants:
+Create `tldw_Server_API/app/core/Persona/visual_starter_recipe_taxonomy.py`:
 
 ```python
+"""Shared taxonomy for Persona Visual starter production recipes.
+
+The starter catalog exposes source asset groups and timed runtime animation
+outputs as separate concepts. Keeping the taxonomy in this small module avoids
+drift between immutable fixture validation and public API schema validation.
+"""
+
 BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS = frozenset(
     {
         "identity_brief",
@@ -170,9 +187,17 @@ BUDDY_VISUAL_ANIMATION_OUTPUT_IDS = frozenset(
         "custom_state_variants",
     }
 )
+
+__all__ = [
+    "BUDDY_VISUAL_ANIMATION_OUTPUT_IDS",
+    "BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS",
+    "BUDDY_VISUAL_STATIC_SOURCE_ASSET_GROUP_IDS",
+]
 ```
 
-Add the three constants to `__all__`.
+`custom_state_variants` remains in `BUDDY_VISUAL_ANIMATION_OUTPUT_IDS` because
+it means timed runtime loops or frame mappings for declared custom states, not
+static source-sheet cells.
 
 - [ ] **Step 4: Run tests and verify the remaining semantic failure**
 
@@ -265,18 +290,44 @@ Expected: pass.
 Run:
 
 ```bash
-git add tldw_Server_API/app/core/Persona/visual_starter_fixtures.py \
+git add tldw_Server_API/app/core/Persona/visual_starter_recipe_taxonomy.py \
+  tldw_Server_API/app/core/Persona/visual_starter_fixtures.py \
   tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py
 git commit -m "test: separate buddy static sheets from animation outputs"
 ```
 
-## Task 3: Enforce Recipe Output Semantics At The API Schema Boundary
+## Task 3: Enforce Recipe Output Semantics At Catalog And API Boundaries
 
 **Files:**
+- Modify: `tldw_Server_API/app/core/Persona/visual_starter_catalog.py`
 - Modify: `tldw_Server_API/app/api/v1/schemas/persona.py`
 - Modify: `tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py`
 
-- [ ] **Step 1: Write failing schema validation tests**
+- [ ] **Step 1: Write failing service and schema validation tests**
+
+Add this service-level test near the malformed production metadata tests:
+
+```python
+def test_list_starter_packs_rejects_static_source_animation_outputs(
+    db_instance: CharactersRAGDB,
+) -> None:
+    malformed = replace(
+        DEFAULT_PERSONA_VISUAL_STARTER_PACKS[0],
+        production_recipe=PersonaVisualStarterProductionRecipe(
+            identity_brief="Identity",
+            neutral_anchor="Neutral anchor",
+            static_sheet="Static sheet",
+            animation_outputs=("static_talking_reaction_sheet",),
+        ),
+    )
+    service = PersonaVisualStarterCatalogService(db_instance, starter_packs=(malformed,))
+
+    with pytest.raises(PersonaVisualStarterCatalogError) as exc_info:
+        service.list_starter_packs()
+
+    assert exc_info.value.code == "invalid_starter_fixture"
+    assert exc_info.value.details["field_name"] == "production_recipe.animation_outputs"
+```
 
 Add a test near `test_production_recipe_response_enforces_catalog_bounds`:
 
@@ -301,30 +352,57 @@ def test_production_recipe_response_rejects_non_animation_outputs(
         PersonaVisualStarterProductionRecipeResponse.model_validate(payload)
 ```
 
-- [ ] **Step 2: Run test and verify it fails**
+- [ ] **Step 2: Run tests and verify they fail**
 
 Run:
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
+  tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py::test_list_starter_packs_rejects_static_source_animation_outputs \
   tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py::test_production_recipe_response_rejects_non_animation_outputs \
   -v
 ```
 
-Expected: fail because the schema currently accepts any bounded non-empty recipe item.
+Expected: fail because the catalog service and schema currently accept any
+bounded non-empty recipe item.
 
-- [ ] **Step 3: Add schema constants and validator**
+- [ ] **Step 3: Add catalog service validation**
 
-In `tldw_Server_API/app/api/v1/schemas/persona.py`, add near the recipe type aliases:
+In `tldw_Server_API/app/core/Persona/visual_starter_catalog.py`, import:
 
 ```python
-_PERSONA_VISUAL_STARTER_ANIMATION_OUTPUTS = frozenset(
-    {
-        "required_state_loops",
-        "animation_strips",
-        "animation_atlas",
-        "custom_state_variants",
-    }
+from tldw_Server_API.app.core.Persona.visual_starter_recipe_taxonomy import (
+    BUDDY_VISUAL_ANIMATION_OUTPUT_IDS,
+)
+```
+
+After `animation_outputs` is normalized in `_starter_production_recipe()`, add:
+
+```python
+        invalid_outputs = sorted(
+            output
+            for output in animation_outputs
+            if output not in BUDDY_VISUAL_ANIMATION_OUTPUT_IDS
+        )
+        if invalid_outputs:
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter production recipe animation_outputs must be timed output ids.",
+                details={
+                    "starter_pack_id": starter_id,
+                    "field_name": "production_recipe.animation_outputs",
+                    "invalid_outputs": invalid_outputs,
+                },
+            )
+```
+
+- [ ] **Step 4: Add schema validator using the shared taxonomy**
+
+In `tldw_Server_API/app/api/v1/schemas/persona.py`, import:
+
+```python
+from tldw_Server_API.app.core.Persona.visual_starter_recipe_taxonomy import (
+    BUDDY_VISUAL_ANIMATION_OUTPUT_IDS,
 )
 ```
 
@@ -335,7 +413,7 @@ Add a validator to `PersonaVisualStarterProductionRecipeResponse`:
     @classmethod
     def validate_animation_outputs(cls, value: list[str]) -> list[str]:
         invalid = sorted(
-            output for output in value if output not in _PERSONA_VISUAL_STARTER_ANIMATION_OUTPUTS
+            output for output in value if output not in BUDDY_VISUAL_ANIMATION_OUTPUT_IDS
         )
         if invalid:
             raise ValueError(
@@ -344,9 +422,10 @@ Add a validator to `PersonaVisualStarterProductionRecipeResponse`:
         return value
 ```
 
-Keep this schema-local to avoid coupling public API schemas to the fixture module.
+Do not import from `visual_starter_fixtures.py`; the shared taxonomy module is
+the stable dependency.
 
-- [ ] **Step 4: Run focused schema/catalog tests**
+- [ ] **Step 5: Run focused schema/catalog tests**
 
 Run:
 
@@ -358,12 +437,14 @@ Run:
 
 Expected: pass.
 
-- [ ] **Step 5: Commit schema validation**
+- [ ] **Step 6: Commit catalog and schema validation**
 
 Run:
 
 ```bash
-git add tldw_Server_API/app/api/v1/schemas/persona.py \
+git add tldw_Server_API/app/core/Persona/visual_starter_recipe_taxonomy.py \
+  tldw_Server_API/app/core/Persona/visual_starter_catalog.py \
+  tldw_Server_API/app/api/v1/schemas/persona.py \
   tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py
 git commit -m "fix: bound buddy starter recipe animation outputs"
 ```
@@ -493,6 +574,8 @@ Run:
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m py_compile \
+  tldw_Server_API/app/core/Persona/visual_starter_recipe_taxonomy.py \
+  tldw_Server_API/app/core/Persona/visual_starter_catalog.py \
   tldw_Server_API/app/core/Persona/visual_starter_fixtures.py \
   tldw_Server_API/app/api/v1/schemas/persona.py
 ```
@@ -505,7 +588,9 @@ Run:
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit \
-  -r tldw_Server_API/app/core/Persona/visual_starter_fixtures.py \
+  -r tldw_Server_API/app/core/Persona/visual_starter_recipe_taxonomy.py \
+     tldw_Server_API/app/core/Persona/visual_starter_catalog.py \
+     tldw_Server_API/app/core/Persona/visual_starter_fixtures.py \
      tldw_Server_API/app/api/v1/schemas/persona.py \
   -f json -o /tmp/bandit_buddy_animation_catalog_metadata.json
 ```
@@ -556,7 +641,8 @@ git commit -m "chore: record buddy catalog metadata verification"
 This slice is complete when:
 
 - `static_talking_reaction_sheet` is present only as source/expected asset metadata, not as a recipe animation output.
-- API schema validation rejects static/source groups in `animation_outputs`.
+- catalog service validation and API schema validation reject static/source
+  groups in `animation_outputs`.
 - starter catalog/API/job tests pass.
 - docs explain the distinction clearly.
 - issue #1787 and the Backlog task record the verification.
