@@ -2,6 +2,8 @@ import React from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { PersonaVisualStarterPackSummary } from "@/types/persona-visuals"
+
 const mocks = vi.hoisted(() => ({
   translate: vi.fn(
     (
@@ -30,7 +32,7 @@ vi.mock("react-i18next", () => ({
 
 import { VisualBuddySetupChoiceCard } from "../VisualBuddySetupChoiceCard"
 
-const starter = {
+const starter: PersonaVisualStarterPackSummary = {
   id: "research-buddy-starter",
   title: "Research Buddy Starter",
   description: "Starter sprite pack",
