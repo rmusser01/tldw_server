@@ -4,7 +4,7 @@ title: Plan llama.cpp model-family and mmproj profile wiring
 status: Done
 assignee: []
 created_date: '2026-05-16 15:06'
-updated_date: '2026-05-16 15:11'
+updated_date: '2026-05-16 15:14'
 labels:
   - llamacpp
   - planning
@@ -38,6 +38,8 @@ Create the next implementation plan for the llama.cpp managed runtime roadmap af
 
 <!-- SECTION:NOTES:BEGIN -->
 Created Docs/superpowers/plans/2026-05-16-llamacpp-model-family-mmproj-profile-wiring-plan.md as the next implementation plan for the approved llama.cpp managed runtime roadmap. The plan scopes the next slice to model-family modes, base GGUF/mmproj profile launch resolution, managed profile metadata, and minimal WebUI capability visibility. It deliberately leaves remote downloads/catalogs, full profile editing, and advanced Chat/Knowledge routing for follow-up tasks. Verification for this planning-only slice: inspected current runtime/inventory/provider/UI code on origin/dev, reviewed the plan file, and ran git diff --check successfully. Bandit skipped because this task changes only planning/task documentation. Note: origin/dev currently has a duplicate TASK-397 ID collision, so this was tracked as standalone TASK-407 instead of being linked as a child of TASK-397.
+
+PR: https://github.com/rmusser01/tldw_server/pull/1772
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
