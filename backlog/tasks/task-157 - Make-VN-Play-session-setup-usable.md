@@ -1,7 +1,7 @@
 ---
 id: TASK-157
 title: Make VN Play session setup usable
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-09 05:15'
 updated_date: '2026-05-09 06:03'

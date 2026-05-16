@@ -1,7 +1,7 @@
 ---
 id: TASK-333
 title: Add VN script graph and outline inspector
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-14 04:15'
 updated_date: '2026-05-14 05:10'

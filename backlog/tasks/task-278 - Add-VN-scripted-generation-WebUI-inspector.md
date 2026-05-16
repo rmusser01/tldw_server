@@ -1,7 +1,7 @@
 ---
 id: TASK-278
 title: Add VN scripted generation WebUI inspector
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-12 01:04'
 labels:

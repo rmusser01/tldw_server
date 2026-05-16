@@ -1,7 +1,7 @@
 ---
 id: TASK-284
 title: Add VN Play branch timeline and restore UX
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-12 03:03'
 updated_date: '2026-05-12 03:04'

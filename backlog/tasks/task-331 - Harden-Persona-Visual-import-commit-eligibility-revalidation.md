@@ -1,7 +1,7 @@
 ---
 id: TASK-331
 title: Harden Persona Visual import-commit eligibility revalidation
-status: In Progress
+status: Done
 assignee:
   - codex
 created_date: '2026-05-14 03:19'
@@ -47,8 +47,8 @@ Add a narrow Persona/Buddy visual-pack hardening slice for GitHub #1657. Current
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
 
 ## Implementation Notes
@@ -83,3 +83,9 @@ Verification after review fix: `git diff --check` passed.
 
 Verification after review fix: `python -m bandit tldw_Server_API/app/core/Persona/visual_portability/commit_eligibility.py tldw_Server_API/app/core/Persona/visual_portability/importer.py tldw_Server_API/app/api/v1/endpoints/persona.py` reported no issues.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Hardened Persona Visual import commit eligibility so commit requests fail closed before queuing when stored previews are already ineligible, and worker revalidation refuses non-completed or non-committable previews before creating draft packs/assets. Review follow-up added helper-level malformed-plan, missing-plan, null-blocker, and legacy renderer preview regressions. Focused Persona Visual worker/API/portability tests, diff checks, and Bandit touched-scope checks passed; no known blockers remain.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -1,7 +1,7 @@
 ---
 id: TASK-405
 title: Add Persona Visual starter asset-production recipes
-status: In Progress
+status: Done
 labels:
 - persona
 - visual-packs
