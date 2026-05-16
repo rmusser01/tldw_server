@@ -1,7 +1,7 @@
 ---
 id: TASK-406
 title: Design Persona Visual recipe-backed generation workflow
-status: In Progress
+status: Done
 labels:
 - persona
 - visual-packs
@@ -25,10 +25,10 @@ Write a backend-only design for connecting Persona Visual starter production_rec
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Design documents recipe-output selection against starter production_recipe metadata.
-- [ ] #2 Design reuses existing Persona Visual generation Jobs and candidate review storage instead of introducing a parallel job system.
-- [ ] #3 Design defines backend validation, idempotency, trace-safety, failure semantics, and future implementation slices.
-- [ ] #4 Design explicitly excludes WebUI and runtime activation behavior.
+- [x] #1 Design documents recipe-output selection against starter production_recipe metadata.
+- [x] #2 Design reuses existing Persona Visual generation Jobs and candidate review storage instead of introducing a parallel job system.
+- [x] #3 Design defines backend validation, idempotency, trace-safety, failure semantics, and future implementation slices.
+- [x] #4 Design explicitly excludes WebUI and runtime activation behavior.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -40,7 +40,9 @@ Docs/superpowers/specs/2026-05-16-persona-visual-recipe-generation-design.md
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+- Added `Docs/superpowers/specs/2026-05-16-persona-visual-recipe-generation-design.md`.
+- Verified with `git diff --check`.
+- Bandit skipped because this slice only changes documentation and Backlog task metadata.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -51,10 +53,10 @@ Backend-only design drafted for connecting Persona Visual starter production_rec
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
