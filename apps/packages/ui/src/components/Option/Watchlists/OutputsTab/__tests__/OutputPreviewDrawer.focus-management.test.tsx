@@ -239,4 +239,59 @@ describe("OutputPreviewDrawer focus management", () => {
     expect(await screen.findByText("Vendor advisory")).toBeInTheDocument()
     expect(serviceMocks.getWatchlistOutputEvidence).toHaveBeenCalledWith(77)
   })
+
+  it("keeps report evidence visible when downloaded output content is empty", async () => {
+    serviceMocks.downloadWatchlistOutput.mockResolvedValue("")
+    serviceMocks.downloadWatchlistOutputBinary.mockResolvedValue(new ArrayBuffer(0))
+    serviceMocks.getWatchlistOutputEvidence.mockResolvedValue({
+      output_id: 77,
+      immutable_snapshot: true,
+      readiness: {
+        state: "ready",
+        score: 95,
+        warnings: []
+      },
+      snapshot: {
+        schema_version: 1,
+        snapshot_id: "snapshot-empty-77",
+        generated_at: "2026-05-15T12:00:00Z",
+        preset: "general_research",
+        watchlist_id: 42,
+        job_id: 2,
+        run_id: 3,
+        output_id: 77,
+        included_items: [],
+        excluded_items: [],
+        source_summary: {
+          unique_source_count: 0
+        },
+        included_count: 0,
+        excluded_count: 0,
+        excluded_items_truncated: false,
+        alert_count: 0,
+        critical_alert_count: 0,
+        readiness: {
+          state: "ready",
+          score: 95,
+          warnings: []
+        }
+      }
+    })
+
+    render(
+      <OutputPreviewDrawer
+        open
+        output={buildOutput({
+          metadata: {
+            report_snapshot_path: "watchlists/snapshot-empty-77.json"
+          }
+        })}
+        onClose={vi.fn()}
+      />
+    )
+
+    expect(await screen.findByText("No content available")).toBeInTheDocument()
+    expect(await screen.findByText("Evidence snapshot")).toBeInTheDocument()
+    expect(serviceMocks.getWatchlistOutputEvidence).toHaveBeenCalledWith(77)
+  })
 })

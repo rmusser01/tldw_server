@@ -1149,7 +1149,7 @@ def _parse_output_metadata(row) -> dict[str, Any]:
     return metadata if isinstance(metadata, dict) else {}
 
 
-def _load_output_content(user_id: int, row) -> str | None:
+async def _load_output_content(user_id: int, row) -> str | None:
     storage_path = getattr(row, "storage_path", None)
     if not storage_path:
         return None
@@ -1160,7 +1160,7 @@ def _load_output_content(user_id: int, row) -> str | None:
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         return None
     try:
-        return path.read_text(encoding="utf-8")
+        return await run_in_threadpool(path.read_text, encoding="utf-8")
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         return None
 
@@ -1243,7 +1243,7 @@ def _report_metadata_from_snapshot(
     }
 
 
-def _row_to_output(row, *, user_id: int | None = None, content_override: str | None = None) -> WatchlistOutput:
+async def _row_to_output(row, *, user_id: int | None = None, content_override: str | None = None) -> WatchlistOutput:
     metadata = _parse_output_metadata(row)
     version = metadata.get("version")
     try:
@@ -1253,7 +1253,7 @@ def _row_to_output(row, *, user_id: int | None = None, content_override: str | N
     expires_at = metadata.get("expires_at") if isinstance(metadata, dict) else None
     content = content_override
     if content is None and user_id is not None:
-        content = _load_output_content(user_id, row)
+        content = await _load_output_content(user_id, row)
     return WatchlistOutput(
         id=row.id,
         run_id=int(row.run_id or 0),
@@ -4335,7 +4335,7 @@ async def get_run_details(
         try:
             p = _resolve_watchlist_log_path(user_id=int(resolved_user_id), log_path=r.log_path)
             if p and p.exists():
-                content = p.read_text(encoding="utf-8", errors="replace")
+                content = await run_in_threadpool(p.read_text, encoding="utf-8", errors="replace")
                 max_len = 65536
                 if len(content) > max_len:
                     log_text = content[-max_len:]
@@ -5734,7 +5734,7 @@ async def create_output(
             )
         else:
             try:
-                path.write_text(output_content or "", encoding="utf-8")
+                await run_in_threadpool(path.write_text, output_content or "", encoding="utf-8")
             except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
                 logger.error(f"watchlists outputs: failed to write output file: {exc}")
                 raise HTTPException(status_code=500, detail="write_failed") from exc
@@ -5906,7 +5906,7 @@ async def create_output(
         _cleanup_outputs()
         raise HTTPException(status_code=500, detail="output_create_failed") from exc
 
-    output = _row_to_output(row, user_id=user_id, content_override=content)
+    output = await _row_to_output(row, user_id=user_id, content_override=content)
 
     notifications = NotificationsService(
         user_id=resolve_user_id_for_request(
@@ -6056,7 +6056,7 @@ async def create_output(
             metadata_json=json.dumps(metadata_for_update) if metadata_for_update is not None else None,
             chatbook_path=chatbook_path_update,
         )
-        output = _row_to_output(updated_row, user_id=user_id)
+        output = await _row_to_output(updated_row, user_id=user_id)
 
     return output
 
@@ -6098,7 +6098,7 @@ async def list_outputs(
         metadata = _parse_output_metadata(row)
         if metadata.get("origin") != "watchlists":
             continue
-        items.append(_row_to_output(row, user_id=user_id))
+        items.append(await _row_to_output(row, user_id=user_id))
     return WatchlistOutputsListResponse(
         items=items,
         total=total,
@@ -6131,7 +6131,7 @@ async def get_output(
         error_status=500,
         invalid_detail="invalid user_id",
     )
-    output = _row_to_output(row, user_id=user_id)
+    output = await _row_to_output(row, user_id=user_id)
     if output.expired:
         collections_db.purge_expired_outputs()
         raise HTTPException(status_code=404, detail="output_not_found")
@@ -6172,7 +6172,7 @@ async def download_output(
         error_status=500,
         invalid_detail="invalid user_id",
     )
-    output = _row_to_output(row, user_id=user_id)
+    output = await _row_to_output(row, user_id=user_id)
     if output.expired:
         collections_db.purge_expired_outputs()
         raise HTTPException(status_code=404, detail="output_not_found")
@@ -6191,7 +6191,7 @@ async def download_output(
         headers = {"Content-Disposition": f'attachment; filename="{filename}.mp3"'}
         return FileResponse(path=output_path, media_type="audio/mpeg", headers=headers)
     try:
-        content = output_path.read_text(encoding="utf-8")
+        content = await run_in_threadpool(output_path.read_text, encoding="utf-8")
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
         raise HTTPException(status_code=404, detail="output_file_missing") from exc
     if fmt == "html":
@@ -6260,7 +6260,7 @@ async def get_output_evidence(
 ) -> dict[str, Any]:
     collections_db.purge_expired_outputs()
     row, metadata = _get_watchlist_output_row_or_404(collections_db, output_id)
-    output = _row_to_output(row)
+    output = await _row_to_output(row)
     if output.expired:
         collections_db.purge_expired_outputs()
         raise HTTPException(status_code=404, detail="output_not_found")
@@ -6286,7 +6286,7 @@ async def get_output_readiness(
 ) -> dict[str, Any]:
     collections_db.purge_expired_outputs()
     row, metadata = _get_watchlist_output_row_or_404(collections_db, output_id)
-    output = _row_to_output(row)
+    output = await _row_to_output(row)
     if output.expired:
         collections_db.purge_expired_outputs()
         raise HTTPException(status_code=404, detail="output_not_found")

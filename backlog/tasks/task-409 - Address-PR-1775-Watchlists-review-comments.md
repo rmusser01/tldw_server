@@ -75,6 +75,8 @@ Sweep live review threads, CodeRabbit outside-diff comments, and failing PR chec
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Addressed PR #1775 review comments across Watchlists alerts, constrained pagination, async stale guards, report builder/evidence handling, settings/template loading feedback, source bulk import state invalidation, first-class Watchlist selection, quick setup auto-open scoping, copy/locale fixes, and extension E2E drift. Added server-side alert search support, safer LIKE search escaping, content-alert regex validation plus timeout-bounded legacy-rule evaluation, endpoint rate limits, async report snapshot file I/O, and regression coverage. Verified focused UI tests, typecheck, backend Watchlists tests, Bandit, extension build, git diff whitespace, and strict Watchlists extension E2E with 13 passed / 0 skipped.
+
+Second sweep addressed remaining CodeRabbit top-level/outside-diff items that were not inline-resolvable: active-scope all-filtered review counting, queued-run smart-count cache separation, capped batch partial state, evidence visibility for empty report content, redundant JobFormModal matchMedia setup, and remaining blocking file I/O in async output paths. Verified focused UI tests, typecheck guard, report API/evidence pytest, Bandit, extension Chrome build, and git diff whitespace.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

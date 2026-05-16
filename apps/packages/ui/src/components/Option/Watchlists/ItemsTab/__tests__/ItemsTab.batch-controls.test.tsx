@@ -1254,6 +1254,132 @@ describe("ItemsTab batch throughput controls", () => {
     )
   })
 
+  it("uses the active queued filter scope and count for mark all filtered", async () => {
+    const queueItems = [
+      {
+        ...makeItems()[0],
+        id: 101,
+        run_id: 1,
+        reviewed: false,
+        queued_for_briefing: true
+      },
+      {
+        ...makeItems()[1],
+        id: 102,
+        run_id: 1,
+        reviewed: true,
+        queued_for_briefing: true
+      },
+      {
+        ...makeItems()[2],
+        id: 201,
+        run_id: 2,
+        reviewed: false,
+        queued_for_briefing: true
+      }
+    ]
+    setupFetchScrapedItemsMock(queueItems)
+    serviceMocks.fetchWatchlistRuns.mockResolvedValue({
+      items: [
+        { id: 1, job_id: 1, status: "completed" },
+        { id: 2, job_id: 1, status: "completed" }
+      ],
+      total: 2,
+      page: 1,
+      size: 200,
+      has_more: false
+    })
+    serviceMocks.fetchScrapedItemSmartCounts.mockResolvedValue({
+      all: 3,
+      today: 3,
+      today_unread: 2,
+      unread: 2,
+      reviewed: 1,
+      queued: 3
+    })
+    serviceMocks.batchUpdateScrapedItems.mockResolvedValue({
+      matched: 1,
+      changed: 1,
+      unchanged: 0,
+      failed: 0,
+      matched_ids: [101],
+      changed_ids: [101],
+      unchanged_ids: [],
+      failed_ids: [],
+      capped: false,
+      exhausted: true,
+      limit: 10000
+    })
+
+    render(<ItemsTab />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("watchlists-item-row-101")).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByTestId("watchlists-items-smart-feed-queued"))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("watchlists-item-row-101")).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByTestId("watchlists-items-mark-all-filtered"))
+
+    await waitFor(() => {
+      expect(uiMocks.modalConfirm).toHaveBeenCalled()
+    })
+    const confirmConfig = uiMocks.modalConfirm.mock.calls[0]?.[0] as Record<string, unknown>
+    expect(confirmConfig?.content).toBe(
+      "Scope: all filtered updates. This will mark 1 update as reviewed."
+    )
+
+    await waitFor(() => {
+      expect(serviceMocks.batchUpdateScrapedItems).toHaveBeenCalledWith({
+        watchlist_id: 42,
+        scope: expect.objectContaining({
+          watchlist_id: 42,
+          queued_for_briefing: true,
+          run_id: 1,
+          reviewed: false
+        }),
+        reviewed: true
+      })
+    })
+  })
+
+  it("treats capped all-filtered batch responses as partial work", async () => {
+    serviceMocks.batchUpdateScrapedItems.mockResolvedValue({
+      matched: 2,
+      changed: 2,
+      unchanged: 0,
+      failed: 0,
+      matched_ids: [101, 102],
+      changed_ids: [101, 102],
+      unchanged_ids: [],
+      failed_ids: [],
+      capped: true,
+      exhausted: false,
+      limit: 2
+    })
+
+    render(<ItemsTab />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("watchlists-item-row-101")).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByTestId("watchlists-items-mark-all-filtered"))
+
+    await waitFor(() => {
+      expect(uiMocks.messageWarning).toHaveBeenCalledWith(
+        "Marked 2 all filtered updates as reviewed; more matching updates may remain."
+      )
+    })
+    expect(screen.getByTestId("watchlists-items-batch-progress-summary")).toHaveTextContent(
+      "Batch review partial: 2 succeeded; more matching updates may remain."
+    )
+  })
+
   it("shows partial-failure feedback and keeps failed selections for retry", async () => {
     serviceMocks.batchUpdateScrapedItems.mockResolvedValue({
       matched: 2,

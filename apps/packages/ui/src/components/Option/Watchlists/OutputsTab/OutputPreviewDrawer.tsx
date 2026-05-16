@@ -466,10 +466,20 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
           )}
         </div>
       ) : (
-        <Empty
-          description={t("watchlists:outputs.noContent", "No content available")}
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-        />
+        <div className="space-y-4">
+          {output && hasReportEvidenceMetadata && (
+            <div className="rounded-lg border border-border bg-surface p-3">
+              <ReportEvidencePanel
+                outputId={output.id}
+                compact
+              />
+            </div>
+          )}
+          <Empty
+            description={t("watchlists:outputs.noContent", "No content available")}
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          />
+        </div>
       )}
     </Drawer>
   )

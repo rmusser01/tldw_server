@@ -3260,6 +3260,9 @@
   "items_batch_completedScoped": {
     "message": "Marked {{count}} {{scope}} as reviewed."
   },
+  "items_batch_incompleteScoped": {
+    "message": "Marked {{success}} {{scope}} as reviewed; more matching updates may remain."
+  },
   "items_batch_partialScoped": {
     "message": "Marked {{success}} {{scope}} as reviewed; {{failed}} failed."
   },
@@ -3277,6 +3280,9 @@
   },
   "items_batch_progress_completed": {
     "message": "Completed {{success}} of {{total}}. {{failed}} failed."
+  },
+  "items_batch_progress_incomplete": {
+    "message": "Batch review partial: {{succeeded}} succeeded; more matching updates may remain."
   },
   "items_batch_progress_retryFailed": {
     "message": "Retry failed"

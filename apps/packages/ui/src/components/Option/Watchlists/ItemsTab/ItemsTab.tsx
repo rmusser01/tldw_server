@@ -130,6 +130,7 @@ interface BatchReviewProgress {
   processed: number
   succeeded: number
   failed: number
+  incomplete: boolean
   failedIds: number[]
   failedItemIds: number[]
 }
@@ -735,6 +736,7 @@ export const ItemsTab: React.FC = () => {
       selectedWatchlistId ?? "all-watchlists",
       selectedSourceId ?? "all",
       statusFilter,
+      queueRunFilter ?? "all-runs",
       effectiveSearchQuery.trim().toLowerCase()
     ].join("|")
     const cached = smartCountsCacheRef.current[cacheKey]
@@ -1125,7 +1127,13 @@ export const ItemsTab: React.FC = () => {
   )
   const selectedUnreviewedCount = selectedUnreviewedItemIds.length
   const pageUnreviewedCount = pageUnreviewedItemIds.length
-  const allFilteredUnreadEstimate = smartCounts.unread
+  const allFilteredUnreadEstimate = useMemo(() => {
+    if (smartFilter === "reviewed") return 0
+    if (smartFilter === "today" || smartFilter === "todayUnread") return smartCounts.todayUnread
+    if (smartFilter === "queued") return smartCounts.queued
+    if (smartFilter === "alertMatches") return smartCounts.alertMatches
+    return smartCounts.unread
+  }, [smartCounts, smartFilter])
 
   const allPageItemsSelected = useMemo(
     () => pageItemIds.length > 0 && pageItemIds.every((id) => selectedItemIdSet.has(id)),
@@ -1266,14 +1274,28 @@ export const ItemsTab: React.FC = () => {
     })
   }, [pageItemIds])
 
-  const buildAllFilteredBatchScope = useCallback((): ScrapedItemBatchScope => {
-    const scope = { ...buildBaseFilterParams({ reviewed: false }, searchQuery) }
+  const buildAllFilteredBatchScope = useCallback((): ScrapedItemBatchScope | null => {
+    if (smartFilter === "reviewed") {
+      return null
+    }
+    const scope = { ...buildBaseFilterParams({}, searchQuery), reviewed: false }
     delete scope.include_alert_summary
     delete scope.page
     delete scope.size
     delete scope.sort
     return scope
-  }, [buildBaseFilterParams, searchQuery])
+  }, [buildBaseFilterParams, searchQuery, smartFilter])
+
+  const countAllFilteredBatchScope = useCallback(async (
+    scope: ScrapedItemBatchScope
+  ): Promise<number> => {
+    const response = await fetchScrapedItems({
+      ...scope,
+      page: 1,
+      size: 1
+    })
+    return Number(response.total || 0)
+  }, [])
 
   const applyBatchReviewResult = useCallback((
     result: ScrapedItemBatchUpdateResponse,
@@ -1297,7 +1319,8 @@ export const ItemsTab: React.FC = () => {
   const markItemsReviewed = useCallback(async (
     itemIds: number[] | null,
     scope: BatchReviewScope,
-    estimatedCount?: number
+    estimatedCount?: number,
+    batchScopeParams?: ScrapedItemBatchScope | null
   ): Promise<void> => {
     if (selectedWatchlistId == null) {
       message.error(t("watchlists:items.batch.watchlistRequired", "Select a Watchlist first."))
@@ -1305,8 +1328,18 @@ export const ItemsTab: React.FC = () => {
     }
 
     const uniqueIds = Array.from(new Set(itemIds || []))
+    const resolvedBatchScope = itemIds ? null : (batchScopeParams ?? buildAllFilteredBatchScope())
     const totalEstimate = itemIds ? uniqueIds.length : Number(estimatedCount || 0)
     if (totalEstimate === 0) return
+    if (!itemIds && !resolvedBatchScope) {
+      message.info(
+        t(
+          "watchlists:items.batch.noFiltered",
+          "No matching unread updates to review."
+        )
+      )
+      return
+    }
 
     setBatchReviewScope(scope)
     setBatchReviewProgress({
@@ -1317,6 +1350,7 @@ export const ItemsTab: React.FC = () => {
       processed: 0,
       succeeded: 0,
       failed: 0,
+      incomplete: false,
       failedIds: [],
       failedItemIds: []
     })
@@ -1330,15 +1364,18 @@ export const ItemsTab: React.FC = () => {
             }
           : {
               watchlist_id: selectedWatchlistId,
-              scope: buildAllFilteredBatchScope(),
+              scope: resolvedBatchScope ?? undefined,
               reviewed: true
             }
       )
 
       applyBatchReviewResult(result, uniqueIds)
 
+      const cappedOrIncomplete = result.capped === true || result.exhausted === false
       const finalPhase: BatchReviewPhase =
-        Number(result.failed || 0) === 0
+        cappedOrIncomplete
+          ? "partial"
+          : Number(result.failed || 0) === 0
           ? "complete"
           : Number(result.changed || 0) > 0
             ? "partial"
@@ -1357,19 +1394,32 @@ export const ItemsTab: React.FC = () => {
               processed: matched,
               succeeded: changed,
               failed,
+              incomplete: cappedOrIncomplete,
               failedIds: [...failedItemIds],
               failedItemIds
             }
           : previous
       )
 
-      if (changed > 0 && failed === 0) {
+      if (changed > 0 && failed === 0 && !cappedOrIncomplete) {
         const scopeLabel = getBatchScopeLabel(scope, changed)
         message.success(
           t("watchlists:items.batch.completedScoped", "Marked {{count}} {{scope}} as reviewed.", {
             count: changed,
             scope: scopeLabel
           })
+        )
+      } else if (changed > 0 && cappedOrIncomplete) {
+        const scopeLabel = getBatchScopeLabel(scope, changed)
+        message.warning(
+          t(
+            "watchlists:items.batch.incompleteScoped",
+            "Marked {{success}} {{scope}} as reviewed; more matching updates may remain.",
+            {
+              success: changed,
+              scope: scopeLabel
+            }
+          )
         )
       } else if (changed > 0) {
         const scopeLabel = getBatchScopeLabel(scope, changed)
@@ -1436,7 +1486,8 @@ export const ItemsTab: React.FC = () => {
     scope: BatchReviewScope,
     itemIds: number[] | null,
     count: number,
-    title: string
+    title: string,
+    batchScopeParams?: ScrapedItemBatchScope | null
   ) => {
     if (count === 0) return
     const scopeLabel = getBatchScopeLabel(scope, count)
@@ -1453,7 +1504,7 @@ export const ItemsTab: React.FC = () => {
       ),
       okText: t("watchlists:items.markReviewed", "Mark as reviewed"),
       cancelText: t("common:cancel", "Cancel"),
-      onOk: () => markItemsReviewed(itemIds, scope, count)
+      onOk: () => markItemsReviewed(itemIds, scope, count, batchScopeParams)
     })
   }, [getBatchScopeLabel, markItemsReviewed, t])
 
@@ -1489,8 +1540,9 @@ export const ItemsTab: React.FC = () => {
     )
   }, [openBatchConfirm, pageUnreviewedItemIds, t])
 
-  const handleMarkAllFilteredReviewed = useCallback(() => {
-    if (allFilteredUnreadEstimate === 0) {
+  const handleMarkAllFilteredReviewed = useCallback(async () => {
+    const batchScopeParams = buildAllFilteredBatchScope()
+    if (!batchScopeParams) {
       message.info(
         t(
           "watchlists:items.batch.noFiltered",
@@ -1500,13 +1552,33 @@ export const ItemsTab: React.FC = () => {
       return
     }
 
-    openBatchConfirm(
-      "allFiltered",
-      null,
-      allFilteredUnreadEstimate,
-      t("watchlists:items.batch.confirmAllFilteredTitle", "Mark all filtered updates as reviewed?")
-    )
-  }, [allFilteredUnreadEstimate, openBatchConfirm, t])
+    setCollectingAllFiltered(true)
+    try {
+      const totalEstimate = await countAllFilteredBatchScope(batchScopeParams)
+      if (totalEstimate === 0) {
+        message.info(
+          t(
+            "watchlists:items.batch.noFiltered",
+            "No matching unread updates to review."
+          )
+        )
+        return
+      }
+
+      openBatchConfirm(
+        "allFiltered",
+        null,
+        totalEstimate,
+        t("watchlists:items.batch.confirmAllFilteredTitle", "Mark all filtered updates as reviewed?"),
+        batchScopeParams
+      )
+    } catch (error) {
+      console.error("Failed to count filtered items for batch review:", error)
+      message.error(t("watchlists:items.fetchError", "Failed to load updates"))
+    } finally {
+      setCollectingAllFiltered(false)
+    }
+  }, [buildAllFilteredBatchScope, countAllFilteredBatchScope, openBatchConfirm, t])
 
   const batchProgressPercent = useMemo(() => {
     if (!batchReviewProgress) return 0
@@ -1539,6 +1611,15 @@ export const ItemsTab: React.FC = () => {
       )
     }
     if (batchReviewProgress.phase === "partial") {
+      if (batchReviewProgress.incomplete) {
+        return t(
+          "watchlists:items.batch.progressIncomplete",
+          "Batch review partial: {{succeeded}} succeeded; more matching updates may remain.",
+          {
+            succeeded: batchReviewProgress.succeeded
+          }
+        )
+      }
       return t(
         "watchlists:items.batch.progressPartial",
         "Batch review complete: {{succeeded}} succeeded, {{failed}} failed.",
