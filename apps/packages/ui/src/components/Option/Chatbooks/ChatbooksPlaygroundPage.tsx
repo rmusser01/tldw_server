@@ -40,6 +40,10 @@ const { Text, Title, Paragraph } = Typography
 
 const POLL_INTERVALS_MS = [3000, 5000, 8000, 13000, 21000, 30000]
 const SEARCH_FETCH_LIMIT = 1000
+const passiveAlertProps = {
+  role: "status",
+  "aria-live": "polite"
+} as const
 
 const CONTENT_TYPE_KEYS = [
   "conversation",
@@ -65,6 +69,9 @@ const getFetchLimitForType = (type: ContentTypeKey) => {
   const max = MAX_RESULTS_BY_TYPE[type]
   return max ? Math.min(SEARCH_FETCH_LIMIT, max) : SEARCH_FETCH_LIMIT
 }
+
+const renderAlertLines = (lines: string[]) =>
+  lines.map((line, index) => <div key={`${index}-${line}`}>{line}</div>)
 
 type ChatbookEntity = {
   id: string
@@ -809,6 +816,7 @@ export const ContentTypePicker: React.FC<ContentTypePickerProps> = ({
         {includeAll && (
           <DesignSystemAlert
             variant="info"
+            {...passiveAlertProps}
             title={t("settings:chatbooksPlayground.includeAllHint", {
               defaultValue: "All {{label}} will be included.",
               label: label.toLowerCase()
@@ -858,6 +866,7 @@ export const ContentTypePicker: React.FC<ContentTypePickerProps> = ({
             {showTruncatedWarning && (
               <DesignSystemAlert
                 variant="warning"
+                {...passiveAlertProps}
                 title={t("settings:chatbooksPlayground.resultsTruncated", {
                   defaultValue:
                     "Results limited to the first {{limit}} items. Refine filters to narrow the list.",
@@ -1857,6 +1866,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
         {!isOnline && (
           <DesignSystemAlert
             variant="info"
+            {...passiveAlertProps}
             title={t(
               "settings:chatbooksPlayground.serverOffline",
               "Server connection required"
@@ -2018,6 +2028,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
           {previewLoading && (
             <DesignSystemAlert
               variant="info"
+              {...passiveAlertProps}
               title={t("settings:chatbooksPlayground.previewLoading", "Previewing chatbook...")}
             />
           )}
@@ -2111,10 +2122,11 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
               {Boolean(openwebuiPreview.warnings?.length) && (
                 <DesignSystemAlert
                   variant="warning"
+                  {...passiveAlertProps}
                   className="mt-3"
                   title={t("settings:chatbooksPlayground.openwebuiWarnings", "Import warnings")}
                 >
-                  {openwebuiPreview.warnings.slice(0, 3).join("\n")}
+                  {renderAlertLines(openwebuiPreview.warnings.slice(0, 3))}
                 </DesignSystemAlert>
               )}
             </Card>
@@ -2181,6 +2193,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
               {selectedOpenWebUIUser && (
                 <DesignSystemAlert
                   variant="info"
+                  {...passiveAlertProps}
                   className="mt-3"
                   title={t("settings:chatbooksPlayground.openwebuiDbDestination", "Destination")}
                 >
@@ -2192,6 +2205,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
 
               <DesignSystemAlert
                 variant="warning"
+                {...passiveAlertProps}
                 className="mt-3"
                 title={t(
                   "settings:chatbooksPlayground.openwebuiDbAttachmentRefs",
@@ -2207,10 +2221,11 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
               {Boolean(openwebuiDbPreview.warnings?.length) && (
                 <DesignSystemAlert
                   variant="warning"
+                  {...passiveAlertProps}
                   className="mt-3"
                   title={t("settings:chatbooksPlayground.openwebuiWarnings", "Import warnings")}
                 >
-                  {openwebuiDbPreview.warnings.slice(0, 3).join("\n")}
+                  {renderAlertLines(openwebuiDbPreview.warnings.slice(0, 3))}
                 </DesignSystemAlert>
               )}
             </Card>
@@ -2358,6 +2373,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
               {hydrationPreview && !hydrationPreviewIsCurrent && (
                 <DesignSystemAlert
                   variant="info"
+                  {...passiveAlertProps}
                   className="mt-3"
                   title={t(
                     "settings:chatbooksPlayground.openwebuiHydrationPreviewStale",
@@ -2459,13 +2475,14 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
                   {Boolean(hydrationWarnings.length) && (
                     <DesignSystemAlert
                       variant="warning"
+                      {...passiveAlertProps}
                       className="mt-3"
                       title={t(
                         "settings:chatbooksPlayground.openwebuiHydrationWarnings",
                         "Hydration warnings"
                       )}
                     >
-                      {hydrationWarnings.slice(0, 3).join("\n")}
+                      {renderAlertLines(hydrationWarnings.slice(0, 3))}
                     </DesignSystemAlert>
                   )}
                 </div>
@@ -2487,6 +2504,8 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
               {hydrationJob && (
                 <DesignSystemAlert
                   variant={hydrationJob.status === "failed" ? "error" : "info"}
+                  role={hydrationJob.status === "failed" ? "alert" : "status"}
+                  aria-live={hydrationJob.status === "failed" ? "assertive" : "polite"}
                   className="mt-3"
                   title={t(
                     "settings:chatbooksPlayground.openwebuiHydrationJobStatus",
@@ -2608,6 +2627,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
       {!isOpenWebUIImport && previewManifest && previewTypes.length === 0 && (
         <DesignSystemAlert
           variant="info"
+          {...passiveAlertProps}
           title={t(
             "settings:chatbooksPlayground.previewNoTypes",
             "Preview did not return item details."
@@ -2862,6 +2882,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
         {!canUseChatbooks && (
           <DesignSystemAlert
             variant="warning"
+            {...passiveAlertProps}
             title={t(
               "settings:chatbooksPlayground.unavailable",
               "Chatbooks is not available on this server."

@@ -17,6 +17,10 @@ import { ServerArgsEditor } from "./ServerArgsEditor"
 
 const { Text } = Typography
 const { TextArea } = Input
+const passiveAlertProps = {
+  role: "status",
+  "aria-live": "polite"
+} as const
 
 const CONTEXT_PRESETS = [
   { label: "2K", value: 2048 },
@@ -136,12 +140,17 @@ export const LlamacppLaunchPanel: React.FC<LlamacppLaunchPanelProps> = ({
         )}
 
         {presetNotice && (
-          <DesignSystemAlert variant="success" title={presetNotice} />
+          <DesignSystemAlert
+            variant="success"
+            {...passiveAlertProps}
+            title={presetNotice}
+          />
         )}
 
         {hardwareWarnings.length > 0 && (
           <DesignSystemAlert
             variant="warning"
+            {...passiveAlertProps}
             title="Hardware guidance"
           >
             <Space orientation="vertical" size={2}>
@@ -665,26 +674,38 @@ export const LlamacppLaunchPanel: React.FC<LlamacppLaunchPanelProps> = ({
         {!selectedModelId && (
           <DesignSystemAlert
             variant="info"
+            {...passiveAlertProps}
             title="Select a model from inventory before launching."
           />
         )}
         {inventoryUnavailable && (
           <DesignSystemAlert
             variant="warning"
+            {...passiveAlertProps}
             title="Inventory is unavailable, launch is disabled until models load."
           />
         )}
         {isRunning && (
           <DesignSystemAlert
             variant="info"
+            {...passiveAlertProps}
             title="Server is already running. Stop it first to start with new settings."
           />
         )}
         {chatAction?.notice && (
-          <DesignSystemAlert variant="success" title={chatAction.notice} />
+          <DesignSystemAlert
+            variant="success"
+            {...passiveAlertProps}
+            title={chatAction.notice}
+          />
         )}
         {chatAction?.warnings?.map((warning) => (
-          <DesignSystemAlert key={warning} variant="warning" title={warning} />
+          <DesignSystemAlert
+            key={warning}
+            variant="warning"
+            {...passiveAlertProps}
+            title={warning}
+          />
         ))}
       </Space>
     </Card>

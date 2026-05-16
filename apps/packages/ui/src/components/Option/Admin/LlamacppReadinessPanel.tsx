@@ -4,6 +4,10 @@ import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import type { LlamacppConfigResponse } from "@/types/llamacpp-admin"
 
 const { Text } = Typography
+const passiveAlertProps = {
+  role: "status",
+  "aria-live": "polite"
+} as const
 
 interface LlamacppReadinessPanelProps {
   config: LlamacppConfigResponse | null
@@ -74,6 +78,7 @@ export const LlamacppReadinessPanel: React.FC<LlamacppReadinessPanelProps> = ({
           {config.restart_required && (
             <DesignSystemAlert
               variant="warning"
+              {...passiveAlertProps}
               title="API server restart required"
             >
               <Space wrap size="small">
@@ -93,6 +98,7 @@ export const LlamacppReadinessPanel: React.FC<LlamacppReadinessPanelProps> = ({
           {envOverrides.length > 0 && (
             <DesignSystemAlert
               variant="warning"
+              {...passiveAlertProps}
               title="Environment overrides are active"
             >
               <Space wrap size="small">
@@ -106,7 +112,12 @@ export const LlamacppReadinessPanel: React.FC<LlamacppReadinessPanelProps> = ({
           )}
 
           {config.warnings.map((warning) => (
-            <DesignSystemAlert key={warning} variant="info" title={warning} />
+            <DesignSystemAlert
+              key={warning}
+              variant="info"
+              {...passiveAlertProps}
+              title={warning}
+            />
           ))}
         </Space>
       )}

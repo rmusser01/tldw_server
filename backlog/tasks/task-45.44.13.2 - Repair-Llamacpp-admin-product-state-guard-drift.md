@@ -4,7 +4,7 @@ title: Repair Llamacpp admin product-state guard drift
 status: Done
 assignee: []
 created_date: '2026-05-16 01:28'
-updated_date: '2026-05-16 01:33'
+updated_date: '2026-05-16 03:24'
 labels:
   - design-system
   - ui
@@ -37,6 +37,8 @@ Current dev has unbaselined Llamacpp admin AntD Alert product-state findings. Mi
 
 <!-- SECTION:NOTES:BEGIN -->
 Migrated the small Llamacpp admin Alert drift from AntD Alert to the design-system Alert primitive across AdminPage, InventoryPanel, LaunchPanel, and ReadinessPanel. Removed stale LlamacppAdminPage baseline entries. Verification: focused Llamacpp admin Vitest files passed; product-state guard test passed; verify:design-system-state passed; git diff --check passed. Full UI tsc remains blocked by pre-existing repo-wide unrelated TypeScript errors outside touched files. Bandit skipped because this task only touches frontend TypeScript/JSON/backlog files.
+
+PR #1738 review fixes: marked non-urgent llama.cpp admin notices as role=status with aria-live=polite while leaving error alerts assertive. Verification: focused Llamacpp admin Vitest files passed; product-state guard test passed; verify:design-system-state passed; git diff --check passed. Full UI tsc remains blocked by pre-existing unrelated errors outside touched paths. Bandit not applicable for frontend TypeScript/backlog-only changes.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

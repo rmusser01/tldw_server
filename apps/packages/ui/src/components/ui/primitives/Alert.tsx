@@ -107,8 +107,7 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
   ) => {
     const config = variantConfig[variant]
     const DefaultIcon = config.icon
-    const hasContent =
-      children !== null && children !== undefined && children !== false && children !== ""
+    const hasContent = React.Children.toArray(children).some((child) => child !== "")
 
     return (
       <div

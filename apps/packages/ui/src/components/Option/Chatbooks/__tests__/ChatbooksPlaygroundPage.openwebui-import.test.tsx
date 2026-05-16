@@ -141,10 +141,12 @@ if (!(globalThis as any).ResizeObserver) {
 
 const expectInsideDesignSystemAlert = (text: string | RegExp) => {
   const node = screen.getByText(text)
-  expect(node.closest('[data-ds-component="Alert"]')).toHaveAttribute(
+  const alert = node.closest('[data-ds-component="Alert"]')
+  expect(alert).toHaveAttribute(
     "data-ds-component",
     "Alert"
   )
+  return alert
 }
 
 describe("ChatbooksPlaygroundPage OpenWebUI import mode", () => {
@@ -439,7 +441,10 @@ describe("ChatbooksPlaygroundPage OpenWebUI import mode", () => {
       expect(screen.getByText("Referenced files")).toBeInTheDocument()
       expect(screen.getByText("Missing 1 source file")).toBeInTheDocument()
     })
-    expectInsideDesignSystemAlert("Hydration warnings")
+    expect(screen.getByText("Missing 1 source file").tagName).toBe("DIV")
+    const hydrationAlert = expectInsideDesignSystemAlert("Hydration warnings")
+    expect(hydrationAlert).toHaveAttribute("role", "status")
+    expect(hydrationAlert).toHaveAttribute("aria-live", "polite")
 
     fireEvent.click(runButton)
 

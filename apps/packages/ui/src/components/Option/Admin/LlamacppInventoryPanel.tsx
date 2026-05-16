@@ -8,6 +8,10 @@ import type {
 } from "@/types/llamacpp-admin"
 
 const { Text } = Typography
+const passiveAlertProps = {
+  role: "status",
+  "aria-live": "polite"
+} as const
 
 interface LlamacppInventoryPanelProps {
   inventory: LlamacppInventoryResponse | null
@@ -96,12 +100,18 @@ export const LlamacppInventoryPanel: React.FC<LlamacppInventoryPanelProps> = ({
         </Space.Compact>
 
         {inventory?.warnings.map((warning) => (
-          <DesignSystemAlert key={warning} variant="warning" title={warning} />
+          <DesignSystemAlert
+            key={warning}
+            variant="warning"
+            {...passiveAlertProps}
+            title={warning}
+          />
         ))}
 
         {inventory?.scan_limited && (
           <DesignSystemAlert
             variant="warning"
+            {...passiveAlertProps}
             title="Inventory scan limit reached"
           />
         )}

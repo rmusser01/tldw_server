@@ -25,6 +25,10 @@ import { LlamacppLaunchPanel } from "./LlamacppLaunchPanel"
 import { LlamacppReadinessPanel } from "./LlamacppReadinessPanel"
 
 const { Title, Text } = Typography
+const passiveAlertProps = {
+  role: "status",
+  "aria-live": "polite"
+} as const
 
 type LlamacppStatus = {
   backend?: string
@@ -415,6 +419,7 @@ export const LlamacppAdminPage: React.FC = () => {
         {adminGuard && (
           <DesignSystemAlert
             variant="warning"
+            {...passiveAlertProps}
             title={
               adminGuard === "forbidden"
                 ? t("settings:admin.adminGuardForbiddenTitle", "Admin access required")
