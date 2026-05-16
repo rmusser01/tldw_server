@@ -113,6 +113,7 @@ def test_capabilities_returns_protocol_domains_limits_and_encryption_policies(
         "server_trusted",
         "shared_workspace_v1",
     ]
+    assert capabilities.supports_attachments is True
 
 
 def test_device_registration_creates_and_refreshes_same_device(sync_service: SyncV2Service):
@@ -1472,6 +1473,18 @@ def test_restore_manifest_is_metadata_only_and_includes_inventory_status(
             ),
         ],
     )
+    sync_service.store_attachment(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domain="source_cache",
+        entity_id="source-1",
+        attachment_id="attachment-1",
+        content_type="application/octet-stream",
+        size_bytes=512,
+        payload_ciphertext="ciphertext:attachment-secret",
+        payload_hash="sha256:attachment",
+        encryption_policy="client_private_v1",
+    )
     sync_store.insert_conflict(
         SyncConflictCreate(
             conflict_id="conflict-1",
@@ -1515,3 +1528,100 @@ def test_restore_manifest_is_metadata_only_and_includes_inventory_status(
     assert "known private label" not in repr(manifest)
     assert "ciphertext:known-private-note" not in repr(manifest)
     assert "wrapped:secret-key" not in repr(manifest)
+
+
+def test_store_attachment_persists_encrypted_payload_and_updates_manifest(
+    sync_service: SyncV2Service,
+):
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes"],
+    )
+
+    stored = sync_service.store_attachment(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domain="notes",
+        entity_id="note-1",
+        attachment_id="attachment-1",
+        content_type="application/octet-stream",
+        size_bytes=512,
+        payload_ciphertext="ciphertext:attachment-secret",
+        payload_hash="sha256:attachment",
+        encryption_policy="client_private_v1",
+        metadata={"slot": "body-image"},
+    )
+    duplicate = sync_service.store_attachment(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domain="notes",
+        entity_id="note-1",
+        attachment_id="attachment-1",
+        content_type="application/octet-stream",
+        size_bytes=512,
+        payload_ciphertext="ciphertext:attachment-secret",
+        payload_hash="sha256:attachment",
+        encryption_policy="client_private_v1",
+        metadata={"slot": "body-image"},
+    )
+    manifest = sync_service.restore_manifest(user_id="user-1")
+
+    assert stored.stored is True
+    assert duplicate.stored is False
+    assert duplicate.payload_hash == "sha256:attachment"
+    assert manifest.datasets[0].attachment_availability == {"available": 1}
+    assert manifest.datasets[0].attachment_size_classes == {"small": 1}
+    assert "attachment-secret" not in repr(manifest)
+
+
+def test_store_attachment_rejects_forbidden_domain_oversize_and_plaintext_policy(
+    sync_service: SyncV2Service,
+):
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes"],
+    )
+
+    with pytest.raises(SyncStoreError, match="payload exceeds"):
+        sync_service.store_attachment(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            domain="notes",
+            entity_id="note-1",
+            attachment_id="attachment-large",
+            content_type="application/octet-stream",
+            size_bytes=4097,
+            payload_ciphertext="ciphertext:large",
+            payload_hash="sha256:large",
+            encryption_policy="client_private_v1",
+        )
+
+    with pytest.raises(SyncStoreError, match="client_private_v1"):
+        sync_service.store_attachment(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            domain="notes",
+            entity_id="note-1",
+            attachment_id="attachment-plaintext-policy",
+            content_type="text/plain",
+            size_bytes=128,
+            payload_ciphertext="known plaintext",
+            payload_hash="sha256:plaintext",
+            encryption_policy="server_trusted",
+        )
+
+    with pytest.raises(SyncStoreError, match="not accessible"):
+        sync_service.store_attachment(
+            user_id="user-2",
+            dataset_id="dataset-1",
+            domain="notes",
+            entity_id="note-1",
+            attachment_id="attachment-forbidden",
+            content_type="application/octet-stream",
+            size_bytes=128,
+            payload_ciphertext="ciphertext:forbidden",
+            payload_hash="sha256:forbidden",
+            encryption_policy="client_private_v1",
+        )

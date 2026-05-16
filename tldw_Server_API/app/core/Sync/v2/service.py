@@ -26,6 +26,8 @@ from .errors import (
 from .models import (
     ConflictStatus,
     EncryptionPolicy,
+    SyncAttachment,
+    SyncAttachmentCreate,
     SyncConflict,
     SyncConflictCreate,
     SyncDataset,
@@ -53,7 +55,7 @@ class SyncV2Settings:
     max_pull_page_size: int = 100
     max_envelope_payload_bytes: int = 262_144
     max_attachment_bytes: int = 1_048_576
-    supports_attachments: bool = False
+    supports_attachments: bool = True
     encryption_policies: list[EncryptionPolicy] = field(
         default_factory=lambda: [
             "client_private_v1",
@@ -75,7 +77,7 @@ class SyncV2Capabilities:
     max_attachment_bytes: int
     supports_restore_manifest: bool = True
     supports_conflicts: bool = True
-    supports_attachments: bool = False
+    supports_attachments: bool = True
     server_time: str | None = None
 
 
@@ -511,6 +513,55 @@ class SyncV2Service:
                 "dataset_ids": list(dataset_ids or []),
                 "domains": list(domains or []),
             },
+        )
+
+    def store_attachment(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        domain: SyncDomain,
+        entity_id: str,
+        attachment_id: str,
+        content_type: str,
+        size_bytes: int,
+        payload_ciphertext: str,
+        payload_hash: str,
+        encryption_policy: EncryptionPolicy = "client_private_v1",
+        metadata: dict[str, object] | None = None,
+    ) -> SyncAttachment:
+        """Persist a small encrypted attachment payload for later restore."""
+
+        if not self.settings.supports_attachments:
+            raise SyncStoreError("Sync v2 attachment persistence is not enabled")
+        if encryption_policy != "client_private_v1":
+            raise SyncStoreError(
+                "Sync attachment persistence requires client_private_v1 encryption"
+            )
+        if size_bytes > self.settings.max_attachment_bytes:
+            raise SyncStoreError("Sync attachment payload exceeds the server size limit")
+        if not payload_ciphertext:
+            raise SyncStoreError("Sync attachment payload_ciphertext is required")
+        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
+        if dataset is None:
+            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        if domain not in dataset.domains:
+            raise SyncInvalidDomainError(
+                f"Sync domain is not enrolled for this dataset: {domain}"
+            )
+        return self.store.store_attachment(
+            SyncAttachmentCreate(
+                attachment_id=attachment_id,
+                dataset_id=dataset_id,
+                domain=domain,
+                entity_id=entity_id,
+                content_type=content_type,
+                size_bytes=size_bytes,
+                payload_ciphertext=payload_ciphertext,
+                payload_hash=payload_hash,
+                encryption_policy=encryption_policy,
+                metadata=dict(metadata or {}),
+            )
         )
 
     def list_conflicts(

@@ -80,11 +80,11 @@ Restore is intentionally two phase:
 1. Metadata preview with `GET /restore-manifest`.
 2. Selected hydration with `GET /pull`.
 
-The manifest includes dataset/domain counts, byte estimates, attachment
-availability, attachment size classes, registered device metadata, unresolved
-conflict counts, encryption policy, and key-recovery readiness. A new device can
-use that manifest to choose all or part of a dataset before downloading
-encrypted envelopes.
+The manifest includes dataset/domain counts, byte estimates, persisted
+attachment availability, attachment size classes, registered device metadata,
+unresolved conflict counts, encryption policy, and key-recovery readiness. A new
+device can use that manifest to choose all or part of a dataset before
+downloading encrypted envelopes and small encrypted attachment payloads.
 
 ## Conflict Model
 
@@ -103,8 +103,8 @@ store a validated resolution envelope before marking the conflict resolved.
   client coverage to migrate safely.
 - Do not expose UI controls that imply full sync support until the client can
   run the corresponding device, dataset, push, pull, and restore flow.
-- Keep large binary attachment replication outside V1 unless a later storage
-  tranche explicitly enables it.
+- Keep large binary replication outside V1; the first storage tranche is limited
+  to small `client_private_v1` attachment ciphertext uploaded through Sync v2.
 
 ## References
 

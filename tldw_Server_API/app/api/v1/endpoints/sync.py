@@ -20,6 +20,7 @@ from fastapi import (
     status,
 )
 from loguru import logger
+from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 
@@ -35,6 +36,8 @@ from tldw_Server_API.app.api.v1.schemas.sync_server_models import (
 from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     ConflictStatus,
     SyncCapabilitiesResponse,
+    SyncAttachmentUploadRequest,
+    SyncAttachmentUploadResponse,
     SyncConflictRecord,
     SyncConflictResolveRequest,
     SyncDatasetEnrollRequest,
@@ -207,6 +210,14 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
         )
     if isinstance(exc, SyncStoreError):
         lowered = str(exc).lower()
+        if "attachment payload exceeds" in lowered:
+            return HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail={
+                    "error_code": "sync_attachment_too_large",
+                    "message": "Sync attachment exceeds the server size limit.",
+                },
+            )
         if (
             "invalid sync cursor" in lowered
             or "page_size" in lowered
@@ -612,21 +623,55 @@ def list_sync_v2_key_recovery_bundles(
 
 @router.post(
     "/attachments",
-    status_code=status.HTTP_501_NOT_IMPLEMENTED,
-    summary="Feature-detect Sync v2 attachment upload support",
+    response_model=SyncAttachmentUploadResponse,
+    summary="Upload a small encrypted Sync v2 attachment",
 )
-def upload_sync_v2_attachment(
-    _request: Request,
+async def upload_sync_v2_attachment(
+    raw_request: Request,
+    user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
 ):
-    supports_attachments = service.capabilities().supports_attachments
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail={
-            "error_code": "sync_attachments_not_enabled",
-            "message": "Sync v2 attachment persistence is not enabled on this server.",
-            "supports_attachments": supports_attachments,
-        },
+    try:
+        request = SyncAttachmentUploadRequest.model_validate(await raw_request.json())
+    except (json.JSONDecodeError, ValidationError) as exc:
+        logger.bind(error_type=type(exc).__name__).warning(
+            "Sync v2 attachment request validation failed"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error_code": "sync_validation_failed",
+                "message": "Sync attachment request is invalid.",
+            },
+        ) from exc
+    try:
+        attachment = service.store_attachment(
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            domain=request.domain,
+            entity_id=request.entity_id,
+            attachment_id=request.attachment_id,
+            content_type=request.content_type,
+            size_bytes=request.size_bytes,
+            payload_ciphertext=request.payload_ciphertext,
+            payload_hash=request.payload_hash,
+            encryption_policy=request.encryption_policy,
+            metadata=request.metadata,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            domain=request.domain,
+            attachment_id=request.attachment_id,
+        ) from exc
+    return SyncAttachmentUploadResponse(
+        attachment_id=attachment.attachment_id,
+        dataset_id=attachment.dataset_id,
+        stored=attachment.stored,
+        size_bytes=attachment.size_bytes,
+        payload_hash=attachment.payload_hash,
     )
 
 

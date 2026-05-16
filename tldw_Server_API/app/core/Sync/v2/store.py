@@ -8,6 +8,8 @@ from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 
 from .models import (
     ConflictStatus,
+    SyncAttachment,
+    SyncAttachmentCreate,
     SyncConflict,
     SyncConflictCreate,
     SyncDataset,
@@ -163,6 +165,9 @@ class SyncV2Store:
             device_id=device_id,
             key_purpose=key_purpose,
         )
+
+    def store_attachment(self, attachment: SyncAttachmentCreate) -> SyncAttachment:
+        return self.db.store_attachment(attachment)
 
     def summarize_restore_manifest_dataset(
         self,

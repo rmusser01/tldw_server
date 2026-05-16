@@ -205,6 +205,40 @@ class SyncKeyRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class SyncAttachmentCreate:
+    """Encrypted attachment payload accepted by the Sync v2 store."""
+
+    attachment_id: str
+    dataset_id: str
+    domain: SyncDomain
+    entity_id: str
+    content_type: str
+    size_bytes: int
+    payload_ciphertext: str
+    payload_hash: str
+    encryption_policy: EncryptionPolicy = "client_private_v1"
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class SyncAttachment:
+    """Stored encrypted attachment payload metadata."""
+
+    attachment_id: str
+    dataset_id: str
+    domain: SyncDomain
+    entity_id: str
+    content_type: str
+    size_bytes: int
+    payload_ciphertext: str
+    payload_hash: str
+    encryption_policy: EncryptionPolicy
+    metadata: dict[str, Any]
+    created_at: str
+    stored: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class SyncRestoreManifestStats:
     """Database-side aggregate statistics for one restore-manifest dataset."""
 
@@ -221,6 +255,8 @@ __all__ = [
     "ConflictStatus",
     "DatasetScopeType",
     "EncryptionPolicy",
+    "SyncAttachment",
+    "SyncAttachmentCreate",
     "SyncConflict",
     "SyncConflictCreate",
     "SyncDataset",
