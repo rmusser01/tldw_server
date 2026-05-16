@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
 import { PlaygroundCockpitShell } from "../PlaygroundCockpitShell"
@@ -123,6 +124,58 @@ describe("Playground cockpit accessibility", () => {
     fireEvent.click(runtimeToggle)
     expect(onLeftRailVisibleChange).toHaveBeenCalledWith(true)
     expect(onRightRailVisibleChange).toHaveBeenCalledWith(false)
+  })
+
+  it("activates cockpit rail and mobile tab controls from the keyboard", async () => {
+    const user = userEvent.setup()
+    const onModeChange = vi.fn()
+    const onLeftRailVisibleChange = vi.fn()
+    const onRightRailVisibleChange = vi.fn()
+    const onMobilePanelChange = vi.fn()
+
+    render(
+      <PlaygroundCockpitShell
+        mode="cockpit"
+        onModeChange={onModeChange}
+        leftRailVisible
+        rightRailVisible
+        onLeftRailVisibleChange={onLeftRailVisibleChange}
+        onRightRailVisibleChange={onRightRailVisibleChange}
+        mobilePanel="context"
+        onMobilePanelChange={onMobilePanelChange}
+        leftRail={<div>Context tools</div>}
+        rightRail={<div>Runtime tools</div>}
+        statusStrip={<div>Ready</div>}
+      >
+        <div>Chat transcript</div>
+      </PlaygroundCockpitShell>
+    )
+
+    const contextToggle = screen.getByRole("button", {
+      name: "Hide context rail"
+    })
+    contextToggle.focus()
+    await user.keyboard("{Enter}")
+    expect(onLeftRailVisibleChange).toHaveBeenCalledWith(false)
+
+    const runtimeToggle = screen.getByRole("button", {
+      name: "Hide runtime rail"
+    })
+    runtimeToggle.focus()
+    await user.keyboard("{Enter}")
+    expect(onRightRailVisibleChange).toHaveBeenCalledWith(false)
+
+    const focusToggle = screen.getByRole("button", {
+      name: "Enter focus chat"
+    })
+    focusToggle.focus()
+    await user.keyboard("{Enter}")
+    expect(onModeChange).toHaveBeenCalledWith("focus")
+
+    const runtimeTab = screen.getByRole("tab", { name: "Runtime" })
+    runtimeTab.focus()
+    await user.keyboard("{Enter}")
+    expect(onMobilePanelChange).toHaveBeenCalledWith("runtime")
   })
 
   it("announces compact runtime state through one status region", () => {

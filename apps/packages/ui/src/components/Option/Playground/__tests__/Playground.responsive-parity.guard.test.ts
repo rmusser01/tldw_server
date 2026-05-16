@@ -32,5 +32,7 @@ describe("Playground responsive parity guard", () => {
     expect(source).toContain("event.key === \"?\"")
     expect(source).toContain("event.key.toLowerCase() === \"f\"")
     expect(source).toContain("searchQuery={threadSearchQuery.trim()}")
+    expect(source).toContain("compositionPreviewSummary")
+    expect(source).toContain("buildPlaygroundCompositionPreviewSummary")
   })
 })

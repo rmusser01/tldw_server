@@ -158,10 +158,11 @@ describe("Playground mature cockpit surfaces", () => {
 
     expect(screen.getByText("Provider route")).toBeInTheDocument()
     expect(screen.getByText("openai:gpt-4.1-mini")).toBeInTheDocument()
-    expect(screen.getByText("Scoped settings")).toBeInTheDocument()
+    expect(screen.getByText("Provider:model settings")).toBeInTheDocument()
     expect(screen.getByText("Temperature")).toBeInTheDocument()
     expect(screen.getByText("0.7")).toBeInTheDocument()
     expect(screen.getByText("MCP tools")).toBeInTheDocument()
+    expect(screen.getByText("Chat tool access")).toBeInTheDocument()
     expect(screen.getByText("3 chat tools available")).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: "Open MCP tools" }))
@@ -203,6 +204,52 @@ describe("Playground mature cockpit surfaces", () => {
     expect(openContext).toHaveBeenCalledTimes(1)
   })
 
+  it("keeps critical warnings visible when both cockpit rails are collapsed", () => {
+    render(
+      <PlaygroundCockpitShell
+        mode="cockpit"
+        onModeChange={vi.fn()}
+        leftRailVisible={false}
+        rightRailVisible={false}
+        leftRail={<div>Context controls</div>}
+        rightRail={<div>Runtime controls</div>}
+        statusStrip={
+          <PlaygroundStatusStrip
+            mode="cockpit"
+            streaming={false}
+            selectedProvider="openai"
+            selectedModel="gpt-4.1-mini"
+            messageCount={2}
+            sessionLabel="Server chat"
+            sessionTitle="Archived investigation"
+            sessionStatusLabel="Load failed"
+            sessionError="Conversation no longer exists"
+            hasContext={false}
+            degradedChecks={["Chacha notes unavailable"]}
+            temporaryChat={false}
+          />
+        }
+      >
+        <div>Chat transcript</div>
+      </PlaygroundCockpitShell>
+    )
+
+    expect(screen.queryByTestId("playground-cockpit-left-rail")).toBeNull()
+    expect(screen.queryByTestId("playground-cockpit-right-rail")).toBeNull()
+    expect(screen.getByTestId("playground-cockpit-mode-summary")).toHaveTextContent(
+      "Cockpit rails hidden. Status remains visible."
+    )
+
+    const status = screen.getByRole("status", { name: "Chat status" })
+    expect(within(status).getByText("Load failed")).toBeInTheDocument()
+    expect(
+      within(status).getByText("Conversation no longer exists")
+    ).toBeInTheDocument()
+    expect(
+      within(status).getByText("Chacha notes unavailable")
+    ).toBeInTheDocument()
+  })
+
   it("uses a controlled mobile cockpit panel instead of independent details", () => {
     const onMobilePanelChange = vi.fn()
 
@@ -233,5 +280,37 @@ describe("Playground mature cockpit surfaces", () => {
 
     fireEvent.click(within(mobilePanels).getByRole("tab", { name: "Runtime" }))
     expect(onMobilePanelChange).toHaveBeenCalledWith("runtime")
+  })
+
+  it("keeps mobile cockpit panel state explicit while preserving the draft surface", () => {
+    render(
+      <PlaygroundCockpitShell
+        mode="cockpit"
+        onModeChange={vi.fn()}
+        leftRailVisible
+        rightRailVisible
+        mobilePanel={"context" satisfies PlaygroundCockpitMobilePanel}
+        leftRail={<div>Context controls</div>}
+        rightRail={<div>Runtime controls</div>}
+        statusStrip={<div>Ready</div>}
+      >
+        <label htmlFor="mobile-draft">Message</label>
+        <textarea id="mobile-draft" data-testid="mobile-draft" defaultValue="Draft stays here" />
+      </PlaygroundCockpitShell>
+    )
+
+    const mobilePanels = screen.getByTestId("playground-cockpit-mobile-rails")
+    expect(mobilePanels).toHaveAttribute("data-mobile-panel", "context")
+    expect(screen.getByTestId("mobile-draft")).toHaveValue("Draft stays here")
+    expect(
+      within(mobilePanels).getByTestId("playground-cockpit-mobile-panel-summary")
+    ).toHaveTextContent("Context panel active. Composer draft remains available below.")
+
+    expect(within(mobilePanels).getByRole("tab", { name: "Context" })).toHaveClass(
+      "min-h-[44px]"
+    )
+    expect(within(mobilePanels).getByRole("tab", { name: "Runtime" })).toHaveClass(
+      "min-h-[44px]"
+    )
   })
 })

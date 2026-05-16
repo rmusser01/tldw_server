@@ -34,6 +34,7 @@ import {
   toggleWebSearchFromCockpit,
 } from "./playground-cockpit-actions";
 import { getCockpitMessageCount } from "./playground-cockpit-state";
+import { buildPlaygroundCompositionPreviewSummary } from "./playground-composition-preview";
 import { ChatErrorBoundary } from "@/components/Common/Playground/ChatErrorBoundary";
 import { useMessageOption } from "@/hooks/useMessageOption";
 import { usePlaygroundSessionPersistence } from "@/hooks/usePlaygroundSessionPersistence";
@@ -1720,7 +1721,14 @@ export const Playground = () => {
     (message) => message.role === "assistant",
   );
   const runtimeStatusDetail =
-    serverReadinessState === "degraded"
+    serverReadinessState === "blocked"
+      ? toText(
+          t(
+            "playground:cockpit.blockedServerHealth",
+            "Server is unavailable. Check the server connection before sending.",
+          ),
+        )
+      : serverReadinessState === "degraded"
       ? serverDegradedChecks.length > 0
         ? `${toText(
             t("playground:cockpit.degraded", DEGRADED_STATE_LABEL),
@@ -2055,6 +2063,93 @@ export const Playground = () => {
         }
       : null,
   ].filter((item): item is RuntimeSettingSummary => Boolean(item));
+  const cockpitToolSummary = buildCockpitMcpSummary({
+    hasMcp: mcpHealthState !== "unavailable",
+    healthState: mcpHealthState,
+    toolsLoading: mcpToolsLoading,
+    discoveredCount: discoveredMcpToolCount,
+    chatToolCount: chatMcpToolCount,
+    toolCounts: mcpToolCounts,
+    copy: {
+      availableDetail: (chatToolCount, discoveredCount) => {
+        const chatToolsLabel =
+          chatToolCount === 1
+            ? toText(
+                t(
+                  "playground:cockpit.mcpChatToolsAvailableOne",
+                  "1 chat tool available",
+                ),
+              )
+            : toText(
+                t(
+                  "playground:cockpit.mcpChatToolsAvailableMany",
+                  `${chatToolCount} chat tools available`,
+                  { count: chatToolCount },
+                ),
+              );
+        if (discoveredCount <= chatToolCount) return chatToolsLabel;
+        const discoveredSuffix = toText(
+          t(
+            "playground:cockpit.mcpDiscoveredSuffix",
+            ` (${discoveredCount} discovered)`,
+            { count: discoveredCount },
+          ),
+        );
+        return `${chatToolsLabel}${discoveredSuffix}`;
+      },
+      chatEnabledLabel: toText(
+        t("playground:cockpit.mcpChatEnabledLabel", "Chat-enabled"),
+      ),
+      discoveredLabel: toText(
+        t("playground:cockpit.mcpDiscoveredLabel", "Discovered"),
+      ),
+      emptyDetail: toText(
+        t("playground:composer.mcpToolsEmpty", "No MCP tools available"),
+      ),
+      executableLabel: toText(
+        t("playground:cockpit.mcpExecutableLabel", "Executable"),
+      ),
+      loadingDetail: toText(
+        t("playground:composer.mcpToolsLoading", "Loading tools..."),
+      ),
+      nameConflictsLabel: toText(
+        t("playground:cockpit.mcpNameConflictsLabel", "Name conflicts"),
+      ),
+      offlineDetail: toText(
+        t("playground:composer.mcpToolsUnhealthy", "MCP tools are offline"),
+      ),
+      toolsLabel: toText(t("playground:cockpit.mcpTools", "MCP tools")),
+      unavailableDetail: toText(
+        t(
+          "playground:composer.mcpToolsUnavailable",
+          "MCP tools unavailable",
+        ),
+      ),
+      unavailableLabel: toText(
+        t("playground:composer.mcpUnavailable", "MCP unavailable"),
+      ),
+      unavailableToolsLabel: toText(
+        t(
+          "playground:cockpit.mcpUnavailableToolsLabel",
+          UNAVAILABLE_DESIGN_STATE_LABEL,
+        ),
+      ),
+      userDisabledLabel: toText(
+        t("playground:cockpit.mcpUserDisabledLabel", "User-disabled"),
+      ),
+    },
+  });
+  const compositionStatus = "idle" as const;
+  const compositionPreviewSummary = buildPlaygroundCompositionPreviewSummary({
+    promptSummary,
+    assistantSummary: cockpitAssistantSummary,
+    providerRoute: providerRouteSummary,
+    settingSummaries: runtimeSettingSummaries,
+    contextSources,
+    toolSummary: cockpitToolSummary,
+    compositionStatus,
+    composition: null,
+  });
   const openModelSettingsFromCockpit = React.useCallback(() => {
     if (typeof setActiveSettingsScope === "function") {
       setActiveSettingsScope(providerRouteSummary.providerRouteLabel ?? null);
@@ -2149,6 +2244,7 @@ export const Playground = () => {
       onClearKnowledge={() => setSelectedKnowledge(null)}
       onClearMedia={() => setRagMediaIds(null)}
       onClearResearch={handleRemoveAttachedResearchContext}
+      compositionPreviewSummary={compositionPreviewSummary}
     />
   );
   const cockpitRightRail = (
@@ -2158,7 +2254,9 @@ export const Playground = () => {
       selectedModel={providerRouteSummary.selectedModel}
       providerRouteLabel={providerRouteSummary.providerRouteLabel}
       runtimeStatus={
-        streaming
+        serverReadinessState === "blocked"
+          ? "error"
+          : streaming
           ? "streaming"
           : serverReadinessState === "degraded"
             ? "degraded"
@@ -2181,82 +2279,7 @@ export const Playground = () => {
       toolChoice={toolChoice as RuntimeToolChoice}
       onToolChoiceChange={(nextChoice) => setToolChoice(nextChoice)}
       onOpenMcpSettings={openMcpSettingsFromCockpit}
-      toolSummary={buildCockpitMcpSummary({
-        hasMcp: mcpHealthState !== "unavailable",
-        healthState: mcpHealthState,
-        toolsLoading: mcpToolsLoading,
-        discoveredCount: discoveredMcpToolCount,
-        chatToolCount: chatMcpToolCount,
-        toolCounts: mcpToolCounts,
-        copy: {
-          availableDetail: (chatToolCount, discoveredCount) => {
-            const chatToolsLabel =
-              chatToolCount === 1
-                ? toText(
-                    t(
-                      "playground:cockpit.mcpChatToolsAvailableOne",
-                      "1 chat tool available",
-                    ),
-                  )
-                : toText(
-                    t(
-                      "playground:cockpit.mcpChatToolsAvailableMany",
-                      `${chatToolCount} chat tools available`,
-                      { count: chatToolCount },
-                    ),
-                  );
-            if (discoveredCount <= chatToolCount) return chatToolsLabel;
-            const discoveredSuffix = toText(
-              t(
-                "playground:cockpit.mcpDiscoveredSuffix",
-                ` (${discoveredCount} discovered)`,
-                { count: discoveredCount },
-              ),
-            );
-            return `${chatToolsLabel}${discoveredSuffix}`;
-          },
-          chatEnabledLabel: toText(
-            t("playground:cockpit.mcpChatEnabledLabel", "Chat-enabled"),
-          ),
-          discoveredLabel: toText(
-            t("playground:cockpit.mcpDiscoveredLabel", "Discovered"),
-          ),
-          emptyDetail: toText(
-            t("playground:composer.mcpToolsEmpty", "No MCP tools available"),
-          ),
-          executableLabel: toText(
-            t("playground:cockpit.mcpExecutableLabel", "Executable"),
-          ),
-          loadingDetail: toText(
-            t("playground:composer.mcpToolsLoading", "Loading tools..."),
-          ),
-          nameConflictsLabel: toText(
-            t("playground:cockpit.mcpNameConflictsLabel", "Name conflicts"),
-          ),
-          offlineDetail: toText(
-            t("playground:composer.mcpToolsUnhealthy", "MCP tools are offline"),
-          ),
-          toolsLabel: toText(t("playground:cockpit.mcpTools", "MCP tools")),
-          unavailableDetail: toText(
-            t(
-              "playground:composer.mcpToolsUnavailable",
-              "MCP tools unavailable",
-            ),
-          ),
-          unavailableLabel: toText(
-            t("playground:composer.mcpUnavailable", "MCP unavailable"),
-          ),
-          unavailableToolsLabel: toText(
-            t(
-              "playground:cockpit.mcpUnavailableToolsLabel",
-              UNAVAILABLE_DESIGN_STATE_LABEL,
-            ),
-          ),
-          userDisabledLabel: toText(
-            t("playground:cockpit.mcpUserDisabledLabel", "User-disabled"),
-          ),
-        },
-      })}
+      toolSummary={cockpitToolSummary}
     />
   );
   const cockpitStatusStrip = (
@@ -2267,12 +2290,18 @@ export const Playground = () => {
       selectedModel={providerRouteSummary.selectedModel}
       messageCount={cockpitMessageCount}
       sessionLabel={sessionLabel}
+      sessionTitle={sessionSummary.title}
+      sessionStatusLabel={sessionSummary.statusLabel}
+      sessionDetail={sessionSummary.detail}
+      sessionError={sessionSummary.error}
       hasContext={hasChatContext}
       contextSummary={statusContextSummary}
       temporaryChat={temporaryChat}
       degraded={serverReadinessState === "degraded"}
       degradedChecks={serverDegradedChecks}
       errorMessage={null}
+      serverBlocked={serverReadinessState === "blocked"}
+      compositionStatus={compositionStatus}
       onStopStreaming={() => stopStreamingRequest()}
       onOpenSearchContext={() => openSearchAndContext({ tab: "context" })}
       onOpenModelSettings={openModelSettings}

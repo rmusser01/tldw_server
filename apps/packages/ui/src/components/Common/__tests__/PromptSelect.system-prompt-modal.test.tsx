@@ -58,6 +58,7 @@ vi.mock("antd", async () => {
       value={props.value}
       defaultValue={props.defaultValue}
       onChange={props.onChange}
+      onKeyDownCapture={props.onKeyDownCapture}
       onKeyDown={props.onKeyDown}
     />
   ))
@@ -280,6 +281,26 @@ describe("PromptSelect system prompt modal", () => {
     await user.click(await screen.findByRole("menuitem", { name: /edit system prompt/i }))
 
     expect(await screen.findByText("Loading via registry")).toBeInTheDocument()
+  })
+
+  it("closes the prompt dropdown when Escape is pressed from search", async () => {
+    const user = userEvent.setup()
+    renderPromptSelect()
+
+    await user.click(
+      await screen.findByRole("button", { name: "selectAPrompt" })
+    )
+    expect(await screen.findByRole("menu")).toBeInTheDocument()
+
+    const search = await screen.findByRole("textbox", {
+      name: "Search prompts..."
+    })
+    search.focus()
+    await user.keyboard("{Escape}")
+
+    await waitFor(() => {
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument()
+    })
   })
 
   it("returns focus to the launching rail trigger after prompt selection", async () => {

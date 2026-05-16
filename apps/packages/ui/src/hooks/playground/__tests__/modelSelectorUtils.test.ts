@@ -23,6 +23,19 @@ describe("model selector utilities", () => {
     expect(getCanonicalModelKey(configuredModel("anthropic", "gpt-4o"))).toBe("anthropic:gpt-4o")
   })
 
+  it("normalizes internal tldw transport ids out of provider:model keys", () => {
+    const model = {
+      id: "gpt-4o-mini",
+      model: "tldw:gpt-4o-mini",
+      name: "GPT-4o mini",
+      provider: "openai",
+      is_configured: true
+    }
+
+    expect(getModelId(model)).toBe("gpt-4o-mini")
+    expect(getCanonicalModelKey(model)).toBe("openai:gpt-4o-mini")
+  })
+
   it("normalizes provider and model identifiers from common server payload shapes", () => {
     const model = {
       id: "claude-3-5-haiku",

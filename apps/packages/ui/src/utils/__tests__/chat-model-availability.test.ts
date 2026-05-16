@@ -22,6 +22,57 @@ describe("chat model availability utilities", () => {
     expect([...ids]).toEqual(["gpt-4o-mini", "claude-3-5-sonnet"])
   })
 
+  it("includes provider-qualified IDs for cockpit model selections", () => {
+    const ids = buildAvailableChatModelIds([
+      {
+        id: "gpt-4o-mini",
+        model: "tldw:gpt-4o-mini",
+        provider: "openai"
+      },
+      {
+        id: "gpt-4o-mini",
+        model: "tldw:gpt-4o-mini",
+        provider: "anthropic"
+      }
+    ])
+
+    expect(ids.has("gpt-4o-mini")).toBe(true)
+    expect(ids.has("openai:gpt-4o-mini")).toBe(true)
+    expect(ids.has("anthropic:gpt-4o-mini")).toBe(true)
+    expect(findUnavailableChatModel(["openai:gpt-4o-mini"], ids)).toBeNull()
+  })
+
+  it("accepts provider-qualified selections when the available catalog only exposes the base model ID", () => {
+    const ids = buildAvailableChatModelIds([
+      {
+        id: "gpt-4o-mini",
+        model: "tldw:gpt-4o-mini"
+      }
+    ])
+
+    expect(ids.has("gpt-4o-mini")).toBe(true)
+    expect(ids.has("openai:gpt-4o-mini")).toBe(false)
+    expect(findUnavailableChatModel(["openai:gpt-4o-mini"], ids)).toBeNull()
+  })
+
+  it("accepts unknown provider-qualified selections when the base model is available", () => {
+    const unavailable = findUnavailableChatModel(
+      ["local:gpt-4o-mini"],
+      new Set(["gpt-4o-mini"])
+    )
+
+    expect(unavailable).toBeNull()
+  })
+
+  it("keeps provider-qualified selections unavailable when neither qualified nor base IDs are available", () => {
+    const unavailable = findUnavailableChatModel(
+      ["openai:gpt-4o-mini"],
+      new Set(["claude-3-5-sonnet"])
+    )
+
+    expect(unavailable).toBe("openai:gpt-4o-mini")
+  })
+
   it("does not flag unavailable model when catalog is empty", () => {
     const unavailable = findUnavailableChatModel(["gpt-4o-mini"], new Set())
     expect(unavailable).toBeNull()

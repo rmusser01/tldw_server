@@ -11,15 +11,14 @@ import {
   UserRound,
 } from "lucide-react";
 import { DEGRADED_STATE_LABEL, READY_STATE_LABEL } from "@/design-system";
+import { PlaygroundCompositionPreview } from "./PlaygroundCompositionPreview";
+import type { PlaygroundCompositionPreviewSummary } from "./playground-composition-preview";
+import {
+  cockpitRailStyles,
+  cockpitRailToneClass,
+} from "./playground-cockpit-rail-styles";
 
-const railSectionClass = "rounded-md border border-border bg-surface px-3 py-2";
-const railHeadingClass = "text-[11px] font-semibold uppercase text-text-muted";
-const railValueClass = "mt-1 text-sm font-medium text-text";
-const railMutedClass = "mt-1 text-xs text-text-muted";
-const railActionClass =
-  "mt-3 inline-flex min-h-[30px] items-center rounded-md border border-border bg-surface2 px-2.5 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus";
-const clearActionClass =
-  "inline-flex shrink-0 items-center rounded border border-border bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus";
+const railActionClass = cockpitRailStyles.action;
 const PROMPT_SELECT_TRIGGER_SELECTOR = "[data-cockpit-prompt-select-trigger]";
 
 type ContextCountItem = {
@@ -91,6 +90,7 @@ export type PlaygroundContextRailProps = {
   onClearKnowledge?: () => void;
   onClearMedia?: () => void;
   onClearResearch?: () => void;
+  compositionPreviewSummary?: PlaygroundCompositionPreviewSummary;
 };
 
 const sourceIcon = (kind: PlaygroundContextSource["kind"]) => {
@@ -104,19 +104,19 @@ const sourceIcon = (kind: PlaygroundContextSource["kind"]) => {
 };
 
 const sourceStateClass = (state: PlaygroundContextSourceState = "active") => {
-  if (state === "degraded") return "border-warning/40 bg-warning/10 text-warning";
-  if (state === "disabled") return "border-border bg-surface2 text-text-muted";
-  if (state === "available") return "border-info/40 bg-info/10 text-info";
-  return "border-success/40 bg-success/10 text-success";
+  if (state === "degraded") return cockpitRailToneClass("warning");
+  if (state === "disabled") return cockpitRailToneClass("muted");
+  if (state === "available") return cockpitRailToneClass("info");
+  return cockpitRailToneClass("success");
 };
 
 const sessionStatusClass = (
   status: NonNullable<PlaygroundContextRailProps["sessionStatus"]> = "idle",
 ) => {
-  if (status === "failed") return "border-danger/40 bg-danger/10 text-danger";
-  if (status === "loading") return "border-info/40 bg-info/10 text-info";
-  if (status === "loaded") return "border-success/40 bg-success/10 text-success";
-  return "border-border bg-surface2 text-text-muted";
+  if (status === "failed") return cockpitRailToneClass("danger");
+  if (status === "loading") return cockpitRailToneClass("info");
+  if (status === "loaded") return cockpitRailToneClass("success");
+  return cockpitRailToneClass("muted");
 };
 
 export const PlaygroundContextRail = ({
@@ -143,6 +143,7 @@ export const PlaygroundContextRail = ({
   onClearKnowledge,
   onClearMedia,
   onClearResearch,
+  compositionPreviewSummary,
 }: PlaygroundContextRailProps) => {
   const { t } = useTranslation("playground");
   const railRef = React.useRef<HTMLDivElement | null>(null);
@@ -161,7 +162,7 @@ export const PlaygroundContextRail = ({
       label: t("cockpit.noPromptSelected", "No prompt selected"),
       detail: t(
         "cockpit.noPromptContext",
-        "No prompt context will be added.",
+        "No system prompt will be added.",
       ),
     };
   const promptActive = effectivePromptSummary.state !== "none";
@@ -266,21 +267,29 @@ export const PlaygroundContextRail = ({
     <div
       ref={railRef}
       data-testid="playground-context-rail"
-      className="flex min-w-0 flex-col gap-2 text-sm"
+      className={cockpitRailStyles.stack}
     >
+      {compositionPreviewSummary ? (
+        <div className={cockpitRailStyles.section}>
+          <PlaygroundCompositionPreview summary={compositionPreviewSummary} />
+        </div>
+      ) : null}
+
       <section
-        className={railSectionClass}
-        aria-label={t("cockpit.conversationContext", "Conversation context")}
+        className={cockpitRailStyles.section}
+        aria-label={t("cockpit.contextStack", "Context stack")}
       >
-        <h2 className={railHeadingClass}>{t("cockpit.context", "Context")}</h2>
+        <h2 className={cockpitRailStyles.heading}>
+          {t("cockpit.contextStack", "Context stack")}
+        </h2>
         <div className="mt-1 flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className={railValueClass}>
+            <p className={cockpitRailStyles.value}>
               {hasContext
                 ? t("cockpit.contextActive", "Context active")
                 : t("cockpit.noExtraContext", "No extra context")}
             </p>
-            <p className={railMutedClass}>
+            <p className={cockpitRailStyles.muted}>
               {hasContext
                 ? sourceCountLabel
                 : t(
@@ -299,7 +308,7 @@ export const PlaygroundContextRail = ({
               : t("cockpit.idle", "Idle")}
           </span>
         </div>
-        {contextSummary.length > 0 || countLabels.length > 0 ? (
+        {contextSummary.length > 0 ? (
           <ul
             className="mt-2 flex flex-wrap gap-1.5 text-xs text-text-muted"
             aria-label={t("cockpit.contextSummary", "Context summary")}
@@ -307,28 +316,9 @@ export const PlaygroundContextRail = ({
             {contextSummary.map((item, index) => (
               <li
                 key={`summary-${index}-${item}`}
-                className="rounded border border-border bg-surface2 px-2 py-0.5"
+                className={cockpitRailStyles.tag}
               >
                 {item}
-              </li>
-            ))}
-            {countLabels.map((item, index) => (
-              <li
-                key={`count-${index}-${item.label}`}
-                className="flex items-center gap-1 rounded border border-border bg-surface2 px-2 py-0.5"
-              >
-                <span className="min-w-0 truncate">{item.label}</span>
-                {item.onClear ? (
-                  <button
-                    type="button"
-                    className={clearActionClass}
-                    aria-label={item.clearLabel}
-                    title={item.clearLabel}
-                    onClick={item.onClear}
-                  >
-                    {t("cockpit.clear", "Clear")}
-                  </button>
-                ) : null}
               </li>
             ))}
           </ul>
@@ -352,7 +342,7 @@ export const PlaygroundContextRail = ({
               return (
                 <li
                   key={source.id}
-                  className="rounded-md border border-border bg-bg px-2.5 py-2"
+                  className={cockpitRailStyles.inset}
                 >
                   <div className="flex items-start gap-2">
                     <span className="mt-0.5 rounded border border-border bg-surface2 p-1 text-text-muted">
@@ -390,7 +380,7 @@ export const PlaygroundContextRail = ({
                       {source.onOpen ? (
                         <button
                           type="button"
-                          className={clearActionClass}
+                          className={cockpitRailStyles.clearAction}
                           aria-label={openLabel}
                           title={openLabel}
                           onClick={source.onOpen}
@@ -401,7 +391,7 @@ export const PlaygroundContextRail = ({
                       {source.onRemove ? (
                         <button
                           type="button"
-                          className={clearActionClass}
+                          className={cockpitRailStyles.clearAction}
                           aria-label={removeLabel}
                           title={removeLabel}
                           onClick={source.onRemove}
@@ -416,46 +406,25 @@ export const PlaygroundContextRail = ({
             })}
           </ul>
         ) : (
-          <div className="mt-3 rounded-md border border-dashed border-border bg-bg px-2.5 py-2 text-xs text-text-muted">
+          <div className={`mt-3 ${cockpitRailStyles.emptyInset}`}>
             {t(
               "cockpit.contextEmptyWorkbench",
               "Add web search, files, knowledge, media, or research context before sending.",
             )}
           </div>
         )}
-        <div className="mt-3 grid grid-cols-1 gap-2">
-          <button
-            type="button"
-            onClick={onToggleWebSearch}
-            className={railActionClass}
-            aria-label={t("cockpit.webSearch", "Web search")}
-            aria-pressed={webSearch}
-          >
-            {webSearch
-              ? t("cockpit.webSearchOn", "Web search on")
-              : t("cockpit.webSearchOff", "Web search off")}
-          </button>
-          <button
-            type="button"
-            onClick={onOpenSearchContext}
-            className={railActionClass}
-            aria-label={t("cockpit.openSearchContext", "Open Search & Context")}
-          >
-            {t("cockpit.searchContext", "Search & Context")}
-          </button>
-        </div>
       </section>
 
       <section
-        className={railSectionClass}
-        aria-label={t("cockpit.promptContext", "Prompt context")}
+        className={cockpitRailStyles.section}
+        aria-label={t("cockpit.promptManagement", "Prompt management")}
       >
-        <h2 className={railHeadingClass}>{t("cockpit.prompts", "Prompts")}</h2>
+        <h2 className={cockpitRailStyles.heading}>{t("cockpit.prompt", "Prompt")}</h2>
         <div className="mt-1 flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className={railValueClass}>{effectivePromptSummary.label}</p>
+            <p className={cockpitRailStyles.value}>{effectivePromptSummary.label}</p>
             {effectivePromptSummary.detail ? (
-              <p className={railMutedClass}>{effectivePromptSummary.detail}</p>
+              <p className={cockpitRailStyles.muted}>{effectivePromptSummary.detail}</p>
             ) : null}
           </div>
           <span
@@ -484,13 +453,82 @@ export const PlaygroundContextRail = ({
       </section>
 
       <section
-        className={railSectionClass}
+        className={cockpitRailStyles.section}
+        aria-label={t("cockpit.searchAndSources", "Search & sources")}
+      >
+        <h2 className={cockpitRailStyles.heading}>
+          {t("cockpit.searchAndSources", "Search & sources")}
+        </h2>
+        <p className={cockpitRailStyles.muted}>
+          {t(
+            "cockpit.searchSourcesDetail",
+            "Manage web, files, knowledge, media, and research context.",
+          )}
+        </p>
+        {countLabels.length > 0 ? (
+          <ul
+            className="mt-2 flex flex-wrap gap-1.5 text-xs text-text-muted"
+            aria-label={t("cockpit.sourceSummary", "Source summary")}
+          >
+            {countLabels.map((item, index) => (
+              <li
+                key={`count-${index}-${item.label}`}
+                className={cockpitRailStyles.inlineTag}
+              >
+                <span className="min-w-0 truncate">{item.label}</span>
+                {item.onClear ? (
+                  <button
+                    type="button"
+                    className={cockpitRailStyles.clearAction}
+                    aria-label={item.clearLabel}
+                    title={item.clearLabel}
+                    onClick={item.onClear}
+                  >
+                    {t("cockpit.clear", "Clear")}
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className={cockpitRailStyles.muted}>
+            {t(
+              "cockpit.noSearchSources",
+              "No files, knowledge, media, or research sources attached.",
+            )}
+          </p>
+        )}
+        <div className="mt-3 grid grid-cols-1 gap-2">
+          <button
+            type="button"
+            onClick={onToggleWebSearch}
+            className={railActionClass}
+            aria-label={t("cockpit.webSearch", "Web search")}
+            aria-pressed={webSearch}
+          >
+            {webSearch
+              ? t("cockpit.webSearchOn", "Web search on")
+              : t("cockpit.webSearchOff", "Web search off")}
+          </button>
+          <button
+            type="button"
+            onClick={onOpenSearchContext}
+            className={railActionClass}
+            aria-label={t("cockpit.openSearchContext", "Open Search & Context")}
+          >
+            {t("cockpit.searchContext", "Search & Context")}
+          </button>
+        </div>
+      </section>
+
+      <section
+        className={cockpitRailStyles.section}
         aria-label={t("cockpit.conversationSession", "Conversation session")}
       >
-        <h2 className={railHeadingClass}>{t("cockpit.session", "Session")}</h2>
+        <h2 className={cockpitRailStyles.heading}>{t("cockpit.session", "Session")}</h2>
         <div className="mt-1 flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className={railValueClass}>{sessionLabel}</p>
+            <p className={cockpitRailStyles.value}>{sessionLabel}</p>
             {sessionTitle ? (
               <p className="mt-0.5 truncate text-xs font-medium text-text">
                 {sessionTitle}
@@ -506,14 +544,14 @@ export const PlaygroundContextRail = ({
           </span>
         </div>
         {sessionDetail ? (
-          <p className={railMutedClass}>{sessionDetail}</p>
+          <p className={cockpitRailStyles.muted}>{sessionDetail}</p>
         ) : null}
         {sessionError && sessionError !== sessionDetail ? (
           <p className="mt-1 rounded border border-danger/30 bg-danger/10 px-2 py-1 text-xs text-danger">
             {sessionError}
           </p>
         ) : null}
-        <p className={railMutedClass}>
+        <p className={cockpitRailStyles.muted}>
           {historyLinked
             ? t("cockpit.historyLinked", "History linked")
             : t("cockpit.noSavedHistory", "No saved history yet")}
@@ -521,7 +559,7 @@ export const PlaygroundContextRail = ({
         <button
           type="button"
           onClick={() => onToggleTemporaryChat(!temporaryChat)}
-          className={railActionClass}
+          className={`${railActionClass} mt-3`}
           aria-pressed={temporaryChat}
           aria-label={
             temporaryChat

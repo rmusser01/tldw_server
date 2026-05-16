@@ -2039,6 +2039,12 @@ export const PlaygroundForm = ({
           aria-haspopup="listbox"
           aria-expanded={modelDropdownOpen}
           data-testid="model-selector"
+          onClick={() => {
+            if (!modelDropdownOpen) {
+              closeComposerPopoversExcept("model");
+              setModelDropdownOpen(true);
+            }
+          }}
           className={`inline-flex min-w-0 items-center gap-1 rounded-full border px-2 min-h-[44px] text-[10px] cursor-pointer transition-colors ${
             modelSelectorWarning
               ? "border-warn/50 bg-warn/10 text-warn hover:bg-warn/20"
@@ -4967,7 +4973,13 @@ export const PlaygroundForm = ({
                         const composerTextareaNode = (
                           <div className="relative">
                             {replyTargetNode}
-                            <div className="flex items-end gap-2">
+                            <div
+                              className={
+                                isMobileViewport
+                                  ? "grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2"
+                                  : "flex items-end gap-2"
+                              }
+                            >
                               <button
                                 type="button"
                                 data-testid="composer-options-toggle"
@@ -5013,7 +5025,13 @@ export const PlaygroundForm = ({
                                   aria-hidden="true"
                                 />
                               </button>
-                              <div className="min-w-0 flex-1">
+                              <div
+                                className={
+                                  isMobileViewport
+                                    ? "min-w-0"
+                                    : "min-w-0 flex-1"
+                                }
+                              >
                                 {wrapComposerProfile(
                                   "composer-textarea",
                                   <ComposerTextarea
@@ -5075,7 +5093,11 @@ export const PlaygroundForm = ({
                               </div>
                               <div
                                 data-testid="composer-inline-send-control"
-                                className="flex shrink-0 items-end self-end"
+                                className={
+                                  isMobileViewport
+                                    ? "col-span-2 flex justify-end self-end"
+                                    : "flex shrink-0 items-end self-end"
+                                }
                               >
                                 {sendControl}
                               </div>

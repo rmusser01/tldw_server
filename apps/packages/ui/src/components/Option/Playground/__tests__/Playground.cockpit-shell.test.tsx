@@ -222,6 +222,9 @@ describe("Playground cockpit shell", () => {
     expect(
       screen.getByTestId("playground-cockpit-status-strip"),
     ).toBeInTheDocument();
+    expect(screen.getByTestId("playground-cockpit-mode-summary")).toHaveTextContent(
+      "Context and runtime rails visible.",
+    );
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
   });
@@ -236,6 +239,9 @@ describe("Playground cockpit shell", () => {
     ).toHaveAttribute("data-mode", "focus");
     expect(screen.queryByTestId("playground-cockpit-left-rail")).toBeNull();
     expect(screen.queryByTestId("playground-cockpit-right-rail")).toBeNull();
+    expect(screen.getByTestId("playground-cockpit-mode-summary")).toHaveTextContent(
+      "Focus mode hides rails. Chat and composer remain active.",
+    );
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
   });
@@ -282,6 +288,9 @@ describe("Playground cockpit shell", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("playground-cockpit-left-rail")).toBeNull();
     });
+    expect(screen.getByTestId("playground-cockpit-mode-summary")).toHaveTextContent(
+      "Context rail hidden. Runtime rail visible.",
+    );
     expect(
       screen.getByTestId("playground-cockpit-right-rail"),
     ).toBeInTheDocument();
@@ -299,6 +308,9 @@ describe("Playground cockpit shell", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("playground-cockpit-right-rail")).toBeNull();
     });
+    expect(screen.getByTestId("playground-cockpit-mode-summary")).toHaveTextContent(
+      "Cockpit rails hidden. Status remains visible.",
+    );
     expect(storageState.values.get("playgroundChatRuntimeRailVisible")).toBe(
       false,
     );
