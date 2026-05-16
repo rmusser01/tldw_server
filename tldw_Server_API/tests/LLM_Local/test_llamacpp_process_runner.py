@@ -43,9 +43,11 @@ class FakeStream:
     def __init__(self, chunks: list[bytes]):
         self.chunks = list(chunks)
         self.read_count = 0
+        self.read_sizes: list[int] = []
 
-    async def readline(self) -> bytes:
+    async def read(self, size: int) -> bytes:
         self.read_count += 1
+        self.read_sizes.append(size)
         if self.chunks:
             return self.chunks.pop(0)
         return b""
@@ -348,14 +350,58 @@ async def test_runner_accepts_existing_handler_server_arg_aliases(
 
 
 @pytest.mark.asyncio
+async def test_runner_filters_blank_optional_args_like_existing_handler(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as runner_module
+
+    commands: list[list[str]] = []
+
+    async def fake_create_subprocess_exec(*command: str, **_kwargs: Any) -> FakeProcess:
+        commands.append(list(command))
+        return FakeProcess(1009)
+
+    async def fake_ready(*_args: Any, **_kwargs: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(runner_module.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(runner_module, "wait_for_http_ready", fake_ready)
+    monkeypatch.setattr(runner_module.platform, "system", lambda: "Windows")
+
+    config = make_config(tmp_path)
+    runner = LlamaCppProcessRunner(config, profile_id="blank-args")
+    monkeypatch.setattr(runner, "_is_port_free", lambda _host, _port: True)
+
+    await runner.start(
+        make_model(config),
+        profile=profile(
+            "blank-args",
+            server_args={
+                "ctx_size": "",
+                "n_gpu_layers": None,
+                "threads": "",
+                "log_file": "",
+            },
+        ),
+    )
+
+    command = commands[0]
+    assert command[command.index("-c") + 1] == "2048"
+    assert command[command.index("-ngl") + 1] == "0"
+    assert "-t" not in command
+    assert "--log-file" not in command
+
+
+@pytest.mark.asyncio
 async def test_runner_drains_pipe_streams_when_no_log_file_is_configured(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as runner_module
 
-    stdout = FakeStream([b"stdout line\n"])
-    stderr = FakeStream([b"stderr line\n"])
+    stdout = FakeStream([b"x" * 2048])
+    stderr = FakeStream([b"y" * 2048])
 
     async def fake_create_subprocess_exec(*_command: str, **_kwargs: Any) -> FakeProcess:
         return FakeProcess(1008, stdout=stdout, stderr=stderr)
@@ -376,6 +422,10 @@ async def test_runner_drains_pipe_streams_when_no_log_file_is_configured(
 
     assert stdout.read_count >= 2
     assert stderr.read_count >= 2
+    assert stdout.read_sizes
+    assert stderr.read_sizes
+    assert max(stdout.read_sizes) <= 1024
+    assert max(stderr.read_sizes) <= 1024
 
     await runner.stop()
 

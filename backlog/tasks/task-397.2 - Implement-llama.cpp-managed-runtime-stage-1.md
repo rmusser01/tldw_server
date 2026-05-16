@@ -4,7 +4,7 @@ title: Implement llama.cpp managed runtime stage 1
 status: In Progress
 assignee: []
 created_date: '2026-05-16 01:43'
-updated_date: '2026-05-16 02:33'
+updated_date: '2026-05-16 02:38'
 labels:
   - llamacpp
   - local-llm
@@ -46,6 +46,8 @@ Task 1 quality review fixes: malformed dict-shaped profile stores now fail close
 Task 2: added LlamaCppProcessRunner with independent process lifecycle, profile port policy handling, allowlist/path checks, owned log tailing, sync cleanup, and runtime state payloads. Verification: py_compile passed; process runner + management + inventory pytest reported 39 passed; Bandit on runner/runtime models had no findings; git diff --check passed.
 
 Task 2 review fixes: retained failed-start runtime details with FAILED status and redacted resolved args, expanded runtime response contract fields, rejected occupied explicit ports before spawn, drained stdout/stderr pipes when no log file is configured, validated model_draft/lora_scaled paths, and restored existing LlamaCppHandler server-arg aliases. Verification: py_compile passed; process runner/profile store/management/inventory pytest reported 54 passed; Bandit on runner/runtime/schema had no findings; git diff --check passed.
+
+Task 2 second review fixes: changed default pipe drainers from readline to bounded read(1024) so long/no-newline output cannot stop draining, and filtered None/empty profile server_args before command construction to match existing LlamaCppHandler behavior. Verification: focused regressions passed; py_compile passed; process runner/profile store/management/inventory pytest reported 55 passed; Bandit on runner/runtime/schema had no findings; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

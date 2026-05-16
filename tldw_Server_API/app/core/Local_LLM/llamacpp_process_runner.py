@@ -250,7 +250,7 @@ class LlamaCppProcessRunner:
         if not executable_path.is_file():
             raise ServerError(f"Llama.cpp server executable not found at {self.config.executable_path}")
 
-        args = dict(profile.server_args)
+        args = {key: value for key, value in profile.server_args.items() if value is not None and value != ""}
         self._check_denylist(args)
         host = handler_utils.strip_host_brackets(profile.host or self.config.default_host or "127.0.0.1")
         port = self._resolve_port(host, profile)
@@ -589,12 +589,11 @@ class LlamaCppProcessRunner:
     async def _drain_stream(self, stream: Any, label: str) -> None:
         try:
             while True:
-                chunk = await stream.readline()
+                chunk = await stream.read(1024)
                 if not chunk:
                     break
-                text = chunk.decode("utf-8", errors="replace").rstrip()
-                if text:
-                    logger.debug("llama.cpp {}: {}", label, _redact_log_line(text))
+        except asyncio.CancelledError:
+            return
         except Exception:
             logger.debug("llama.cpp {} stream drain stopped", label, exc_info=True)
 
