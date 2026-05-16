@@ -4,7 +4,7 @@ title: Risk Gate 4 prototype API contract and error semantics freeze
 status: In Progress
 assignee: []
 created_date: '2026-05-16 01:30'
-updated_date: '2026-05-16 01:49'
+updated_date: '2026-05-16 06:18'
 labels:
   - prototype-workspaces
   - risk-gate
@@ -47,13 +47,17 @@ Implementation plan: Docs/superpowers/plans/2026-05-15-prototype-workspace-risk-
 <!-- SECTION:NOTES:BEGIN -->
 2026-05-15: Created isolated worktree .worktrees/prototype-risk-gate-4-contract-freeze on branch codex/prototype-risk-gate-4-contract-freeze from origin/dev 2df371fbe after Risk Gate 3 PR #1729 was merged and GitHub issue #1455 was closed.
 
-2026-05-15: Baseline verification before implementation: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/PrototypeWorkspaces -q passed with 103 passed, 5 warnings in 8.73s.
+2026-05-15: Baseline verification before implementation: ../../.venv/bin/python -m pytest tldw_Server_API/tests/PrototypeWorkspaces -q passed with 103 passed, 5 warnings in 8.73s.
 
 2026-05-15: Implemented structured PrototypeErrorResponse detail contract for prototype workspace endpoints and public prototype-session exchange, added OpenAPI response model metadata, froze the v2 frontend contract fixture, and updated Risk Gate 4 API/matrix docs with lifecycle examples plus migration/rollback notes.
 
-2026-05-15: Verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/PrototypeWorkspaces -q passed with 107 passed, 5 warnings in 8.74s. Bandit touched backend paths wrote /tmp/bandit_prototype_risk_gate_4.json with 0 findings. git diff --check was clean.
+2026-05-15: Verification: ../../.venv/bin/python -m pytest tldw_Server_API/tests/PrototypeWorkspaces -q passed with 107 passed, 5 warnings in 8.74s. Bandit touched backend paths wrote /tmp/bandit_prototype_risk_gate_4.json with 0 findings. git diff --check was clean.
 
-2026-05-15: Opened draft PR #1739 for Risk Gate 4: https://github.com/rmusser01/tldw_server/pull/1739. PR remains draft pending human-written Change summary and Frontend/Product review/signoff.
+2026-05-15: Opened PR #1739 for Risk Gate 4: https://github.com/rmusser01/tldw_server/pull/1739. Merge readiness remains pending human-written Change summary and Frontend/Product review/signoff.
+
+2026-05-15: Started PR #1739 review-fix pass after live PR sweep. Actionable technical findings: 422 OpenAPI/default-validation mismatch, preview-renewal raw exception messages, missing 429 public-link rate-limit response metadata, machine-specific verification notes, and duplicated prototype error helper. Human-owned gate remains Frontend/Product signoff; do not fabricate it.
+
+2026-05-15: Implemented PR #1739 technical review fixes: centralized prototype error response metadata/helpers, documented 422 as PrototypeErrorResponse or HTTPValidationError, added public prototype exchange 429 OpenAPI metadata, masked preview-renewal exception text, replaced machine-specific verification command notes, and added regression tests. Verification: targeted 5-test review subset passed; ../../.venv/bin/python -m pytest tldw_Server_API/tests/PrototypeWorkspaces -q passed with 109 passed, 5 warnings in 8.35s; Bandit touched backend paths wrote /tmp/bandit_prototype_risk_gate_4_review_fixes.json with 0 findings; git diff --check was clean.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

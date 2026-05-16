@@ -181,6 +181,13 @@ Response highlights:
 - `session_token`
 - `runtime_policy_profile`
 
+Expected failure states:
+
+- Invalid, expired, exhausted, archived, or mismatched links: non-enumerating 404 or 403 `PrototypeErrorResponse`.
+- Missing required FastAPI request fields: 422 `HTTPValidationError`.
+- Domain-invalid request shape, such as a missing first-use `display_name`: 422 `PrototypeErrorResponse`.
+- Public exchange rate-limit exhaustion: 429.
+
 ## Prototype Shared Actor Model
 
 External stakeholders do not become first-class AuthNZ users.
@@ -235,7 +242,7 @@ Contract rules:
 - Active collaborator session-token paths use `inactive_session` when the signed token maps to a revoked or expired shared actor/session.
 - Preview renewal returns `preview_unavailable` with 404 for missing/revoked handles and 409 for renewal conflicts.
 
-The generated OpenAPI contract references `PrototypeErrorResponse` for prototype route 403, 404, 409, and 422 responses where those statuses are expected.
+The generated OpenAPI contract references `PrototypeErrorResponse` for prototype route 403, 404, and 409 responses where those statuses are expected. Prototype 422 entries allow either `PrototypeErrorResponse` or FastAPI's `HTTPValidationError` because malformed request bodies are rejected before endpoint code can wrap them in the domain error envelope.
 
 ## Lifecycle Examples
 

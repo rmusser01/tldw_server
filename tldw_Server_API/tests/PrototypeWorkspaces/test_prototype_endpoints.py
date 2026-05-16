@@ -51,6 +51,17 @@ def _assert_openapi_error_response(openapi: dict[str, Any], path: str, method: s
     assert schema["$ref"].endswith("/PrototypeErrorResponse")
 
 
+def _assert_openapi_error_or_validation_response(
+    openapi: dict[str, Any],
+    path: str,
+    method: str,
+    status_code: str,
+) -> None:
+    schema = openapi["paths"][path][method]["responses"][status_code]["content"]["application/json"]["schema"]
+    refs = {entry["$ref"].rsplit("/", maxsplit=1)[-1] for entry in schema["anyOf"]}
+    assert {"PrototypeErrorResponse", "HTTPValidationError"} <= refs
+
+
 def _seed_workspace(
     services: SimpleNamespace,
     *,
@@ -187,6 +198,7 @@ class TestPrototypeWorkspaceEndpoints:
             "409",
         )
         _assert_openapi_error_response(openapi, "/api/v1/prototype-sessions", "post", "403")
+        _assert_openapi_error_or_validation_response(openapi, "/api/v1/prototype-sessions", "post", "422")
         _assert_openapi_error_response(openapi, "/api/v1/prototype-promotions", "post", "404")
         _assert_openapi_error_response(
             openapi,
@@ -195,6 +207,15 @@ class TestPrototypeWorkspaceEndpoints:
             "403",
         )
         _assert_openapi_error_response(openapi, "/api/v1/prototype-previews/{preview_handle}/renew", "post", "409")
+
+    def test_request_validation_422_uses_fastapi_validation_shape(
+        self,
+        client: TestClient,
+    ) -> None:
+        resp = client.post("/api/v1/prototype-sessions", json={})
+
+        assert resp.status_code == 422
+        assert isinstance(resp.json()["detail"], list)
 
     def test_owner_can_fetch_workspace_detail_with_snapshot_and_session_inventory(
         self,
@@ -923,6 +944,38 @@ class TestPrototypeWorkspaceEndpoints:
             frontend_state="preview_unavailable",
             retryable=False,
         )
+        assert renewed.json()["detail"]["message"] == "Prototype preview is unavailable"
+
+    def test_preview_grant_renewal_maps_runtime_error_to_stable_message(
+        self,
+        client: TestClient,
+        test_services: SimpleNamespace,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        workspace, _seed_snapshot = _seed_workspace(test_services, title="Preview renewal conflict")
+
+        def fake_record(_preview_handle: str) -> dict[str, str]:
+            return {"prototype_workspace_id": workspace["id"]}
+
+        async def fake_renew(_preview_handle: str) -> dict[str, str]:
+            raise RuntimeError("runtime target leaked: http://internal-preview-host")
+
+        monkeypatch.setattr(test_services.preview_broker, "get_preview_record", fake_record)
+        monkeypatch.setattr(test_services.preview_broker, "renew_preview_grant", fake_renew)
+
+        renewed = client.post(
+            "/api/v1/prototype-previews/ph_conflict/renew",
+            json={},
+        )
+
+        assert renewed.status_code == 409
+        _assert_prototype_error(
+            renewed,
+            category="preview_unavailable",
+            frontend_state="preview_unavailable",
+            retryable=True,
+        )
+        assert renewed.json()["detail"]["message"] == "Prototype preview renewal conflict; please retry"
 
     def test_revoked_preview_grant_renewal_returns_404(
         self,

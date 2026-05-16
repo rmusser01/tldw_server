@@ -53,6 +53,12 @@ def _assert_openapi_error_response(openapi: dict, path: str, method: str, status
     assert schema["$ref"].endswith("/PrototypeErrorResponse")
 
 
+def _assert_openapi_error_or_validation_response(openapi: dict, path: str, method: str, status_code: str) -> None:
+    schema = openapi["paths"][path][method]["responses"][status_code]["content"]["application/json"]["schema"]
+    refs = {entry["$ref"].rsplit("/", maxsplit=1)[-1] for entry in schema["anyOf"]}
+    assert {"PrototypeErrorResponse", "HTTPValidationError"} <= refs
+
+
 class _FakePool:
     """Minimal DatabasePool stand-in backed by an in-memory SQLite connection."""
 
@@ -373,6 +379,13 @@ def test_public_prototype_exchange_openapi_declares_error_contract(test_app):
         "post",
         "404",
     )
+    _assert_openapi_error_or_validation_response(
+        openapi,
+        "/api/v1/sharing/public/{token}/prototype-session",
+        "post",
+        "422",
+    )
+    assert "429" in openapi["paths"]["/api/v1/sharing/public/{token}/prototype-session"]["post"]["responses"]
 
 
 def test_contract_states_fixture_uses_structured_error_details():
