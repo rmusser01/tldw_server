@@ -29,11 +29,14 @@ import type {
   PersonaVisualPackExportResponse,
   PersonaVisualPackListResponse,
   PersonaVisualPortabilityJobResponse,
+  PersonaVisualRendererType,
   PersonaVisualRendererCapabilitiesResponse,
+  PersonaVisualStarterComplexityTier,
   PersonaVisualStarterPackCopyRequest,
   PersonaVisualStarterPackDetail,
   PersonaVisualStarterPackListResponse,
-  PersonaVisualStarterPackSummary
+  PersonaVisualStarterPackSummary,
+  PersonaVisualStarterProductionStatus
 } from "@/types/persona-visuals"
 
 type PersonaVisualFetchInit = {
@@ -153,13 +156,91 @@ export const normalizePersonaVisualPackList = (
   }
 }
 
+const starterComplexityTiers = new Set<PersonaVisualStarterComplexityTier>([
+  "basic",
+  "intermediate",
+  "intricate"
+])
+
+const starterProductionStatuses = new Set<PersonaVisualStarterProductionStatus>([
+  "scaffold",
+  "art_ready"
+])
+
+const starterRendererTypes = new Set<PersonaVisualRendererType>([
+  "sprite_frames",
+  "sprite_sheet",
+  "static_image",
+  "live2d"
+])
+
+const normalizeStarterText = (value: unknown, fallback = ""): string =>
+  typeof value === "string" ? value : fallback
+
+const normalizeStarterNumber = (value: unknown, fallback = 0): number =>
+  typeof value === "number" && Number.isFinite(value) ? value : fallback
+
+const normalizeStarterStringList = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : []
+
+const normalizePersonaVisualStarterPackSummary = (
+  starter: PersonaVisualStarterPackSummary | Record<string, unknown>
+): PersonaVisualStarterPackSummary => {
+  const item = starter as Record<string, unknown>
+  const rendererType = normalizeStarterText(item.renderer_type, "sprite_frames")
+  const complexityTier = normalizeStarterText(item.complexity_tier, "basic")
+  const productionStatus = normalizeStarterText(item.production_status, "scaffold")
+
+  return {
+    id: normalizeStarterText(item.id),
+    title: normalizeStarterText(item.title),
+    description: normalizeStarterText(item.description),
+    renderer_type: starterRendererTypes.has(rendererType as PersonaVisualRendererType)
+      ? (rendererType as PersonaVisualRendererType)
+      : "sprite_frames",
+    manifest_version: normalizeStarterNumber(item.manifest_version, 1),
+    states_offered: normalizeStarterStringList(item.states_offered),
+    asset_count: normalizeStarterNumber(item.asset_count),
+    total_bytes: normalizeStarterNumber(item.total_bytes),
+    tags: normalizeStarterStringList(item.tags),
+    license_label: normalizeStarterText(item.license_label, "bundled"),
+    complexity_tier: starterComplexityTiers.has(
+      complexityTier as PersonaVisualStarterComplexityTier
+    )
+      ? (complexityTier as PersonaVisualStarterComplexityTier)
+      : "basic",
+    production_status: starterProductionStatuses.has(
+      productionStatus as PersonaVisualStarterProductionStatus
+    )
+      ? (productionStatus as PersonaVisualStarterProductionStatus)
+      : "scaffold",
+    neutral_anchor_required:
+      typeof item.neutral_anchor_required === "boolean"
+        ? item.neutral_anchor_required
+        : true,
+    expected_asset_groups: normalizeStarterStringList(item.expected_asset_groups),
+    animation_coverage_notes: normalizeStarterStringList(
+      item.animation_coverage_notes
+    )
+  }
+}
+
 export const normalizePersonaVisualStarterPackList = (
   payload: PersonaVisualStarterPackSummary[] | PersonaVisualStarterPackListResponse
 ): PersonaVisualStarterPackListResponse => {
-  if (Array.isArray(payload)) return { starter_packs: payload }
+  if (Array.isArray(payload)) {
+    return {
+      starter_packs: payload.map(normalizePersonaVisualStarterPackSummary)
+    }
+  }
   return {
     starter_packs: Array.isArray(payload?.starter_packs)
-      ? payload.starter_packs
+      ? payload.starter_packs.map(normalizePersonaVisualStarterPackSummary)
       : []
   }
 }
