@@ -118,6 +118,41 @@ def test_vision_profile_injects_resolved_mmproj(monkeypatch, tmp_path: Path):
 
 
 @pytest.mark.unit
+def test_asset_id_paths_pass_through_custom_path_resolver(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    base = models_dir / "llava.gguf"
+    projector = models_dir / "mmproj-llava.gguf"
+    base.write_text("base")
+    projector.write_text("projector")
+    _configure_assets(monkeypatch, models_dir)
+    calls: list[tuple[str, str, str]] = []
+
+    def path_resolver(raw_path: str | Path, expected_kind: str, label: str) -> Path:
+        calls.append((str(raw_path), expected_kind, label))
+        return Path(raw_path).resolve()
+
+    profile = LlamaCppProfile(
+        profile_id="vision",
+        name="Vision",
+        mode=LlamaCppProfileMode.VISION,
+        model_id=llamacpp_inventory_service.asset_id_for_path(base, "gguf"),
+        mmproj_model_id=llamacpp_inventory_service.asset_id_for_path(projector, "mmproj"),
+    )
+
+    resolved = resolve_profile_launch(profile, path_resolver=path_resolver)
+
+    assert resolved.model_path == base.resolve()
+    assert resolved.mmproj_path == projector.resolve()
+    assert calls == [
+        (str(base.resolve()), "gguf", "Model"),
+        (str(projector.resolve()), "mmproj", "mmproj"),
+    ]
+
+
+@pytest.mark.unit
 def test_vision_profile_rejects_conflicting_manual_mmproj(monkeypatch, tmp_path: Path):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
 

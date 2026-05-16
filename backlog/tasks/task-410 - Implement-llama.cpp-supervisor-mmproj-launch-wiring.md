@@ -9,6 +9,7 @@ labels:
 modified_files:
 - tldw_Server_API/app/core/Local_LLM/llamacpp_profile_capabilities.py
 - tldw_Server_API/app/core/Local_LLM/llamacpp_supervisor_service.py
+- tldw_Server_API/tests/LLM_Local/test_llamacpp_profile_capabilities.py
 - tldw_Server_API/tests/LLM_Local/test_llamacpp_supervisor_service.py
 references:
 - https://github.com/rmusser01/tldw_server/pull/1788
@@ -39,15 +40,15 @@ Docs/superpowers/plans/2026-05-16-llamacpp-model-family-mmproj-profile-wiring-pl
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Supervisor starts now use the llama.cpp profile capability resolver, injecting resolved mmproj paths at launch time and rejecting invalid vision/mmproj configurations before process start. Added focused async supervisor coverage for valid mmproj injection, missing projector, wrong-kind projector asset, outside-allowlist manual mmproj, resolved_args propagation, and non-mutation of persisted profile server_args. Verification: RED check failed as expected before implementation; focused pytest passed with 41 tests; git diff --check passed; Bandit on touched backend files passed with zero findings.
+Supervisor starts now use the llama.cpp profile capability resolver, injecting resolved mmproj paths at launch time and rejecting invalid vision/mmproj configurations before process start. Review fixes for PR #1788 route inventory asset-ID paths through the injected path resolver, delegate supervisor launch path validation to the inventory service to avoid stale allowlist logic/private helper access, add docstrings for new helper contracts, configure supervisor tests with matching inventory saved config, and mark the Definition of Done checklist consistently. Verification: RED check failed as expected before implementation; review regression passed; focused pytest passed with 42 tests; git diff --check passed; Bandit on touched backend files passed with zero findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

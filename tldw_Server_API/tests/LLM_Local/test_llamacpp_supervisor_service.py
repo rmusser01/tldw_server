@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+from configparser import ConfigParser
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +54,32 @@ def make_model(config: LlamaCppConfig, name: str = "model.gguf") -> Path:
     model_path = config.models_dir / name
     model_path.write_text("not really gguf", encoding="utf-8")
     return model_path
+
+
+def _llamacpp_parser(default_models_dir: Path, **overrides: str) -> ConfigParser:
+    parser = ConfigParser()
+    parser.add_section("LlamaCpp")
+    values = {
+        "enabled": "true",
+        "models_dir": str(default_models_dir),
+        "allowed_paths": "",
+        "registered_model_paths": "",
+        "imported_asset_folders": "",
+    }
+    values.update(overrides)
+    parser["LlamaCpp"] = values
+    return parser
+
+
+@pytest.fixture(autouse=True)
+def configure_inventory_for_supervisor_tests(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(tmp_path / "models"),
+    )
 
 
 def profile(
@@ -182,24 +209,17 @@ def configure_supervisor_assets(
     base_name: str = "llava.gguf",
     mmproj_name: str = "mmproj-llava.gguf",
 ) -> tuple[Path, Path, str, str]:
-    from configparser import ConfigParser
-
     from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
 
     base_path = make_model(config, base_name)
     mmproj_path = config.models_dir / mmproj_name
     mmproj_path.write_text("projector", encoding="utf-8")
 
-    parser = ConfigParser()
-    parser.add_section("LlamaCpp")
-    parser["LlamaCpp"] = {
-        "enabled": "true",
-        "models_dir": str(config.models_dir),
-        "allowed_paths": "",
-        "registered_model_paths": "",
-        "imported_asset_folders": "",
-    }
-    monkeypatch.setattr(llamacpp_inventory_service, "load_comprehensive_config", lambda: parser)
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(config.models_dir),
+    )
     return (
         base_path.resolve(),
         mmproj_path.resolve(),

@@ -82,6 +82,13 @@ def _resolve_base_model_path(
     assets: list[LlamaCppAsset] | None,
     path_resolver: Callable[[str | Path, str, str], Path] | None,
 ) -> Path:
+    """Resolve and validate the profile's base GGUF path.
+
+    The base model can come from an inventory asset ID or a direct profile path.
+    Both forms pass through `_resolve_asset_path` so supervisor-provided launch
+    validation can enforce the same file, kind, and allowlist checks. Raises
+    `ModelNotFoundError` when the profile has no usable base model.
+    """
     if profile.model_id:
         asset = llamacpp_inventory_service.resolve_asset_id(
             profile.model_id,
@@ -93,7 +100,7 @@ def _resolve_base_model_path(
                 f"Model asset {profile.model_id} does not reference an "
                 "available local asset."
             )
-        return Path(asset.resolved_path)
+        return _resolve_asset_path(asset.resolved_path, "gguf", "Model", path_resolver)
     if profile.model_path:
         return _resolve_asset_path(profile.model_path, "gguf", "Model", path_resolver)
     raise ModelNotFoundError("Llama.cpp profile requires a model_id or model_path.")
@@ -105,6 +112,13 @@ def _resolve_mmproj_path(
     assets: list[LlamaCppAsset] | None,
     path_resolver: Callable[[str | Path, str, str], Path] | None,
 ) -> Path | None:
+    """Resolve and validate the optional mmproj path for a profile launch.
+
+    Projectors can be selected by inventory ID or supplied manually in
+    `server_args["mmproj"]`. When both are present they must resolve to the same
+    validated path. Raises `ModelNotFoundError` for missing/wrong-kind projector
+    assets and `ServerError` for conflicting projector selections.
+    """
     asset_path: Path | None = None
     if profile.mmproj_model_id:
         asset = llamacpp_inventory_service.resolve_asset_id(
@@ -117,7 +131,7 @@ def _resolve_mmproj_path(
                 f"mmproj asset {profile.mmproj_model_id} does not reference an "
                 "available local asset."
             )
-        asset_path = Path(asset.resolved_path)
+        asset_path = _resolve_asset_path(asset.resolved_path, "mmproj", "mmproj", path_resolver)
 
     manual_value = server_args.get("mmproj")
     if manual_value in (None, ""):
@@ -135,6 +149,13 @@ def _resolve_asset_path(
     label: str,
     path_resolver: Callable[[str | Path, str, str], Path] | None,
 ) -> Path:
+    """Validate an asset path through the launch resolver or inventory service.
+
+    The optional resolver lets the supervisor align launch-time validation with
+    its chosen source of configuration while plain metadata calls keep using the
+    inventory service's saved-config validation. Errors are intentionally
+    propagated from the selected resolver so endpoint mappings remain stable.
+    """
     if path_resolver is not None:
         return path_resolver(raw_path, expected_kind, label)
     return llamacpp_inventory_service.resolve_asset_path(raw_path, expected_kind=expected_kind, label=label)

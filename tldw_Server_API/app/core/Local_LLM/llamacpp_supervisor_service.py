@@ -10,7 +10,7 @@ from typing import Any, Callable, Protocol
 from uuid import uuid4
 
 from tldw_Server_API.app.core.Local_LLM import handler_utils, llamacpp_inventory_service
-from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ModelNotFoundError, ServerError
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 from tldw_Server_API.app.core.Local_LLM.llamacpp_process_runner import LlamaCppProcessRunner
 from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_capabilities import resolve_profile_launch
@@ -431,26 +431,31 @@ class LlamaCppSupervisor:
         return profile
 
     def _profile_for_launch_resolution(self, profile: LlamaCppProfile) -> LlamaCppProfile:
+        """Return the profile shape used only for launch-time resolution.
+
+        The default-profile compatibility path persists both `model_id` and a
+        resolved `model_path` after `/start-by-model`. Clearing `model_id` here
+        keeps start-by-model/start-by-path bridge launches path-based without
+        mutating the stored profile. Other profiles keep their original asset
+        selection so invalid IDs still fail before runner spawn.
+        """
         if profile.profile_id == DEFAULT_PROFILE_ID and profile.model_path:
             return profile.model_copy(update={"model_id": None})
         return profile
 
     def _resolve_launch_asset_path(self, raw_path: str | Path, expected_kind: str, label: str) -> Path:
-        try:
-            path = Path(raw_path).expanduser().resolve()
-        except (OSError, RuntimeError, ValueError) as exc:
-            raise ServerError(f"{label} path could not be resolved.") from exc
-        if not path.is_file():
-            raise ModelNotFoundError(f"{label} path does not reference an available local file.")
-        if llamacpp_inventory_service._asset_kind_for_path(path) != expected_kind:
-            raise ModelNotFoundError(f"{label} path does not reference a {expected_kind} asset.")
-        allowed_paths = handler_utils.build_allowed_paths(
-            Path(self.config.models_dir),
-            getattr(self.config, "allowed_paths", None),
+        """Resolve a launch asset path using the inventory service contract.
+
+        The inventory service reads the current saved llama.cpp config for
+        canonicalization, asset-kind validation, and allowlist enforcement. This
+        avoids stale supervisor config snapshots and preserves the standard
+        `ModelNotFoundError`/`ServerError` behavior used by Admin endpoints.
+        """
+        return llamacpp_inventory_service.resolve_asset_path(
+            raw_path,
+            expected_kind=expected_kind,
+            label=label,
         )
-        if not handler_utils.is_path_allowed(path, allowed_paths):
-            raise ServerError(f"{label} path is outside allowed llama.cpp paths.")
-        return path
 
     def _validate_runtime_port_available(self, profile: LlamaCppProfile) -> None:
         if not profile.enabled or profile.port_policy != LlamaCppPortPolicy.EXPLICIT:
