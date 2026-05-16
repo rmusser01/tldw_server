@@ -21,7 +21,7 @@ import {
   Loader2,
 } from "lucide-react"
 import { Button } from "@/components/Common/Button"
-import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
+import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
 import { getDesignSystemState } from "@/design-system"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { ACPRestClient } from "@/services/acp/client"
@@ -150,10 +150,11 @@ const CreationProgress: React.FC<CreationProgressProps> = ({ step, error }) => {
         ]}
       />
       {error && (
-        <DesignSystemAlert
+        <Alert
           className="mt-3"
-          variant="error"
+          type="error"
           title={error.message}
+          showIcon
         >
           {error.suggestions.length > 0 ? (
             <ul className="mt-2 list-inside list-disc text-sm">
@@ -167,7 +168,7 @@ const CreationProgress: React.FC<CreationProgressProps> = ({ step, error }) => {
           ) : (
             t("acp.create.errorNoSuggestions", "Review the error details and try again.")
           )}
-        </DesignSystemAlert>
+        </Alert>
       )}
     </div>
   )

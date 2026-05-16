@@ -73,7 +73,7 @@ Verification:
 - Scoped baseline count for MCPHub, ACPPlayground, and WorkspacePlayground: 0.
 - Bandit skipped: UI-only TypeScript/React change, no Python code touched.
 
-Review note: Qodo's "AntD Alert replaced" requirement gap conflicts with issue #1661's note to keep AntD only where it is mechanics while migrating product-state language to shared primitives/state registry. This implementation preserves AntD mechanics and replaces only product-state `Alert`, flagged `Tag`, and flagged `Empty` usage.
+Review note: Qodo's "AntD Alert replaced" requirement gap conflicts with issue #1661's note to keep AntD only where it is mechanics while migrating product-state language to shared primitives/state registry. The direct shared `Alert` imports in the original ACP/MCP files were moved behind the product-state adapter so the component call sites keep AntD-like `type`/`title` mechanics while rendering through the design-system primitive.
 
 PR: https://github.com/rmusser01/tldw_server/pull/1742
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

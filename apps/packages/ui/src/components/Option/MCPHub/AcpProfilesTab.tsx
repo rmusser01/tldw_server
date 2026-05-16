@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { Button, Card, Empty, List, Space, Tag, Typography } from "antd"
 
-import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
+import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
 import { createAcpProfile, listAcpProfiles, type McpHubProfile } from "@/services/tldw/mcp-hub"
 
 export const AcpProfilesTab = () => {
@@ -56,11 +56,7 @@ export const AcpProfilesTab = () => {
       <Typography.Text type="secondary">
         ACP profiles define reusable MCP execution defaults.
       </Typography.Text>
-      {errorMessage ? (
-        <DesignSystemAlert variant="error">
-          {errorMessage}
-        </DesignSystemAlert>
-      ) : null}
+      {errorMessage ? <Alert type="error" title={errorMessage} showIcon /> : null}
 
       <Space>
         <Button type="primary" onClick={() => setCreateOpen(true)}>
