@@ -1617,28 +1617,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/DataTables/TablePreview.tsx:Alert#antd-alert-tablepreview-type-error-line-461-1wcr4it",
-    "path": "src/components/Option/DataTables/TablePreview.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/DataTables/TablePreview.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/DataTables/TablePreview.tsx:Alert#antd-alert-tablepreview-type-warning-line-494-1biqk4f",
-    "path": "src/components/Option/DataTables/TablePreview.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/DataTables/TablePreview.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Dictionaries/DictionaryVersionHistoryModal.tsx:Alert#antd-alert-dictionaryversionhistorymodal-type-error-vers-1pavdz5",
     "path": "src/components/Option/Dictionaries/DictionaryVersionHistoryModal.tsx",
     "rule": "antd-product-state-import",

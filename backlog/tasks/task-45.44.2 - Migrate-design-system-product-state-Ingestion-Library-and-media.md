@@ -36,6 +36,7 @@ Mirror the linked GitHub product-area migration issue. Closure requires zero cur
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - TASK-45.44.2.4 migrates TimelineModal error and empty product-state alerts from AntD Alert to the shared design-system Alert primitive, reducing the baseline from 398 to 396 total exceptions and the Ingestion/Library/media area by 2. PR: https://github.com/rmusser01/tldw_server/pull/1785
+- TASK-45.44.2.5 migrates TablePreview generation error and warning product-state alerts from AntD Alert to the shared design-system Alert primitive, reducing the baseline from 396 to 394 total exceptions and the Ingestion/Library/media area by 2. PR: https://github.com/rmusser01/tldw_server/pull/1786
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
