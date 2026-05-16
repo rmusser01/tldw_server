@@ -27,6 +27,7 @@ import { StatusTag } from "../shared"
 import { RunDetailDrawer } from "./RunDetailDrawer"
 import { Download, Square } from "lucide-react"
 import { mapWatchlistsError } from "../shared/watchlists-error"
+import { useWatchlistsViewport } from "../shared/useWatchlistsViewport"
 import {
   getRunFailureHint,
   resolveStalledRunNotification
@@ -103,6 +104,7 @@ const persistDisclosureState = (key: string, value: boolean): void => {
 
 export const RunsTab: React.FC = () => {
   const { t } = useTranslation(["watchlists", "common"])
+  const { isConstrained } = useWatchlistsViewport()
 
   // Store state
   const runs = useWatchlistsStore((s) => s.runs)
@@ -882,6 +884,172 @@ export const RunsTab: React.FC = () => {
     setActiveTab("outputs")
   }, [setActiveTab, setOutputsJobFilter, setOutputsRunFilter])
 
+  const renderConstrainedRunList = () => (
+    <div className="space-y-3" data-testid="watchlists-runs-constrained-list">
+      {(Array.isArray(runs) ? runs : []).map((run) => {
+        const status = String(run.status || "").toLowerCase()
+        const isCancellable = status === "running" || status === "pending" || status === "queued"
+        const cancelling = cancellingRunIds.includes(run.id)
+        const cancelFailed = failedCancelRunIds.includes(run.id)
+        const progressPercent = Math.round(
+          ((run.stats?.items_ingested || 0) /
+            Math.max(run.stats?.items_found || 1, 1)) *
+            100
+        )
+        return (
+          <article
+            key={run.id}
+            className="rounded-lg border border-border bg-surface p-3"
+            data-testid={`watchlists-run-card-${run.id}`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 space-y-1">
+                <div className="font-medium text-text">{getJobName(run.job_id)}</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusTag status={run.status} />
+                  {status === "running" && (
+                    <Progress
+                      percent={progressPercent}
+                      size="small"
+                      showInfo={false}
+                      className="w-20"
+                      aria-label={t("watchlists:runs.progressAria", "Run ingestion progress {{percent}} percent", {
+                        percent: progressPercent
+                      })}
+                    />
+                  )}
+                </div>
+              </div>
+              <span className="shrink-0 text-xs text-text-muted">
+                #{run.id}
+              </span>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:runs.columns.started", "Started")}
+                </div>
+                <span className="text-text-muted">
+                  {run.started_at ? formatRelativeTime(run.started_at, t) : "-"}
+                </span>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:runs.columns.duration", "Duration")}
+                </div>
+                <span className="text-text-muted">{calculateDuration(run)}</span>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:runs.columns.itemsFound", "Found")}
+                </div>
+                <span>{run.stats?.items_found ?? "-"}</span>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:runs.columns.itemsProcessed", "Processed")}
+                </div>
+                <span>{run.stats?.items_ingested ?? "-"}</span>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:runs.columns.itemsFiltered", "Filtered")}
+                </div>
+                <span>{run.stats?.items_filtered ?? "-"}</span>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:runs.columns.itemsErrored", "Errors")}
+                </div>
+                <span>{run.stats?.items_errored ?? "-"}</span>
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap justify-end gap-2">
+              <Button
+                type="text"
+                size="small"
+                aria-label={t("watchlists:runs.viewDetails", "View Details")}
+                icon={<Eye className="h-4 w-4" />}
+                onClick={() => openRunDetail(run.id)}
+              />
+              <Button
+                type="text"
+                size="small"
+                aria-label={t("watchlists:runs.openReports", "Open Reports")}
+                icon={<Download className="h-4 w-4" />}
+                data-testid={`watchlists-run-open-outputs-${run.id}`}
+                onClick={() => openRunOutputs(run.id, run.job_id)}
+              />
+              {isCancellable && (
+                <Button
+                  type="text"
+                  size="small"
+                  danger
+                  loading={cancelling}
+                  aria-label={
+                    cancelling
+                      ? t("watchlists:runs.cancelling", "Cancelling...")
+                      : cancelFailed
+                        ? t("watchlists:runs.cancelFailedRetry", "Cancel failed. Retry.")
+                        : t("watchlists:runs.cancelRun", "Cancel run")
+                  }
+                  icon={!cancelling ? <Square className="h-4 w-4" /> : undefined}
+                  data-testid={`watchlists-run-cancel-${run.id}`}
+                  onClick={async () => {
+                    if (cancelling) return
+                    setCancellingRunIds((prev) => (prev.includes(run.id) ? prev : [...prev, run.id]))
+                    setFailedCancelRunIds((prev) => prev.filter((id) => id !== run.id))
+                    try {
+                      const result = await cancelWatchlistRun(run.id)
+                      if (!result?.cancelled) {
+                        setFailedCancelRunIds((prev) => (prev.includes(run.id) ? prev : [...prev, run.id]))
+                        message.error(
+                          t("watchlists:runs.cancelRunError", "Failed to cancel run")
+                        )
+                        return
+                      }
+                      updateRunInList(run.id, {
+                        status: "cancelled" as any,
+                        finished_at: new Date().toISOString(),
+                        error_msg: "cancelled_by_user"
+                      })
+                      message.success(
+                        t("watchlists:runs.cancelRunSuccess", "Run cancelled")
+                      )
+                      setRunsLiveAnnouncement(
+                        t("watchlists:runs.live.cancelRunSuccess", "Run #{{id}} cancelled.", {
+                          id: run.id
+                        })
+                      )
+                    } catch (err) {
+                      console.error("Failed to cancel run:", err)
+                      setFailedCancelRunIds((prev) => (prev.includes(run.id) ? prev : [...prev, run.id]))
+                      message.error(
+                        t("watchlists:runs.cancelRunError", "Failed to cancel run")
+                      )
+                      setRunsLiveAnnouncement(
+                        t("watchlists:runs.live.cancelRunError", "Failed to cancel run #{{id}}.", {
+                          id: run.id
+                        })
+                      )
+                    } finally {
+                      setCancellingRunIds((prev) => prev.filter((id) => id !== run.id))
+                    }
+                  }}
+                />
+              )}
+            </div>
+          </article>
+        )
+      })}
+      <div className="text-xs text-text-subtle">
+        {t("watchlists:runs.totalItems", "{{total}} runs", { total: runsTotal })}
+      </div>
+    </div>
+  )
+
   return (
     <div className="space-y-4">
       <div
@@ -1076,30 +1244,33 @@ export const RunsTab: React.FC = () => {
         />
       )}
 
-      {/* Table */}
-      <Table
-        dataSource={Array.isArray(runs) ? runs : []}
-        columns={columns}
-        rowKey="id"
-        aria-label={t("watchlists:runs.tableAria", "Activity runs table")}
-        loading={runsLoading}
-        pagination={{
-          current: runsPage,
-          pageSize: runsPageSize,
-          total: runsTotal,
-          showSizeChanger: true,
-          showTotal: (total) =>
-            t("watchlists:runs.totalItems", "{{total}} runs", { total }),
-          onChange: (page, pageSize) => {
-            setRunsPage(page)
-            if (pageSize !== runsPageSize) {
-              setRunsPageSize(pageSize)
+      {isConstrained ? (
+        renderConstrainedRunList()
+      ) : (
+        <Table
+          dataSource={Array.isArray(runs) ? runs : []}
+          columns={columns}
+          rowKey="id"
+          aria-label={t("watchlists:runs.tableAria", "Activity runs table")}
+          loading={runsLoading}
+          pagination={{
+            current: runsPage,
+            pageSize: runsPageSize,
+            total: runsTotal,
+            showSizeChanger: true,
+            showTotal: (total) =>
+              t("watchlists:runs.totalItems", "{{total}} runs", { total }),
+            onChange: (page, pageSize) => {
+              setRunsPage(page)
+              if (pageSize !== runsPageSize) {
+                setRunsPageSize(pageSize)
+              }
             }
-          }
-        }}
-        size="middle"
-        scroll={{ x: 800 }}
-      />
+          }}
+          size="middle"
+          scroll={{ x: 800 }}
+        />
+      )}
 
       {/* Run Detail Drawer */}
       <RunDetailDrawer

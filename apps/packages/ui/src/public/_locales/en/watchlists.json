@@ -938,6 +938,12 @@
   "runs_columns_itemsProcessed": {
     "message": "Processed"
   },
+  "runs_columns_itemsFiltered": {
+    "message": "Filtered"
+  },
+  "runs_columns_itemsErrored": {
+    "message": "Errors"
+  },
   "runs_columns_actions": {
     "message": "Actions"
   },
@@ -980,11 +986,29 @@
   "runs_detail_items": {
     "message": "Scraped Items"
   },
+  "runs_detail_itemsTableAria": {
+    "message": "Run items table"
+  },
+  "runs_detail_itemsTotal": {
+    "message": "{{total}} items"
+  },
   "runs_detail_noLogs": {
     "message": "No logs available"
   },
   "runs_detail_noItems": {
     "message": "No items found"
+  },
+  "runs_detail_toggleReviewedAria": {
+    "message": "Toggle reviewed for {{title}}"
+  },
+  "runs_detail_reviewed": {
+    "message": "Reviewed"
+  },
+  "runs_detail_needsReview": {
+    "message": "Needs review"
+  },
+  "runs_detail_openSource": {
+    "message": "Open source"
   },
   "runs_detail_errorMessage": {
     "message": "Error Message"
@@ -1270,6 +1294,9 @@
   },
   "reports_evidence_title": {
     "message": "Evidence snapshot"
+  },
+  "reports_evidence_tableAria": {
+    "message": "Evidence table"
   },
   "reports_evidence_legacyTitle": {
     "message": "Live provenance only"
@@ -1778,6 +1805,9 @@
   "outputs_columns_delivery": {
     "message": "Delivery"
   },
+  "outputs_columns_readiness": {
+    "message": "Readiness"
+  },
   "outputs_columns_expires": {
     "message": "Expires"
   },
@@ -1843,6 +1873,24 @@
   },
   "templates_empty": {
     "message": "No templates yet"
+  },
+  "templates_tableAria": {
+    "message": "Templates table"
+  },
+  "templates_noDescription": {
+    "message": "No description"
+  },
+  "templates_versionLabel": {
+    "message": "Version"
+  },
+  "templates_latestVersion": {
+    "message": "Latest"
+  },
+  "templates_historyLabel": {
+    "message": "History"
+  },
+  "templates_versionCount": {
+    "message": "{{count}} version{{plural}}"
   },
   "templates_createTitle": {
     "message": "Create Template"
@@ -3244,6 +3292,12 @@
   },
   "outputs_tableAria": {
     "message": "Reports table"
+  },
+  "outputs_expired": {
+    "message": "Expired"
+  },
+  "outputs_never": {
+    "message": "Never"
   },
   "outputs_live_loadError": {
     "message": "Reports refresh failed."

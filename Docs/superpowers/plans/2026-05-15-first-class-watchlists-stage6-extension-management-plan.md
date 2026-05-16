@@ -327,7 +327,7 @@ git commit -m "feat: adapt watchlist sources and monitors for constrained manage
 - Test: `apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/ReportEvidencePanel.extension-management.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/Watchlists/TemplatesTab/__tests__/TemplatesTab.extension-management.test.tsx`
 
-- [ ] **Step 1: Write failing Activity tests**
+- [x] **Step 1: Write failing Activity tests**
 
 At `420px`, assert:
 
@@ -335,11 +335,11 @@ At `420px`, assert:
 - Status filter, job filter, Refresh, CSV export, cancel where available, detail open, and relationship jumps remain reachable.
 - Run detail drawer shows run items in a list/card pattern instead of a horizontally scrolling table.
 
-- [ ] **Step 2: Implement Activity constrained cards**
+- [x] **Step 2: Implement Activity constrained cards**
 
 Keep the existing desktop table and column chooser behavior. In constrained mode, render run cards with status, job/source summary, started/finished timing, item/error counts, actions, and details.
 
-- [ ] **Step 3: Write failing Reports tests**
+- [x] **Step 3: Write failing Reports tests**
 
 At `420px`, assert:
 
@@ -347,11 +347,11 @@ At `420px`, assert:
 - Create report, refresh, advanced filters, preview, evidence, download, regenerate, delivery issue actions, and relationship jumps remain reachable.
 - Evidence panel renders included evidence as cards/list rows in constrained mode.
 
-- [ ] **Step 4: Implement Reports constrained cards**
+- [x] **Step 4: Implement Reports constrained cards**
 
 Use existing output metadata helpers from `outputMetadata.ts`; do not recreate metadata parsing. Keep Stage 5 report builder and preview drawers intact, but verify their drawers remain full-width and usable at constrained width.
 
-- [ ] **Step 5: Write failing Templates tests**
+- [x] **Step 5: Write failing Templates tests**
 
 At `420px`, assert:
 
@@ -359,11 +359,11 @@ At `420px`, assert:
 - Create, preview/edit, duplicate if currently available, delete, and refresh remain reachable.
 - Template format/version metadata is visible without horizontal scrolling.
 
-- [ ] **Step 6: Implement Templates constrained cards**
+- [x] **Step 6: Implement Templates constrained cards**
 
 Keep the existing desktop table. Use a simple list/detail pattern for constrained mode and preserve `TemplateEditor` flows.
 
-- [ ] **Step 7: Run focused regression tests**
+- [x] **Step 7: Run focused regression tests**
 
 Run:
 
@@ -382,7 +382,9 @@ bunx vitest run \
 
 Expected: all selected tests pass.
 
-- [ ] **Step 8: Commit Stage 6C**
+Recorded on Stage 6C closeout: the focused Activity, run detail, Reports, evidence, and Templates constrained-management suite passed with 8 files and 29 tests. The Watchlists static guard passed with 1 file and 3 tests. Locale JSON parsing passed for the web and extension locale files, and `git diff --check` passed. Bandit was not applicable because Stage 6C changed only frontend, locale, documentation, and Backlog files.
+
+- [x] **Step 8: Commit Stage 6C**
 
 ```bash
 git add \

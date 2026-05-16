@@ -61,6 +61,7 @@ import {
   isAudioOutput
 } from "./outputMetadata"
 import { ReportBuilderDrawer } from "./ReportBuilderDrawer"
+import { useWatchlistsViewport } from "../shared/useWatchlistsViewport"
 import {
   getFocusableActiveElement,
   restoreFocusToElement
@@ -110,6 +111,7 @@ const hasOutputDeliveryIssue = (output: WatchlistOutput): boolean =>
 
 export const OutputsTab: React.FC = () => {
   const { t } = useTranslation(["watchlists", "common"])
+  const { isConstrained } = useWatchlistsViewport()
 
   // Store state
   const outputs = useWatchlistsStore((s) => s.outputs)
@@ -766,6 +768,187 @@ export const OutputsTab: React.FC = () => {
     ? allColumns
     : allColumns.filter((column) => defaultColumnKeys.has(resolveColumnKey(column)))
 
+  const renderConstrainedOutputList = () => (
+    <div className="space-y-3" data-testid="watchlists-outputs-constrained-list">
+      {filteredOutputs.map((output) => {
+        const deliveries = getOutputDeliveryStatuses(output.metadata)
+        const deliveryDisclosure = buildDeliveryDisclosureSummary(deliveries, {
+          maxVisible: showAdvancedFilters ? deliveries.length : 2
+        })
+        const readiness = getOutputReportReadiness(output.metadata)
+        return (
+          <article
+            key={output.id}
+            className="rounded-lg border border-border bg-surface p-3"
+            data-testid={`watchlists-output-card-${output.id}`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium text-text">{output.title || `Output #${output.id}`}</span>
+                  <Tag color={getOutputArtifactTagColor(output)}>
+                    {getOutputArtifactLabel(output)}
+                  </Tag>
+                  {getOutputReportSnapshotAvailable(output.metadata) ? (
+                    <Tag color="blue">
+                      {t("watchlists:reports.evidence.title", "Evidence snapshot")}
+                    </Tag>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs text-text-muted">
+                  <span>
+                    {t("watchlists:reports.table.sourceCount", "{{count}} sources", {
+                      count: getSourceCount(output.metadata)
+                    })}
+                  </span>
+                  <span>
+                    {t("watchlists:reports.table.alertCount", "{{count}} alerts", {
+                      count: getAlertCount(output.metadata)
+                    })}
+                  </span>
+                  {getWeakEvidenceWarningCount(output.metadata) > 0 && (
+                    <span>
+                      {t("watchlists:reports.table.weakWarningCount", "{{count}} weak evidence warnings", {
+                        count: getWeakEvidenceWarningCount(output.metadata)
+                      })}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <span className="shrink-0 text-xs text-text-muted">
+                #{output.id}
+              </span>
+            </div>
+
+            <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:outputs.columns.job", "Monitor")}
+                </div>
+                <Button
+                  type="link"
+                  size="small"
+                  className="px-0"
+                  onClick={() => openOutputMonitor(output.job_id)}
+                  data-testid={`watchlists-output-open-job-${output.id}`}
+                >
+                  {getJobName(output.job_id)}
+                </Button>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:outputs.columns.run", "Run")}
+                </div>
+                <Button
+                  type="link"
+                  size="small"
+                  className="px-0"
+                  onClick={() => openOutputRun(output)}
+                  data-testid={`watchlists-output-open-run-${output.id}`}
+                >
+                  #{output.run_id}
+                </Button>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:outputs.columns.created", "Created")}
+                </div>
+                <span className="text-text-muted">{formatRelativeTime(output.created_at, t)}</span>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:outputs.columns.expires", "Expires")}
+                </div>
+                {output.expired ? (
+                  <Tag color="red">{t("watchlists:outputs.expired", "Expired")}</Tag>
+                ) : output.expires_at ? (
+                  <span className="text-text-muted">{formatRelativeTime(output.expires_at, t)}</span>
+                ) : (
+                  <span className="text-text-muted">{t("watchlists:outputs.never", "Never")}</span>
+                )}
+              </div>
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:outputs.columns.delivery", "Delivery")}
+                </div>
+                {deliveries.length === 0 ? (
+                  <span className="text-text-subtle">-</span>
+                ) : (
+                  <div className="flex flex-wrap gap-1">
+                    {deliveryDisclosure.visible.map((delivery, index) => (
+                      <Tag key={`${delivery.channel}-${delivery.status}-${index}`} color={getDeliveryStatusColor(delivery.status)}>
+                        <span className="inline-flex items-center gap-1">
+                          {renderDeliveryStatusIcon(delivery.status)}
+                          <span>
+                            {delivery.channel} {getDeliveryStatusLabel(delivery.status)}
+                          </span>
+                        </span>
+                      </Tag>
+                    ))}
+                    {deliveryDisclosure.hidden.length > 0 && (
+                      <Tag>
+                        {t("watchlists:outputs.deliveryOverflowCount", "+{{count}} more", {
+                          count: deliveryDisclosure.hidden.length
+                        })}
+                      </Tag>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:outputs.columns.readiness", "Readiness")}
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  <Tag color={getReadinessTagColor(readiness.state)}>
+                    {getReadinessLabel(readiness.state)}
+                  </Tag>
+                  {getOutputReportSnapshotAvailable(output.metadata) ? (
+                    <Tag color="blue">
+                      <span className="inline-flex items-center gap-1">
+                        <FileText className="h-3.5 w-3.5" aria-hidden />
+                        {t("watchlists:reports.evidence.snapshotShort", "Evidence")}
+                      </span>
+                    </Tag>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap justify-end gap-2">
+              <Button
+                type="text"
+                size="small"
+                aria-label={t("watchlists:outputs.preview", "Preview")}
+                icon={<Eye className="h-4 w-4" />}
+                onClick={() => openOutputPreview(output.id)}
+              />
+              <Button
+                type="text"
+                size="small"
+                aria-label={t("watchlists:outputs.download", "Download")}
+                icon={<Download className="h-4 w-4" />}
+                onClick={() => handleDownload(output)}
+              />
+              <Button
+                type="text"
+                size="small"
+                aria-label={t("watchlists:outputs.regenerate", "Regenerate")}
+                icon={<RotateCcw className="h-4 w-4" />}
+                onClick={() => openRegenerate(output)}
+              />
+            </div>
+          </article>
+        )
+      })}
+      <div className="text-xs text-text-subtle">
+        {t("watchlists:outputs.totalItems", "{{total}} outputs", {
+          total: normalizedDeliveryStatusFilter ? filteredOutputs.length : outputsTotal
+        })}
+      </div>
+    </div>
+  )
+
   return (
     <div className="space-y-4">
       <div
@@ -924,30 +1107,33 @@ export const OutputsTab: React.FC = () => {
         />
       )}
 
-      {/* Table */}
-      <Table
-        dataSource={filteredOutputs}
-        columns={columns}
-        rowKey="id"
-        aria-label={t("watchlists:outputs.tableAria", "Reports table")}
-        loading={outputsLoading}
-        pagination={{
-          current: outputsPage,
-          pageSize: outputsPageSize,
-          total: normalizedDeliveryStatusFilter ? filteredOutputs.length : outputsTotal,
-          showSizeChanger: true,
-          showTotal: (total) =>
-            t("watchlists:outputs.totalItems", "{{total}} outputs", { total }),
-          onChange: (page, pageSize) => {
-            setOutputsPage(page)
-            if (pageSize !== outputsPageSize) {
-              setOutputsPageSize(pageSize)
+      {isConstrained ? (
+        renderConstrainedOutputList()
+      ) : (
+        <Table
+          dataSource={filteredOutputs}
+          columns={columns}
+          rowKey="id"
+          aria-label={t("watchlists:outputs.tableAria", "Reports table")}
+          loading={outputsLoading}
+          pagination={{
+            current: outputsPage,
+            pageSize: outputsPageSize,
+            total: normalizedDeliveryStatusFilter ? filteredOutputs.length : outputsTotal,
+            showSizeChanger: true,
+            showTotal: (total) =>
+              t("watchlists:outputs.totalItems", "{{total}} outputs", { total }),
+            onChange: (page, pageSize) => {
+              setOutputsPage(page)
+              if (pageSize !== outputsPageSize) {
+                setOutputsPageSize(pageSize)
+              }
             }
-          }
-        }}
-        size="middle"
-        scroll={{ x: 800 }}
-      />
+          }}
+          size="middle"
+          scroll={{ x: 800 }}
+        />
+      )}
 
       {/* Output Preview Drawer */}
       <OutputPreviewDrawer

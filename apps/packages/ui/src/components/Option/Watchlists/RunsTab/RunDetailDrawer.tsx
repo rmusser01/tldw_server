@@ -37,6 +37,7 @@ import { formatRelativeTime } from "@/utils/dateFormatters"
 import { StatusTag } from "../shared"
 import { mapWatchlistsError } from "../shared/watchlists-error"
 import { classifyRunFailure, getRunFailureHint } from "./run-notifications"
+import { useWatchlistsViewport } from "../shared/useWatchlistsViewport"
 import {
   getFocusableActiveElement,
   restoreFocusToElement
@@ -91,6 +92,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   onClose
 }) => {
   const { t } = useTranslation(["watchlists", "common"])
+  const { isConstrained } = useWatchlistsViewport()
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<RunDetailResponse | null>(null)
   const [error, setError] = useState<ReturnType<typeof mapWatchlistsError> | null>(null)
@@ -747,6 +749,115 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
     }
   ]
 
+  const getItemTitle = (item: ScrapedItem): string =>
+    item.title || item.url || t("watchlists:runs.detail.itemsUntitled", "Untitled")
+
+  const renderItemSource = (sourceId: number) => {
+    const sourceReference = t(
+      "watchlists:runs.detail.itemsSourceReference",
+      "#{{id}}",
+      { id: sourceId }
+    )
+    const sourceName = sourceNamesById[sourceId]
+    if (!sourceName) return sourceReference
+    return sourceName
+  }
+
+  const renderItemStatus = (item: ScrapedItem) => {
+    const normalized = String(item.status || "").toLowerCase()
+    const label =
+      normalized === "ingested"
+        ? t("watchlists:runs.detail.itemsStatusInBriefing", "Included in briefing")
+        : normalized === "filtered"
+          ? t("watchlists:runs.detail.itemsStatusFilteredOut", "Excluded from briefing")
+          : item.status
+    return (
+      <Tag color={normalized === "ingested" ? "green" : "default"}>
+        {label}
+      </Tag>
+    )
+  }
+
+  const renderConstrainedItems = () => (
+    <div className="space-y-3" data-testid="watchlists-run-items-constrained-list">
+      {items.map((item) => {
+        const title = getItemTitle(item)
+        return (
+          <article
+            key={item.id}
+            className="rounded-lg border border-border bg-surface p-3"
+            data-testid={`watchlists-run-item-card-${item.id}`}
+          >
+            <div className="space-y-1">
+              <div className="font-medium text-text">{title}</div>
+              {item.summary && (
+                <div className="text-xs text-text-muted line-clamp-2">{item.summary}</div>
+              )}
+            </div>
+
+            <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:runs.detail.itemsColumns.status", "Status")}
+                </div>
+                {renderItemStatus(item)}
+              </div>
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:runs.detail.itemsColumns.source", "Source")}
+                </div>
+                <span className="text-text-muted">{renderItemSource(item.source_id)}</span>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:runs.detail.itemsColumns.published", "Published")}
+                </div>
+                <span className="text-text-muted">
+                  {item.published_at ? formatRelativeTime(item.published_at, t) : "-"}
+                </span>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:runs.detail.itemsColumns.created", "Ingested")}
+                </div>
+                <span className="text-text-muted">
+                  {item.created_at ? formatRelativeTime(item.created_at, t) : "-"}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+              <span className="inline-flex items-center gap-2">
+                <Switch
+                  checked={item.reviewed}
+                  onChange={(checked) => handleToggleReviewed(item, checked)}
+                  loading={updatingItemIds.includes(item.id)}
+                  size="small"
+                  aria-label={t("watchlists:runs.detail.toggleReviewedAria", "Toggle reviewed for {{title}}", {
+                    title
+                  })}
+                />
+                <span className="text-xs text-text-muted">
+                  {item.reviewed
+                    ? t("watchlists:runs.detail.reviewed", "Reviewed")
+                    : t("watchlists:runs.detail.needsReview", "Needs review")}
+                </span>
+              </span>
+              {item.url ? (
+                <a href={item.url} target="_blank" rel="noreferrer" className="text-sm text-primary hover:underline">
+                  {t("watchlists:runs.detail.openSource", "Open source")}
+                </a>
+              ) : null}
+            </div>
+          </article>
+        )
+      })}
+      <div className="text-xs text-text-subtle">
+        {t("watchlists:runs.detail.itemsTotal", "{{total}} items", { total: itemsTotal })}
+      </div>
+    </div>
+  )
+
   const streamStateColorMap: Record<StreamConnectionState, string> = {
     connecting: "blue",
     connected: "green",
@@ -1103,25 +1214,30 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
               image={Empty.PRESENTED_IMAGE_SIMPLE}
             />
           ) : (
-            <Table
-              dataSource={items}
-              columns={itemColumns}
-              rowKey="id"
-              loading={itemsLoading}
-              pagination={{
-                current: itemsPage,
-                pageSize: itemsPageSize,
-                total: itemsTotal,
-                showSizeChanger: true,
-                onChange: (page, pageSize) => {
-                  setItemsPage(page)
-                  if (pageSize !== itemsPageSize) {
-                    setItemsPageSize(pageSize)
+            isConstrained ? (
+              renderConstrainedItems()
+            ) : (
+              <Table
+                dataSource={items}
+                columns={itemColumns}
+                rowKey="id"
+                aria-label={t("watchlists:runs.detail.itemsTableAria", "Run items table")}
+                loading={itemsLoading}
+                pagination={{
+                  current: itemsPage,
+                  pageSize: itemsPageSize,
+                  total: itemsTotal,
+                  showSizeChanger: true,
+                  onChange: (page, pageSize) => {
+                    setItemsPage(page)
+                    if (pageSize !== itemsPageSize) {
+                      setItemsPageSize(pageSize)
+                    }
                   }
-                }
-              }}
-              size="small"
-            />
+                }}
+                size="small"
+              />
+            )
           )}
         </div>
       )
@@ -1169,7 +1285,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
       placement="right"
       onClose={onClose}
       open={open}
-      styles={{ wrapper: { width: 600 } }}
+      styles={{ wrapper: { width: isConstrained ? "100vw" : 600 } }}
     >
       {loading ? (
         <div className="flex items-center justify-center py-12">

@@ -12,6 +12,7 @@ import {
   getReadinessLabel,
   getReadinessTagColor
 } from "./outputMetadata"
+import { useWatchlistsViewport } from "../shared/useWatchlistsViewport"
 
 interface ReportEvidencePanelProps {
   outputId: number
@@ -36,6 +37,7 @@ export const ReportEvidencePanel: React.FC<ReportEvidencePanelProps> = ({
   compact = false
 }) => {
   const { t } = useTranslation(["watchlists", "common"])
+  const { isConstrained } = useWatchlistsViewport()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [response, setResponse] = useState<WatchlistOutputEvidenceResponse | null>(
@@ -139,6 +141,91 @@ export const ReportEvidencePanel: React.FC<ReportEvidencePanelProps> = ({
       }
     ],
     [t]
+  )
+
+  const renderAlertEvidence = (item: WatchlistReportEvidenceItem) => (
+    <div className="flex flex-wrap gap-1">
+      {item.alerts.length > 0 ? (
+        item.alerts.map((alert) => (
+          <Tooltip key={alert.id} title={alert.matched_text || alert.snippet}>
+            <Tag color={alert.severity === "critical" ? "red" : "gold"}>
+              {alert.severity}
+            </Tag>
+          </Tooltip>
+        ))
+      ) : (
+        <span className="text-text-subtle">-</span>
+      )}
+    </div>
+  )
+
+  const renderReviewState = (item: WatchlistReportEvidenceItem) => (
+    <div className="flex flex-wrap gap-1">
+      <Tag color={item.reviewed ? "green" : "gold"}>
+        {item.reviewed
+          ? t("watchlists:reports.evidence.reviewed", "Reviewed")
+          : t("watchlists:reports.evidence.needsReview", "Needs review")}
+      </Tag>
+      {item.queued_for_briefing && (
+        <Tag color="blue">{t("watchlists:reports.evidence.queued", "Queued")}</Tag>
+      )}
+    </div>
+  )
+
+  const renderConstrainedIncludedEvidence = (items: WatchlistReportEvidenceItem[]) => (
+    <div className="space-y-3" data-testid="report-evidence-included-constrained-list">
+      {items.map((item) => (
+        <article
+          key={item.id}
+          className="rounded-lg border border-border bg-surface p-3"
+          data-testid={`report-evidence-included-card-${item.id}`}
+        >
+          <div className="space-y-1">
+            <div className="font-medium text-text">{item.title || `Update #${item.id}`}</div>
+            {item.summary && (
+              <div className="text-xs text-text-muted line-clamp-2">{item.summary}</div>
+            )}
+          </div>
+
+          <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+            <div>
+              <div className="text-xs font-medium text-text-subtle">
+                {t("watchlists:reports.evidence.columns.source", "Source")}
+              </div>
+              <span className="text-text-muted">
+                {item.source_name || `Source #${item.source_id ?? "-"}`}
+              </span>
+            </div>
+            <div>
+              <div className="text-xs font-medium text-text-subtle">
+                {t("watchlists:reports.evidence.columns.published", "Published")}
+              </div>
+              <span className="text-text-muted">{item.published_at || "-"}</span>
+            </div>
+            <div>
+              <div className="text-xs font-medium text-text-subtle">
+                {t("watchlists:reports.evidence.columns.alerts", "Alert evidence")}
+              </div>
+              {renderAlertEvidence(item)}
+            </div>
+            <div>
+              <div className="text-xs font-medium text-text-subtle">
+                {t("watchlists:reports.evidence.columns.state", "Review/queue state")}
+              </div>
+              {renderReviewState(item)}
+            </div>
+          </div>
+
+          {item.url ? (
+            <div className="mt-3">
+              <a href={item.url} target="_blank" rel="noreferrer" className="text-sm text-primary hover:underline">
+                {t("watchlists:reports.evidence.openSource", "Open source")}
+              </a>
+            </div>
+          ) : null}
+        </article>
+      ))}
+    </div>
   )
 
   if (loading && !response) {
@@ -252,13 +339,18 @@ export const ReportEvidencePanel: React.FC<ReportEvidencePanelProps> = ({
         </div>
       ) : null}
 
-      <Table
-        dataSource={snapshot.included_items}
-        columns={includedColumns}
-        rowKey="id"
-        size="small"
-        pagination={false}
-      />
+      {isConstrained ? (
+        renderConstrainedIncludedEvidence(snapshot.included_items)
+      ) : (
+        <Table
+          dataSource={snapshot.included_items}
+          columns={includedColumns}
+          rowKey="id"
+          aria-label={t("watchlists:reports.evidence.tableAria", "Evidence table")}
+          size="small"
+          pagination={false}
+        />
+      )}
 
       <div className="rounded-lg border border-border bg-surface p-3 space-y-2">
         <div className="font-medium text-text">
