@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import {
   DEGRADED_STATE_LABEL,
   ERROR_STATE_LABEL,
+  LOADING_STATE_LABEL,
   READY_STATE_LABEL,
 } from "@/design-system";
 import type { PlaygroundCockpitMode } from "./PlaygroundCockpitShell";
@@ -9,7 +10,29 @@ import {
   formatCockpitMessageCount,
   useCockpitMessageCount,
 } from "./playground-cockpit-state";
-import { AlertTriangle, CircleCheck, Loader2, Search, Settings2, Square } from "lucide-react";
+import {
+  AlertTriangle,
+  CircleCheck,
+  Loader2,
+  Search,
+  Settings2,
+  Square,
+} from "lucide-react";
+
+type PlaygroundStatusStripCompositionStatus =
+  | "idle"
+  | "loading"
+  | "ready"
+  | "error";
+
+type PlaygroundStatusStripRuntimeState =
+  | "error"
+  | "server-blocked"
+  | "streaming"
+  | "loading"
+  | "missing-model"
+  | "degraded"
+  | "ready";
 
 export type PlaygroundStatusStripProps = {
   mode: PlaygroundCockpitMode;
@@ -28,6 +51,8 @@ export type PlaygroundStatusStripProps = {
   degraded?: boolean;
   degradedChecks?: string[];
   errorMessage?: string | null;
+  serverBlocked?: boolean;
+  compositionStatus?: PlaygroundStatusStripCompositionStatus;
   onStopStreaming?: () => void;
   onOpenSearchContext?: () => void;
   onOpenModelSettings?: () => void;
@@ -55,6 +80,8 @@ export const PlaygroundStatusStrip = ({
   degraded = false,
   degradedChecks = [],
   errorMessage,
+  serverBlocked = false,
+  compositionStatus = "idle",
   onStopStreaming,
   onOpenSearchContext,
   onOpenModelSettings,
@@ -62,17 +89,41 @@ export const PlaygroundStatusStrip = ({
   const { t } = useTranslation("playground");
   const effectiveMessageCount = useCockpitMessageCount(messageCount);
   const isDegraded = degraded || degradedChecks.length > 0;
-  const routeLabel =
-    selectedProvider && selectedModel
-      ? `${selectedProvider}:${selectedModel}`
-      : selectedModel || t("cockpit.noModelSelected", "No model selected");
-  const runtimeLabel = errorMessage
-    ? t("cockpit.error", ERROR_STATE_LABEL)
-    : isDegraded
-      ? t("cockpit.degraded", DEGRADED_STATE_LABEL)
+  const hasSelectedModel = Boolean(selectedModel?.trim());
+  const isContextLoading = compositionStatus === "loading";
+  const runtimeState: PlaygroundStatusStripRuntimeState = errorMessage
+    ? "error"
+    : serverBlocked
+      ? "server-blocked"
       : streaming
-        ? t("cockpit.streaming", "Streaming")
-        : t("cockpit.ready", READY_STATE_LABEL);
+        ? "streaming"
+        : isContextLoading
+          ? "loading"
+          : !hasSelectedModel
+            ? "missing-model"
+            : isDegraded
+              ? "degraded"
+              : "ready";
+  const routeLabel =
+    selectedProvider && hasSelectedModel
+      ? `${selectedProvider}:${selectedModel}`
+      : hasSelectedModel
+        ? selectedModel
+        : t("cockpit.noModelSelected", "No model selected");
+  const runtimeLabel =
+    runtimeState === "error"
+      ? t("cockpit.error", ERROR_STATE_LABEL)
+      : runtimeState === "server-blocked"
+        ? t("cockpit.serverUnavailable", "Server unavailable")
+        : runtimeState === "streaming"
+          ? t("cockpit.streaming", "Streaming")
+          : runtimeState === "loading"
+            ? t("cockpit.loadingContext", `${LOADING_STATE_LABEL} context`)
+            : runtimeState === "missing-model"
+              ? t("cockpit.noModelSelected", "No model selected")
+              : runtimeState === "degraded"
+                ? t("cockpit.degraded", DEGRADED_STATE_LABEL)
+                : t("cockpit.ready", READY_STATE_LABEL);
   const messageLabel = formatCockpitMessageCount(
     t("cockpit.messageCount", {
       count: effectiveMessageCount,
@@ -82,8 +133,29 @@ export const PlaygroundStatusStrip = ({
     effectiveMessageCount,
   );
   const degradedChatAvailableLabel =
-    isDegraded && !errorMessage
+    isDegraded && !errorMessage && !serverBlocked && hasSelectedModel
       ? t("cockpit.degradedChatAvailable", "Chat remains available.")
+      : null;
+  const serverBlockedReason =
+    runtimeState === "server-blocked"
+      ? t(
+          "cockpit.serverUnavailableRecovery",
+          "Reconnect to the server or review server settings before sending.",
+        )
+      : null;
+  const missingModelReason =
+    runtimeState === "missing-model"
+      ? t(
+          "cockpit.chooseModelBeforeSending",
+          "Choose a model before sending.",
+        )
+      : null;
+  const contextLoadingReason =
+    runtimeState === "loading"
+      ? t(
+          "cockpit.contextPreviewLoading",
+          "Context preview is loading.",
+        )
       : null;
   const normalizedSessionTitle = sessionTitle?.trim() || null;
   const normalizedSessionStatusLabel = sessionStatusLabel?.trim() || null;
@@ -114,20 +186,23 @@ export const PlaygroundStatusStrip = ({
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <span
           className={`${pillClass} gap-1.5 ${
-            errorMessage
+            runtimeState === "error" || runtimeState === "server-blocked"
               ? "border-error/40 bg-error/10 text-error"
-              : isDegraded
+              : runtimeState === "degraded" ||
+                  runtimeState === "missing-model"
                 ? "border-warning/40 bg-warning/10 text-warning"
-                : streaming
+                : runtimeState === "streaming" || runtimeState === "loading"
                   ? "border-info/40 bg-info/10 text-info"
                   : "border-success/40 bg-success/10 text-success"
           }`}
         >
-          {errorMessage ? (
+          {runtimeState === "error" ||
+          runtimeState === "server-blocked" ||
+          runtimeState === "missing-model" ? (
             <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
-          ) : streaming ? (
+          ) : runtimeState === "streaming" || runtimeState === "loading" ? (
             <Loader2 className="h-3.5 w-3.5" aria-hidden="true" />
-          ) : isDegraded ? (
+          ) : runtimeState === "degraded" ? (
             <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
           ) : (
             <CircleCheck className="h-3.5 w-3.5" aria-hidden="true" />
@@ -178,11 +253,25 @@ export const PlaygroundStatusStrip = ({
           <span className={pillClass}>{errorMessage}</span>
         ) : (
           <>
-            {degradedChecks.map((check, index) => (
-              <span className={pillClass} key={`degraded-${index}-${check}`}>
-                {check}
-              </span>
-            ))}
+            {serverBlockedReason ? (
+              <span className={pillClass}>{serverBlockedReason}</span>
+            ) : null}
+            {missingModelReason ? (
+              <span className={pillClass}>{missingModelReason}</span>
+            ) : null}
+            {contextLoadingReason ? (
+              <span className={pillClass}>{contextLoadingReason}</span>
+            ) : null}
+            {!serverBlocked
+              ? degradedChecks.map((check, index) => (
+                  <span
+                    className={pillClass}
+                    key={`degraded-${index}-${check}`}
+                  >
+                    {check}
+                  </span>
+                ))
+              : null}
             {degradedChatAvailableLabel ? (
               <span className={pillClass}>{degradedChatAvailableLabel}</span>
             ) : null}
@@ -229,7 +318,7 @@ export const PlaygroundStatusStrip = ({
             <Settings2 className="h-3 w-3" aria-hidden="true" />
             {t("cockpit.reviewSettings", "Review settings")}
           </button>
-        ) : !selectedModel && onOpenModelSettings ? (
+        ) : !hasSelectedModel && onOpenModelSettings ? (
           <button
             type="button"
             className={actionClass}

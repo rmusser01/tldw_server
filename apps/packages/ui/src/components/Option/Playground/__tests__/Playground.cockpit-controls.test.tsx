@@ -977,6 +977,63 @@ describe("Playground cockpit controls", () => {
     );
   });
 
+  it("keeps streaming primary when degraded readiness is warning-only", async () => {
+    messageOptionState.value.streaming = true;
+
+    render(<Playground />);
+
+    await screen.findByTestId("playground-cockpit-shell");
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("tldw:server-readiness-state", {
+          detail: { state: "degraded", degradedChecks: ["embeddings"] },
+        }),
+      );
+    });
+
+    const runtimeInspector = within(
+      screen.getByTestId("playground-cockpit-right-rail"),
+    ).getByTestId("playground-runtime-inspector");
+    expect(within(runtimeInspector).getByText("Streaming")).toBeInTheDocument();
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Streaming");
+    expect(status).toHaveTextContent("embeddings");
+    expect(status).toHaveTextContent("Chat remains available.");
+  });
+
+  it("surfaces blocked server readiness as chat-critical unavailable state", async () => {
+    messageOptionState.value.streaming = false;
+
+    render(<Playground />);
+
+    await screen.findByTestId("playground-cockpit-shell");
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("tldw:server-readiness-state", {
+          detail: { state: "blocked", degradedChecks: ["chat"] },
+        }),
+      );
+    });
+
+    const runtimeInspector = within(
+      screen.getByTestId("playground-cockpit-right-rail"),
+    ).getByTestId("playground-runtime-inspector");
+    expect(within(runtimeInspector).getByText("Error")).toBeInTheDocument();
+    expect(
+      within(runtimeInspector).getByText(
+        "Server is unavailable. Check the server connection before sending.",
+      ),
+    ).toBeInTheDocument();
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Server unavailable");
+    expect(status).toHaveTextContent(
+      "Reconnect to the server or review server settings before sending.",
+    );
+    expect(status).not.toHaveTextContent("Chat remains available.");
+  });
+
   it("keeps the cockpit visibly degraded when readiness details are empty", async () => {
     messageOptionState.value.streaming = false;
 

@@ -616,7 +616,9 @@ test.describe('/chat cockpit real-server parity', () => {
     ).resolves.toEqual({ status: 204, body: null });
   });
 
-  test('does not intercept backend routes in this real-server spec', async ({}, testInfo) => {
+  test('does not intercept backend routes in this real-server spec', async ({
+    browserName: _browserName,
+  }, testInfo) => {
     const fs = await import('node:fs');
     const { readFileSync } = fs;
     const source = readFileSync(testInfo.file, 'utf8');
@@ -672,6 +674,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(cockpitStatus).toBeVisible();
     if (health.body?.status === 'degraded') {
       await expect(cockpitStatus).toContainText('Degraded');
+      await expect(cockpitStatus).toContainText('Chat remains available.');
     }
     await expect(getDesktopCompositionPreview(page)).toContainText(
       `Scope: ${chatModelSelection.key}`

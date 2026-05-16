@@ -1721,7 +1721,14 @@ export const Playground = () => {
     (message) => message.role === "assistant",
   );
   const runtimeStatusDetail =
-    serverReadinessState === "degraded"
+    serverReadinessState === "blocked"
+      ? toText(
+          t(
+            "playground:cockpit.blockedServerHealth",
+            "Server is unavailable. Check the server connection before sending.",
+          ),
+        )
+      : serverReadinessState === "degraded"
       ? serverDegradedChecks.length > 0
         ? `${toText(
             t("playground:cockpit.degraded", DEGRADED_STATE_LABEL),
@@ -2132,6 +2139,7 @@ export const Playground = () => {
       ),
     },
   });
+  const compositionStatus = "idle" as const;
   const compositionPreviewSummary = buildPlaygroundCompositionPreviewSummary({
     promptSummary,
     assistantSummary: cockpitAssistantSummary,
@@ -2139,7 +2147,7 @@ export const Playground = () => {
     settingSummaries: runtimeSettingSummaries,
     contextSources,
     toolSummary: cockpitToolSummary,
-    compositionStatus: "idle",
+    compositionStatus,
     composition: null,
   });
   const openModelSettingsFromCockpit = React.useCallback(() => {
@@ -2246,7 +2254,9 @@ export const Playground = () => {
       selectedModel={providerRouteSummary.selectedModel}
       providerRouteLabel={providerRouteSummary.providerRouteLabel}
       runtimeStatus={
-        streaming
+        serverReadinessState === "blocked"
+          ? "error"
+          : streaming
           ? "streaming"
           : serverReadinessState === "degraded"
             ? "degraded"
@@ -2290,6 +2300,8 @@ export const Playground = () => {
       degraded={serverReadinessState === "degraded"}
       degradedChecks={serverDegradedChecks}
       errorMessage={null}
+      serverBlocked={serverReadinessState === "blocked"}
+      compositionStatus={compositionStatus}
       onStopStreaming={() => stopStreamingRequest()}
       onOpenSearchContext={() => openSearchAndContext({ tab: "context" })}
       onOpenModelSettings={openModelSettings}

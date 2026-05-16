@@ -66,6 +66,111 @@ describe("PlaygroundStatusStrip first-slice state", () => {
     expect(status).toHaveTextContent("Temporary");
   });
 
+  it("keeps active streaming primary while degraded health remains warning-only", () => {
+    const stopStreaming = vi.fn();
+
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming
+        selectedProvider="openai"
+        selectedModel="gpt-4.1-mini"
+        messageCount={2}
+        sessionLabel="Server chat"
+        hasContext={false}
+        contextSummary={[]}
+        temporaryChat={false}
+        degradedChecks={["Embeddings unavailable"]}
+        errorMessage={null}
+        onStopStreaming={stopStreaming}
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Streaming");
+    expect(status).toHaveTextContent("Embeddings unavailable");
+    expect(status).toHaveTextContent("Chat remains available.");
+    fireEvent.click(screen.getByRole("button", { name: "Stop generation" }));
+    expect(stopStreaming).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces missing model as a recoverable send blocker", () => {
+    const openModelSettings = vi.fn();
+
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider={null}
+        selectedModel={null}
+        messageCount={0}
+        sessionLabel="Local chat"
+        hasContext={false}
+        contextSummary={[]}
+        temporaryChat
+        degradedChecks={[]}
+        errorMessage={null}
+        onOpenModelSettings={openModelSettings}
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("No model selected");
+    expect(status).toHaveTextContent("Choose a model before sending.");
+    fireEvent.click(screen.getByRole("button", { name: "Open model settings" }));
+    expect(openModelSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows context preview loading without treating the chat route as degraded", () => {
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider="openai"
+        selectedModel="gpt-4.1-mini"
+        messageCount={0}
+        sessionLabel="Server chat"
+        hasContext
+        contextSummary={["2 knowledge items"]}
+        temporaryChat={false}
+        degradedChecks={[]}
+        errorMessage={null}
+        compositionStatus="loading"
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Loading context");
+    expect(status).toHaveTextContent("Context preview is loading.");
+    expect(status).not.toHaveTextContent("Degraded");
+  });
+
+  it("distinguishes blocked server readiness from warning-only degraded health", () => {
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider="openai"
+        selectedModel="gpt-4.1-mini"
+        messageCount={0}
+        sessionLabel="Server chat"
+        hasContext={false}
+        contextSummary={[]}
+        temporaryChat={false}
+        degradedChecks={["Embeddings unavailable"]}
+        errorMessage={null}
+        serverBlocked
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Server unavailable");
+    expect(status).toHaveTextContent(
+      "Reconnect to the server or review server settings before sending.",
+    );
+    expect(status).not.toHaveTextContent("Chat remains available.");
+  });
+
   it("renders recoverable error state ahead of degraded state", () => {
     const openModelSettings = vi.fn();
 
