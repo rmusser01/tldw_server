@@ -49,6 +49,6 @@ Backlog: TASK-393, TASK-394.1
 
 - Active product launch paths should be treated as `QuickIngestButton` / `QuickIngestModalHost` / `QuickIngestWizardModal`, not legacy `QuickIngestModal`.
 - Backlog lists both `TASK-393` and `TASK-394.1` because `TASK-393` is the original plan task, while `TASK-394.1` is the execution child task for this remediation slice.
-- `quick-ingest-run`, `quick-ingest-cancel`, and `quick-ingest-open-media-primary` are active selectors in shared wizard pieces: `apps/packages/ui/src/components/Common/QuickIngest/shared/ProcessButton.tsx:88`, `apps/packages/ui/src/components/Common/QuickIngest/shared/ProcessButton.tsx:104`, and `apps/packages/ui/src/components/Common/QuickIngest/ResultsPanel.tsx:324`.
+- `quick-ingest-cancel`, `quick-ingest-run`, and `quick-ingest-open-media-primary` are active selectors in shared wizard pieces: `apps/packages/ui/src/components/Common/QuickIngest/shared/ProcessButton.tsx:88`, `apps/packages/ui/src/components/Common/QuickIngest/shared/ProcessButton.tsx:104`, and `apps/packages/ui/src/components/Common/QuickIngest/ResultsPanel.tsx:324`.
 - Legacy tests that import `QuickIngestModal` can still pass against overlapping selectors, but they do not validate the active wizard runtime.
 - For the next implementation task, prefer extending active wizard tests before changing product code; only migrate legacy tests if the changed behavior needs their scenario coverage.
