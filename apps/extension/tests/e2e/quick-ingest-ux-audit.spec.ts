@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 import { launchWithBuiltExtension } from './utils/extension-build'
 import {
   waitForConnectionStore,
@@ -8,8 +8,155 @@ import {
 
 const API_KEY = 'THIS-IS-A-SECURE-KEY-123-FAKE-KEY'
 
+const openQuickIngestDialog = async (page: Page): Promise<Locator> => {
+  const ingestButton = page
+    .getByRole('button', { name: /^Quick ingest$/i })
+    .or(page.getByRole('button', { name: /open quick ingest/i }))
+    .first()
+  await expect(ingestButton).toBeVisible()
+  await ingestButton.click()
+
+  const dialog = page.getByRole('dialog', { name: /quick ingest/i }).first()
+  await expect(dialog).toBeVisible()
+  return dialog
+}
+
+const addUrlToQuickIngest = async (dialog: Locator, url: string) => {
+  const urlInput = dialog
+    .getByLabel(/url input area|paste urls input/i)
+    .or(dialog.getByPlaceholder(/https:\/\/example\.com/i))
+    .first()
+  await urlInput.click()
+  await urlInput.fill(url)
+  await dialog.getByRole('button', { name: /Add URLs|Add URLs to queue|Add/i }).first().click()
+}
+
+const startQueuedQuickIngest = async (dialog: Locator) => {
+  const useDefaultsButton = dialog
+    .getByRole('button', { name: /use defaults & process/i })
+    .first()
+  if (await useDefaultsButton.isVisible({ timeout: 3000 }).catch(() => false)) {
+    await useDefaultsButton.click()
+    return
+  }
+
+  const configureButton = dialog
+    .getByRole('button', { name: /configure \d+ items/i })
+    .first()
+  await expect(configureButton).toBeVisible()
+  await configureButton.click()
+
+  const nextButton = dialog.getByRole('button', { name: /^next$/i }).first()
+  await expect(nextButton).toBeVisible()
+  await nextButton.click()
+
+  const startButton = dialog.getByRole('button', { name: /start processing/i }).first()
+  await expect(startButton).toBeVisible()
+  await startButton.click()
+}
+
+const patchQuickIngestRuntimeResults = async (
+  page: Page,
+  results: Array<Record<string, unknown>>
+) => {
+  return page.evaluate((items) => {
+    try {
+      const runtime =
+        (globalThis as any)?.browser?.runtime ||
+        (globalThis as any)?.chrome?.runtime
+      const onMessage = runtime?.onMessage
+      const originalSendMessage =
+        typeof runtime?.sendMessage === 'function'
+          ? runtime.sendMessage.bind(runtime)
+          : null
+      if (!runtime || !onMessage || !originalSendMessage) {
+        return false
+      }
+
+      const originalAddListener =
+        typeof onMessage.addListener === 'function'
+          ? onMessage.addListener.bind(onMessage)
+          : null
+      const originalRemoveListener =
+        typeof onMessage.removeListener === 'function'
+          ? onMessage.removeListener.bind(onMessage)
+          : null
+      const listeners = new Set<(message: any, sender?: any, sendResponse?: any) => void>()
+
+      const emit = (message: any) => {
+        for (const listener of [...listeners]) {
+          try {
+            listener(message, {}, () => undefined)
+          } catch {
+            // best-effort test emitter
+          }
+        }
+      }
+
+      onMessage.addListener = (listener: any) => {
+        listeners.add(listener)
+      }
+      onMessage.removeListener = (listener: any) => {
+        listeners.delete(listener)
+      }
+
+      runtime.sendMessage = async (message: any) => {
+        if (message?.type === 'tldw:quick-ingest/start') {
+          const sessionId = 'qi-e2e-ux-audit-session'
+          setTimeout(() => {
+            emit({
+              type: 'tldw:quick-ingest/completed',
+              payload: {
+                sessionId,
+                results: items
+              }
+            })
+          }, 50)
+          return { ok: true, sessionId }
+        }
+        if (message?.type === 'tldw:quick-ingest-batch') {
+          return { ok: true, results: items }
+        }
+        return originalSendMessage(message)
+      }
+
+      ;(window as any).__restoreQuickIngestUxAuditPatch = () => {
+        runtime.sendMessage = originalSendMessage
+        if (originalAddListener) {
+          onMessage.addListener = originalAddListener
+        }
+        if (originalRemoveListener) {
+          onMessage.removeListener = originalRemoveListener
+        }
+        listeners.clear()
+      }
+      return true
+    } catch {
+      return false
+    }
+  }, results)
+}
+
+const restoreQuickIngestRuntimePatch = async (page: Page) => {
+  try {
+    await page.evaluate(() => {
+      try {
+        const restore = (window as any).__restoreQuickIngestUxAuditPatch
+        if (typeof restore === 'function') {
+          restore()
+        }
+        delete (window as any).__restoreQuickIngestUxAuditPatch
+      } catch {
+        // ignore best-effort cleanup failures
+      }
+    })
+  } catch {
+    // ignore cleanup failures if page/context is already torn down
+  }
+}
+
 test.describe('Quick ingest – UX audit', () => {
-  test('first-time user sees tips with Advanced/Inspector collapsed', async () => {
+  test('first-time user sees purpose and supported input copy before configuration', async () => {
     const { context, page, optionsUrl } = await launchWithBuiltExtension({
       seedConfig: {
         serverUrl: 'http://127.0.0.1:8000',
@@ -21,29 +168,21 @@ test.describe('Quick ingest – UX audit', () => {
     try {
       await page.goto(optionsUrl + '#/media', { waitUntil: 'domcontentloaded' })
 
-      const ingestButton = page
-        .getByRole('button', { name: /Quick ingest/i })
-        .first()
-      await expect(ingestButton).toBeVisible()
-      await ingestButton.click()
+      const modal = await openQuickIngestDialog(page)
 
-      const modal = page.locator('.quick-ingest-modal .ant-modal-content')
-      await expect(modal).toBeVisible()
-
-      // Tips + supported formats should be visible on first open.
       await expect(
-        modal.getByText(/Tips/i)
+        modal.getByText(/Add URLs or files\. Stored items appear in Media/i)
       ).toBeVisible()
       await expect(
-        modal.getByText(/Supported: docs, PDFs, audio, video, and web URLs./i)
+        modal.getByText(/Supported: PDF, EPUB, DOCX, TXT, Markdown, HTML, XML, JSON, audio, video/i)
+      ).toBeVisible()
+      await expect(
+        modal.getByText(/Max file size: 50 MB/i)
       ).toBeVisible()
 
-      // Advanced options content should not be visible until expanded.
+      // Advanced options belong to the configure step, not the first add step.
       await expect(
         modal.getByText(/Advanced options/i)
-      ).toBeVisible()
-      await expect(
-        modal.getByPlaceholder(/Search advanced fields/i)
       ).toHaveCount(0)
 
       // Inspector drawer should not be open by default.
@@ -55,7 +194,7 @@ test.describe('Quick ingest – UX audit', () => {
     }
   })
 
-  test('success summary surfaces a primary Media CTA', async () => {
+  test('success results surface a Media handoff action', async () => {
     const { context, page, optionsUrl } = await launchWithBuiltExtension({
       seedConfig: {
         serverUrl: 'http://127.0.0.1:8000',
@@ -67,239 +206,133 @@ test.describe('Quick ingest – UX audit', () => {
     try {
       await page.goto(optionsUrl + '#/media', { waitUntil: 'domcontentloaded' })
 
-      const ingestButton = page
-        .getByRole('button', { name: /Quick ingest/i })
-        .first()
-      await expect(ingestButton).toBeVisible()
-      await ingestButton.click()
-
-      const modal = page.locator('.quick-ingest-modal .ant-modal-content')
-      await expect(modal).toBeVisible()
-
-      // Add a URL to queue.
-      const urlInput = modal
-        .getByLabel(/URLs to ingest/i)
-        .or(modal.getByPlaceholder(/https:\/\/example\.com/i))
-        .first()
-      await urlInput.click()
-      await urlInput.fill('https://example.com')
-      await modal.getByRole('button', { name: /Add URLs/i }).click()
-
-      // Run ingest – rely on live server or existing mocks.
-      const runButton = modal.getByRole('button', {
-        name: /Run quick ingest|Ingest|Process/i
-      }).first()
-      await expect(runButton).toBeVisible()
-      await runButton.click()
-
-      // Wait for summary to appear.
-      await expect(
-        modal.getByText(/Quick ingest completed (successfully|with some errors)/i)
-      ).toBeVisible({ timeout: 30_000 })
-
-      // Primary CTA should be present first in the summary actions.
-      const primaryCta = modal.getByTestId(
-        'quick-ingest-open-media-primary'
-      )
-      await expect(primaryCta).toBeVisible()
-
-      // At least one "Open in Media viewer" link should be present in the results list.
-      await expect(
-        modal.getByRole('button', { name: /Open in Media viewer/i }).first()
-      ).toBeVisible()
-    } finally {
-      await context.close()
-    }
-  })
-
-  test('advanced options surface a Recommended group and embedding context', async () => {
-    const { context, page, optionsUrl } = await launchWithBuiltExtension({
-      seedConfig: {
-        serverUrl: 'http://127.0.0.1:8000',
-        authMode: 'single-user',
-        apiKey: API_KEY
-      }
-    })
-
-    try {
-      await page.goto(optionsUrl + '#/media', { waitUntil: 'domcontentloaded' })
-
-      // Seed a default embedding model so the inline RAG label is deterministic.
-      await page.evaluate(
-        () =>
-          new Promise<void>((resolve) => {
-            // @ts-ignore
-            chrome.storage.local.set(
-              { defaultEmbeddingModel: 'openai/text-embedding-3-small' },
-              () => resolve()
-            )
-          })
-      )
-
-      const ingestButton = page
-        .getByRole('button', { name: /Quick ingest/i })
-        .first()
-      await expect(ingestButton).toBeVisible()
-      await ingestButton.click()
-
-      const modal = page.locator('.quick-ingest-modal .ant-modal-content')
-      await expect(modal).toBeVisible()
-
-      // Inline embedding context should be visible near common options.
-      await expect(
-        modal.getByText(/Uses .* for RAG search/i)
-      ).toBeVisible()
-
-      // "Model settings" link should navigate to the model settings route.
-      await modal.getByRole('button', { name: /Model settings/i }).click()
-      await expect(page).toHaveURL(/#\/settings\/model/)
-
-      // Go back to Media and reopen Quick Ingest for Advanced checks.
-      await page.goto(optionsUrl + '#/media', { waitUntil: 'domcontentloaded' })
-      const ingestButton2 = page
-        .getByRole('button', { name: /Quick ingest/i })
-        .first()
-      await ingestButton2.click()
-
-      const modal2 = page.locator('.quick-ingest-modal .ant-modal-content')
-      await expect(modal2).toBeVisible()
-
-      // Expand Advanced options.
-      await modal2.getByText(/Advanced options/i).click()
-
-      // Recommended group should appear at the top when present.
-      const recommendedHeading = modal2.getByText(/Recommended fields/i)
-      const count = await recommendedHeading.count()
-      if (count > 0) {
-        await expect(recommendedHeading.first()).toBeVisible()
-      }
-    } finally {
-      await context.close()
-    }
-  })
-
-  test('results filter surfaces failed items first and supports Failed-only view', async () => {
-    const { context, page, optionsUrl } = await launchWithBuiltExtension({
-      seedConfig: {
-        serverUrl: 'http://127.0.0.1:8000',
-        authMode: 'single-user',
-        apiKey: API_KEY
-      }
-    })
-
-    try {
-      // Patch quick-ingest batch to return mixed results deterministically.
-      const patched = await page.evaluate(() => {
-        try {
-          // @ts-ignore
-          const b = browser as any
-          const original =
-            b.runtime && typeof b.runtime.sendMessage === 'function'
-              ? b.runtime.sendMessage.bind(b.runtime)
-              : undefined
-          ;(window as any).__origQuickIngestSendMessageMixed = original
-          if (b.runtime) {
-            b.runtime.sendMessage = async (message: any) => {
-              if (message?.type === 'tldw:quick-ingest-batch') {
-                return {
-                  ok: true,
-                  results: [
-                    {
-                      id: 'fail-1',
-                      status: 'error',
-                      type: 'html',
-                      url: 'https://fail.example.com',
-                      error: 'Simulated failure'
-                    },
-                    {
-                      id: 'ok-1',
-                      status: 'ok',
-                      type: 'html',
-                      url: 'https://ok.example.com',
-                      data: { id: 123 }
-                    }
-                  ]
-                }
-              }
-              if (typeof original === 'function') {
-                return original(message)
-              }
-              return undefined
-            }
-          }
-          return true
-        } catch {
-          return false
+      const patched = await patchQuickIngestRuntimeResults(page, [
+        {
+          id: 'ok-1',
+          status: 'ok',
+          type: 'html',
+          url: 'https://example.com',
+          title: 'Example quick ingest',
+          mediaId: 'qi-extension-media-1'
         }
+      ])
+      if (!patched) {
+        test.skip(
+          true,
+          'Quick-ingest runtime patching failed in page context; skipping deterministic success handoff audit.'
+        )
+        return
+      }
+
+      const modal = await openQuickIngestDialog(page)
+
+      await addUrlToQuickIngest(modal, 'https://example.com')
+      await startQueuedQuickIngest(modal)
+
+      await expect(modal.getByTestId('wizard-results-step')).toBeVisible({
+        timeout: 30_000
       })
+      await expect(
+        modal.getByRole('region', { name: /completed items/i })
+      ).toBeVisible()
+
+      await expect(
+        modal.getByRole('button', { name: /Open .* in Media/i }).first()
+      ).toBeVisible()
+    } finally {
+      await restoreQuickIngestRuntimePatch(page)
+      await context.close()
+    }
+  })
+
+  test('configure step exposes presets and keeps advanced options collapsed by default', async () => {
+    const { context, page, optionsUrl } = await launchWithBuiltExtension({
+      seedConfig: {
+        serverUrl: 'http://127.0.0.1:8000',
+        authMode: 'single-user',
+        apiKey: API_KEY
+      }
+    })
+
+    try {
+      await page.goto(optionsUrl + '#/media', { waitUntil: 'domcontentloaded' })
+
+      const modal = await openQuickIngestDialog(page)
+      await addUrlToQuickIngest(modal, 'https://example.com/configure')
+      await modal.getByRole('button', { name: /configure \d+ items/i }).click()
+
+      await expect(
+        modal.getByText(/Presets are starting points/i)
+      ).toBeVisible()
+      await expect(
+        modal.getByRole('button', { name: /Advanced options/i })
+      ).toHaveAttribute('aria-expanded', 'false')
+
+      await modal.getByRole('button', { name: /Advanced options/i }).click()
+      await expect(
+        modal.getByRole('button', { name: /Hide advanced options/i })
+      ).toHaveAttribute('aria-expanded', 'true')
+      await expect(modal.getByText(/Audio options/i)).toBeVisible()
+    } finally {
+      await context.close()
+    }
+  })
+
+  test('mixed results surface completed and error sections without legacy filters', async () => {
+    const { context, page, optionsUrl } = await launchWithBuiltExtension({
+      seedConfig: {
+        serverUrl: 'http://127.0.0.1:8000',
+        authMode: 'single-user',
+        apiKey: API_KEY
+      }
+    })
+
+    try {
+      await page.goto(optionsUrl + '#/media', { waitUntil: 'domcontentloaded' })
+
+      const patched = await patchQuickIngestRuntimeResults(page, [
+        {
+          id: 'fail-1',
+          status: 'error',
+          type: 'html',
+          url: 'https://fail.example.com',
+          error: 'Simulated failure'
+        },
+        {
+          id: 'ok-1',
+          status: 'ok',
+          type: 'html',
+          url: 'https://ok.example.com',
+          title: 'Successful quick ingest item',
+          mediaId: 'qi-extension-media-ok'
+        }
+      ])
 
       if (!patched) {
-        test.info().skip(
+        test.skip(
+          true,
           'Quick-ingest message patching failed in page context; skipping mixed-results UX audit.'
         )
         return
       }
 
-      await page.goto(optionsUrl + '#/media', { waitUntil: 'domcontentloaded' })
+      const modal = await openQuickIngestDialog(page)
+      await addUrlToQuickIngest(modal, 'https://example.com/mixed')
+      await startQueuedQuickIngest(modal)
 
-      const ingestButton = page
-        .getByRole('button', { name: /Quick ingest/i })
-        .first()
-      await expect(ingestButton).toBeVisible()
-      await ingestButton.click()
-
-      const modal = page.locator('.quick-ingest-modal .ant-modal-content')
-      await expect(modal).toBeVisible()
-
-      const urlInput = modal
-        .getByLabel(/URLs to ingest/i)
-        .or(modal.getByPlaceholder(/https:\/\/example\.com/i))
-        .first()
-      await urlInput.click()
-      await urlInput.fill('https://example.com/mixed')
-      await modal.getByRole('button', { name: /Add URLs/i }).click()
-
-      const runButton = modal.getByRole('button', {
-        name: /Run quick ingest|Ingest|Process/i
-      }).first()
-      await expect(runButton).toBeVisible()
-      await runButton.click()
-
-      // Wait for summary/result list.
-      await expect(
-        modal.getByText(/Quick ingest completed (successfully|with some errors)/i)
-      ).toBeVisible({ timeout: 30_000 })
-
-      const items = modal.locator('.ant-list-item')
-      await expect(items.first().getByText(/FAILED/i)).toBeVisible()
-
-      const filterCombo = modal.getByRole('combobox', {
-        name: /Filter results by status/i
+      await expect(modal.getByTestId('wizard-results-step')).toBeVisible({
+        timeout: 30_000
       })
-      await filterCombo.click()
-      await page.getByRole('option', { name: /Failed only/i }).click()
-
-      await expect(items).toHaveCount(1)
-      await expect(items.first().getByText(/https:\/\/fail\.example\.com/i)).toBeVisible()
+      await expect(
+        modal.getByRole('region', { name: /completed items/i })
+      ).toBeVisible()
+      await expect(
+        modal.getByRole('region', { name: /error items/i })
+      ).toBeVisible()
+      await expect(modal.getByText(/https:\/\/fail\.example\.com/i)).toBeVisible()
+      await expect(modal.getByText(/Successful quick ingest item/i)).toBeVisible()
     } finally {
-      try {
-        await page.evaluate(() => {
-          try {
-            // @ts-ignore
-            const b = browser as any
-            const w: any = window
-            const original = w.__origQuickIngestSendMessageMixed
-            if (b.runtime && (typeof original === 'function' || original === undefined)) {
-              b.runtime.sendMessage = original
-            }
-            delete w.__origQuickIngestSendMessageMixed
-          } catch {
-            // ignore restore errors in page context
-          }
-        })
-      } catch {
-        // ignore if page/context is already torn down
-      }
+      await restoreQuickIngestRuntimePatch(page)
       await context.close()
     }
   })
@@ -312,38 +345,29 @@ test.describe('Quick ingest – UX audit', () => {
       await waitForConnectionStore(page, 'quick-ingest-ux-offline')
 
       const openQuickIngest = async () => {
-        const ingestButton = page
-          .getByRole('button', { name: /Quick ingest/i })
-          .first()
-        await expect(ingestButton).toBeVisible()
-        await ingestButton.click()
-
-        const modal = page.locator('.quick-ingest-modal .ant-modal-content')
-        await expect(modal).toBeVisible()
-        return { ingestButton, modal }
+        const modal = await openQuickIngestDialog(page)
+        return { modal }
       }
 
       const assertBannerAndFooter = async () => {
         const { modal } = await openQuickIngest()
 
-        // Headline should indicate that we are not connected.
+        // Headline should indicate that processing cannot start yet.
         await expect(
-          modal.getByText(/Not connected to server/i)
+          modal.getByText(/Server offline/i)
         ).toBeVisible()
 
-        // Banner body should explain inputs are disabled until connected.
+        // Banner body should explain how to recover without blocking queue review.
         await expect(
-          modal.getByText(/Inputs are disabled until connected/i)
+          modal.getByText(/Configure your tldw server|Cannot reach your tldw server|Reconnect to your tldw server/i)
         ).toBeVisible()
 
         await expect(
-          modal.getByText(/Connect to run ingest|Configure your server URL/i)
+          modal.getByRole('button', { name: /retry connection/i })
         ).toBeVisible()
 
         // Close between states so each run starts clean.
-        await page
-          .getByRole('button', { name: /Close quick ingest/i })
-          .click()
+        await page.keyboard.press('Escape')
         await expect(modal).toBeHidden()
       }
 

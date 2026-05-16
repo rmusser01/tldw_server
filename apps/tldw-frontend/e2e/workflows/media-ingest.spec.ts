@@ -577,6 +577,31 @@ test.describe("Media Ingestion Workflow", () => {
       await expect(emptyStateTrigger).toBeVisible({ timeout: 15_000 })
       await emptyStateTrigger.click()
       await expect(dialog).toBeVisible({ timeout: 15_000 })
+      await expect(dialog).toContainText(
+        /Add URLs or files\. Stored items appear in Media/i
+      )
+      await expect(dialog).toContainText(/Max file size: 50 MB/i)
+
+      await assertNoCriticalErrors(diagnostics)
+    })
+
+    test("quick ingest communicates mixed URL paste validation before processing", async ({
+      authedPage,
+      diagnostics
+    }) => {
+      await authedPage.goto("/media", { waitUntil: "domcontentloaded" })
+      await waitForConnection(authedPage)
+
+      const dialog = await openQuickIngestDialog(authedPage)
+      const urlInput = dialog
+        .getByLabel(/url input area|paste urls input/i)
+        .or(dialog.getByPlaceholder(/https:\/\/example\.com/i))
+        .first()
+      await urlInput.fill("https://example.com/valid\nnot-a-url")
+      await dialog.getByRole("button", { name: /add urls/i }).first().click()
+
+      await expect(dialog).toContainText(/1 valid \/ 1 invalid/i)
+      await expect(dialog).toContainText(/Invalid URL format/i)
 
       await assertNoCriticalErrors(diagnostics)
     })
