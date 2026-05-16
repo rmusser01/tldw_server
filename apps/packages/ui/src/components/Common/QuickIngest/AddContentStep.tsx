@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react"
-import { Alert, Button, Input, Tag, Tooltip, Typography } from "antd"
+import { Button, Input, Tooltip, Typography } from "antd"
 import { useTranslation } from "react-i18next"
 import {
   AlertTriangle,
@@ -16,6 +16,7 @@ import {
 import type { DetectedMediaType, WizardQueueItem, QueueItemValidation } from "./types"
 import { useIngestWizard } from "./IngestWizardContext"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
+import { Alert as DesignSystemAlert, Badge } from "@/components/ui/primitives"
 import { FileDropZone } from "./QueueTab/FileDropZone"
 import {
   QUICK_INGEST_ACCEPT_STRING,
@@ -157,6 +158,10 @@ const validateQueueItem = (
 
 // Warning uses >= (show at boundary); validation uses > (allow exactly at limit)
 const LARGE_FILE_WARNING_THRESHOLD = 500 * 1024 * 1024 // 500 MB
+const PASSIVE_ALERT_PROPS = {
+  role: "status",
+  "aria-live": "polite",
+} as const
 
 type AddContentStepProps = {
   isOnlineForIngest?: boolean
@@ -295,11 +300,11 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
         </Typography.Text>
 
         {hasLargeFiles && (
-          <Alert
-            type="warning"
-            showIcon
-            icon={<AlertTriangle className="h-4 w-4" />}
-            message={qi(
+          <DesignSystemAlert
+            variant="warning"
+            {...PASSIVE_ALERT_PROPS}
+            icon={<AlertTriangle className="h-4 w-4" aria-hidden="true" />}
+            title={qi(
               "largeFileWarning",
               "Large file -- upload may take several minutes. Consider using a smaller file if possible."
             )}
@@ -340,12 +345,12 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
 
       {/* FFmpeg missing warning for audio/video items */}
       {ffmpegMissing && hasAvMediaItems && (
-        <Alert
-          type="warning"
-          showIcon
-          icon={<AlertTriangle className="h-4 w-4" />}
+        <DesignSystemAlert
+          variant="warning"
+          {...PASSIVE_ALERT_PROPS}
+          icon={<AlertTriangle className="h-4 w-4" aria-hidden="true" />}
           className="mt-3"
-          message={qi(
+          title={qi(
             "ffmpegMissing",
             "FFmpeg is not installed on the server. Audio and video files may fail to process. Other file types (PDF, documents, ebooks) are unaffected."
           )}
@@ -412,25 +417,30 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
                           "FFmpeg is not installed on the server -- this file may fail to process"
                         )}
                       >
-                        <Tag
-                          color="warning"
-                          className="!text-[10px] !leading-tight !px-1 !py-0 !m-0"
+                        <Badge
+                          variant="warning"
+                          size="sm"
+                          className="!m-0"
                         >
-                          <AlertTriangle className="mr-0.5 inline h-3 w-3" />
+                          <AlertTriangle
+                            className="mr-0.5 h-3 w-3"
+                            aria-hidden="true"
+                          />
                           {item.detectedType.charAt(0).toUpperCase() +
                             item.detectedType.slice(1)}
-                        </Tag>
+                        </Badge>
                       </Tooltip>
                     ) : (
-                      <Tag
-                        color="geekblue"
-                        className="!text-[10px] !leading-tight !px-1 !py-0 !m-0"
+                      <Badge
+                        variant="info"
+                        size="sm"
+                        className="!m-0"
                       >
                         {item.detectedType === "web"
                           ? "Web page"
                           : item.detectedType.charAt(0).toUpperCase() +
                             item.detectedType.slice(1)}
-                      </Tag>
+                      </Badge>
                     )}
                     {item.detectedType !== "unknown" && (
                       <span className="text-text-subtle">(auto)</span>
