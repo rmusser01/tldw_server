@@ -429,7 +429,6 @@ def _multi_asset_pack(
             animation_outputs=(
                 (
                     "required_state_loops",
-                    "static_talking_reaction_sheet",
                     "animation_strips",
                     "animation_atlas",
                     "custom_state_variants",
@@ -437,7 +436,6 @@ def _multi_asset_pack(
                 if complexity_tier == "intricate"
                 else (
                     "required_state_loops",
-                    "static_talking_reaction_sheet",
                     "custom_state_variants",
                 )
             ),
@@ -484,12 +482,11 @@ def _atlas_pack(
                 "Author a full neutral model sheet before generating atlas-backed loops."
             ),
             static_sheet=(
-                "Create a separate talking/reaction sheet for expression choices before "
-                "compiling timed atlas regions."
+                "Create a separate static talking/reaction sheet for expression choices "
+                "before compiling timed atlas regions."
             ),
             animation_outputs=(
                 "required_state_loops",
-                "static_talking_reaction_sheet",
                 "animation_strips",
                 "animation_atlas",
                 "custom_state_variants",

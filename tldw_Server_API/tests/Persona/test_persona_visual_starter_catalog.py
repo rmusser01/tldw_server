@@ -29,6 +29,11 @@ from tldw_Server_API.app.core.Persona.visual_starter_fixtures import (
     PersonaVisualStarterPack,
     PersonaVisualStarterProductionRecipe,
 )
+from tldw_Server_API.app.core.Persona.visual_starter_recipe_taxonomy import (
+    BUDDY_VISUAL_ANIMATION_OUTPUT_IDS,
+    BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS,
+    BUDDY_VISUAL_STATIC_SOURCE_ASSET_GROUP_IDS,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -166,11 +171,16 @@ def test_get_starter_pack_returns_isolated_manifest_preview(
 
 
 @pytest.mark.parametrize(
-    ("starter_pack_id", "complexity_tier", "required_group"),
+    ("starter_pack_id", "complexity_tier", "required_group", "expected_output"),
     (
-        ("research-buddy-basic", "basic", "required_state_loops"),
-        ("study-desk-intermediate", "intermediate", "static_talking_reaction_sheet"),
-        ("lofi-study-intricate", "intricate", "animation_atlas"),
+        ("research-buddy-basic", "basic", "required_state_loops", "required_state_loops"),
+        (
+            "study-desk-intermediate",
+            "intermediate",
+            "static_talking_reaction_sheet",
+            "required_state_loops",
+        ),
+        ("lofi-study-intricate", "intricate", "animation_atlas", "animation_atlas"),
     ),
 )
 def test_starter_pack_reports_production_readiness_metadata(
@@ -178,6 +188,7 @@ def test_starter_pack_reports_production_readiness_metadata(
     starter_pack_id: str,
     complexity_tier: str,
     required_group: str,
+    expected_output: str,
 ) -> None:
     service = PersonaVisualStarterCatalogService(db_instance)
 
@@ -188,7 +199,51 @@ def test_starter_pack_reports_production_readiness_metadata(
     assert detail["neutral_anchor_required"] is True
     assert required_group in detail["expected_asset_groups"]
     assert all("scaffold" in note.lower() for note in detail["animation_coverage_notes"])
-    _assert_recipe_shape(detail["production_recipe"], expected_output=required_group)
+    _assert_recipe_shape(detail["production_recipe"], expected_output=expected_output)
+
+
+def test_default_starter_production_recipes_use_pipeline_taxonomy(
+    db_instance: CharactersRAGDB,
+) -> None:
+    service = PersonaVisualStarterCatalogService(db_instance)
+
+    for detail in (
+        service.get_starter_pack(starter_id)
+        for starter_id in DEFAULT_PERSONA_VISUAL_STARTER_PACK_IDS
+    ):
+        expected_groups = set(detail["expected_asset_groups"])
+        animation_outputs = set(detail["production_recipe"]["animation_outputs"])
+
+        assert expected_groups <= BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS
+        assert animation_outputs <= BUDDY_VISUAL_ANIMATION_OUTPUT_IDS
+        assert not (animation_outputs & BUDDY_VISUAL_STATIC_SOURCE_ASSET_GROUP_IDS)
+
+
+@pytest.mark.parametrize(
+    "starter_pack_id",
+    (
+        "study-desk-intermediate",
+        "tool-helper-intermediate",
+        "object-creature-intermediate",
+        "lofi-study-intricate",
+        "action-guide-intricate",
+        "elaborate-persona-intricate",
+    ),
+)
+def test_static_talking_sheet_is_source_material_not_animation_output(
+    db_instance: CharactersRAGDB,
+    starter_pack_id: str,
+) -> None:
+    service = PersonaVisualStarterCatalogService(db_instance)
+
+    detail = service.get_starter_pack(starter_pack_id)
+
+    assert "static_talking_reaction_sheet" in detail["expected_asset_groups"]
+    assert "static" in detail["production_recipe"]["static_sheet"].lower()
+    assert (
+        "static_talking_reaction_sheet"
+        not in detail["production_recipe"]["animation_outputs"]
+    )
 
 
 @pytest.mark.parametrize(
