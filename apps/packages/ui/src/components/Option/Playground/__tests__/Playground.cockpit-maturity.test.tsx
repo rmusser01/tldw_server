@@ -192,7 +192,7 @@ describe("Playground mature cockpit surfaces", () => {
     const status = screen.getByRole("status", { name: "Chat status" })
     expect(within(status).getByText("Streaming")).toBeInTheDocument()
     expect(within(status).getByText("openai:gpt-4.1-mini")).toBeInTheDocument()
-    expect(within(status).getByText("Context active")).toBeInTheDocument()
+    expect(within(status).queryByText("Context active")).toBeNull()
 
     fireEvent.click(
       within(status).getByRole("button", { name: "Stop generation" })
@@ -222,6 +222,7 @@ describe("Playground mature cockpit surfaces", () => {
             messageCount={2}
             sessionLabel="Server chat"
             sessionTitle="Archived investigation"
+            sessionStatus="failed"
             sessionStatusLabel="Load failed"
             sessionError="Conversation no longer exists"
             hasContext={false}

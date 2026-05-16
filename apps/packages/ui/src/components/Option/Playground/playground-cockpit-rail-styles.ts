@@ -16,6 +16,8 @@ export const cockpitRailStyles = {
     "inline-flex min-h-[30px] items-center rounded-md border border-border/70 bg-surface2 px-2.5 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus",
   clearAction:
     "inline-flex shrink-0 items-center rounded border border-border/70 bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+  collapseAction:
+    "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-border/70 bg-surface2 text-text-muted hover:bg-surface hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus",
   inset: "rounded-md border border-border/60 bg-bg/70 px-2.5 py-2",
   compactInset: "rounded-md border border-border/60 bg-bg/70 px-2 py-1.5",
   emptyInset:
