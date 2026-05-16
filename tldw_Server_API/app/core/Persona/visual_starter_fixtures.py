@@ -49,6 +49,7 @@ _INTRICATE_EXPECTED_ASSET_GROUPS = (
     "neutral_anchor",
     "model_sheet",
     "static_talking_reaction_sheet",
+    "required_state_loops",
     "animation_strips",
     "animation_atlas",
     "custom_state_variants",

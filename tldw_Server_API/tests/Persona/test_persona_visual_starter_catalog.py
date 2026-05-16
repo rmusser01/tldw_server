@@ -216,6 +216,7 @@ def test_default_starter_production_recipes_use_pipeline_taxonomy(
 
         assert expected_groups <= BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS
         assert animation_outputs <= BUDDY_VISUAL_ANIMATION_OUTPUT_IDS
+        assert animation_outputs <= expected_groups
         assert not (animation_outputs & BUDDY_VISUAL_STATIC_SOURCE_ASSET_GROUP_IDS)
 
 
