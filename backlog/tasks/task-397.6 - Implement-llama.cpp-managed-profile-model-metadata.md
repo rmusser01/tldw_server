@@ -3,8 +3,8 @@ id: TASK-397.6
 title: Implement llama.cpp managed profile model metadata
 status: Done
 assignee: []
-created_date: ''
-updated_date: '2026-05-16 19:44'
+created_date: '2026-05-16 19:34'
+updated_date: '2026-05-16 20:00'
 labels:
   - llamacpp
   - backend
@@ -35,17 +35,13 @@ Implement Task 3 from the llama.cpp model-family/mmproj profile wiring plan: exp
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Implemented Task 3 managed profile metadata for /api/v1/llm/models/metadata. Added a public metadata builder backed by the existing llama.cpp profile capability resolver, appended supervisor-managed profile entries through the existing llm_manager path, preserved existing catalog filters, kept stale asset failures as bounded capability warnings, and documented disabled profiles as visible with is_configured=false.
+Implemented Task 3 managed profile metadata for /api/v1/llm/models/metadata. Added a public metadata builder backed by the existing llama.cpp profile capability resolver, appended supervisor-managed profile entries through the existing llm_manager path, preserved existing catalog filters, kept stale asset failures as bounded capability warnings, and documented disabled profiles as visible with is_configured=false. PR review fixes offloaded managed profile metadata collection from the async endpoint, bounded Local_LLM scan failures, added scan-truncation warnings, and expanded output_modality test coverage.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Managed llama.cpp profiles now appear in /api/v1/llm/models/metadata with profile IDs, aliases, type, capabilities, modalities, and warning metadata. Verification recorded: 24 metadata/provider tests passed, 75 focused llama.cpp backend tests passed, Bandit on touched backend files reported zero findings, and git diff --check was clean.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
+Managed llama.cpp profiles now appear in /api/v1/llm/models/metadata with profile IDs, aliases, type, capabilities, modalities, and warning metadata. Review fixes addressed async offload, bounded scan errors, scan-limited warnings, request typing, output_modality coverage, and task metadata cleanup. Verification recorded: 15 metadata/provider tests passed, 77 focused llama.cpp backend tests passed, Bandit on touched backend files reported zero findings, and git diff --check was clean.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
 from tldw_Server_API.app.core.http_client import fetch as _http_fetch
 from tldw_Server_API.app.core.Image_Generation.listing import list_image_models_for_catalog
 from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import LLMInferenceLibError
 from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_capabilities import (
     managed_profile_model_metadata,
 )
@@ -75,6 +76,9 @@ _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS = (
     EgressPolicyError,
     NetworkError,
     RetryExhaustedError,
+)
+_LLAMACPP_METADATA_EXCEPTIONS = _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS + (
+    LLMInferenceLibError,
 )
 
 # ----------------------------------------------------------------------------------
@@ -2050,31 +2054,38 @@ def _managed_llamacpp_profile_metadata_entries(supervisor: Any | None) -> list[d
         return []
     try:
         profiles = supervisor.list_profiles()
-    except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
+    except _LLAMACPP_METADATA_EXCEPTIONS:
         logger.debug("Failed to list managed llama.cpp profiles for model metadata", exc_info=True)
         return []
     if not profiles:
         return []
 
-    asset_scan_warning: str | None = None
+    asset_scan_warnings: list[str] = []
     try:
-        assets = llamacpp_inventory_service.scan_assets().assets
-    except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
+        asset_scan = llamacpp_inventory_service.scan_assets()
+        assets = asset_scan.assets
+        if asset_scan.scan_limited:
+            asset_scan_warnings.append(
+                "Managed llama.cpp asset inventory scan was truncated; capability metadata may be incomplete."
+            )
+    except _LLAMACPP_METADATA_EXCEPTIONS:
         logger.debug("Failed to scan llama.cpp assets for model metadata", exc_info=True)
         assets = []
-        asset_scan_warning = "Managed llama.cpp asset scan failed; capability metadata may be incomplete."
+        asset_scan_warnings.append("Managed llama.cpp asset scan failed; capability metadata may be incomplete.")
 
     entries: list[dict[str, Any]] = []
     for profile in profiles:
         try:
             entry = managed_profile_model_metadata(profile, assets=assets)
-        except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
+        except _LLAMACPP_METADATA_EXCEPTIONS:
             logger.debug("Failed to build managed llama.cpp profile metadata", exc_info=True)
             continue
-        if asset_scan_warning:
+        if asset_scan_warnings:
             warnings = entry.setdefault("capability_warnings", [])
             if isinstance(warnings, list):
-                warnings.append(asset_scan_warning)
+                warnings.extend(asset_scan_warnings)
+            else:
+                entry["capability_warnings"] = list(asset_scan_warnings)
         entries.append(entry)
     return entries
 
@@ -2166,7 +2177,7 @@ async def get_llm_providers(include_deprecated: bool = False):
     ),
     response_model=dict[str, Any])
 async def get_models_metadata(
-    request: Request = None,
+    request: Request,
     include_deprecated: bool = False,
     refresh_openrouter: bool = Query(
         False,
@@ -2217,9 +2228,11 @@ async def get_models_metadata(
                 ):
                     continue
                 flattened.append(entry)
-        for entry in _managed_llamacpp_profile_metadata_entries(
-            _llamacpp_supervisor_from_request(request)
-        ):
+        managed_entries = await asyncio.to_thread(
+            _managed_llamacpp_profile_metadata_entries,
+            _llamacpp_supervisor_from_request(request),
+        )
+        for entry in managed_entries:
             if not _model_matches_filters(
                 entry,
                 type_filters=type_filters,

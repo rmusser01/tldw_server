@@ -12,6 +12,7 @@ from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
     LlamaCppAssetsResponse,
 )
 from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
 from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
     LlamaCppProfile,
     LlamaCppProfileMode,
@@ -45,6 +46,7 @@ def _client_for_profiles(
     *,
     profiles: list[LlamaCppProfile],
     assets: list[LlamaCppAsset],
+    scan_assets_response: LlamaCppAssetsResponse | BaseException | None = None,
 ) -> TestClient:
     allowed_roots = [
         Path(asset.resolved_path).parent
@@ -58,11 +60,14 @@ def _client_for_profiles(
     monkeypatch.setattr(llm_providers, "get_configured_providers_async", _configured_providers)
     monkeypatch.setattr(llm_providers, "apply_llm_provider_overrides_to_listing", lambda result: result)
     monkeypatch.setattr(llm_providers, "list_image_models_for_catalog", lambda: [])
-    monkeypatch.setattr(
-        llamacpp_inventory_service,
-        "scan_assets",
-        lambda: LlamaCppAssetsResponse(assets=assets, warnings=[]),
-    )
+    response_or_error = scan_assets_response or LlamaCppAssetsResponse(assets=assets, warnings=[])
+
+    def _scan_assets(*_args, **_kwargs):
+        if isinstance(response_or_error, BaseException):
+            raise response_or_error
+        return response_or_error
+
+    monkeypatch.setattr(llamacpp_inventory_service, "scan_assets", _scan_assets)
     monkeypatch.setattr(
         llamacpp_inventory_service,
         "resolve_asset_path",
@@ -153,8 +158,12 @@ def test_models_metadata_filters_managed_llamacpp_profiles(monkeypatch, tmp_path
     )
 
     with _client_for_profiles(monkeypatch, profiles=[vision, embedding], assets=[base, mmproj]) as client:
-        image_response = client.get("/api/v1/llm/models/metadata?type=chat&input_modality=image")
-        embedding_response = client.get("/api/v1/llm/models/metadata?type=embedding")
+        image_response = client.get(
+            "/api/v1/llm/models/metadata?type=chat&input_modality=image&output_modality=text"
+        )
+        embedding_response = client.get(
+            "/api/v1/llm/models/metadata?type=embedding&output_modality=embedding"
+        )
 
     assert image_response.status_code == 200, image_response.text
     image_profile_ids = {
@@ -193,3 +202,57 @@ def test_models_metadata_keeps_stale_llamacpp_profile_as_warning_entry(monkeypat
     assert entry["capabilities"]["vision"] is False
     assert entry["capability_warnings"]
     assert "gguf:missing" in entry["capability_warnings"][0]
+
+
+def test_models_metadata_keeps_scan_server_error_as_warning_entry(monkeypatch):
+    profile = LlamaCppProfile(
+        profile_id="scan-error",
+        name="Scan error profile",
+        mode=LlamaCppProfileMode.CHAT,
+        model_id="gguf:missing",
+        provider_alias="llamacpp-scan-error",
+    )
+
+    with _client_for_profiles(
+        monkeypatch,
+        profiles=[profile],
+        assets=[],
+        scan_assets_response=ServerError("imported folder path could not be resolved"),
+    ) as client:
+        response = client.get("/api/v1/llm/models/metadata")
+
+    assert response.status_code == 200, response.text
+    models = response.json()["models"]
+    entry = next(item for item in models if item["llamacpp_profile_id"] == "scan-error")
+    assert entry["model"] == "llamacpp-scan-error"
+    assert any(
+        "asset scan failed" in warning
+        for warning in entry["capability_warnings"]
+    )
+
+
+def test_models_metadata_marks_scan_limited_warning(monkeypatch):
+    profile = LlamaCppProfile(
+        profile_id="truncated",
+        name="Truncated inventory profile",
+        mode=LlamaCppProfileMode.CHAT,
+        model_id="gguf:not-in-limited-scan",
+        provider_alias="llamacpp-truncated",
+    )
+
+    with _client_for_profiles(
+        monkeypatch,
+        profiles=[profile],
+        assets=[],
+        scan_assets_response=LlamaCppAssetsResponse(assets=[], warnings=[], scan_limited=True),
+    ) as client:
+        response = client.get("/api/v1/llm/models/metadata")
+
+    assert response.status_code == 200, response.text
+    models = response.json()["models"]
+    entry = next(item for item in models if item["llamacpp_profile_id"] == "truncated")
+    assert entry["model"] == "llamacpp-truncated"
+    assert any(
+        "inventory scan was truncated" in warning
+        for warning in entry["capability_warnings"]
+    )
