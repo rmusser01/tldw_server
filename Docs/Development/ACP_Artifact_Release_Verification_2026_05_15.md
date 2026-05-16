@@ -49,10 +49,10 @@ Commands were run from the isolated worktree
 
 | Gate | Command | Result |
 | --- | --- | --- |
-| New ACP artifact promotion contract | `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Agent_Orchestration/test_artifact_promotion_contract.py -q` | `6 passed`, 5 warnings in 31.20s. |
-| Existing backend artifact/API regression set | `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Agent_Orchestration/test_orchestration_api.py tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py tldw_Server_API/tests/Workspaces/test_workspaces_api.py -q` | `104 passed`, 5 warnings in 653.88s. |
+| New ACP artifact promotion contract | `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Agent_Orchestration/test_artifact_promotion_contract.py -q` | `6 passed`, 5 warnings in 31.20s. |
+| Existing backend artifact/API regression set | `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Agent_Orchestration/test_orchestration_api.py tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py tldw_Server_API/tests/Workspaces/test_workspaces_api.py -q` | `104 passed`, 5 warnings in 653.88s. |
 | UI artifact detail and hydration regression set | `cd apps/packages/ui && bun run test src/components/Option/WorkspacePlayground/StudioPane/__tests__/TraceableArtifactDetail.test.tsx src/store/__tests__/workspace-api-first.test.ts` | 2 files passed, 27 tests passed. |
-| Security scan for touched Python test path | `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/tests/Agent_Orchestration/test_artifact_promotion_contract.py -s B101 -f json -o /tmp/bandit_acp_artifact_signoff_1704.json` | `results=[]`, `errors=[]`; pytest assertion rule `B101` skipped for test code. |
+| Security scan for touched Python test path | `source .venv/bin/activate && python -m bandit -r tldw_Server_API/tests/Agent_Orchestration/test_artifact_promotion_contract.py -s B101 -f json -o /tmp/bandit_acp_artifact_signoff_1704.json` | `results=[]`, `errors=[]`; pytest assertion rule `B101` skipped for test code. |
 | Formatting | `git diff --check` | Clean. |
 
 The UI worktree needed `bun install` from `apps/` before the focused Vitest

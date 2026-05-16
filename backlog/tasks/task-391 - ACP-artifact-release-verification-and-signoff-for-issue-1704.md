@@ -56,10 +56,10 @@ Implement GitHub issue #1704: release-grade verification for the ACP traceable a
 
 ## Verification
 
-- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Agent_Orchestration/test_artifact_promotion_contract.py -q` -> `6 passed`, 5 warnings.
-- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Agent_Orchestration/test_orchestration_api.py tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py tldw_Server_API/tests/Workspaces/test_workspaces_api.py -q` -> `104 passed`, 5 warnings.
+- `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Agent_Orchestration/test_artifact_promotion_contract.py -q` -> `6 passed`, 5 warnings.
+- `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Agent_Orchestration/test_orchestration_api.py tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py tldw_Server_API/tests/Workspaces/test_workspaces_api.py -q` -> `104 passed`, 5 warnings.
 - `cd apps/packages/ui && bun run test src/components/Option/WorkspacePlayground/StudioPane/__tests__/TraceableArtifactDetail.test.tsx src/store/__tests__/workspace-api-first.test.ts` -> 2 files passed, 27 tests passed.
-- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/tests/Agent_Orchestration/test_artifact_promotion_contract.py -s B101 -f json -o /tmp/bandit_acp_artifact_signoff_1704.json` -> `results=[]`, `errors=[]`; `B101` skipped for pytest assertions.
+- `source .venv/bin/activate && python -m bandit -r tldw_Server_API/tests/Agent_Orchestration/test_artifact_promotion_contract.py -s B101 -f json -o /tmp/bandit_acp_artifact_signoff_1704.json` -> `results=[]`, `errors=[]`; `B101` skipped for pytest assertions.
 - `git diff --check` -> clean.
 
 ## Final Summary
