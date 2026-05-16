@@ -51,6 +51,17 @@ Verification:
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m py_compile tldw_Server_API/app/core/Persona/visual_portability/preview.py tldw_Server_API/tests/Persona/test_persona_visual_portability.py` passed.
 - `git diff --check` passed.
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Persona/visual_portability/preview.py tldw_Server_API/tests/Persona/test_persona_visual_portability.py -f json -o /tmp/bandit_persona_visual_pipeline.json` passed with 0 findings.
+
+Review follow-up:
+
+- Addressed Gemini's null manifest-section review thread with a regression test
+  for V2 renderer-preview archives where `states` and `animations` are null.
+- Addressed Qodo's helper-docstring review thread by documenting
+  `_bundle_asset_summary()` and `_known_asset_group()`.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_portability.py -q` passed with 15 tests.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m py_compile tldw_Server_API/app/core/Persona/visual_portability/preview.py tldw_Server_API/tests/Persona/test_persona_visual_portability.py` passed.
+- `git diff --check` passed.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Persona/visual_portability/preview.py tldw_Server_API/tests/Persona/test_persona_visual_portability.py -f json -o /tmp/bandit_persona_visual_pipeline_review_fixes.json` passed with 0 findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

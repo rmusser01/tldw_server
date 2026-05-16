@@ -338,6 +338,8 @@ def _bundle_summary(
     if not isinstance(visual_manifest, Mapping):
         visual_manifest = {}
     manifest_asset_references = collect_visual_manifest_asset_ids(dict(visual_manifest))
+    states = visual_manifest.get("states")
+    animations = visual_manifest.get("animations")
     return {
         "pack_title": pack.get("title") or manifest.get("pack_title"),
         "renderer_type": pack.get("renderer_type") or manifest.get("renderer_type"),
@@ -345,8 +347,8 @@ def _bundle_summary(
         "asset_count": len(assets),
         "assets_with_bytes": asset_summary["present_asset_items"],
         "missing_asset_items": asset_summary["missing_asset_items"],
-        "state_count": len(visual_manifest.get("states", {})),
-        "animation_count": len(visual_manifest.get("animations", {})),
+        "state_count": len(states) if isinstance(states, Mapping) else 0,
+        "animation_count": len(animations) if isinstance(animations, Mapping) else 0,
         "resolved_required_states": dict(resolved_required_states),
         "manifest_asset_references": sorted(manifest_asset_references),
         "assets": [
@@ -364,6 +366,8 @@ def _bundle_asset_summary(
     *,
     manifest_asset_references: set[str],
 ) -> dict[str, Any]:
+    """Return review-safe asset diagnostics for an import-preview bundle."""
+
     source_asset_id = str(asset.get("source_asset_id") or "").strip()
     return {
         "source_asset_id": asset.get("source_asset_id"),
@@ -380,6 +384,8 @@ def _bundle_asset_summary(
 
 
 def _known_asset_group(value: Any) -> str | None:
+    """Return a recognized Buddy pipeline asset group, if the archive declared one."""
+
     if not isinstance(value, str):
         return None
     normalized = value.strip()

@@ -890,6 +890,32 @@ def test_import_preview_reports_v2_unknown_renderer_safely(
     assert "\n" not in renderer_preview["blockers"][0]  # nosec B101
 
 
+def test_import_preview_counts_null_v2_manifest_sections_as_empty(
+    tmp_path: Path,
+) -> None:
+    assets, asset_files = _live2d_preview_assets()
+    visual_manifest = _live2d_v2_manifest()
+    visual_manifest["states"] = None
+    visual_manifest["animations"] = None
+    archive_path = _renderer_preview_archive(
+        tmp_path,
+        title="Live2D Null Sections",
+        visual_manifest=visual_manifest,
+        assets=assets,
+        asset_files=asset_files,
+    )
+
+    preview = PersonaVisualPackImportPreviewer().create_preview(
+        archive_path=archive_path,
+        owner_user_id="user-1",
+        target_persona_id="target-persona",
+    )
+
+    assert preview["status"] == "blocked"  # nosec B101
+    assert preview["bundle_summary"]["state_count"] == 0  # nosec B101
+    assert preview["bundle_summary"]["animation_count"] == 0  # nosec B101
+
+
 def test_import_preview_rejects_unsupported_renderer_type_in_visual_manifest(
     db_instance: CharactersRAGDB,
     tmp_path: Path,
