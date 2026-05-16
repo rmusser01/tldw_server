@@ -1598,6 +1598,20 @@ def test_store_attachment_rejects_forbidden_domain_oversize_and_plaintext_policy
             encryption_policy="client_private_v1",
         )
 
+    with pytest.raises(SyncStoreError, match="payload exceeds"):
+        sync_service.store_attachment(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            domain="notes",
+            entity_id="note-1",
+            attachment_id="attachment-oversized-ciphertext",
+            content_type="application/octet-stream",
+            size_bytes=12,
+            payload_ciphertext="x" * 8193,
+            payload_hash="sha256:oversized-ciphertext",
+            encryption_policy="client_private_v1",
+        )
+
     with pytest.raises(SyncStoreError, match="client_private_v1"):
         sync_service.store_attachment(
             user_id="user-1",

@@ -1513,42 +1513,46 @@ class SyncDatabase:
                     connection=conn,
                 )
             )
-            self.execute(
-                """
-                INSERT INTO sync_attachments (
-                    attachment_id, dataset_id, domain, entity_id, content_type,
-                    size_bytes, payload_ciphertext, payload_hash, encryption_policy,
-                    metadata_json, created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (dataset_id, attachment_id) DO NOTHING
-                """,
-                (
-                    attachment.attachment_id,
-                    attachment.dataset_id,
-                    attachment.domain,
-                    attachment.entity_id,
-                    attachment.content_type,
-                    attachment.size_bytes,
-                    attachment.payload_ciphertext,
-                    attachment.payload_hash,
-                    attachment.encryption_policy,
-                    encode_json(attachment.metadata, default={}),
-                    now,
-                ),
-                connection=conn,
-            )
-            inserted = existing is None
-            row = _first(
+            if existing is not None:
+                inserted = False
+                row = existing
+            else:
                 self.execute(
                     """
-                    SELECT * FROM sync_attachments
-                     WHERE dataset_id = ? AND attachment_id = ?
+                    INSERT INTO sync_attachments (
+                        attachment_id, dataset_id, domain, entity_id, content_type,
+                        size_bytes, payload_ciphertext, payload_hash, encryption_policy,
+                        metadata_json, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (dataset_id, attachment_id) DO NOTHING
                     """,
-                    (attachment.dataset_id, attachment.attachment_id),
+                    (
+                        attachment.attachment_id,
+                        attachment.dataset_id,
+                        attachment.domain,
+                        attachment.entity_id,
+                        attachment.content_type,
+                        attachment.size_bytes,
+                        attachment.payload_ciphertext,
+                        attachment.payload_hash,
+                        attachment.encryption_policy,
+                        encode_json(attachment.metadata, default={}),
+                        now,
+                    ),
                     connection=conn,
                 )
-            )
+                inserted = True
+                row = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_attachments
+                         WHERE dataset_id = ? AND attachment_id = ?
+                        """,
+                        (attachment.dataset_id, attachment.attachment_id),
+                        connection=conn,
+                    )
+                )
             if row is None:
                 raise SyncStoreError(
                     "Sync attachment insert did not produce a retrievable record"
@@ -1619,22 +1623,36 @@ class SyncDatabase:
 
             params = [dataset_id]
             sql = """
-                SELECT domain, size_bytes
+                SELECT COUNT(*) AS attachment_count,
+                       COALESCE(SUM(CASE WHEN size_bytes <= 1048576 THEN 1 ELSE 0 END), 0)
+                           AS small_count,
+                       COALESCE(SUM(
+                           CASE
+                               WHEN size_bytes > 1048576 AND size_bytes <= 16777216
+                               THEN 1 ELSE 0
+                           END
+                       ), 0) AS medium_count,
+                       COALESCE(SUM(CASE WHEN size_bytes > 16777216 THEN 1 ELSE 0 END), 0)
+                           AS large_count
                   FROM sync_attachments
                  WHERE dataset_id = ?
             """
             sql += _domain_filter_sql(domain_list if domain_filter_enabled else None, params)
-            for row in self.execute(sql, tuple(params)).rows:
-                attachment_availability["available"] = (
-                    attachment_availability.get("available", 0) + 1
-                )
-                try:
-                    size_bytes = int(row.get("size_bytes") or 0)
-                except (TypeError, ValueError):
-                    size_bytes = 0
-                size_class = _manifest_attachment_size_class(size_bytes)
-                attachment_size_classes[size_class] = (
-                    attachment_size_classes.get(size_class, 0) + 1
+            attachment_row = _first(self.execute(sql, tuple(params)))
+            attachment_count = int((attachment_row or {}).get("attachment_count") or 0)
+            if attachment_count:
+                attachment_availability["available"] = attachment_count
+                size_counts = {
+                    "small": int((attachment_row or {}).get("small_count") or 0),
+                    "medium": int((attachment_row or {}).get("medium_count") or 0),
+                    "large": int((attachment_row or {}).get("large_count") or 0),
+                }
+                attachment_size_classes.update(
+                    {
+                        size_class: count
+                        for size_class, count in size_counts.items()
+                        if count > 0
+                    }
                 )
 
         key_row = _first(

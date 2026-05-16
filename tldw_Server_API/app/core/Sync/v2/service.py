@@ -538,7 +538,13 @@ class SyncV2Service:
             raise SyncStoreError(
                 "Sync attachment persistence requires client_private_v1 encryption"
             )
-        if size_bytes > self.settings.max_attachment_bytes:
+        if (
+            size_bytes > self.settings.max_attachment_bytes
+            or _ciphertext_exceeds_attachment_limit(
+                payload_ciphertext,
+                self.settings.max_attachment_bytes,
+            )
+        ):
             raise SyncStoreError("Sync attachment payload exceeds the server size limit")
         if not payload_ciphertext:
             raise SyncStoreError("Sync attachment payload_ciphertext is required")
@@ -905,6 +911,15 @@ def _compact_json_size(value: object) -> int:
             "utf-8"
         )
     )
+
+
+def _ciphertext_exceeds_attachment_limit(
+    payload_ciphertext: str,
+    max_attachment_bytes: int,
+) -> bool:
+    """Return whether textual ciphertext is implausibly large for the binary cap."""
+
+    return len(payload_ciphertext.encode("utf-8")) > max_attachment_bytes * 2
 
 
 def _call_adapter_evaluate(
