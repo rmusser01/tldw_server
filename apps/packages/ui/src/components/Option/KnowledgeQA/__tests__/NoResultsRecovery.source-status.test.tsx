@@ -8,6 +8,18 @@ vi.mock("@/store/quick-ingest", () => ({
     selector({ recentlyIngestedDocs: [] }),
 }))
 
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>(
+    "react-router-dom"
+  )
+  return {
+    ...actual,
+    Link: ({ to, ...props }: { to: string } & React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+      <a data-router-link="true" href={to} {...props} />
+    ),
+  }
+})
+
 const defaultProps = {
   onOpenQuickIngest: vi.fn(),
   onEnableWeb: vi.fn(),
@@ -123,6 +135,10 @@ describe("NoResultsRecovery source diagnostics", () => {
     expect(screen.getByRole("link", { name: "Open source page" })).toHaveAttribute(
       "href",
       "/sources"
+    )
+    expect(screen.getByRole("link", { name: "Open source page" })).toHaveAttribute(
+      "data-router-link",
+      "true"
     )
     expect(screen.queryByRole("button", { name: "Add sources" })).not.toBeInTheDocument()
     expect(

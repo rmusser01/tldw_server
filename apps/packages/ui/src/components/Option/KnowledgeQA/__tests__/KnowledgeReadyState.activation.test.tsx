@@ -270,4 +270,54 @@ describe("KnowledgeReadyState activation", () => {
       screen.queryByText("No searchable items yet. Open Quick Ingest or the source owner page to add content.")
     ).not.toBeInTheDocument()
   })
+
+  it("does not classify indexing sources as unavailable", () => {
+    renderReadyState({
+      hasSources: true,
+      selectedSources: ["notes"],
+      sourceHealth: {
+        ...sourceHealth,
+        sources: [
+          {
+            sourceId: "notes",
+            label: "Notes",
+            available: true,
+            searchable: false,
+            itemCount: 4,
+            indexedCount: 1,
+            lastUpdated: null,
+            lastIndexed: null,
+            indexStatus: "indexing",
+            embeddingStatus: "indexing",
+            disabledReason: null,
+            workspaceScoped: false,
+            hiddenByDefault: false,
+            privacyNote: null,
+          },
+        ],
+        bySource: {
+          notes: {
+            sourceId: "notes",
+            label: "Notes",
+            available: true,
+            searchable: false,
+            itemCount: 4,
+            indexedCount: 1,
+            lastUpdated: null,
+            lastIndexed: null,
+            indexStatus: "indexing",
+            embeddingStatus: "indexing",
+            disabledReason: null,
+            workspaceScoped: false,
+            hiddenByDefault: false,
+            privacyNote: null,
+          },
+        },
+      },
+    })
+
+    expect(
+      screen.queryByText("Selected sources are unavailable. Open source settings or choose a different scope.")
+    ).not.toBeInTheDocument()
+  })
 })

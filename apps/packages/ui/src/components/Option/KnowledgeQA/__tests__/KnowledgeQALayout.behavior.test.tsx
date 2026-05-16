@@ -12,6 +12,15 @@ const state = {
   isSearching: false,
   error: null as string | null,
   queryStage: "idle" as string,
+  searchDetails: null as null | {
+    alsoConsidered?: Array<{
+      id: string
+      title: string
+      score: number | null
+      reason: string | null
+    }>
+    sourceStatus?: Record<string, unknown>
+  },
   preset: "balanced" as string,
   setPreset: vi.fn(),
   settings: {
@@ -172,10 +181,14 @@ vi.mock("../panels/NoResultsRecovery", () => ({
     sourceHealth,
     selectedSources,
     onOpenQuickIngest,
+    onShowNearestMatches,
+    showNearestMatchesAvailable,
   }: {
     sourceHealth?: { loadedAt: string | null }
     selectedSources?: string[]
     onOpenQuickIngest?: () => void
+    onShowNearestMatches?: () => void
+    showNearestMatchesAvailable?: boolean
   }) => (
     <div data-testid="knowledge-no-results-recovery">
       <span>{sourceHealth?.loadedAt ?? "No source health"}</span>
@@ -183,6 +196,11 @@ vi.mock("../panels/NoResultsRecovery", () => ({
       <button type="button" onClick={onOpenQuickIngest}>
         Open Quick Ingest
       </button>
+      {showNearestMatchesAvailable ? (
+        <button type="button" onClick={onShowNearestMatches}>
+          Show nearest matches
+        </button>
+      ) : null}
     </div>
   ),
 }))
@@ -219,6 +237,7 @@ describe("KnowledgeQALayout evidence-rail transitions", () => {
     state.isSearching = false
     state.error = null
     state.queryStage = "idle"
+    state.searchDetails = null
     state.preset = "balanced"
     state.settings.sources = []
     state.settings.enable_web_fallback = true
@@ -456,5 +475,26 @@ describe("KnowledgeQALayout evidence-rail transitions", () => {
     ).toMatchObject({
       detail: { source: "knowledge_qa" },
     })
+  })
+
+  it("shows nearest misses in no-results recovery from search metadata", async () => {
+    state.hasSearched = true
+    state.searchDetails = {
+      alsoConsidered: [
+        {
+          id: "near-1",
+          title: "Near miss",
+          score: 0.42,
+          reason: "below threshold",
+        },
+      ],
+    }
+
+    renderLayout()
+
+    fireEvent.click(await screen.findByRole("button", { name: "Show nearest matches" }))
+    expect(state.setEvidenceRailOpen).toHaveBeenCalledWith(true)
+    expect(state.setEvidenceRailTab).toHaveBeenCalledWith("details")
+    expect(state.focusSource).not.toHaveBeenCalled()
   })
 })

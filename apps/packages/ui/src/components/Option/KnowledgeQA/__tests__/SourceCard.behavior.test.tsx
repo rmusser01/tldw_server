@@ -258,7 +258,9 @@ describe("SourceCard action structure", () => {
 
     // Primary buttons are always visible
     expect(screen.getByRole("button", { name: /View source 1/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /Copy citation/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Copy citation/i })).toHaveTextContent(
+      "Copy citation"
+    )
     expect(screen.getByRole("button", { name: /More actions/i })).toBeInTheDocument()
 
     // Secondary actions are hidden until overflow is opened

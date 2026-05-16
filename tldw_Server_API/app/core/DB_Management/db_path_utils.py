@@ -426,7 +426,13 @@ class DatabasePaths:
     PERSONA_VISUALS_SUBDIR = "persona_visuals"
 
     @staticmethod
-    def get_user_db_base_dir(*, allow_legacy_alias: bool = False) -> Path:
+    def resolve_user_db_base_dir(*, allow_legacy_alias: bool = False) -> Path:
+        """
+        Resolve the configured per-user database base directory without creating it.
+
+        This mirrors ``get_user_db_base_dir`` path selection, including isolated
+        test fallbacks, for read-only checks that must not create storage.
+        """
         env_user_db_base = os.getenv("USER_DB_BASE_DIR")
         settings_user_db_base = settings.get("USER_DB_BASE_DIR")
         project_root = Path(get_project_root())
@@ -486,6 +492,13 @@ class DatabasePaths:
                 logger.warning(f"USER_DB_BASE_DIR not configured, using fallback: {base_path}")
         else:
             base_path = _normalize_user_db_base_dir(Path(user_db_base))
+        return base_path
+
+    @staticmethod
+    def get_user_db_base_dir(*, allow_legacy_alias: bool = False) -> Path:
+        base_path = DatabasePaths.resolve_user_db_base_dir(
+            allow_legacy_alias=allow_legacy_alias
+        )
         _ensure_dir(base_path, label="user database base")
         return base_path
 

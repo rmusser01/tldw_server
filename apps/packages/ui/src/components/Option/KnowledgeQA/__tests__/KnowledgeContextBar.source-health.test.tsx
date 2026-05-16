@@ -144,4 +144,23 @@ describe("KnowledgeContextBar source health", () => {
 
     expect(onRefreshSourceHealth).toHaveBeenCalledOnce()
   })
+
+  it("disables source health refresh while a refresh is loading", () => {
+    const onRefreshSourceHealth = vi.fn()
+    render(
+      <KnowledgeContextBar
+        {...baseProps}
+        sourceHealth={{ ...sourceHealth, loading: true }}
+        onRefreshSourceHealth={onRefreshSourceHealth}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Sources:/i }))
+    const refreshButton = screen.getByRole("button", { name: "Refresh source health" })
+    expect(refreshButton).toBeDisabled()
+    expect(refreshButton).toHaveAttribute("aria-busy", "true")
+
+    fireEvent.click(refreshButton)
+    expect(onRefreshSourceHealth).not.toHaveBeenCalled()
+  })
 })

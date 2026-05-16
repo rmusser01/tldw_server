@@ -925,6 +925,8 @@ export function KnowledgeContextBar({
                       {onRefreshSourceHealth ? (
                         <button
                           type="button"
+                          disabled={sourceHealthState.loading}
+                          aria-busy={sourceHealthState.loading}
                           className="rounded px-1.5 py-0.5 text-[11px] text-text-muted hover:bg-hover hover:text-text transition-colors"
                           onClick={onRefreshSourceHealth}
                         >

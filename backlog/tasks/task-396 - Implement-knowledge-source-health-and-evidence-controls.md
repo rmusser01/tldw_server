@@ -4,7 +4,7 @@ title: Implement /knowledge source health and evidence controls
 status: Done
 assignee: []
 created_date: '2026-05-16 00:51'
-updated_date: '2026-05-16 02:59'
+updated_date: '2026-05-16 03:34'
 labels:
   - webui
   - knowledge
@@ -47,6 +47,10 @@ Task 4 evidence/trust UI slice implemented. Added deterministic answer trust-sum
 Task 5 recovery/parity slice implemented. No-results recovery now separates pre-query Source readiness from post-query Search diagnostics, uses concrete handoff labels (Open Quick Ingest, Open source page), and hides Show nearest matches unless evidence exists. Low-quality recovery uses limited-evidence copy and receives selected source-health caveat counts from AnswerPanel without implying automatic web fallback. KnowledgeQALayout passes sourceHealth and selected sources into recovery, and extension /knowledge route parity was rechecked. Verification: red Task 5 tests failed before implementation; focused Vitest passed 23 tests across NoResultsRecovery.source-status, LowQualityRecoveryBanner, and KnowledgeQALayout.behavior. Extension parity passed 4 tests in apps/tldw-frontend. git diff --check passed. Full UI tsc remains blocked by unrelated baseline errors; filtered compiler diagnostics produced no KnowledgeQA/NoResultsRecovery/LowQualityRecoveryBanner/KnowledgeQALayout/AnswerPanel matches. Bandit is not applicable to this frontend-only slice.
 
 Task 6 final verification completed after rebasing onto origin/dev. Backend focused pytest passed: 8 passed, 4 warnings. KnowledgeQA focused Vitest passed: 14 files, 117 tests. Extension parity passed: 1 file, 4 tests. Browser smoke passed after rerunning Playwright outside the macOS sandbox: /knowledge navigation/search-bar test passed against frontend localhost:18001 and backend 127.0.0.1:8000. git diff --check passed. Bandit touched backend files passed with 0 findings at /tmp/bandit_knowledge_source_health.json. Opened PR https://github.com/rmusser01/tldw_server/pull/1745.
+
+PR review sweep for #1745 started. Actionable unresolved threads verified: Gemini core_settings.get, async filesystem threadpool, internal /sources Link; Qodo async filesystem, PostgreSQL/non-file health detection, TEST_MODE base-dir parity. Implementing fixes on the same PR branch.
+
+PR review sweep for #1745 completed. Addressed Gemini/Qodo source-health review by moving filesystem checks into a threadpool, reusing DatabasePaths read-only base-dir resolution, adding single-user ID fallback, and avoiding file-only false negatives for PostgreSQL/lazy sources. Addressed CodeRabbit UI review by using router Link for /sources, disabling refresh while source health is loading, guarding source-health refresh races, treating missing health entries as caveats, avoiding indexing-as-unavailable copy, restoring no-results nearest-match access from search metadata, and making the SourceCard visible action label "Copy citation". Verification: backend focused pytest passed 15 selected tests; KnowledgeQA focused Vitest passed 7 files / 63 tests; git diff --check passed; Bandit touched backend files passed with 0 findings at /tmp/bandit_knowledge_source_health_review.json.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

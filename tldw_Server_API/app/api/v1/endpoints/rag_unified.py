@@ -11,11 +11,11 @@ import inspect
 import json
 import os
 import time
-from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal, get_request_user, rbac_rate_limit, RequirePermission, TokenScopeGuard, User
@@ -71,8 +71,7 @@ from tldw_Server_API.app.core.RAG.rag_service.response_mapping import (
 )
 from tldw_Server_API.app.core.RAG.rag_service.source_health import build_source_health_entries
 from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import stream_rag_events
-from tldw_Server_API.app.core.config import get_config_value, settings as core_settings
-from tldw_Server_API.app.core.Utils.Utils import get_project_root
+from tldw_Server_API.app.core.config import get_config_value, settings
 
 # Unified Pipeline
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
@@ -390,18 +389,14 @@ def _resolve_source_health_user_id(current_user: Optional[User], request_user_id
         raw = str(candidate).strip()
         if raw.isdigit() and int(raw) > 0:
             return raw
+    try:
+        fallback = DatabasePaths.get_single_user_id()
+        fallback_raw = str(fallback).strip()
+        if fallback_raw.isdigit() and int(fallback_raw) > 0:
+            return fallback_raw
+    except (RuntimeError, ValueError, OSError, TypeError):
+        logger.debug("Failed to resolve single-user ID for source health path", exc_info=True)
     return None
-
-
-def _resolve_source_health_user_db_base_dir() -> Path:
-    """Resolve the user DB base directory path without ensuring directories."""
-    raw_base = os.getenv("USER_DB_BASE_DIR") or core_settings.get("USER_DB_BASE_DIR")
-    if raw_base:
-        base_path = Path(raw_base).expanduser()
-        if not base_path.is_absolute():
-            base_path = Path(get_project_root()) / base_path
-        return base_path.resolve(strict=False)
-    return (Path(get_project_root()) / "Databases" / "user_databases").resolve(strict=False)
 
 
 def _resolve_existing_source_db_paths(
@@ -413,7 +408,7 @@ def _resolve_existing_source_db_paths(
     if user_id is None:
         return {}
 
-    user_dir = _resolve_source_health_user_db_base_dir() / user_id
+    user_dir = DatabasePaths.resolve_user_db_base_dir() / user_id
     candidates = {
         "media_db": user_dir / DatabasePaths.MEDIA_DB_NAME,
         "chacha_db": user_dir / DatabasePaths.CHACHA_DB_NAME,
@@ -427,14 +422,28 @@ def _resolve_existing_source_db_paths(
     }
 
 
-def _build_source_health_configured_sources(
+def _media_db_uses_non_file_storage() -> bool:
+    """Return whether Media DB search is configured for non-file content storage."""
+    backend_mode_hint = (
+        os.getenv("CONTENT_DB_MODE")
+        or os.getenv("TLDW_CONTENT_DB_BACKEND")
+        or str(settings.get("CONTENT_DB_BACKEND", "sqlite"))
+    )
+    return backend_mode_hint.strip().lower() in {"postgres", "postgresql"}
+
+
+def _build_source_health_source_sets(
     *,
     existing_paths: dict[str, str],
-) -> set[Any]:
-    """Derive source availability from existing source database files."""
+    media_backend_uses_non_file_storage: bool = False,
+) -> tuple[set[Any], set[Any]]:
+    """Derive ready and empty source sets without creating source storage."""
     configured: set[Any] = set()
-    if "media_db" in existing_paths:
+    empty: set[Any] = set()
+    if "media_db" in existing_paths or media_backend_uses_non_file_storage:
         configured.add("media_db")
+    else:
+        empty.add("media_db")
     if "chacha_db" in existing_paths:
         configured.update(
             {
@@ -445,11 +454,25 @@ def _build_source_health_configured_sources(
                 "dictionaries",
             }
         )
+    else:
+        empty.update(
+            {
+                "notes",
+                "chats",
+                "characters",
+                "world_books",
+                "dictionaries",
+            }
+        )
     if "prompts_db" in existing_paths:
         configured.add("prompts")
+    else:
+        empty.add("prompts")
     if "kanban_db" in existing_paths:
         configured.add("kanban")
-    return configured
+    else:
+        empty.add("kanban")
+    return configured, empty
 
 
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
@@ -1075,11 +1098,16 @@ async def source_health_endpoint(
     current_user: User = Depends(get_request_user),
 ) -> KnowledgeSourceHealthResponse:
     """Return safe pre-query readiness for canonical Knowledge QA sources."""
-    configured_sources = _build_source_health_configured_sources(
-        existing_paths=_resolve_existing_source_db_paths(current_user),
+    existing_paths = await run_in_threadpool(_resolve_existing_source_db_paths, current_user)
+    configured_sources, empty_sources = _build_source_health_source_sets(
+        existing_paths=existing_paths,
+        media_backend_uses_non_file_storage=_media_db_uses_non_file_storage(),
     )
     return KnowledgeSourceHealthResponse(
-        sources=build_source_health_entries(configured_sources=configured_sources)
+        sources=build_source_health_entries(
+            configured_sources=configured_sources,
+            empty_sources=empty_sources,
+        )
     )
 
 

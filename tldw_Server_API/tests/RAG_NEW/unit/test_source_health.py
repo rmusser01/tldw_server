@@ -50,6 +50,27 @@ def test_source_health_marks_configured_sources_searchable() -> None:
     assert by_id["characters"].disabled_reason == "no_retriever_configured"
 
 
+def test_source_health_marks_lazy_sources_empty_without_disabling_search() -> None:
+    entries = build_source_health_entries(
+        configured_sources=[DataSource.MEDIA_DB],
+        empty_sources=["notes", DataSource.PROMPTS],
+    )
+    by_id = {entry.source_id: entry for entry in entries}
+
+    assert by_id["notes"].available is True
+    assert by_id["notes"].searchable is True
+    assert by_id["notes"].index_status == "empty"
+    assert by_id["notes"].disabled_reason is None
+    assert by_id["prompts"].available is True
+    assert by_id["prompts"].searchable is True
+    assert by_id["prompts"].index_status == "empty"
+    assert by_id["prompts"].disabled_reason is None
+
+    assert by_id["characters"].available is False
+    assert by_id["characters"].searchable is False
+    assert by_id["characters"].index_status == "unavailable"
+
+
 def test_source_health_ignores_unsafe_source_metadata() -> None:
     entries = build_source_health_entries(
         configured_sources={DataSource.MEDIA_DB},

@@ -178,6 +178,8 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
   const hasResults = results.length > 0 || Boolean(answer)
   const showNoResultsState =
     hasSearched && !isSearching && !error && results.length === 0 && !answer
+  const nearestMatchesAvailable =
+    (knowledgeQa.searchDetails?.alsoConsidered?.length ?? 0) > 0
   const hasVisibleResultsArea =
     hasResults || showNoResultsState || Boolean(error) || isSearching
   const recentHistoryItem = useMemo(() => {
@@ -364,7 +366,7 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
 
   const handleShowNearestMatches = () => {
     setEvidenceRailOpen(true)
-    setEvidenceRailTab("sources")
+    setEvidenceRailTab(results.length > 0 ? "sources" : "details")
     if (results.length > 0) {
       focusSource(0)
     }
@@ -568,7 +570,7 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                       selectedSources={settings.sources}
                       sourceHealth={sourceHealth}
                       sourceStatus={knowledgeQa.searchDetails?.sourceStatus}
-                      showNearestMatchesAvailable={results.length > 0}
+                      showNearestMatchesAvailable={nearestMatchesAvailable}
                     />
                   </React.Suspense>
                 ) : null}

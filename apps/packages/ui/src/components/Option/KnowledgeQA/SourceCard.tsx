@@ -550,7 +550,7 @@ export function SourceCard({
             title="Copy citation"
             aria-label={`Copy citation for source ${index}`}
           >
-            {copiedState === "citation" ? "Copied!" : "Cite"}
+            {copiedState === "citation" ? "Copied!" : "Copy citation"}
           </button>
 
           <div ref={overflowRef} className="relative">

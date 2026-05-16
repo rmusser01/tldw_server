@@ -341,6 +341,25 @@ describe("AnswerPanel state guardrails", () => {
     )
   })
 
+  it("treats missing selected source-health entries as caveats", () => {
+    const health = createSourceHealthState()
+    const mediaHealth = health.bySource.media_db
+    state.answer = "Claim one."
+    state.results = [{ id: "r1", metadata: { title: "Doc 1" } }]
+    state.settings.sources = ["media_db", "prompts"]
+    state.sourceHealth = {
+      ...health,
+      sources: mediaHealth ? [mediaHealth] : [],
+      bySource: mediaHealth ? { media_db: mediaHealth } : {},
+    }
+
+    render(<AnswerPanel />)
+
+    expect(screen.getByLabelText("Answer trust summary")).toHaveTextContent(
+      "1 selected source needs attention."
+    )
+  })
+
   it("uses verification rate as trust badge fallback when faithfulness is missing", () => {
     state.answer = "Claim [1]."
     state.citations = [{ index: 1 }]

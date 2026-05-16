@@ -131,7 +131,7 @@ function describeFaithfulness(score: number | null): TrustDescriptor | null {
 function sourceHealthNeedsAttention(
   health: KnowledgeSourceHealth | null | undefined
 ): boolean {
-  if (!health) return false
+  if (!health) return true
   if (!health.available || !health.searchable) return true
   if (health.workspaceScoped || health.hiddenByDefault) return true
   if (health.indexStatus !== "ready") return true

@@ -115,3 +115,111 @@ def test_rag_source_health_returns_safe_canonical_sources(
     assert "stub_chacha.db" not in response.text
     assert "stub_prompts.db" not in response.text
     assert "stub_kanban.db" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_rag_source_health_offloads_filesystem_checks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+
+    calls: list[str] = []
+
+    async def fake_run_in_threadpool(fn: Any, *args: Any, **kwargs: Any) -> Any:
+        calls.append(getattr(fn, "__name__", repr(fn)))
+        return fn(*args, **kwargs)
+
+    def fake_resolve_existing_source_db_paths(*args: Any, **kwargs: Any) -> dict[str, str]:
+        return {"media_db": "stub_media.db"}
+
+    monkeypatch.setattr(rag_ep, "run_in_threadpool", fake_run_in_threadpool)
+    monkeypatch.setattr(
+        rag_ep,
+        "_resolve_existing_source_db_paths",
+        fake_resolve_existing_source_db_paths,
+    )
+    monkeypatch.setattr(rag_ep, "_media_db_uses_non_file_storage", lambda: False)
+
+    response = await rag_ep.source_health_endpoint(
+        User(id=1, username="tester", email=None, is_active=True)
+    )
+
+    assert calls == ["fake_resolve_existing_source_db_paths"]
+    assert {source.source_id for source in response.sources if source.searchable} == {
+        "media_db",
+        "notes",
+        "chats",
+        "characters",
+        "kanban",
+        "prompts",
+        "world_books",
+        "dictionaries",
+    }
+
+
+def test_rag_source_health_uses_canonical_user_db_base_resolver(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+
+    media_db = tmp_path / "1" / "Media_DB_v2.db"
+    media_db.parent.mkdir(parents=True)
+    media_db.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        rag_ep.DatabasePaths,
+        "resolve_user_db_base_dir",
+        staticmethod(lambda: tmp_path),
+    )
+
+    paths = rag_ep._resolve_existing_source_db_paths(User(id=1, username="tester", email=None, is_active=True))
+
+    assert paths == {"media_db": str(media_db)}
+
+
+def test_rag_source_health_user_id_falls_back_to_single_user_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+
+    monkeypatch.setattr(
+        rag_ep.DatabasePaths,
+        "get_single_user_id",
+        staticmethod(lambda: 7),
+    )
+
+    assert rag_ep._resolve_source_health_user_id(None) == "7"
+
+
+def test_rag_source_health_marks_non_file_media_backend_available() -> None:
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+
+    configured, empty = rag_ep._build_source_health_source_sets(
+        existing_paths={},
+        media_backend_uses_non_file_storage=True,
+    )
+
+    assert "media_db" in configured
+    assert "media_db" not in empty
+    assert {"notes", "chats", "characters", "world_books", "dictionaries"}.issubset(empty)
+
+
+def test_rag_source_health_marks_absent_lazy_sqlite_sources_empty() -> None:
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+
+    configured, empty = rag_ep._build_source_health_source_sets(
+        existing_paths={},
+        media_backend_uses_non_file_storage=False,
+    )
+
+    assert configured == set()
+    assert {
+        "media_db",
+        "notes",
+        "chats",
+        "characters",
+        "kanban",
+        "prompts",
+        "world_books",
+        "dictionaries",
+    }.issubset(empty)

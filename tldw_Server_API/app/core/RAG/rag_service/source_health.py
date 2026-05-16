@@ -80,25 +80,29 @@ def _normalize_configured_sources(
 def build_source_health_entries(
     *,
     configured_sources: Iterable[DataSource | str] | Mapping[Any, Any],
+    empty_sources: Iterable[DataSource | str] | Mapping[Any, Any] = (),
     unsafe_metadata: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[KnowledgeSourceHealthEntry]:
     """Build safe pre-query source readiness entries for Knowledge QA."""
     del unsafe_metadata
     configured = _normalize_configured_sources(configured_sources)
+    empty = _normalize_configured_sources(empty_sources)
 
     entries: list[KnowledgeSourceHealthEntry] = []
     for source_id in CANONICAL_KNOWLEDGE_SOURCE_IDS:
         data_source = _SOURCE_TO_DATASOURCE[source_id]
         is_configured = data_source in configured
+        is_empty = data_source in empty and not is_configured
+        available = is_configured or is_empty
         entries.append(
             KnowledgeSourceHealthEntry(
                 source_id=source_id,
                 label=_SOURCE_LABELS[source_id],
-                available=is_configured,
-                searchable=is_configured,
-                index_status="ready" if is_configured else "unavailable",
-                embedding_status="unknown" if is_configured else "unavailable",
-                disabled_reason=None if is_configured else "no_retriever_configured",
+                available=available,
+                searchable=available,
+                index_status="ready" if is_configured else "empty" if is_empty else "unavailable",
+                embedding_status="unknown" if available else "unavailable",
+                disabled_reason=None if available else "no_retriever_configured",
             )
         )
     return entries

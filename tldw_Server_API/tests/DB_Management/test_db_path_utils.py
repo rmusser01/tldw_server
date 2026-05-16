@@ -169,6 +169,27 @@ def test_user_db_base_dir_test_fallback_is_not_repo_local(monkeypatch):
     )
 
 
+def test_resolve_user_db_base_dir_matches_test_fallback_without_creating(monkeypatch, tmp_path):
+    """Read-only base resolution should match DB creation fallback without creating storage."""
+    monkeypatch.delenv("USER_DB_BASE_DIR", raising=False)
+    monkeypatch.delenv("USER_DB_BASE", raising=False)
+    monkeypatch.setenv("TLDW_TEST_RUN_ID", f"readonly-{tmp_path.name}")
+    monkeypatch.setitem(settings, "USER_DB_BASE_DIR", None)
+    monkeypatch.setitem(settings, "USER_DB_BASE", None)
+    monkeypatch.setattr(db_path_utils, "_is_test_context", lambda: True)
+
+    resolved = DatabasePaths.resolve_user_db_base_dir()
+
+    _expect_true(
+        "tldw_user_databases_test" in str(resolved),
+        "read-only resolver should use the same isolated test fallback tree",
+    )
+    _expect_true(
+        not resolved.exists(),
+        "read-only resolver must not create the user DB base directory",
+    )
+
+
 def test_user_db_base_dir_test_fallback_uses_unique_run_tag(monkeypatch):
     monkeypatch.delenv("USER_DB_BASE_DIR", raising=False)
     monkeypatch.delenv("USER_DB_BASE", raising=False)

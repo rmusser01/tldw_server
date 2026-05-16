@@ -1,6 +1,7 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { SearchX } from "lucide-react"
+import { Link } from "react-router-dom"
 import { useQuickIngestStore } from "@/store/quick-ingest"
 import { getRagSourceLabel, isRagSource } from "@/services/rag/sourceMetadata"
 import type { RagSource } from "@/services/rag/unified-rag"
@@ -121,12 +122,12 @@ export function NoResultsRecovery({
             >
               Open Quick Ingest
             </button>
-            <a
-              href="/sources"
+            <Link
+              to="/sources"
               className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text-subtle hover:bg-hover hover:text-text transition-colors"
             >
               Open source page
-            </a>
+            </Link>
             <button
               type="button"
               onClick={onEnableWeb}

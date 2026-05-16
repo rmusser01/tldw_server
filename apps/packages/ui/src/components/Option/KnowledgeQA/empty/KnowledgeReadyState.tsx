@@ -51,8 +51,7 @@ function buildSourceHealthNotice(
     (source) =>
       !source.available ||
       source.indexStatus === "unavailable" ||
-      source.indexStatus === "error" ||
-      (!source.searchable && source.indexStatus !== "empty")
+      source.indexStatus === "error"
   )
   if (allSelectedUnavailable) {
     return {

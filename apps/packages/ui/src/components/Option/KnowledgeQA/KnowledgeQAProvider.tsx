@@ -1416,6 +1416,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
   const activeSearchRequestIdRef = useRef(0)
   const activeThreadHydrationRequestIdRef = useRef(0)
   const activeHistoryLoadRequestIdRef = useRef(0)
+  const sourceHealthRequestIdRef = useRef(0)
   const historyMutationVersionRef = useRef(0)
   const focusedSourceTimeoutRef = useRef<number | null>(null)
   const persistenceWarningShownRef = useRef(false)
@@ -2843,14 +2844,18 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const refreshSourceHealth = useCallback(async () => {
+    const requestId = sourceHealthRequestIdRef.current + 1
+    sourceHealthRequestIdRef.current = requestId
     dispatch({ type: "SET_SOURCE_HEALTH_LOADING" })
     try {
       const payload = await tldwClient.ragSourceHealth()
+      if (sourceHealthRequestIdRef.current !== requestId) return
       dispatch({
         type: "SET_SOURCE_HEALTH",
         payload: normalizeKnowledgeSourceHealth(payload),
       })
     } catch {
+      if (sourceHealthRequestIdRef.current !== requestId) return
       dispatch({
         type: "SET_SOURCE_HEALTH_ERROR",
         payload:

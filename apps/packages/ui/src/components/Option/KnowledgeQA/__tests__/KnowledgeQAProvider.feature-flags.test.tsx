@@ -85,6 +85,64 @@ describe("KnowledgeQAProvider feature flags", () => {
     expect(latestContext?.isSearching).toBe(false)
   })
 
+  it("ignores stale source health refresh responses", async () => {
+    const resolvers: Array<(value: unknown) => void> = []
+    ragSourceHealthMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvers.push(resolve)
+        })
+    )
+
+    render(
+      <KnowledgeQAProvider>
+        <ContextProbe />
+      </KnowledgeQAProvider>
+    )
+
+    await waitFor(() => expect(ragSourceHealthMock).toHaveBeenCalledTimes(1))
+    await act(async () => {
+      void latestContext!.refreshSourceHealth()
+      void latestContext!.refreshSourceHealth()
+    })
+    expect(ragSourceHealthMock).toHaveBeenCalledTimes(3)
+
+    await act(async () => {
+      resolvers[2]?.({
+        sources: [
+          {
+            source_id: "prompts",
+            label: "Prompts",
+            available: true,
+            searchable: true,
+            index_status: "ready",
+            embedding_status: "not_applicable",
+          },
+        ],
+      })
+      await Promise.resolve()
+    })
+    expect(latestContext?.sourceHealth.bySource.prompts?.indexStatus).toBe("ready")
+
+    await act(async () => {
+      resolvers[1]?.({
+        sources: [
+          {
+            source_id: "notes",
+            label: "Notes",
+            available: true,
+            searchable: true,
+            index_status: "ready",
+            embedding_status: "not_applicable",
+          },
+        ],
+      })
+      await Promise.resolve()
+    })
+    expect(latestContext?.sourceHealth.bySource.prompts?.indexStatus).toBe("ready")
+    expect(latestContext?.sourceHealth.bySource.notes).toBeUndefined()
+  })
+
   it("skips streaming path when streaming feature flag is disabled", async () => {
     render(
       <KnowledgeQAProvider>
