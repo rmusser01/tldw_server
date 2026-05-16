@@ -345,7 +345,7 @@ def test_candidate_generation_provenance_round_trip(db_instance: CharactersRAGDB
             "target_state": "thinking",
             "recipe": {
                 "starter_pack_id": "starter-basic",
-                "recipe_output": "static_sheet",
+                "recipe_output": "required_state_loops",
                 "correlation_id": "corr-1",
                 "identity_brief": "friendly buddy",
                 "neutral_anchor": "api_key=secret\n/Users/macbook-dev/private",
@@ -373,7 +373,7 @@ def test_candidate_generation_provenance_round_trip(db_instance: CharactersRAGDB
     assert provenance["backend"] == "fake provider"
     assert provenance["target_state"] == "thinking"
     assert provenance["recipe"]["starter_pack_id"] == "starter-basic"
-    assert provenance["recipe"]["recipe_output"] == "static_sheet"
+    assert provenance["recipe"]["recipe_output"] == "required_state_loops"
     assert provenance["recipe"]["correlation_id"] == "corr-1"
     assert provenance["recipe"]["identity_brief"] == "friendly buddy"
     assert provenance["recipe"]["neutral_anchor"] == "[redacted]"

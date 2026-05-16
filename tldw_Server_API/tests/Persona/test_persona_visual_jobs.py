@@ -487,7 +487,7 @@ async def test_generation_worker_stores_generated_asset_and_candidate(
                 "request_id": "request-worker-1",
                 "recipe_intent": {
                     "starter_pack_id": "starter-basic",
-                    "recipe_output": "static_sheet",
+                    "recipe_output": "required_state_loops",
                     "correlation_id": "corr-worker-1",
                     "identity_brief": "small helpful buddy",
                     "neutral_anchor": "front-facing neutral pose",
@@ -526,7 +526,7 @@ async def test_generation_worker_stores_generated_asset_and_candidate(
     assert provenance["backend"] == "fake"
     assert provenance["target_state"] == "thinking"
     assert provenance["recipe"]["starter_pack_id"] == "starter-basic"
-    assert provenance["recipe"]["recipe_output"] == "static_sheet"
+    assert provenance["recipe"]["recipe_output"] == "required_state_loops"
     assert provenance["recipe"]["correlation_id"] == "corr-worker-1"
     assert provenance["recipe"]["review_checks"] == [
         "consistent silhouette",

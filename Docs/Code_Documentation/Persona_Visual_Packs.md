@@ -265,30 +265,38 @@ scaffolds from final authored default assets:
 2. `production_status` is currently `scaffold` for all bundled starters.
 3. `neutral_anchor_required` is true when the final authored pack should begin
    from a neutral identity anchor.
-4. `expected_asset_groups` lists the authored inputs expected before a scaffold
-   becomes production artwork, such as `identity_brief`, `neutral_anchor`,
-   `static_talking_reaction_sheet`, `animation_strips`, or
-   `animation_atlas`.
+4. `expected_asset_groups` lists the authored inputs and outputs expected
+   before a scaffold becomes production artwork, such as `identity_brief`,
+   `neutral_anchor`, `static_talking_sheet`, `static_reaction_sheet`,
+   `required_state_loops`, `animation_strips`, or `animation_atlas`.
 5. `animation_coverage_notes` are bounded notes for reviewers and future
    generation jobs. They describe the missing neutral-anchor-derived animation
    work and do not grant runtime support by themselves.
 6. `production_recipe` is structured handoff metadata for authored assets. It
    includes an `identity_brief`, `neutral_anchor` guidance, `static_sheet`
-   guidance, expected `animation_outputs`, and `review_checks`.
+   guidance, timed runtime `animation_outputs`, and `review_checks`.
 
 The neutral-anchor pipeline remains: identity brief, neutral anchor, optional
-static talking/reaction sheet, animation strips or atlas regions, review, then
-copy/import into an inactive draft with separate activation. The production
+static talking and reaction sheets, animation strips or atlas regions, review,
+then copy/import into an inactive draft with separate activation. The production
 metadata is catalog guidance for that pipeline; it does not create final art,
 run image generation, activate a pack, or change renderer support.
 
 Production recipes make the scaffold-to-art handoff explicit. Basic starters
 usually expect only required-state loops derived from a single neutral anchor.
-Intermediate starters add a static talking/reaction sheet and custom-state
+Intermediate starters add separate static talking and reaction sheets and custom-state
 variants. Intricate starters add animation strips or atlas regions on top of the
 same neutral anchor. These recipes are not prompts that the server executes and
 are not proof that finished animation assets exist; they are bounded metadata
 for reviewers, future generation jobs, and custom provider handoffs.
+
+Static talking sheets and static reaction sheets are source material, not timed animation outputs.
+They may appear in `expected_asset_groups` and in the recipe `static_sheet`
+guidance, but they must not appear in `production_recipe.animation_outputs`.
+Those outputs name runtime artifacts that can be mapped into manifest
+`animations`, such as `required_state_loops`, `animation_strips`,
+`animation_atlas`, or `custom_state_variants`. A static sheet becomes animation
+only after its cells are explicitly mapped as timed manifest frames.
 
 Copying a bundled starter pack creates a normal user-owned draft pack attached
 to the selected target persona. The copy path validates the fixture manifest and

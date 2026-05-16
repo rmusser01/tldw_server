@@ -7,10 +7,14 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
     PersonaVisualRendererSetupStatus,
+)
+from tldw_Server_API.app.core.Persona.visual_starter_recipe_taxonomy import (
+    BUDDY_VISUAL_ANIMATION_OUTPUT_IDS,
+    BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS,
 )
 
 
@@ -304,6 +308,20 @@ class PersonaVisualStarterProductionRecipeResponse(BaseModel):
     animation_outputs: PersonaVisualStarterRecipeItems
     review_checks: PersonaVisualStarterRecipeItems
 
+    @field_validator("animation_outputs")
+    @classmethod
+    def validate_animation_outputs(cls, value: list[str]) -> list[str]:
+        invalid_outputs = [
+            output for output in value if output not in BUDDY_VISUAL_ANIMATION_OUTPUT_IDS
+        ]
+        if invalid_outputs:
+            invalid_output_list = ", ".join(sorted(set(invalid_outputs)))
+            raise ValueError(
+                "animation_outputs must use supported animation output ids. "
+                f"Invalid: {invalid_output_list}"
+            )
+        return value
+
     @field_validator("review_checks")
     @classmethod
     def validate_review_checks(cls, value: list[str]) -> list[str]:
@@ -329,6 +347,37 @@ class PersonaVisualStarterPackResponse(BaseModel):
     expected_asset_groups: list[str] = Field(default_factory=list)
     animation_coverage_notes: list[str] = Field(default_factory=list)
     production_recipe: PersonaVisualStarterProductionRecipeResponse
+
+    @field_validator("expected_asset_groups")
+    @classmethod
+    def validate_expected_asset_groups(cls, value: list[str]) -> list[str]:
+        invalid_groups = [
+            group for group in value if group not in BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS
+        ]
+        if invalid_groups:
+            invalid_group_list = ", ".join(sorted(set(invalid_groups)))
+            raise ValueError(
+                "expected_asset_groups must use supported asset group ids. "
+                f"Invalid: {invalid_group_list}"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def validate_recipe_outputs_are_expected(self) -> "PersonaVisualStarterPackResponse":
+        expected_groups = set(self.expected_asset_groups)
+        missing_outputs = sorted(
+            output
+            for output in self.production_recipe.animation_outputs
+            if output not in expected_groups
+        )
+        if missing_outputs:
+            missing_output_list = ", ".join(missing_outputs)
+            raise ValueError(
+                "production_recipe.animation_outputs must be declared in "
+                "expected_asset_groups. "
+                f"Missing: {missing_output_list}"
+            )
+        return self
 
 
 class PersonaVisualStarterPackDetailResponse(PersonaVisualStarterPackResponse):
