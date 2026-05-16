@@ -74,6 +74,7 @@ export type PlaygroundRuntimeInspectorProps = {
   onStopStreaming?: () => void;
   canRegenerate?: boolean;
   onRegenerate?: () => void;
+  emptyAssistantResponse?: boolean;
   settingSummaries?: RuntimeSettingSummary[];
   toolSummary?: RuntimeToolSummary | null;
 };
@@ -108,6 +109,7 @@ export const PlaygroundRuntimeInspector = ({
   onStopStreaming,
   canRegenerate = false,
   onRegenerate,
+  emptyAssistantResponse = false,
   settingSummaries = [],
   toolSummary = null,
 }: PlaygroundRuntimeInspectorProps) => {
@@ -514,6 +516,30 @@ export const PlaygroundRuntimeInspector = ({
         <h2 className={cockpitRailStyles.heading}>
           {t("cockpit.runControls", "Run controls")}
         </h2>
+        {emptyAssistantResponse && !streaming ? (
+          <div
+            role="status"
+            aria-live="polite"
+            aria-label={t(
+              "cockpit.emptyAssistantResponse",
+              "Empty assistant response",
+            )}
+            className="mt-2 rounded-md border border-warn/30 bg-warn/10 px-2.5 py-2 text-xs text-warn"
+          >
+            <p className="font-medium">
+              {t(
+                "cockpit.emptyAssistantResponseSummary",
+                "No response text returned.",
+              )}
+            </p>
+            <p className="mt-1 opacity-90">
+              {t(
+                "cockpit.emptyAssistantResponseDetail",
+                "Regenerate this turn or switch model settings before trying again.",
+              )}
+            </p>
+          </div>
+        ) : null}
         <div className="mt-2 grid gap-2">
           <div>
             <button

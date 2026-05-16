@@ -36,6 +36,7 @@ import {
 import { getCockpitMessageCount } from "./playground-cockpit-state";
 import { buildPlaygroundCompositionPreviewSummary } from "./playground-composition-preview";
 import { ChatErrorBoundary } from "@/components/Common/Playground/ChatErrorBoundary";
+import { hasVisibleAssistantResponse } from "@/components/Common/Playground/message-visibility";
 import { useMessageOption } from "@/hooks/useMessageOption";
 import { usePlaygroundSessionPersistence } from "@/hooks/usePlaygroundSessionPersistence";
 import { shouldRestorePersistedPlaygroundSession } from "@/hooks/playground-session-restore";
@@ -246,6 +247,7 @@ export const Playground = () => {
     setContextFiles,
     createChatBranch,
     streaming,
+    isProcessing,
     selectedCharacter,
     setSelectedCharacter,
     compareMode,
@@ -1717,9 +1719,20 @@ export const Playground = () => {
         ),
     },
   });
-  const canRegenerateLastResponse = messages.some(
-    (message) => message.role === "assistant",
-  );
+  const latestAssistantMessage = React.useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message?.role === "assistant" || message?.isBot) {
+        return message;
+      }
+    }
+    return null;
+  }, [messages]);
+  const canRegenerateLastResponse = Boolean(latestAssistantMessage);
+  const emptyAssistantResponse = React.useMemo(() => {
+    if (!latestAssistantMessage || streaming || isProcessing) return false;
+    return !hasVisibleAssistantResponse(latestAssistantMessage);
+  }, [isProcessing, latestAssistantMessage, streaming]);
   const runtimeStatusDetail =
     serverReadinessState === "blocked"
       ? toText(
@@ -2013,13 +2026,15 @@ export const Playground = () => {
     activeSettingsScope && scopedSettingsByModelKey
       ? scopedSettingsByModelKey[activeSettingsScope]
       : undefined;
-  const getRuntimeSettingSource = (key: keyof ChatModelSettings) =>
+  const getRuntimeSettingSource = (
+    key: keyof ChatModelSettings,
+  ): RuntimeSettingSummary["source"] =>
     activeSettingsScope
       ? Object.prototype.hasOwnProperty.call(activeScopedModelSettings || {}, key)
         ? "override"
         : "default"
       : undefined;
-  const runtimeSettingSummaries: RuntimeSettingSummary[] = [
+  const runtimeSettingSummaryItems: Array<RuntimeSettingSummary | null> = [
     typeof temperature === "number"
       ? {
           label: toText(t("playground:cockpit.temperature", "Temperature")),
@@ -2062,7 +2077,11 @@ export const Playground = () => {
           source: getRuntimeSettingSource("reasoningEffort"),
         }
       : null,
-  ].filter((item): item is RuntimeSettingSummary => Boolean(item));
+  ];
+  const runtimeSettingSummaries: RuntimeSettingSummary[] =
+    runtimeSettingSummaryItems.filter(
+      (item): item is RuntimeSettingSummary => Boolean(item),
+    );
   const cockpitToolSummary = buildCockpitMcpSummary({
     hasMcp: mcpHealthState !== "unavailable",
     healthState: mcpHealthState,
@@ -2275,6 +2294,7 @@ export const Playground = () => {
       onStopStreaming={() => stopStreamingRequest()}
       canRegenerate={canRegenerateLastResponse}
       onRegenerate={() => regenerateLastMessage()}
+      emptyAssistantResponse={emptyAssistantResponse}
       settingSummaries={runtimeSettingSummaries}
       toolChoice={toolChoice as RuntimeToolChoice}
       onToolChoiceChange={(nextChoice) => setToolChoice(nextChoice)}

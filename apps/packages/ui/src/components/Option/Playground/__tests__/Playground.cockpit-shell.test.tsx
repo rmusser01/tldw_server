@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Playground } from "../Playground";
@@ -15,15 +21,27 @@ const messageOptionState = vi.hoisted(() => ({
     setHistoryId: vi.fn(),
     setHistory: vi.fn(),
     setMessages: vi.fn(),
+    regenerateLastMessage: vi.fn(),
+    selectedSystemPrompt: "" as string | null,
     setSelectedSystemPrompt: vi.fn(),
+    selectedQuickPrompt: null as string | null,
+    setSelectedQuickPrompt: vi.fn(),
     setSelectedModel: vi.fn(),
     setServerChatId: vi.fn(),
+    contextFiles: [] as Array<{ id: string; name: string }>,
     setContextFiles: vi.fn(),
     createChatBranch: vi.fn(),
     streaming: false,
     selectedModel: "openai:gpt-4.1-mini",
     selectedCharacter: null,
     setSelectedCharacter: vi.fn(),
+    selectedAssistant: null as {
+      kind: "character" | "persona";
+      id: string;
+      name: string;
+    } | null,
+    serverChatPersonaMemoryMode: null as "read_only" | "read_write" | null,
+    setSelectedAssistant: vi.fn(),
     compareMode: false,
     compareFeatureEnabled: false,
     temporaryChat: false,
@@ -204,6 +222,12 @@ describe("Playground cockpit shell", () => {
     messageOptionState.value.serverChatId = null;
     messageOptionState.value.streaming = false;
     messageOptionState.value.selectedModel = "openai:gpt-4.1-mini";
+    messageOptionState.value.selectedSystemPrompt = "";
+    messageOptionState.value.selectedQuickPrompt = null;
+    messageOptionState.value.selectedAssistant = null;
+    messageOptionState.value.selectedCharacter = null;
+    messageOptionState.value.contextFiles = [];
+    messageOptionState.value.regenerateLastMessage = vi.fn();
     sessionPersistenceState.value.sessionScopeReady = true;
   });
 
@@ -222,9 +246,9 @@ describe("Playground cockpit shell", () => {
     expect(
       screen.getByTestId("playground-cockpit-status-strip"),
     ).toBeInTheDocument();
-    expect(screen.getByTestId("playground-cockpit-mode-summary")).toHaveTextContent(
-      "Context and runtime rails visible.",
-    );
+    expect(
+      screen.getByTestId("playground-cockpit-mode-summary"),
+    ).toHaveTextContent("Context and runtime rails visible.");
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
   });
@@ -239,7 +263,9 @@ describe("Playground cockpit shell", () => {
     ).toHaveAttribute("data-mode", "focus");
     expect(screen.queryByTestId("playground-cockpit-left-rail")).toBeNull();
     expect(screen.queryByTestId("playground-cockpit-right-rail")).toBeNull();
-    expect(screen.getByTestId("playground-cockpit-mode-summary")).toHaveTextContent(
+    expect(
+      screen.getByTestId("playground-cockpit-mode-summary"),
+    ).toHaveTextContent(
       "Focus mode hides rails. Chat and composer remain active.",
     );
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
@@ -281,16 +307,14 @@ describe("Playground cockpit shell", () => {
       screen.getByTestId("playground-cockpit-right-rail"),
     ).toBeInTheDocument();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /hide context rail/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /hide context rail/i }));
 
     await waitFor(() => {
       expect(screen.queryByTestId("playground-cockpit-left-rail")).toBeNull();
     });
-    expect(screen.getByTestId("playground-cockpit-mode-summary")).toHaveTextContent(
-      "Context rail hidden. Runtime rail visible.",
-    );
+    expect(
+      screen.getByTestId("playground-cockpit-mode-summary"),
+    ).toHaveTextContent("Context rail hidden. Runtime rail visible.");
     expect(
       screen.getByTestId("playground-cockpit-right-rail"),
     ).toBeInTheDocument();
@@ -301,28 +325,22 @@ describe("Playground cockpit shell", () => {
       screen.getByRole("button", { name: /show context rail/i }),
     ).toBeInTheDocument();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /hide runtime rail/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /hide runtime rail/i }));
 
     await waitFor(() => {
       expect(screen.queryByTestId("playground-cockpit-right-rail")).toBeNull();
     });
-    expect(screen.getByTestId("playground-cockpit-mode-summary")).toHaveTextContent(
-      "Cockpit rails hidden. Status remains visible.",
-    );
+    expect(
+      screen.getByTestId("playground-cockpit-mode-summary"),
+    ).toHaveTextContent("Cockpit rails hidden. Status remains visible.");
     expect(storageState.values.get("playgroundChatRuntimeRailVisible")).toBe(
       false,
     );
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /show context rail/i }),
-    );
-    fireEvent.click(
-      screen.getByRole("button", { name: /show runtime rail/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /show context rail/i }));
+    fireEvent.click(screen.getByRole("button", { name: /show runtime rail/i }));
 
     await waitFor(() => {
       expect(
@@ -337,6 +355,122 @@ describe("Playground cockpit shell", () => {
     );
     expect(storageState.values.get("playgroundChatRuntimeRailVisible")).toBe(
       true,
+    );
+  });
+
+  it("persists sidechannel collapse and restore from rail-local controls", async () => {
+    render(<Playground />);
+
+    const contextRail = await screen.findByTestId(
+      "playground-cockpit-left-rail",
+    );
+
+    fireEvent.click(
+      within(contextRail).getByRole("button", {
+        name: /collapse context sidechannel/i,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("playground-cockpit-left-rail")).toBeNull();
+    });
+    expect(storageState.values.get("playgroundChatContextRailVisible")).toBe(
+      false,
+    );
+    expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
+    expect(screen.getByTestId("playground-form")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("playground-collapsed-composition-summary"),
+    ).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /restore context sidechannel/i }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("playground-cockpit-left-rail"),
+      ).toBeInTheDocument();
+    });
+    expect(storageState.values.get("playgroundChatContextRailVisible")).toBe(
+      true,
+    );
+
+    const runtimeRailAfterRestore = screen.getByTestId(
+      "playground-cockpit-right-rail",
+    );
+    fireEvent.click(
+      within(runtimeRailAfterRestore).getByRole("button", {
+        name: /collapse runtime sidechannel/i,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("playground-cockpit-right-rail")).toBeNull();
+    });
+    expect(storageState.values.get("playgroundChatRuntimeRailVisible")).toBe(
+      false,
+    );
+    expect(
+      screen.getByTestId("playground-cockpit-status-strip"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("playground-collapsed-composition-summary"),
+    ).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /restore runtime sidechannel/i }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("playground-cockpit-right-rail"),
+      ).toBeInTheDocument();
+    });
+    expect(storageState.values.get("playgroundChatRuntimeRailVisible")).toBe(
+      true,
+    );
+  });
+
+  it("surfaces empty assistant response recovery in the runtime sidechannel", async () => {
+    messageOptionState.value.messages = [
+      {
+        id: "user-1",
+        role: "user",
+        isBot: false,
+        name: "You",
+        message: "Say something",
+      },
+      {
+        id: "assistant-1",
+        isBot: true,
+        name: "openai:gpt-4.1-mini",
+        message: "",
+      },
+    ];
+
+    render(<Playground />);
+
+    const runtimeRail = await screen.findByTestId(
+      "playground-cockpit-right-rail",
+    );
+    const runControls = within(runtimeRail).getByRole("region", {
+      name: "Run controls",
+    });
+    expect(
+      within(runControls).getByRole("status", {
+        name: "Empty assistant response",
+      }),
+    ).toHaveTextContent("No response text returned.");
+
+    fireEvent.click(
+      within(runControls).getByRole("button", {
+        name: "Regenerate last response",
+      }),
+    );
+
+    expect(messageOptionState.value.regenerateLastMessage).toHaveBeenCalledTimes(
+      1,
     );
   });
 });

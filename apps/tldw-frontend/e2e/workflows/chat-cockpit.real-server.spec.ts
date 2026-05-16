@@ -24,7 +24,10 @@ const serverUrl = (
 const apiKey =
   process.env.TLDW_E2E_API_KEY || process.env.TLDW_API_KEY || process.env.SINGLE_USER_API_KEY || '';
 
-test.skip(!apiKey, 'TLDW_E2E_API_KEY, TLDW_API_KEY, or SINGLE_USER_API_KEY is required for real-server chat cockpit checks');
+test.skip(
+  !apiKey,
+  'TLDW_E2E_API_KEY, TLDW_API_KEY, or SINGLE_USER_API_KEY is required for real-server chat cockpit checks'
+);
 
 type ApiHit = {
   method: string;
@@ -59,9 +62,7 @@ const parseApiJsonResponse = async <T>(
     let responseText = '<response body unavailable>';
     try {
       const text = (await response.text()).trim();
-      responseText = text
-        ? truncateForDiagnostics(text)
-        : '<empty response body>';
+      responseText = text ? truncateForDiagnostics(text) : '<empty response body>';
     } catch {
       // Keep the fallback marker when the response body cannot be read.
     }
@@ -100,10 +101,7 @@ const apiPost = async <T>(
   return { status: response.status(), body: payload as T | null };
 };
 
-const apiDelete = async (
-  request: APIRequestContext,
-  path: string
-): Promise<{ status: number }> => {
+const apiDelete = async (request: APIRequestContext, path: string): Promise<{ status: number }> => {
   const response = await request.delete(`${serverUrl}${path}`, {
     headers: apiHeaders(),
     timeout: 30_000,
@@ -156,7 +154,9 @@ const normalizeCockpitProviderKey = (provider: string): string => {
 };
 
 const normalizeConfiguredChatModelId = (providerName: string, value: unknown): string => {
-  let model = String(value || '').trim().replace(/^tldw:/i, '');
+  let model = String(value || '')
+    .trim()
+    .replace(/^tldw:/i, '');
   const separatorIndex = model.indexOf(':');
   if (separatorIndex <= 0 || separatorIndex === model.length - 1) return model;
 
@@ -395,9 +395,7 @@ const getDesktopCompositionPreview = (page: Page): Locator =>
   });
 
 const getDesktopRuntimeInspector = (page: Page): Locator =>
-  page
-    .getByTestId('playground-cockpit-right-rail')
-    .getByTestId('playground-runtime-inspector');
+  page.getByTestId('playground-cockpit-right-rail').getByTestId('playground-runtime-inspector');
 
 const assertCoreComposerControls = async (
   page: Page,
@@ -450,7 +448,9 @@ const assertRuntimeMcpRailState = async (runtimeInspector: Locator) => {
     await expect(
       runtimeInspector.getByRole('button', { name: 'MCP tool choice Required' })
     ).toBeVisible();
-    await expect(runtimeInspector.getByRole('button', { name: 'MCP tool choice None' })).toBeVisible();
+    await expect(
+      runtimeInspector.getByRole('button', { name: 'MCP tool choice None' })
+    ).toBeVisible();
     const stateCounts = runtimeInspector.getByLabel('MCP tool state counts');
     if (await stateCounts.isVisible().catch(() => false)) {
       await expect(stateCounts).toContainText('Discovered');
@@ -501,13 +501,28 @@ const assertChatCompletionRenderedOrRecoverable = async (
 ) => {
   const chatLog = page.getByRole('log', { name: /chat messages/i });
   if (!response || response.status() < 400) {
-    await expect(
-      page
-        .locator(
-          "article[aria-label*='Assistant message'], [data-role='assistant'], [data-message-role='assistant'], .assistant-message"
-        )
-        .last()
-    ).toBeVisible({ timeout: 60_000 });
+    const assistantMessage = page
+      .locator(
+        "article[aria-label*='Assistant message'], [data-role='assistant'], [data-message-role='assistant'], .assistant-message"
+      )
+      .last();
+    await expect(assistantMessage).toBeVisible({ timeout: 60_000 });
+
+    const emptyResponseNotice = assistantMessage.getByRole('status', {
+      name: 'Empty assistant response',
+    });
+    if ((await emptyResponseNotice.count()) > 0) {
+      await expect(emptyResponseNotice).toContainText('No response text was returned.');
+      const runtimeInspector = getDesktopRuntimeInspector(page);
+      await expect(
+        runtimeInspector.getByRole('status', {
+          name: 'Empty assistant response',
+        })
+      ).toContainText('No response text returned.');
+      await expect(
+        runtimeInspector.getByRole('button', { name: 'Regenerate last response' })
+      ).toBeEnabled();
+    }
     return;
   }
 
@@ -533,10 +548,7 @@ const assertProviderQualifiedPayload = async (page: Page, response: Response) =>
     .first()
     .textContent()
     .catch(() => null);
-  const routeLabel =
-    visibleRouteLabel?.trim() ||
-    routeText?.replace(/^Route\s+/, '').trim() ||
-    '';
+  const routeLabel = visibleRouteLabel?.trim() || routeText?.replace(/^Route\s+/, '').trim() || '';
   const separatorIndex = routeLabel.indexOf(':');
   if (separatorIndex > 0 && separatorIndex < routeLabel.length - 1) {
     const provider = routeLabel.slice(0, separatorIndex);
@@ -608,9 +620,7 @@ test.describe('/chat cockpit real-server parity', () => {
       }),
     } as unknown as APIRequestContext;
 
-    await expect(
-      apiPost(fakeRequest, '/api/v1/example', { sample: true })
-    ).rejects.toThrow(
+    await expect(apiPost(fakeRequest, '/api/v1/example', { sample: true })).rejects.toThrow(
       /POST \/api\/v1\/example returned non-JSON response \(502\): upstream gateway returned HTML/
     );
   });
@@ -626,9 +636,10 @@ test.describe('/chat cockpit real-server parity', () => {
       }),
     } as unknown as APIRequestContext;
 
-    await expect(
-      apiPost(fakeRequest, '/api/v1/example', { sample: true })
-    ).resolves.toEqual({ status: 204, body: null });
+    await expect(apiPost(fakeRequest, '/api/v1/example', { sample: true })).resolves.toEqual({
+      status: 204,
+      body: null,
+    });
   });
 
   test('normalizes configured provider model IDs before deriving cockpit keys', () => {
@@ -725,6 +736,35 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(getDesktopCompositionPreview(page)).toContainText(
       `Scope: ${chatModelSelection.key}`
     );
+
+    await page
+      .getByTestId('playground-cockpit-left-rail')
+      .getByRole('button', { name: 'Collapse context sidechannel' })
+      .click();
+    await expect(page.getByTestId('playground-cockpit-left-rail')).toHaveCount(0);
+    await expect(page.getByTestId('playground-cockpit-left-rail-restore')).toBeVisible();
+    await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
+    await expect(page.getByTestId('playground-collapsed-composition-summary')).toHaveCount(0);
+    await page.screenshot({
+      path: testInfo.outputPath('chat-cockpit-desktop-context-collapsed-side-only.png'),
+      fullPage: true,
+    });
+    await page.getByTestId('playground-cockpit-left-rail-restore').click();
+    await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
+    await expect(modeSummary).toHaveText('Context and runtime rails visible.');
+
+    await page
+      .getByTestId('playground-cockpit-right-rail')
+      .getByRole('button', { name: 'Collapse runtime sidechannel' })
+      .click();
+    await expect(page.getByTestId('playground-cockpit-right-rail')).toHaveCount(0);
+    await expect(page.getByTestId('playground-cockpit-right-rail-restore')).toBeVisible();
+    await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
+    await expect(page.getByTestId('playground-collapsed-composition-summary')).toHaveCount(0);
+    await page.getByTestId('playground-cockpit-right-rail-restore').click();
+    await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
+    await expect(modeSummary).toHaveText('Context and runtime rails visible.');
+
     await page.getByRole('button', { name: 'Hide context rail' }).click();
     await expect(page.getByTestId('playground-cockpit-left-rail')).toHaveCount(0);
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
@@ -746,8 +786,12 @@ test.describe('/chat cockpit real-server parity', () => {
     await assertRuntimeProviderSummary(runtimeInspector);
     await expect(runtimeInspector.getByText('Provider:model settings')).toBeVisible();
     await expect(runtimeInspector.getByRole('heading', { name: 'MCP tools' })).toBeVisible();
-    await expect(runtimeInspector.getByRole('button', { name: 'Open model settings' })).toBeVisible();
-    await expect(runtimeInspector.getByRole('button', { name: 'Select character or persona' })).toBeVisible();
+    await expect(
+      runtimeInspector.getByRole('button', { name: 'Open model settings' })
+    ).toBeVisible();
+    await expect(
+      runtimeInspector.getByRole('button', { name: 'Select character or persona' })
+    ).toBeVisible();
     await assertRuntimeMcpRailState(runtimeInspector);
     const webSearchControl = contextRail.getByRole('button', { name: 'Web search', exact: true });
     const initialWebSearchState = await webSearchControl.getAttribute('aria-pressed');
@@ -768,9 +812,9 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(cockpitStatus).toContainText('Web search on');
     const sourceInventory = contextRail.getByRole('list', { name: 'Context sources' });
     await expect(sourceInventory).toBeVisible();
-    await expect(sourceInventory.getByRole('listitem').filter({ hasText: 'Web search' })).toContainText(
-      'Active'
-    );
+    await expect(
+      sourceInventory.getByRole('listitem').filter({ hasText: 'Web search' })
+    ).toContainText('Active');
 
     await closeSearchContextIfOpen(page);
     await contextRail.getByRole('button', { name: 'Open Search & Context' }).click();
@@ -997,9 +1041,9 @@ test.describe('/chat cockpit real-server parity', () => {
           })
       );
       await modelSettingsTrigger.click();
-      await expect.poll(async () => (await modelSettingsOpenDetail).settingsScope || '').toMatch(
-        /^[^:]+:.+/
-      );
+      await expect
+        .poll(async () => (await modelSettingsOpenDetail).settingsScope || '')
+        .toMatch(/^[^:]+:.+/);
       const modelSettingsDialog = page.getByRole('dialog', {
         name: 'Current Chat Model Settings',
       });
@@ -1030,9 +1074,7 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(compositionPreview).toContainText(`Temperature: ${restoredTemperature}`);
 
       await assertRuntimeMcpRailState(runtimeInspector);
-      const mcpSettingsTrigger = runtimeInspector.locator(
-        '[data-cockpit-mcp-settings-trigger]'
-      );
+      const mcpSettingsTrigger = runtimeInspector.locator('[data-cockpit-mcp-settings-trigger]');
       await mcpSettingsTrigger.click();
       const mcpSettingsDialog = page.getByRole('dialog', {
         name: 'MCP tool settings',
@@ -1160,8 +1202,7 @@ test.describe('/chat cockpit real-server parity', () => {
       name: 'Web search',
       exact: true,
     });
-    const initialMobileWebSearchState =
-      await mobileWebSearchControl.getAttribute('aria-pressed');
+    const initialMobileWebSearchState = await mobileWebSearchControl.getAttribute('aria-pressed');
     await mobileWebSearchControl.click();
     await expect(mobileWebSearchControl).toHaveAttribute(
       'aria-pressed',
@@ -1200,7 +1241,9 @@ test.describe('/chat cockpit real-server parity', () => {
       name: 'Open model settings',
     });
     await expect(mobileModelSettingsTrigger).toBeVisible();
-    await expect(runtimePanel.getByRole('button', { name: 'Select character or persona' })).toBeVisible();
+    await expect(
+      runtimePanel.getByRole('button', { name: 'Select character or persona' })
+    ).toBeVisible();
     await expect(runtimePanel.getByRole('button', { name: 'Configure MCP tools' })).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath('chat-cockpit-mobile-runtime.png'),
@@ -1340,7 +1383,9 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(composerAssistant).toHaveAccessibleName(characterName);
       await expect(page.getByText(`Character: ${characterName}`)).toBeVisible();
       await expect(runtimeInspector.getByRole('button', { name: 'Clear assistant' })).toBeVisible();
-      await expect(runtimeInspector.getByRole('button', { name: 'Open Scene Director' })).toBeVisible();
+      await expect(
+        runtimeInspector.getByRole('button', { name: 'Open Scene Director' })
+      ).toBeVisible();
       const contextRail = getDesktopContextRail(page);
       const compositionPreview = getDesktopCompositionPreview(page);
       await expect(compositionPreview).toContainText(characterName);
@@ -1359,12 +1404,11 @@ test.describe('/chat cockpit real-server parity', () => {
 
       await assistantContextSource.getByRole('button', { name: 'Clear assistant' }).click();
       await expect(runtimeInspector.getByText('No assistant selected').first()).toBeVisible();
-      await expect(runtimeInspector.getByRole('button', { name: 'Clear assistant' })).toHaveCount(0);
-      await expect(assistantContextSource).toHaveCount(0);
-      await expect(composerAssistant).toHaveAttribute(
-        'aria-label',
-        /Select character or persona/i
+      await expect(runtimeInspector.getByRole('button', { name: 'Clear assistant' })).toHaveCount(
+        0
       );
+      await expect(assistantContextSource).toHaveCount(0);
+      await expect(composerAssistant).toHaveAttribute('aria-label', /Select character or persona/i);
     } finally {
       await apiDelete(
         request,
@@ -1410,7 +1454,8 @@ test.describe('/chat cockpit real-server parity', () => {
       });
       const listed = await apiGet<any>(request, '/api/v1/persona/profiles?active_only=true');
       const personas = extractPersonaProfiles(listed.body);
-      selectedPersona = personas.find((persona) => persona?.is_active !== false) ?? personas[0] ?? null;
+      selectedPersona =
+        personas.find((persona) => persona?.is_active !== false) ?? personas[0] ?? null;
     }
 
     if (!selectedPersona?.id || !selectedPersona?.name) {
@@ -1448,13 +1493,9 @@ test.describe('/chat cockpit real-server parity', () => {
         'aria-selected',
         'true'
       );
-      await page
-        .getByRole('button', { name: String(selectedPersona.name), exact: true })
-        .click();
+      await page.getByRole('button', { name: String(selectedPersona.name), exact: true }).click();
 
-      const assistantTrigger = runtimeInspector.locator(
-        '[data-cockpit-assistant-select-trigger]'
-      );
+      const assistantTrigger = runtimeInspector.locator('[data-cockpit-assistant-select-trigger]');
       await expect(assistantTrigger).toBeFocused({ timeout: 5_000 });
       await expect(runtimeInspector.getByText(String(selectedPersona.name))).toBeVisible();
       await expect(runtimeInspector.getByText('Persona selected').first()).toBeVisible();
@@ -1485,12 +1526,11 @@ test.describe('/chat cockpit real-server parity', () => {
       await runtimeInspector.getByRole('button', { name: 'Clear assistant' }).click();
       await expect(assistantTrigger).toBeFocused({ timeout: 5_000 });
       await expect(runtimeInspector.getByText('No assistant selected').first()).toBeVisible();
-      await expect(runtimeInspector.getByRole('button', { name: 'Clear assistant' })).toHaveCount(0);
-      await expect(personaContextSource).toHaveCount(0);
-      await expect(composerAssistant).toHaveAttribute(
-        'aria-label',
-        /Select character or persona/i
+      await expect(runtimeInspector.getByRole('button', { name: 'Clear assistant' })).toHaveCount(
+        0
       );
+      await expect(personaContextSource).toHaveCount(0);
+      await expect(composerAssistant).toHaveAttribute('aria-label', /Select character or persona/i);
     } finally {
       if (cleanupPersonaId) {
         const expectedVersionQuery =
