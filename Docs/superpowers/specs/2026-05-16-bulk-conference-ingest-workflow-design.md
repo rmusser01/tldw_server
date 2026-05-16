@@ -53,9 +53,9 @@ The end-to-end workflow should become:
 2. Quick Ingest detects playlist context and opens a metadata preflight.
 3. The server expands the playlist metadata without downloading videos.
 4. User reviews the item list, deselects unwanted videos, sees duplicates, and sets conference metadata.
-5. User starts a durable ingest run.
+5. User starts a durable ingest run, creating planned collection items before work is submitted.
 6. The run is tracked as a batch with per-item status, cancel, retry, and failure export.
-7. Completed items are linked into a durable conference collection.
+7. Completed media IDs resolve against the durable conference collection.
 8. Results route the user into the collection.
 9. The user reviews talks, tracks transcript/summary status, compares selected talks, and asks Knowledge QA scoped to the conference.
 
@@ -156,6 +156,8 @@ Fields:
 - `title`
 - `description`
 - `item_count`
+- `loaded_count`, for partial or paginated preflight results
+- `total_count`, when known
 - `items[]`
 - `warnings[]`
 - `status`: `pending`, `partial`, `ready`, `failed`, or `expired`
@@ -211,7 +213,7 @@ Collection item fields:
 - `position`
 - `job_id`, when processed through media ingest jobs
 - `metadata`
-- `error_summary`, when failed or cancelled
+- `error_summary`, when `submit_failed`, failed, or cancelled
 
 ### Batch Metadata
 
@@ -368,7 +370,7 @@ Acceptance criteria:
 - A user can override title/speaker/date for one item without editing every row.
 - The review step states which metadata will be applied to all selected items.
 - Metadata is persisted through the chosen collection/planned-item contract before or atomically with job submission.
-- Failed, cancelled, and synchronous-fallback items retain batch metadata and source URLs for later retry/export.
+- `submit_failed`, failed, cancelled, and synchronous-fallback items retain batch metadata and source URLs for later retry/export.
 
 Risk:
 
@@ -390,7 +392,7 @@ Scope:
   - elapsed time
   - cancel job
   - cancel batch
-  - retry retryable failures
+  - retry all retryable failures
   - export failed URLs
 - Subscribe to SSE events when available and fall back to polling.
 - Detect worker disabled/unavailable state and show a clear degraded-mode message.
@@ -405,7 +407,7 @@ Out of scope:
 Acceptance criteria:
 
 - Refreshing during a jobs-backed 34-item run restores the run state.
-- Failed items can be exported and retried.
+- `submit_failed` and failed items can be exported and retried.
 - Job status updates preserve collection membership and item metadata across success, skip, failure, cancellation, and retry.
 - Re-running retry for the same failed item is idempotent and does not enqueue duplicate work for completed items.
 - Users can tell whether the run is durable or using a less recoverable fallback.
@@ -431,7 +433,7 @@ Scope:
 - Primary action: open the created conference collection.
 - Secondary actions:
   - review failed items
-  - retry retryable failures
+  - retry all retryable failures
   - export failed URLs
   - ingest more
 - Optional secondary action when scoped QA capability already exists:
@@ -547,7 +549,7 @@ Scope:
   - unsupported URL
   - server capability missing
 - Cookies/auth guidance where appropriate.
-- Retry selected subsets.
+- Retry selected subsets. PR 4 and PR 5 cover all-retry controls; selection-based retry is introduced here.
 
 Out of scope:
 
@@ -618,7 +620,7 @@ Each PR should include focused tests matching its blast radius.
 Recommended coverage:
 
 - Unit tests for YouTube URL classification and preflight normalization.
-- API tests for granular capabilities, metadata-only preflight, dedupe lookup, collection creation, idempotent retry, and job status behavior.
+- API tests for granular capabilities, metadata-only preflight, dedupe lookup, collection creation, submit-failure handling, idempotent retry, and job status behavior.
 - UI tests for Quick Ingest playlist preflight, batch metadata, results handoff, and collection review.
 - Extension tests for playlist context detection and shared preflight handoff.
 - Knowledge QA tests proving collection/media-ID scope is sent to and enforced by the backend contract.
@@ -659,7 +661,7 @@ Recommended coverage:
 - The user sets conference metadata once.
 - The collection source of truth is durable and documented.
 - The ingest run is durable when jobs are available and honest about fallback when not.
-- Completed, skipped, and failed items are clearly reported.
+- Completed, skipped, `submit_failed`, failed, and cancelled items are clearly reported.
 - Successful and included existing items appear in a durable conference collection.
 - The user can review talks sequentially, compare selected talks, and ask Knowledge QA scoped to the conference.
 - The extension starts the same workflow instead of creating a separate one.
