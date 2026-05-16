@@ -36,6 +36,12 @@
   "saving": "Saving...",
   "retry": "Retry",
   "close": "Close",
+  "storageQuota": {
+    "exceededTitle": "Storage nearly full",
+    "exceededDescription": "Workspace storage is {{pct}}% full ({{usedMB}}/{{budgetMB}} MB). New data may not save. Archive or delete old workspaces to free space.",
+    "warningTitle": "Storage getting full",
+    "warningDescription": "Workspace storage is {{pct}}% full ({{usedMB}}/{{budgetMB}} MB). Consider archiving old workspaces."
+  },
   "loadMore": "Load More...",
   "share": {
     "tooltip": {
