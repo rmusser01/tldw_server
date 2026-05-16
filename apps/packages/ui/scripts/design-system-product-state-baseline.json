@@ -572,17 +572,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/ACPPlayground/ACPSessionCreateModal.tsx:Alert",
-    "path": "src/components/Option/ACPPlayground/ACPSessionCreateModal.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/ACPPlayground/ACPSessionCreateModal.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Admin/ApiKeyManagementPage.tsx:Alert#antd-alert-apikeymanagementpage-type-error-access-denied-1uep3es",
     "path": "src/components/Option/Admin/ApiKeyManagementPage.tsx",
     "rule": "antd-product-state-import",
@@ -2306,17 +2295,6 @@
     "state": "allowed_legacy_exception",
     "owner": "design-system",
     "reason": "Existing AntD Alert product-state UI in src/components/Option/KanbanPlayground/ImportPanel.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/MCPHub/AcpProfilesTab.tsx:Alert",
-    "path": "src/components/Option/MCPHub/AcpProfilesTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/MCPHub/AcpProfilesTab.tsx before the guard.",
     "replacement": "tldw design-system state primitive",
     "migrationQueue": "shared-product-state"
   },

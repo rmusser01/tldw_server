@@ -8,9 +8,7 @@ import {
   Radio,
   Collapse,
   notification,
-  Alert,
   Steps,
-  Tag,
   Tooltip,
 } from "antd"
 import {
@@ -23,6 +21,7 @@ import {
   Loader2,
 } from "lucide-react"
 import { Button } from "@/components/Common/Button"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { getDesignSystemState } from "@/design-system"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { ACPRestClient } from "@/services/acp/client"
@@ -151,24 +150,24 @@ const CreationProgress: React.FC<CreationProgressProps> = ({ step, error }) => {
         ]}
       />
       {error && (
-        <Alert
+        <DesignSystemAlert
           className="mt-3"
-          type="error"
-          showIcon
+          variant="error"
           title={error.message}
-          description={
-            error.suggestions.length > 0 && (
-              <ul className="mt-2 list-inside list-disc text-sm">
-                {error.suggestions.map((s, i) => (
-                  <li key={i}>
-                    <strong>{s.action}</strong>
-                    {s.description && `: ${s.description}`}
-                  </li>
-                ))}
-              </ul>
-            )
-          }
-        />
+        >
+          {error.suggestions.length > 0 ? (
+            <ul className="list-inside list-disc">
+              {error.suggestions.map((s, i) => (
+                <li key={i}>
+                  <strong>{s.action}</strong>
+                  {s.description && `: ${s.description}`}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            t("acp.create.errorNoSuggestions", "Review the error details and try again.")
+          )}
+        </DesignSystemAlert>
       )}
     </div>
   )
