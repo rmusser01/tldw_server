@@ -333,6 +333,92 @@ def resolve_model_id(model_id: str) -> Path:
     raise ModelNotFoundError(f"Model ID {wanted} was not found in the llama.cpp inventory.")
 
 
+def resolve_asset_id(
+    asset_id: str,
+    expected_kind: str | None = None,
+    assets: list[LlamaCppAsset] | None = None,
+) -> LlamaCppAsset:
+    """Resolve a stable asset inventory ID to an available local asset."""
+    wanted = str(asset_id or "").strip()
+    if not wanted:
+        raise ModelNotFoundError("Asset ID is required.")
+    normalized_kind = str(expected_kind or "").strip().lower() or None
+    search_pool = assets if assets is not None else scan_assets().assets
+    saved_config = _read_saved_config()
+    allowed_bases = _allowed_bases_for_config(saved_config)
+
+    for asset in search_pool:
+        if asset.asset_id != wanted:
+            continue
+        if normalized_kind and asset.kind != normalized_kind:
+            raise ModelNotFoundError(
+                f"Asset ID {wanted} does not reference a {normalized_kind} asset."
+            )
+        if not asset.resolved_path:
+            raise ModelNotFoundError(
+                f"Asset ID {wanted} does not reference an available local asset."
+            )
+        path = _canonical_path(Path(asset.resolved_path), "Asset")
+        if not path.exists():
+            raise ModelNotFoundError(
+                f"Asset ID {wanted} does not reference an available local asset."
+            )
+        if asset.kind in {"gguf", "mmproj"} and not path.is_file():
+            raise ModelNotFoundError(
+                f"Asset ID {wanted} does not reference an available local asset."
+            )
+        if asset.kind == "folder" and not path.is_dir():
+            raise ModelNotFoundError(
+                f"Asset ID {wanted} does not reference an available local asset."
+            )
+        if (
+            normalized_kind in {"gguf", "mmproj"}
+            and _asset_kind_for_path(path) != normalized_kind
+        ):
+            raise ModelNotFoundError(
+                f"Asset ID {wanted} does not reference a {normalized_kind} asset."
+            )
+        _validate_allowed_asset_path(path, allowed_bases, "Asset path")
+        return asset.model_copy(update={"resolved_path": str(path)})
+    raise ModelNotFoundError(f"Asset ID {wanted} was not found.")
+
+
+def resolve_asset_path(
+    raw_path: str | Path,
+    expected_kind: str,
+    *,
+    label: str = "Asset",
+) -> Path:
+    """Resolve and validate a local llama.cpp asset path."""
+    normalized_kind = str(expected_kind or "").strip().lower()
+    path = _canonical_path(Path(raw_path), label)
+    if not normalized_kind:
+        raise ModelNotFoundError(f"{label} path requires an expected asset kind.")
+    if normalized_kind == "folder":
+        if not path.is_dir():
+            raise ModelNotFoundError(
+                f"{label} path does not reference an available folder."
+            )
+    else:
+        if not path.is_file():
+            raise ModelNotFoundError(
+                f"{label} path does not reference an available local file."
+            )
+        if _asset_kind_for_path(path) != normalized_kind:
+            raise ModelNotFoundError(
+                f"{label} path does not reference a {normalized_kind} asset."
+            )
+
+    allowed_bases = _allowed_bases_for_config(_read_saved_config())
+    _validate_allowed_asset_path(path, allowed_bases, f"{label} path")
+    return path
+
+
+def _validate_allowed_asset_path(path: Path, allowed_bases: list[Path], label: str) -> None:
+    if not allowed_bases or not handler_utils.is_path_allowed(path, allowed_bases):
+        raise ServerError(f"{label} is outside allowed llama.cpp paths.")
+
+
 def _iter_gguf_models(models_dir: Path, warnings: list[str], limit: int):
     if limit <= 0:
         return
