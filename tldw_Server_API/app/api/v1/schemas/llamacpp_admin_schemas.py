@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
@@ -28,6 +30,7 @@ class LlamaCppSavedConfig(BaseModel):
     port_probe_max: int | None = None
     allowed_paths: list[str] = Field(default_factory=list)
     registered_model_paths: list[str] = Field(default_factory=list)
+    imported_asset_folders: list[str] = Field(default_factory=list)
     log_output_file: str | None = None
 
 
@@ -119,6 +122,58 @@ class LlamaCppModelMetadata(BaseModel):
     quantization: str | None = None
     parameter_hint: str | None = None
     context_hint: int | None = None
+
+
+class LlamaCppAssetMetadata(BaseModel):
+    """Best-effort metadata parsed from a local llama.cpp asset."""
+
+    quantization: str | None = None
+    parameter_hint: str | None = None
+    context_hint: int | None = None
+    family_hint: str | None = None
+
+
+class LlamaCppAsset(BaseModel):
+    """A local llama.cpp file or folder discovered by asset inventory."""
+
+    asset_id: str
+    kind: Literal["gguf", "mmproj", "folder", "unknown"]
+    identity_basis: Literal["resolved_path", "manual"]
+    path: str
+    resolved_path: str | None = None
+    display_name: str
+    source: Literal["models_dir", "registered_path", "imported_folder"]
+    size_bytes: int | None = None
+    modified_at: str | None = None
+    metadata: LlamaCppAssetMetadata = Field(default_factory=LlamaCppAssetMetadata)
+    capabilities: list[str] = Field(default_factory=list)
+    mmproj_asset_ids: list[str] = Field(default_factory=list)
+    base_model_asset_ids: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class LlamaCppAssetsResponse(BaseModel):
+    """Bounded local llama.cpp asset inventory response."""
+
+    assets: list[LlamaCppAsset]
+    warnings: list[str] = Field(default_factory=list)
+    scan_limited: bool = False
+
+
+class LlamaCppRegisterAssetPathRequest(BaseModel):
+    """Request to register an allowlisted local llama.cpp asset path."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(..., min_length=1)
+
+
+class LlamaCppImportAssetFolderRequest(BaseModel):
+    """Request to import an existing allowlisted local asset folder."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(..., min_length=1)
 
 
 class LlamaCppInventoryItem(BaseModel):

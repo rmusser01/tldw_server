@@ -152,7 +152,7 @@ If Python 3.10 compatibility rejects dynamic `Literal` usage during tests, repla
 - Modify: `tldw_Server_API/app/core/Local_LLM/llamacpp_config_service.py`
 - Test: `tldw_Server_API/tests/LLM_Local/test_llamacpp_asset_inventory_service.py`
 
-- [ ] **Step 1: Write failing schema/config tests**
+- [x] **Step 1: Write failing schema/config tests**
 
 Create `tldw_Server_API/tests/LLM_Local/test_llamacpp_asset_inventory_service.py` with:
 
@@ -199,7 +199,7 @@ def test_config_state_reads_imported_asset_folders(monkeypatch, tmp_path: Path):
     assert state["saved_config"]["imported_asset_folders"] == [str(imported)]
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -210,7 +210,7 @@ Run:
 
 Expected: FAIL because `imported_asset_folders` is not parsed yet.
 
-- [ ] **Step 3: Add schemas and saved config field**
+- [x] **Step 3: Add schemas and saved config field**
 
 In `llamacpp_admin_schemas.py`:
 
@@ -225,7 +225,7 @@ In `llamacpp_config_service.py`:
 - do not add it to `RESTART_FIELDS`; registering a folder changes inventory, not an active process;
 - do not add an environment override in this slice unless existing config docs already define one.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run:
 
@@ -236,7 +236,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/llamacpp_admin_schemas.py \

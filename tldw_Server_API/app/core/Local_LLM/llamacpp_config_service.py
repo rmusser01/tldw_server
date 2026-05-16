@@ -63,6 +63,7 @@ _INT_FIELDS = {
 _LIST_FIELDS = {
     "allowed_paths",
     "registered_model_paths",
+    "imported_asset_folders",
 }
 _LIST_VALUE_DELIMITERS = {",", os.pathsep}
 _SAVED_FIELDS = (
@@ -80,6 +81,7 @@ _SAVED_FIELDS = (
     "port_probe_max",
     "allowed_paths",
     "registered_model_paths",
+    "imported_asset_folders",
     "log_output_file",
 )
 
@@ -200,6 +202,7 @@ def _read_saved_config(warnings: list[str] | None = None) -> dict[str, Any]:
         "enabled": False,
         "allowed_paths": [],
         "registered_model_paths": [],
+        "imported_asset_folders": [],
     }
     if section is None:
         return saved
