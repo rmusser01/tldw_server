@@ -17,6 +17,9 @@ const apiMock = vi.hoisted(() => ({
   pauseLlamacppProfile: vi.fn(),
   resumeLlamacppProfile: vi.fn(),
   useLlamacppProfileInChat: vi.fn(),
+  createLlamacppProfile: vi.fn(),
+  updateLlamacppProfile: vi.fn(),
+  deleteLlamacppProfile: vi.fn(),
   startLlamacppModel: vi.fn(),
   startLlamacppServer: vi.fn(),
   stopLlamacppServer: vi.fn(),
@@ -183,6 +186,63 @@ vi.mock("../LlamacppRuntimePanel", async () => {
   return {
     LlamacppRuntimePanel,
     default: LlamacppRuntimePanel
+  }
+})
+
+vi.mock("../LlamacppProfilesPanel", async () => {
+  const React = await import("react")
+
+  interface ProfilesPanelProps {
+    onCreate: (payload: any) => void
+    onUpdate: (profileId: string, payload: any) => void
+    onDelete: (profileId: string) => void
+  }
+
+  const LlamacppProfilesPanel = ({
+    onCreate,
+    onUpdate,
+    onDelete
+  }: ProfilesPanelProps) =>
+    React.createElement(
+      "section",
+      { "aria-label": "Profiles" },
+      React.createElement(
+        "button",
+        {
+          onClick: () =>
+            onCreate({
+              name: "Created profile",
+              model_id: "gguf:toy-model-id",
+              host: "127.0.0.1",
+              port: 8190,
+              port_policy: "explicit",
+              server_args: {}
+            })
+        },
+        "Create saved profile"
+      ),
+      React.createElement(
+        "button",
+        {
+          onClick: () =>
+            onUpdate("analysis", {
+              name: "Edited profile",
+              port: 8191,
+              server_args: { ctx_size: 8192 }
+            })
+        },
+        "Update saved profile"
+      ),
+      React.createElement(
+        "button",
+        { onClick: () => onDelete("analysis") },
+        "Delete saved profile"
+      )
+    )
+
+  return {
+    LlamacppProfilesPanel,
+    default: LlamacppProfilesPanel
   }
 })
 
@@ -448,6 +508,12 @@ describe("LlamacppAdminPage", () => {
       effective: true,
       warnings: []
     })
+    apiMock.createLlamacppProfile.mockResolvedValue(mockProfiles.profiles[0])
+    apiMock.updateLlamacppProfile.mockResolvedValue(mockProfiles.profiles[1])
+    apiMock.deleteLlamacppProfile.mockResolvedValue({
+      profile_id: "analysis",
+      deleted: true
+    })
     apiMock.startLlamacppModel.mockResolvedValue({
       status: "started",
       model_id: "gguf:toy-model-id"
@@ -556,6 +622,63 @@ describe("LlamacppAdminPage", () => {
       expect(apiMock.startLlamacppProfile).toHaveBeenCalledWith("analysis")
       expect(apiMock.useLlamacppProfileInChat).toHaveBeenCalledWith("default")
     })
+  })
+
+  it("routes saved profile mutations without lifecycle side effects", async () => {
+    render(<LlamacppAdminPage />)
+
+    expect(await screen.findByLabelText("Profiles")).toBeTruthy()
+
+    apiMock.listLlamacppProfiles.mockClear()
+    apiMock.listLlamacppInstances.mockClear()
+    apiMock.startLlamacppProfile.mockClear()
+    apiMock.useLlamacppProfileInChat.mockClear()
+    apiMock.startLlamacppModel.mockClear()
+
+    fireEvent.click(screen.getByRole("button", { name: "Create saved profile" }))
+
+    await waitFor(() => {
+      expect(apiMock.createLlamacppProfile).toHaveBeenCalledWith({
+        name: "Created profile",
+        model_id: "gguf:toy-model-id",
+        host: "127.0.0.1",
+        port: 8190,
+        port_policy: "explicit",
+        server_args: {}
+      })
+      expect(apiMock.listLlamacppProfiles).toHaveBeenCalledTimes(1)
+      expect(apiMock.listLlamacppInstances).toHaveBeenCalledTimes(1)
+    })
+
+    apiMock.listLlamacppProfiles.mockClear()
+    apiMock.listLlamacppInstances.mockClear()
+
+    fireEvent.click(screen.getByRole("button", { name: "Update saved profile" }))
+
+    await waitFor(() => {
+      expect(apiMock.updateLlamacppProfile).toHaveBeenCalledWith("analysis", {
+        name: "Edited profile",
+        port: 8191,
+        server_args: { ctx_size: 8192 }
+      })
+      expect(apiMock.listLlamacppProfiles).toHaveBeenCalledTimes(1)
+      expect(apiMock.listLlamacppInstances).toHaveBeenCalledTimes(1)
+    })
+
+    apiMock.listLlamacppProfiles.mockClear()
+    apiMock.listLlamacppInstances.mockClear()
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete saved profile" }))
+
+    await waitFor(() => {
+      expect(apiMock.deleteLlamacppProfile).toHaveBeenCalledWith("analysis")
+      expect(apiMock.listLlamacppProfiles).toHaveBeenCalledTimes(1)
+      expect(apiMock.listLlamacppInstances).toHaveBeenCalledTimes(1)
+    })
+
+    expect(apiMock.startLlamacppProfile).not.toHaveBeenCalled()
+    expect(apiMock.useLlamacppProfileInChat).not.toHaveBeenCalled()
+    expect(apiMock.startLlamacppModel).not.toHaveBeenCalled()
   })
 
   it("keeps single-server controls when runtime instance APIs are unavailable", async () => {
