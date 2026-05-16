@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ from tldw_Server_API.app.core.Persona.visual_starter_catalog import (
 from tldw_Server_API.app.core.Persona.visual_starter_fixtures import (
     DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID,
     DEFAULT_PERSONA_VISUAL_STARTER_PACK_IDS,
+    DEFAULT_PERSONA_VISUAL_STARTER_PACKS,
     LEGACY_PERSONA_VISUAL_STARTER_PACK_ID,
     PersonaVisualStarterAsset,
     PersonaVisualStarterPack,
@@ -152,6 +154,37 @@ def test_starter_pack_reports_production_readiness_metadata(
     assert detail["neutral_anchor_required"] is True
     assert required_group in detail["expected_asset_groups"]
     assert all("scaffold" in note.lower() for note in detail["animation_coverage_notes"])
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    (
+        ("complexity_tier", "basic "),
+        ("production_status", " scaffold"),
+        ("expected_asset_groups", None),
+        ("expected_asset_groups", "neutral_anchor"),
+        ("expected_asset_groups", ("neutral_anchor", "")),
+        ("animation_coverage_notes", None),
+        ("animation_coverage_notes", "Scaffold fixture only."),
+        ("animation_coverage_notes", ("Scaffold fixture only.", "")),
+    ),
+)
+def test_list_starter_packs_rejects_malformed_production_metadata(
+    db_instance: CharactersRAGDB,
+    field_name: str,
+    value: Any,
+) -> None:
+    malformed = replace(
+        DEFAULT_PERSONA_VISUAL_STARTER_PACKS[0],
+        **{field_name: value},
+    )
+    service = PersonaVisualStarterCatalogService(db_instance, starter_packs=(malformed,))
+
+    with pytest.raises(PersonaVisualStarterCatalogError) as exc_info:
+        service.list_starter_packs()
+
+    assert exc_info.value.code == "invalid_starter_fixture"
+    assert exc_info.value.details["starter_pack_id"] == malformed.id
 
 
 def test_get_starter_pack_accepts_legacy_research_buddy_alias(

@@ -93,12 +93,8 @@ class PersonaVisualStarterPack:
     complexity_tier: str = "basic"
     production_status: str = "scaffold"
     neutral_anchor_required: bool = True
-    expected_asset_groups: tuple[str, ...] = field(
-        default_factory=lambda: _BASIC_EXPECTED_ASSET_GROUPS
-    )
-    animation_coverage_notes: tuple[str, ...] = field(
-        default_factory=lambda: _BASIC_ANIMATION_NOTES
-    )
+    expected_asset_groups: tuple[str, ...] = _BASIC_EXPECTED_ASSET_GROUPS
+    animation_coverage_notes: tuple[str, ...] = _BASIC_ANIMATION_NOTES
 
 
 def _png_chunk(kind: bytes, payload: bytes) -> bytes:

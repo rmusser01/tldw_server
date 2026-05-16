@@ -290,6 +290,26 @@ class PersonaVisualStarterCatalogService:
     @staticmethod
     def _starter_summary(starter: PersonaVisualStarterPack) -> dict[str, Any]:
         states = starter.manifest.get("states") if isinstance(starter.manifest, dict) else {}
+        complexity_tier = PersonaVisualStarterCatalogService._starter_metadata_text(
+            starter.complexity_tier,
+            field_name="complexity_tier",
+            starter_id=starter.id,
+        )
+        production_status = PersonaVisualStarterCatalogService._starter_metadata_text(
+            starter.production_status,
+            field_name="production_status",
+            starter_id=starter.id,
+        )
+        expected_asset_groups = PersonaVisualStarterCatalogService._starter_metadata_tuple(
+            starter.expected_asset_groups,
+            field_name="expected_asset_groups",
+            starter_id=starter.id,
+        )
+        animation_coverage_notes = PersonaVisualStarterCatalogService._starter_metadata_tuple(
+            starter.animation_coverage_notes,
+            field_name="animation_coverage_notes",
+            starter_id=starter.id,
+        )
         return {
             "id": starter.id,
             "title": starter.title,
@@ -301,11 +321,11 @@ class PersonaVisualStarterCatalogService:
             "total_bytes": sum(len(asset.content) for asset in starter.assets),
             "tags": list(starter.tags),
             "license_label": starter.license_label,
-            "complexity_tier": starter.complexity_tier,
-            "production_status": starter.production_status,
+            "complexity_tier": complexity_tier,
+            "production_status": production_status,
             "neutral_anchor_required": bool(starter.neutral_anchor_required),
-            "expected_asset_groups": list(starter.expected_asset_groups),
-            "animation_coverage_notes": list(starter.animation_coverage_notes),
+            "expected_asset_groups": list(expected_asset_groups),
+            "animation_coverage_notes": list(animation_coverage_notes),
         }
 
     @staticmethod
@@ -336,7 +356,11 @@ class PersonaVisualStarterCatalogService:
                 },
             )
 
-        complexity_tier = str(starter.complexity_tier or "").strip()
+        complexity_tier = PersonaVisualStarterCatalogService._starter_metadata_text(
+            starter.complexity_tier,
+            field_name="complexity_tier",
+            starter_id=starter.id,
+        )
         if complexity_tier not in _ALLOWED_STARTER_COMPLEXITY_TIERS:
             raise PersonaVisualStarterCatalogError(
                 "invalid_starter_fixture",
@@ -346,7 +370,11 @@ class PersonaVisualStarterCatalogService:
                     "complexity_tier": complexity_tier,
                 },
             )
-        production_status = str(starter.production_status or "").strip()
+        production_status = PersonaVisualStarterCatalogService._starter_metadata_text(
+            starter.production_status,
+            field_name="production_status",
+            starter_id=starter.id,
+        )
         if production_status not in _ALLOWED_STARTER_PRODUCTION_STATUSES:
             raise PersonaVisualStarterCatalogError(
                 "invalid_starter_fixture",
@@ -356,15 +384,26 @@ class PersonaVisualStarterCatalogService:
                     "production_status": production_status,
                 },
             )
-        if starter.neutral_anchor_required and "neutral_anchor" not in set(
-            starter.expected_asset_groups
+        expected_asset_groups = PersonaVisualStarterCatalogService._starter_metadata_tuple(
+            starter.expected_asset_groups,
+            field_name="expected_asset_groups",
+            starter_id=starter.id,
+        )
+        if (
+            starter.neutral_anchor_required
+            and "neutral_anchor" not in expected_asset_groups
         ):
             raise PersonaVisualStarterCatalogError(
                 "invalid_starter_fixture",
                 "Bundled starter neutral-anchor metadata is inconsistent.",
                 details={"starter_pack_id": starter.id},
             )
-        if not starter.animation_coverage_notes:
+        animation_coverage_notes = PersonaVisualStarterCatalogService._starter_metadata_tuple(
+            starter.animation_coverage_notes,
+            field_name="animation_coverage_notes",
+            starter_id=starter.id,
+        )
+        if not animation_coverage_notes:
             raise PersonaVisualStarterCatalogError(
                 "invalid_starter_fixture",
                 "Bundled starter animation coverage notes are required.",
@@ -428,6 +467,56 @@ class PersonaVisualStarterCatalogService:
                 str(exc),
                 details={"starter_pack_id": starter.id},
             ) from exc
+
+    @staticmethod
+    def _starter_metadata_text(value: object, *, field_name: str, starter_id: str) -> str:
+        """Return one canonical starter metadata string or fail fixture validation."""
+        if not isinstance(value, str):
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter metadata text must be a canonical non-empty string.",
+                details={"starter_pack_id": starter_id, "field_name": field_name},
+            )
+        normalized = value.strip()
+        if not normalized or normalized != value:
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter metadata text must be a canonical non-empty string.",
+                details={"starter_pack_id": starter_id, "field_name": field_name},
+            )
+        return normalized
+
+    @staticmethod
+    def _starter_metadata_tuple(
+        value: object,
+        *,
+        field_name: str,
+        starter_id: str,
+    ) -> tuple[str, ...]:
+        """Return canonical immutable starter metadata entries or fail validation."""
+        if not isinstance(value, tuple):
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter metadata lists must be immutable tuples.",
+                details={"starter_pack_id": starter_id, "field_name": field_name},
+            )
+        items: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                raise PersonaVisualStarterCatalogError(
+                    "invalid_starter_fixture",
+                    "Bundled starter metadata entries must be canonical non-empty strings.",
+                    details={"starter_pack_id": starter_id, "field_name": field_name},
+                )
+            normalized = item.strip()
+            if not normalized or normalized != item:
+                raise PersonaVisualStarterCatalogError(
+                    "invalid_starter_fixture",
+                    "Bundled starter metadata entries must be canonical non-empty strings.",
+                    details={"starter_pack_id": starter_id, "field_name": field_name},
+                )
+            items.append(normalized)
+        return tuple(items)
 
     def _cleanup_partial_pack(
         self,
