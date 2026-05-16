@@ -423,7 +423,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
                           className="!m-0"
                         >
                           <AlertTriangle
-                            className="h-3 w-3"
+                            className="mr-0.5 h-3 w-3"
                             aria-hidden="true"
                           />
                           {item.detectedType.charAt(0).toUpperCase() +

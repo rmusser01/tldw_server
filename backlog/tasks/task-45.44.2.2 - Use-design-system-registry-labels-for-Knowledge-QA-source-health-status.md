@@ -26,7 +26,7 @@ Fix unbaselined canonical-state-label guard findings in Knowledge QA source heal
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Routed ready/searchable and unavailable source-health labels through getDesignSystemStateLabel with neutral fallbacks so canonical labels come from the design-system registry.
+Routed ready/searchable and unavailable source-health labels through design-system registry label constants so canonical labels keep defensive non-empty fallbacks.
 
 Verification: RED sourceHealth registry-label test failed against hardcoded labels; GREEN sourceHealth test passed 4/4; product-state guard unit passed 52/52; verify:design-system-state exited 0 and no longer reports sourceHealth.ts as blocked.
 
@@ -37,8 +37,6 @@ Known verification note: full UI TypeScript check still fails on existing repo-w
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Fixed Knowledge QA source-health canonical labels to use the design-system registry and added focused regression coverage for ready and unavailable status labels.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

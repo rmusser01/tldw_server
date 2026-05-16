@@ -53,11 +53,6 @@ Known verification note: full UI TypeScript check still fails on existing repo-w
 Migrated QuickIngest AddContentStep warning notices and media labels to design-system Alert and Badge primitives, added regression coverage, and removed its three legacy product-state baseline entries.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-Migrated QuickIngest AddContentStep warning notices and media labels to design-system Alert and Badge primitives, added regression coverage, and removed its three legacy product-state baseline entries.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

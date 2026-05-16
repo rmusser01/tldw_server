@@ -239,7 +239,11 @@ vi.mock("lucide-react", () => {
   const mocks: Record<string, any> = {}
   for (const name of iconNames) {
     mocks[name] = (props: any) => (
-      <span data-icon={name} aria-hidden={props?.["aria-hidden"]} />
+      <span
+        data-icon={name}
+        aria-hidden={props?.["aria-hidden"]}
+        className={props?.className}
+      />
     )
   }
   return mocks
@@ -556,6 +560,9 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
       .closest('[data-ds-component="Badge"]')
     expect(badge).toBeInTheDocument()
     expect(badge).toHaveAttribute("data-ds-variant", "warning")
+    expect(badge?.querySelector('[data-icon="AlertTriangle"]')).toHaveClass(
+      "mr-0.5"
+    )
   })
 
   it("Step 1 — renders detected media labels with the design-system badge", async () => {

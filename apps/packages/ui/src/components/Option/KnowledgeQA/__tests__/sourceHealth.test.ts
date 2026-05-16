@@ -1,17 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 const designSystemMocks = vi.hoisted(() => ({
-  getDesignSystemStateLabel: vi.fn(
-    (key: string, fallback: string) =>
-      ({
-        ready: "Registry Ready",
-        unavailable: "Registry Unavailable",
-      })[key] ?? fallback
-  ),
+  READY_STATE_LABEL: "Registry Ready",
+  UNAVAILABLE_STATE_LABEL: "Registry Unavailable",
 }))
 
 vi.mock("@/design-system", () => ({
-  getDesignSystemStateLabel: designSystemMocks.getDesignSystemStateLabel,
+  READY_STATE_LABEL: designSystemMocks.READY_STATE_LABEL,
+  UNAVAILABLE_STATE_LABEL: designSystemMocks.UNAVAILABLE_STATE_LABEL,
 }))
 
 import {
@@ -21,10 +17,6 @@ import {
 } from "../sourceHealth"
 
 describe("Knowledge QA source health normalization", () => {
-  beforeEach(() => {
-    designSystemMocks.getDesignSystemStateLabel.mockClear()
-  })
-
   it("normalizes partial backend payloads without colliding with search source status", () => {
     const normalized = normalizeKnowledgeSourceHealth({
       sources: [
@@ -138,14 +130,6 @@ describe("Knowledge QA source health normalization", () => {
     )
     expect(getSourceHealthStatusLabel(normalized.bySource.prompts)).toBe(
       "Registry Unavailable"
-    )
-    expect(designSystemMocks.getDesignSystemStateLabel).toHaveBeenCalledWith(
-      "ready",
-      ""
-    )
-    expect(designSystemMocks.getDesignSystemStateLabel).toHaveBeenCalledWith(
-      "unavailable",
-      ""
     )
   })
 })
