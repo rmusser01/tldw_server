@@ -29,6 +29,8 @@ PersonaSetupTestType = Literal["dry_run", "live_session"]
 PersonaVisualPackStatus = Literal["draft", "review", "active", "archived", "failed"]
 PersonaVisualRendererType = Literal["sprite_frames", "sprite_sheet", "static_image", "live2d"]
 PersonaVisualAssetRole = Literal["frame", "still_pose", "sprite_sheet", "preview", "generated_candidate"]
+PersonaVisualStarterComplexityTier = Literal["basic", "intermediate", "intricate"]
+PersonaVisualStarterProductionStatus = Literal["scaffold", "art_ready"]
 PersonaVisualCandidateStatus = Literal["review", "accepted", "rejected", "failed"]
 PersonaVisualCandidateReviewStatus = Literal["accepted", "rejected", "failed"]
 PersonaVisualPortabilityOperation = Literal["export", "import_preview", "import_commit"]
@@ -301,6 +303,11 @@ class PersonaVisualStarterPackResponse(BaseModel):
     total_bytes: int = 0
     tags: list[str] = Field(default_factory=list)
     license_label: str = "bundled"
+    complexity_tier: PersonaVisualStarterComplexityTier = "basic"
+    production_status: PersonaVisualStarterProductionStatus = "scaffold"
+    neutral_anchor_required: bool = True
+    expected_asset_groups: list[str] = Field(default_factory=list)
+    animation_coverage_notes: list[str] = Field(default_factory=list)
 
 
 class PersonaVisualStarterPackDetailResponse(PersonaVisualStarterPackResponse):

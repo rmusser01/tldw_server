@@ -197,6 +197,11 @@ def test_get_persona_visual_starter_pack_detail(persona_db: CharactersRAGDB) -> 
     assert payload["manifest"]["renderer_type"] == "sprite_frames"
     assert "catalog:scaffold" in payload["tags"]
     assert "scaffold" in payload["description"].lower()
+    assert payload["production_status"] == "scaffold"
+    assert payload["complexity_tier"] == "basic"
+    assert payload["neutral_anchor_required"] is True
+    assert "neutral_anchor" in payload["expected_asset_groups"]
+    assert payload["animation_coverage_notes"]
     assert payload["assets"][0]["mime_type"] == "image/png"
 
 
@@ -370,6 +375,10 @@ def test_list_persona_visual_starter_packs(persona_db: CharactersRAGDB) -> None:
     assert starter["asset_count"] == 1
     assert "catalog:scaffold" in starter["tags"]
     assert "scaffold" in starter["description"].lower()
+    assert starter["production_status"] == "scaffold"
+    assert starter["complexity_tier"] == "basic"
+    assert starter["neutral_anchor_required"] is True
+    assert "neutral_anchor" in starter["expected_asset_groups"]
     assert {"idle", "listening", "thinking", "speaking", "error"}.issubset(
         set(starter["states_offered"])
     )

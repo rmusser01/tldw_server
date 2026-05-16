@@ -31,6 +31,40 @@ DEFAULT_PERSONA_VISUAL_STARTER_PACK_IDS: tuple[str, ...] = (
 )
 
 _REQUIRED_STATE_IDS = ("idle", "listening", "thinking", "speaking", "error")
+_BASIC_EXPECTED_ASSET_GROUPS = (
+    "identity_brief",
+    "neutral_anchor",
+    "preview_image",
+    "required_state_loops",
+)
+_INTERMEDIATE_EXPECTED_ASSET_GROUPS = (
+    "identity_brief",
+    "neutral_anchor",
+    "static_talking_reaction_sheet",
+    "required_state_loops",
+    "custom_state_variants",
+)
+_INTRICATE_EXPECTED_ASSET_GROUPS = (
+    "identity_brief",
+    "neutral_anchor",
+    "model_sheet",
+    "static_talking_reaction_sheet",
+    "animation_strips",
+    "animation_atlas",
+    "custom_state_variants",
+)
+_BASIC_ANIMATION_NOTES = (
+    "Scaffold fixture only: final basic art should replace the tiny PNG with "
+    "neutral-anchor-derived required-state loops.",
+)
+_INTERMEDIATE_ANIMATION_NOTES = (
+    "Scaffold fixture only: final intermediate art should add a neutral model "
+    "sheet, talking/reaction sheet, and short custom-state loops.",
+)
+_INTRICATE_ANIMATION_NOTES = (
+    "Scaffold fixture only: final intricate art should compile reviewed "
+    "neutral-anchor-derived strips or atlas regions into runtime animations.",
+)
 
 
 @dataclass(frozen=True)
@@ -56,6 +90,11 @@ class PersonaVisualStarterPack:
     assets: tuple[PersonaVisualStarterAsset, ...]
     tags: tuple[str, ...] = field(default_factory=tuple)
     license_label: str = "bundled"
+    complexity_tier: str = "basic"
+    production_status: str = "scaffold"
+    neutral_anchor_required: bool = True
+    expected_asset_groups: tuple[str, ...] = _BASIC_EXPECTED_ASSET_GROUPS
+    animation_coverage_notes: tuple[str, ...] = _BASIC_ANIMATION_NOTES
 
 
 def _png_chunk(kind: bytes, payload: bytes) -> bytes:
@@ -244,6 +283,11 @@ def _basic_pack(
         manifest=_sprite_manifest(base_asset_key=asset.asset_key),
         assets=(asset,),
         tags=("starter", "sprite_frames", "catalog:scaffold", "tier:basic", *tags),
+        complexity_tier="basic",
+        production_status="scaffold",
+        neutral_anchor_required=True,
+        expected_asset_groups=_BASIC_EXPECTED_ASSET_GROUPS,
+        animation_coverage_notes=_BASIC_ANIMATION_NOTES,
     )
 
 
@@ -254,6 +298,7 @@ def _multi_asset_pack(
     description: str,
     palette: tuple[tuple[int, int, int, int], ...],
     tags: tuple[str, ...],
+    complexity_tier: str = "intermediate",
     custom_states: dict[str, dict[str, Any]] | None = None,
     authored_triggers: list[dict[str, Any]] | None = None,
     fallbacks: dict[str, list[str]] | None = None,
@@ -298,6 +343,19 @@ def _multi_asset_pack(
         ),
         assets=assets,
         tags=("starter", "sprite_frames", "catalog:scaffold", *tags),
+        complexity_tier=complexity_tier,
+        production_status="scaffold",
+        neutral_anchor_required=True,
+        expected_asset_groups=(
+            _INTRICATE_EXPECTED_ASSET_GROUPS
+            if complexity_tier == "intricate"
+            else _INTERMEDIATE_EXPECTED_ASSET_GROUPS
+        ),
+        animation_coverage_notes=(
+            _INTRICATE_ANIMATION_NOTES
+            if complexity_tier == "intricate"
+            else _INTERMEDIATE_ANIMATION_NOTES
+        ),
     )
 
 
@@ -329,6 +387,11 @@ def _atlas_pack(
             "atlas",
             *tags,
         ),
+        complexity_tier="intricate",
+        production_status="scaffold",
+        neutral_anchor_required=True,
+        expected_asset_groups=_INTRICATE_EXPECTED_ASSET_GROUPS,
+        animation_coverage_notes=_INTRICATE_ANIMATION_NOTES,
     )
 
 
@@ -450,6 +513,7 @@ DEFAULT_PERSONA_VISUAL_STARTER_PACKS: tuple[PersonaVisualStarterPack, ...] = (
             (232, 132, 92, 255),
         ),
         tags=("tier:intricate", "action", "reaction"),
+        complexity_tier="intricate",
         custom_states={
             "reaction.anticipation": {
                 "label": "Anticipation",
@@ -481,6 +545,7 @@ DEFAULT_PERSONA_VISUAL_STARTER_PACKS: tuple[PersonaVisualStarterPack, ...] = (
             (148, 124, 192, 255),
         ),
         tags=("tier:intricate", "fantasy", "sci-fi"),
+        complexity_tier="intricate",
         custom_states={
             "mood.focused": {
                 "label": "Focused mood",
