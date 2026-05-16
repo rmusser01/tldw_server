@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   submitQuickIngestBatch: vi.fn(),
   cancelQuickIngestSession: vi.fn(),
   reattachQuickIngestSession: vi.fn(),
+  checkConnection: vi.fn(),
   runtimeListeners: [] as Array<(message: any) => void>,
 }))
 
@@ -96,6 +97,20 @@ vi.mock("react-router-dom", async (importOriginal) => {
 
 vi.mock("@/routes/route-paths", () => ({
   DOCUMENT_WORKSPACE_PATH: "/document-workspace",
+}))
+
+vi.mock("@/store/connection", () => ({
+  useConnectionStore: (selector: any) =>
+    selector({
+      state: {
+        phase: "connected",
+        isConnected: true,
+        isChecking: false,
+        lastError: null,
+        offlineBypass: false,
+      },
+      checkOnce: mocks.checkConnection,
+    }),
 }))
 
 vi.mock("lucide-react", () => {
@@ -256,6 +271,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     mocks.submitQuickIngestBatch.mockReset()
     mocks.cancelQuickIngestSession.mockReset()
     mocks.reattachQuickIngestSession.mockReset()
+    mocks.checkConnection.mockReset()
     mocks.cancelQuickIngestSession.mockResolvedValue({ ok: true })
     useQuickIngestSessionStore.setState({
       session: null,

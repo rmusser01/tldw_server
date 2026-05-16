@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo } from "react"
+import { Alert, Button } from "antd"
 import { useTranslation } from "react-i18next"
 import {
   AlertTriangle,
@@ -82,7 +83,19 @@ const TYPE_ICONS: Record<DetectedMediaType, React.ElementType> = {
 // Component
 // ---------------------------------------------------------------------------
 
-export const ReviewStep: React.FC = () => {
+type ReviewStepProps = {
+  isOnlineForIngest?: boolean
+  isCheckingConnection?: boolean
+  connectionRecoveryMessage?: string
+  onRetryConnection?: () => void
+}
+
+export const ReviewStep: React.FC<ReviewStepProps> = ({
+  isOnlineForIngest = true,
+  isCheckingConnection = false,
+  connectionRecoveryMessage,
+  onRetryConnection,
+}) => {
   const { t } = useTranslation(["option"])
   const { state, goBack, goNext, startProcessing } = useIngestWizard()
 
@@ -115,6 +128,18 @@ export const ReviewStep: React.FC = () => {
 
   // Storage mode
   const storageMode = presetConfig.storeRemote ? "Server" : "Local"
+  const validItemCount = useMemo(
+    () => queueItems.filter((item) => item.validation.valid).length,
+    [queueItems]
+  )
+  const canStartProcessing =
+    validItemCount > 0 && isOnlineForIngest && !isCheckingConnection
+
+  const handleStartProcessing = useCallback(() => {
+    if (!canStartProcessing) return
+    startProcessing()
+    goNext()
+  }, [canStartProcessing, goNext, startProcessing])
 
   // Contextual warnings
   const warnings = useMemo(() => {
@@ -176,7 +201,7 @@ export const ReviewStep: React.FC = () => {
           {qi("review.title", "Ready to Process")}
         </h2>
         <p className="mt-1 text-sm text-text-muted">
-          {qi("review.summary", "{{count}} items | {{preset}} preset | ~{{time}} estimated", {
+          {qi("review.summary", "{{count}} items | {{preset}} preset | {{time}} estimated", {
             count: queueItems.length,
             preset: presetLabel,
             time: estimatedTimeLabel,
@@ -221,6 +246,37 @@ export const ReviewStep: React.FC = () => {
           {qi("review.storage", "Storage: {{mode}}", { mode: storageMode })}
         </p>
 
+        {!isOnlineForIngest && (
+          <Alert
+            type="warning"
+            showIcon
+            icon={<AlertTriangle className="h-4 w-4" />}
+            className="mt-3"
+            message={qi("wizard.offline.title", "Server offline")}
+            description={
+              connectionRecoveryMessage ||
+              qi(
+                "wizard.offline.description",
+                "Reconnect to your tldw server before processing. You can go back and keep editing the queue."
+              )
+            }
+            action={
+              onRetryConnection ? (
+                <Button
+                  size="small"
+                  onClick={onRetryConnection}
+                  loading={isCheckingConnection}
+                  disabled={isCheckingConnection}
+                >
+                  {isCheckingConnection
+                    ? qi("wizard.offline.checking", "Checking...")
+                    : qi("wizard.offline.retry", "Retry connection")}
+                </Button>
+              ) : undefined
+            }
+          />
+        )}
+
         {/* Contextual warnings */}
         {warnings.length > 0 && (
           <div className="mt-3 space-y-2" role="alert">
@@ -254,8 +310,8 @@ export const ReviewStep: React.FC = () => {
 
         <button
           type="button"
-          onClick={() => { startProcessing(); goNext() }}
-          disabled={queueItems.length === 0}
+          onClick={handleStartProcessing}
+          disabled={!canStartProcessing}
           className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-50"
           aria-label={qi("review.startAriaLabel", "Start processing")}
         >

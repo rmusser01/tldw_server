@@ -571,12 +571,46 @@ test.describe("Media Ingestion Workflow", () => {
         await dismissQuickIngest(authedPage)
       }
 
-      const emptyStateTrigger = authedPage
+      let emptyStateTrigger = authedPage
         .getByRole("button", { name: /open quick ingest/i })
         .first()
+      if (!(await emptyStateTrigger.isVisible().catch(() => false))) {
+        const skipTutorial = authedPage.getByRole("button", { name: /skip for now/i }).first()
+        if (await skipTutorial.isVisible().catch(() => false)) {
+          await skipTutorial.click()
+        }
+        emptyStateTrigger = authedPage
+          .getByRole("button", { name: /open quick ingest/i })
+          .first()
+      }
       await expect(emptyStateTrigger).toBeVisible({ timeout: 15_000 })
       await emptyStateTrigger.click()
       await expect(dialog).toBeVisible({ timeout: 15_000 })
+      await expect(dialog).toContainText(
+        /Add URLs or files\. Stored items appear in Media/i
+      )
+      await expect(dialog).toContainText(/Max file size: 50 MB/i)
+
+      await assertNoCriticalErrors(diagnostics)
+    })
+
+    test("quick ingest communicates mixed URL paste validation before processing", async ({
+      authedPage,
+      diagnostics
+    }) => {
+      await authedPage.goto("/media", { waitUntil: "domcontentloaded" })
+      await waitForConnection(authedPage)
+
+      const dialog = await openQuickIngestDialog(authedPage)
+      const urlInput = dialog
+        .getByLabel(/url input area|paste urls input/i)
+        .or(dialog.getByPlaceholder(/https:\/\/example\.com/i))
+        .first()
+      await urlInput.fill("https://example.com/valid\nnot-a-url")
+      await dialog.getByRole("button", { name: /add urls/i }).first().click()
+
+      await expect(dialog).toContainText(/1 valid \/ 1 invalid/i)
+      await expect(dialog).toContainText(/Invalid URL format/i)
 
       await assertNoCriticalErrors(diagnostics)
     })
@@ -641,6 +675,19 @@ test.describe("Media Ingestion Workflow", () => {
         sourceUrl: ingestUrl,
         title,
       })
+
+      const openInMediaButton = dialog
+        .getByRole("button", { name: /open .* media/i })
+        .first()
+      await expect(openInMediaButton).toBeVisible({ timeout: 15_000 })
+      await openInMediaButton.click()
+      await authedPage.waitForURL(
+        (url) =>
+          url.pathname === "/media" &&
+          url.searchParams.get("id") === expectedMediaId,
+        { timeout: 15_000 }
+      )
+      await expect(dialog).toBeHidden({ timeout: 15_000 })
 
       await assertNoCriticalErrors(diagnostics)
     })

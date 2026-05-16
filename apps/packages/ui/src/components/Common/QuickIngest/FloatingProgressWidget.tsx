@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
-import { Loader2, Check, ExternalLink } from "lucide-react"
+import { AlertTriangle, Loader2, Check, ExternalLink, XCircle } from "lucide-react"
 import { useIngestWizard } from "./IngestWizardContext"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
 
@@ -12,6 +12,8 @@ import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
 /** Seconds to show the "Done!" state before auto-dismissing. */
 const AUTO_DISMISS_DELAY_MS = 10_000
 
+type WidgetTerminalState = "complete" | "failed" | "cancelled" | "interrupted"
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -20,7 +22,8 @@ export const FloatingProgressWidget: React.FC = () => {
   const { t } = useTranslation(["option"])
   const { state, restore } = useIngestWizard()
   const { processingState, isMinimized } = state
-  const { sessionVisibility, showSession } = useQuickIngestSessionStore((store) => ({
+  const { sessionVisibility, sessionLifecycle, showSession } = useQuickIngestSessionStore((store) => ({
+    sessionLifecycle: store.session?.lifecycle,
     sessionVisibility: store.session?.visibility,
     showSession: store.showSession,
   }))
@@ -56,10 +59,52 @@ export const FloatingProgressWidget: React.FC = () => {
     }
   }, [processingState.perItemProgress])
 
-  const allDone = processingState.status === "complete" ||
-    processingState.status === "cancelled" ||
-    processingState.status === "error" ||
-    (completedCount === totalCount && totalCount > 0)
+  const terminalState = useMemo<WidgetTerminalState | null>(() => {
+    const items = processingState.perItemProgress
+    const hasItems = items.length > 0
+    const hasFailed = items.some((item) => item.status === "failed")
+    const hasCancelled = items.some((item) => item.status === "cancelled")
+    const allTerminal =
+      hasItems &&
+      items.every((item) =>
+        item.status === "complete" ||
+        item.status === "failed" ||
+        item.status === "cancelled"
+      )
+    const allComplete = hasItems && items.every((item) => item.status === "complete")
+    const allCancelled = hasItems && items.every((item) => item.status === "cancelled")
+
+    if (sessionLifecycle === "interrupted") return "interrupted"
+    if (
+      sessionLifecycle === "partial_failure" ||
+      processingState.status === "error" ||
+      hasFailed
+    ) {
+      return "failed"
+    }
+    if (
+      sessionLifecycle === "cancelled" ||
+      processingState.status === "cancelled" ||
+      allCancelled
+    ) {
+      return "cancelled"
+    }
+    if (
+      sessionLifecycle === "completed" ||
+      processingState.status === "complete" ||
+      allComplete
+    ) {
+      return "complete"
+    }
+    if (allTerminal) {
+      return hasCancelled ? "cancelled" : "complete"
+    }
+    return null
+  }, [
+    processingState.perItemProgress,
+    processingState.status,
+    sessionLifecycle,
+  ])
 
   // Auto-dismiss after completion
   useEffect(() => {
@@ -69,7 +114,7 @@ export const FloatingProgressWidget: React.FC = () => {
       return
     }
 
-    if (allDone && isMinimized && !dismissed) {
+    if (terminalState && isMinimized && !dismissed) {
       dismissTimerRef.current = setTimeout(() => {
         setDismissed(true)
       }, AUTO_DISMISS_DELAY_MS)
@@ -81,7 +126,7 @@ export const FloatingProgressWidget: React.FC = () => {
         dismissTimerRef.current = null
       }
     }
-  }, [allDone, isMinimized, dismissed])
+  }, [terminalState, isMinimized, dismissed])
 
   const handleOpen = useCallback(() => {
     setDismissed(false)
@@ -103,6 +148,31 @@ export const FloatingProgressWidget: React.FC = () => {
         : `~${Math.ceil(processingState.estimatedRemaining / 60)} min`
       : ""
 
+  const terminalPresentation = terminalState
+    ? {
+        complete: {
+          icon: <Check className="h-4 w-4 text-primary" strokeWidth={2.5} aria-hidden="true" />,
+          label: qi("widget.done", "Done"),
+          barClassName: "bg-primary",
+        },
+        failed: {
+          icon: <XCircle className="h-4 w-4 text-danger" strokeWidth={2.5} aria-hidden="true" />,
+          label: qi("widget.failed", "Failed"),
+          barClassName: "bg-danger",
+        },
+        cancelled: {
+          icon: <XCircle className="h-4 w-4 text-text-muted" strokeWidth={2.5} aria-hidden="true" />,
+          label: qi("widget.cancelled", "Cancelled"),
+          barClassName: "bg-text-muted",
+        },
+        interrupted: {
+          icon: <AlertTriangle className="h-4 w-4 text-warn" strokeWidth={2.5} aria-hidden="true" />,
+          label: qi("widget.interrupted", "Interrupted"),
+          barClassName: "bg-warn",
+        },
+      }[terminalState]
+    : null
+
   const widget = (
     <div
       className="fixed bottom-4 right-4 z-[9000] w-72 rounded-lg border border-border bg-surface shadow-lg"
@@ -114,10 +184,10 @@ export const FloatingProgressWidget: React.FC = () => {
         {/* Header line */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm font-medium text-text">
-            {allDone ? (
+            {terminalPresentation ? (
               <>
-                <Check className="h-4 w-4 text-primary" strokeWidth={2.5} aria-hidden="true" />
-                <span>{qi("widget.done", "Done!")}</span>
+                {terminalPresentation.icon}
+                <span>{terminalPresentation.label}</span>
               </>
             ) : (
               <>
@@ -137,11 +207,11 @@ export const FloatingProgressWidget: React.FC = () => {
         </div>
 
         {/* Processing description */}
-        {!allDone && (
+        {!terminalPresentation && (
           <p className="text-[11px] leading-tight text-text-muted">
             {qi(
               "widget.processingHint",
-              "Transcribing and indexing content..."
+              "Processing and indexing content..."
             )}
           </p>
         )}
@@ -151,7 +221,7 @@ export const FloatingProgressWidget: React.FC = () => {
           <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface2">
             <div
               className={`h-full rounded-full transition-all duration-300 ${
-                allDone ? "bg-primary" : "bg-primary"
+                terminalPresentation?.barClassName || "bg-primary"
               }`}
               style={{ width: `${overallPercent}%` }}
             />

@@ -19,9 +19,10 @@ import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { Alert as DesignSystemAlert, Badge } from "@/components/ui/primitives"
 import { FileDropZone } from "./QueueTab/FileDropZone"
 import {
-  QUICK_INGEST_ACCEPT_STRING,
+  QUICK_INGEST_MAX_FILE_SIZE_LABEL,
   QUICK_INGEST_MAX_FILE_SIZE,
 } from "./constants"
+import { normalizeUrlForDedupe } from "@/entries/shared/ingest-payloads"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -57,10 +58,38 @@ const detectTypeFromExtension = (name: string): DetectedMediaType => {
   if (["mp3", "wav", "ogg", "flac", "m4a", "aac", "wma", "opus"].includes(ext)) return "audio"
   if (["mp4", "mkv", "avi", "mov", "webm", "wmv", "flv", "m4v"].includes(ext)) return "video"
   if (["pdf"].includes(ext)) return "pdf"
-  if (["epub", "mobi", "azw3"].includes(ext)) return "ebook"
-  if (["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "tiff"].includes(ext)) return "image"
-  if (["doc", "docx", "txt", "rtf", "md", "markdown", "html", "htm", "xml", "json", "csv", "tsv"].includes(ext)) return "document"
+  if (["epub"].includes(ext)) return "ebook"
+  if (["doc", "docx", "txt", "rtf", "md", "markdown", "html", "htm", "xhtml", "xml", "json"].includes(ext)) return "document"
   return "unknown"
+}
+
+const detectTypeFromMime = (mimeType: string | undefined): DetectedMediaType => {
+  const normalized = String(mimeType || "").trim().toLowerCase()
+  if (!normalized) return "unknown"
+  if (normalized.startsWith("audio/")) return "audio"
+  if (normalized.startsWith("video/")) return "video"
+  if (normalized.includes("pdf")) return "pdf"
+  if (normalized.includes("epub")) return "ebook"
+  if (
+    normalized.startsWith("text/") ||
+    normalized.includes("markdown") ||
+    normalized.includes("html") ||
+    normalized.includes("xml") ||
+    normalized.includes("json") ||
+    normalized.includes("rtf") ||
+    normalized.includes("msword") ||
+    normalized.includes("officedocument.wordprocessingml.document")
+  ) {
+    return "document"
+  }
+  return "unknown"
+}
+
+const detectTypeFromFile = (file: File): DetectedMediaType => {
+  const detectedFromExtension = detectTypeFromExtension(file.name)
+  return detectedFromExtension !== "unknown"
+    ? detectedFromExtension
+    : detectTypeFromMime(file.type)
 }
 
 export const detectTypeFromUrl = (url: string): DetectedMediaType => {
@@ -117,17 +146,21 @@ const validateQueueItem = (
       errors.push("Invalid URL format")
     }
     // Check for duplicates
+    const dedupeKey = normalizeUrlForDedupe(item.url)
     const isDuplicate = existingItems.some(
-      (other) => other.id !== item.id && other.url && other.url === item.url
+      (other) =>
+        other.id !== item.id &&
+        other.url &&
+        normalizeUrlForDedupe(other.url) === dedupeKey
     )
     if (isDuplicate) {
-      warnings.push("Duplicate URL")
+      warnings.push("Already queued")
     }
   }
 
   if (item.file) {
     if (item.fileSize > QUICK_INGEST_MAX_FILE_SIZE) {
-      errors.push("File exceeds 500 MB limit")
+      errors.push(`File exceeds ${QUICK_INGEST_MAX_FILE_SIZE_LABEL} quick-ingest limit`)
     }
     // Check for duplicate files
     const isDuplicate = existingItems.some(
@@ -137,12 +170,14 @@ const validateQueueItem = (
         other.fileSize === item.fileSize
     )
     if (isDuplicate) {
-      warnings.push("Duplicate file")
+      warnings.push("Already queued")
     }
   }
 
   if (item.detectedType === "unknown") {
-    warnings.push("Unrecognized file type")
+    errors.push(
+      "Unsupported file type. Quick Ingest supports PDF, EPUB, DOC/DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, and video."
+    )
   }
 
   return {
@@ -157,7 +192,7 @@ const validateQueueItem = (
 // ---------------------------------------------------------------------------
 
 // Warning uses >= (show at boundary); validation uses > (allow exactly at limit)
-const LARGE_FILE_WARNING_THRESHOLD = 500 * 1024 * 1024 // 500 MB
+const LARGE_FILE_WARNING_THRESHOLD = Math.floor(QUICK_INGEST_MAX_FILE_SIZE * 0.8)
 const PASSIVE_ALERT_PROPS = {
   role: "status",
   "aria-live": "polite",
@@ -165,11 +200,17 @@ const PASSIVE_ALERT_PROPS = {
 
 type AddContentStepProps = {
   isOnlineForIngest?: boolean
+  isCheckingConnection?: boolean
+  connectionRecoveryMessage?: string
+  onRetryConnection?: () => void
   onQuickProcess?: () => void
 }
 
 export const AddContentStep: React.FC<AddContentStepProps> = ({
   isOnlineForIngest = true,
+  isCheckingConnection = false,
+  connectionRecoveryMessage,
+  onRetryConnection,
   onQuickProcess,
 }) => {
   const { t } = useTranslation(["option"])
@@ -191,7 +232,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     (files: File[]) => {
       const newItems: WizardQueueItem[] = []
       for (const file of files) {
-        const detectedType = detectTypeFromExtension(file.name)
+        const detectedType = detectTypeFromFile(file)
         const item: WizardQueueItem = {
           id: crypto.randomUUID(),
           fileName: file.name,
@@ -267,7 +308,9 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     () => queueItems.filter((item) => item.validation.valid).length,
     [queueItems]
   )
+  const invalidItemCount = queueItems.length - validItemCount
   const canProceed = validItemCount > 0
+  const canStartProcessing = canProceed && isOnlineForIngest && !isCheckingConnection
 
   const hasLargeFiles = useMemo(
     () => queueItems.some((item) => item.fileSize >= LARGE_FILE_WARNING_THRESHOLD),
@@ -295,7 +338,14 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
         <Typography.Text className="text-[11px] text-text-subtle">
           {qi(
             "fileSizeLimits",
-            "Supported: PDF, EPUB, DOCX, TXT, Markdown, audio, video. Max file size: 500 MB."
+            "Supported: PDF, EPUB, DOC/DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, video. Max file size: {{maxSize}}.",
+            { maxSize: QUICK_INGEST_MAX_FILE_SIZE_LABEL }
+          )}
+        </Typography.Text>
+        <Typography.Text className="block text-xs text-text-muted">
+          {qi(
+            "wizard.addPurpose",
+            "Add URLs or files. Stored items appear in Media; analyzed and chunked items become searchable in Knowledge."
           )}
         </Typography.Text>
 
@@ -306,7 +356,8 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
             icon={<AlertTriangle className="h-4 w-4" aria-hidden="true" />}
             title={qi(
               "largeFileWarning",
-              "Large file -- upload may take several minutes. Consider using a smaller file if possible."
+              "Large file -- this browser-buffered upload is close to the {{maxSize}} quick-ingest limit.",
+              { maxSize: QUICK_INGEST_MAX_FILE_SIZE_LABEL }
             )}
           />
         )}
@@ -357,20 +408,61 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
         />
       )}
 
+      {!isOnlineForIngest && (
+        <DesignSystemAlert
+          variant="warning"
+          icon={<AlertTriangle className="h-4 w-4" aria-hidden="true" />}
+          className="mt-3"
+          title={qi("wizard.offline.title", "Server offline")}
+          action={
+            onRetryConnection
+              ? {
+                  label: isCheckingConnection
+                    ? qi("wizard.offline.checking", "Checking...")
+                    : qi("wizard.offline.retry", "Retry connection"),
+                  onClick: onRetryConnection,
+                  loading: isCheckingConnection,
+                  disabled: isCheckingConnection,
+                }
+              : undefined
+          }
+        >
+          {connectionRecoveryMessage ||
+            qi(
+              "wizard.offline.description",
+              "Reconnect to your tldw server before processing. You can still add URLs and configure queued items."
+            )}
+        </DesignSystemAlert>
+      )}
+
       {/* Queued items list */}
       {hasItems && (
         <div className="mt-4">
           <div className="flex items-center justify-between">
-            <Typography.Text className="text-sm font-medium">
-              {qi("queueTitle", "QUEUED")}
-              <span className="ml-1.5 text-text-muted font-normal">
-                ({queueItems.length}{" "}
-                {queueItems.length === 1
-                  ? qi("wizard.item", "item")
-                  : qi("wizard.items", "items")}
-                )
-              </span>
-            </Typography.Text>
+            <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2">
+              <Typography.Text className="text-sm font-medium">
+                {qi("queueTitle", "QUEUED")}
+                <span className="ml-1.5 text-text-muted font-normal">
+                  ({queueItems.length}{" "}
+                  {queueItems.length === 1
+                    ? qi("wizard.item", "item")
+                    : qi("wizard.items", "items")}
+                  )
+                </span>
+              </Typography.Text>
+              {invalidItemCount > 0 && (
+                <Typography.Text className="text-xs text-text-muted">
+                  {qi(
+                    "queueValiditySummary",
+                    "{{valid}} valid / {{invalid}} invalid",
+                    {
+                      valid: validItemCount,
+                      invalid: invalidItemCount,
+                    }
+                  )}
+                </Typography.Text>
+              )}
+            </div>
             <Button
               size="small"
               type="text"
@@ -480,7 +572,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
           <Button
             type="primary"
             onClick={onQuickProcess}
-            disabled={!canProceed}
+            disabled={!canStartProcessing}
           >
             {qi("wizard.useDefaultsProcess", "Use defaults & process")}
           </Button>
