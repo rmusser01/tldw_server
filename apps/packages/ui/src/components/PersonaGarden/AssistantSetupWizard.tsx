@@ -18,6 +18,7 @@ type AssistantSetupWizardProps = {
   archetypeKey?: string | null
   archetypePreview?: ArchetypePreview | null
   onSelectArchetype?: (key: string) => void
+  visualSetupContent?: React.ReactNode
   voiceStepContent?: React.ReactNode
   commandsStepContent?: React.ReactNode
   safetyStepContent?: React.ReactNode
@@ -38,6 +39,7 @@ export const AssistantSetupWizard: React.FC<AssistantSetupWizardProps> = ({
   archetypeKey,
   archetypePreview: _archetypePreview,
   onSelectArchetype,
+  visualSetupContent,
   voiceStepContent,
   commandsStepContent,
   safetyStepContent,
@@ -149,6 +151,11 @@ export const AssistantSetupWizard: React.FC<AssistantSetupWizardProps> = ({
       {error ? (
         <div className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
           {error}
+        </div>
+      ) : null}
+      {visualSetupContent ? (
+        <div data-testid="assistant-setup-visual-optional">
+          {visualSetupContent}
         </div>
       ) : null}
       {currentStep === "archetype" ? (

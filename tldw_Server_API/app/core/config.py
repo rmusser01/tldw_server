@@ -601,7 +601,8 @@ RAG_SERVICE_CONFIG = {
         "max_context_length": 4096,
         "context_padding_tokens": 100,
         "enable_metadata_filtering": True,
-        "token_counter": "tiktoken"
+        # Tokenizer name, not a secret.
+        "token_counter": "tiktoken"  # nosec B105
     },
 
     # Generator configuration
@@ -661,7 +662,8 @@ DIARIZATION_CONFIG = {
     "num_threads": 4,  # Number of threads for processing
     "memory_efficient": False,
     "max_memory_mb": 2048,
-    "use_auth_token": None,  # HuggingFace auth token if needed
+    # Default sentinel; real HuggingFace auth token is supplied via config/env.
+    "use_auth_token": None,  # nosec B105
     "cache_dir": None,  # Directory for model cache
 
     # Output settings
