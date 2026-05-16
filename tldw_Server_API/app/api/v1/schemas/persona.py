@@ -315,7 +315,11 @@ class PersonaVisualStarterProductionRecipeResponse(BaseModel):
             output for output in value if output not in BUDDY_VISUAL_ANIMATION_OUTPUT_IDS
         ]
         if invalid_outputs:
-            raise ValueError("animation_outputs must use supported animation output ids")
+            invalid_output_list = ", ".join(sorted(set(invalid_outputs)))
+            raise ValueError(
+                "animation_outputs must use supported animation output ids. "
+                f"Invalid: {invalid_output_list}"
+            )
         return value
 
     @field_validator("review_checks")
@@ -351,7 +355,11 @@ class PersonaVisualStarterPackResponse(BaseModel):
             group for group in value if group not in BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS
         ]
         if invalid_groups:
-            raise ValueError("expected_asset_groups must use supported asset group ids")
+            invalid_group_list = ", ".join(sorted(set(invalid_groups)))
+            raise ValueError(
+                "expected_asset_groups must use supported asset group ids. "
+                f"Invalid: {invalid_group_list}"
+            )
         return value
 
 

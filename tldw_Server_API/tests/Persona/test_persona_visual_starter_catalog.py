@@ -379,12 +379,16 @@ def test_production_recipe_response_rejects_non_animation_outputs(
     payload = _valid_recipe_payload()
     payload["animation_outputs"] = animation_outputs
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc_info:
         PersonaVisualStarterProductionRecipeResponse.model_validate(payload)
+
+    error_message = str(exc_info.value)
+    for animation_output in animation_outputs:
+        assert animation_output in error_message
 
 
 def test_starter_pack_response_rejects_unknown_expected_asset_groups() -> None:
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc_info:
         PersonaVisualStarterPackResponse.model_validate(
             {
                 "id": "starter",
@@ -395,6 +399,8 @@ def test_starter_pack_response_rejects_unknown_expected_asset_groups() -> None:
                 "production_recipe": _valid_recipe_payload(),
             }
         )
+
+    assert "unknown_group" in str(exc_info.value)
 
 
 def test_get_starter_pack_accepts_legacy_research_buddy_alias(
