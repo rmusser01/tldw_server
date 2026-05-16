@@ -63,7 +63,12 @@ class PersonaVisualGenerationWorker:
         target_state = str(payload.get("target_state") or "").strip() or None
         requested_backend = str(payload.get("backend") or "").strip() or None
         request_id = str(payload.get("request_id") or "").strip()
-        recipe_intent = payload.get("recipe_intent") if isinstance(payload.get("recipe_intent"), dict) else None
+        recipe_intent_payload = payload.get("recipe_intent")
+        recipe_intent = (
+            recipe_intent_payload
+            if isinstance(recipe_intent_payload, dict)
+            else None
+        )
         if not user_id or not persona_id or not pack_id or not prompt:
             raise ValueError("invalid_persona_visual_generation_payload")
 

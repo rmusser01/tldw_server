@@ -56,7 +56,7 @@ Docs/superpowers/plans/2026-05-16-persona-visual-recipe-contract-implementation-
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented Persona Visual recipe-backed generation contract Slice 1 for issue #1774. Generation requests now support request IDs plus optional starter_pack_id/recipe_output pairs, validate recipe intent against bundled starter production recipes, compose bounded effective prompts, queue the existing persona_visual_generate_candidate job with recipe_intent metadata, include correlation IDs in job payloads/responses, and distinguish recipe-backed idempotency. Added trace-safe logging for request validation, job creation, candidate creation, and candidate review. Focused backend tests cover prompt-only behavior, valid recipe-backed requests, missing recipe pairs, unknown starter/output, overlong composed prompts, correlation payloads, and idempotency.
+Implemented Persona Visual recipe-backed generation contract Slice 1 for issue #1774. Generation requests now support request IDs plus optional starter_pack_id/recipe_output pairs, validate recipe intent against bundled starter production recipes, compose bounded effective prompts, queue the existing persona_visual_generate_candidate job with recipe_intent metadata, include correlation IDs in job payloads/responses, distinguish recipe-backed idempotency, and reject unsafe request IDs before queueing. Added trace-safe logging for recipe request validation, job creation, and candidate creation. Focused backend tests cover prompt-only behavior, valid recipe-backed requests, missing recipe pairs, unknown starter/output, overlong composed prompts, unsafe request IDs, correlation payloads, and idempotency.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

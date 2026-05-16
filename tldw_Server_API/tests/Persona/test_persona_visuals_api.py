@@ -973,6 +973,30 @@ def test_create_generation_job_rejects_invalid_recipe_intent(
     assert manager.created == []
 
 
+@pytest.mark.parametrize("request_id", ["bad/path", "line\nbreak", "token=abc"])
+def test_create_generation_job_rejects_unsafe_request_id(
+    persona_db: CharactersRAGDB,
+    request_id: str,
+) -> None:
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Unsafe Request Persona")
+        pack = _create_visual_pack(client, persona_id)
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/generation-jobs",
+            json={
+                "request_id": request_id,
+                "prompt": "make a speaking pose",
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid_request_id"
+    assert manager.created == []
+
+
 def test_create_generation_job_rejects_overlong_recipe_prompt(
     persona_db: CharactersRAGDB,
 ) -> None:
