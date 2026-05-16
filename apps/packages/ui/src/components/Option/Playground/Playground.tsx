@@ -198,7 +198,7 @@ export const Playground = () => {
     React.useState<ServerReadinessState>(null);
   const [composerDockMetrics, setComposerDockMetrics] =
     React.useState<ComposerDockLayoutMetrics | null>(null);
-  const [composerDraftMessage, setComposerDraftMessage] = React.useState("");
+  const [composerHasDraft, setComposerHasDraft] = React.useState(false);
   const { t } = useTranslation(["playground", "common"]);
   const navigate = useNavigate();
   const [chatBackgroundImage] = useSetting(CHAT_BACKGROUND_IMAGE_SETTING);
@@ -352,9 +352,9 @@ export const Playground = () => {
     },
     [],
   );
-  const handleComposerDraftMessageChange = React.useCallback(
-    (message: string) => {
-      setComposerDraftMessage(message);
+  const handleComposerDraftPresenceChange = React.useCallback(
+    (hasDraft: boolean) => {
+      setComposerHasDraft(hasDraft);
     },
     [],
   );
@@ -391,7 +391,7 @@ export const Playground = () => {
     history.length === 0 &&
     !stableHistoryId &&
     !serverChatId &&
-    composerDraftMessage.trim().length === 0;
+    !composerHasDraft;
   const setRouteContext = useChatSurfaceCoordinatorStore(
     (state) => state.setRouteContext,
   );
@@ -2835,7 +2835,7 @@ export const Playground = () => {
               onSelectAttachedResearchContextHistory={
                 handleSelectAttachedResearchContextHistory
               }
-              onDraftMessageChange={handleComposerDraftMessageChange}
+              onDraftPresenceChange={handleComposerDraftPresenceChange}
             />
           </div>
           </div>

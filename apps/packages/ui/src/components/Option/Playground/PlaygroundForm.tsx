@@ -248,7 +248,7 @@ type Props = {
   onPrepareResearchFollowUp?: (target: ResearchFollowUpTarget) => void;
   stickyDockEnabled?: boolean;
   onComposerLayoutChange?: (metrics: ComposerDockLayoutMetrics) => void;
-  onDraftMessageChange?: (message: string) => void;
+  onDraftPresenceChange?: (hasDraft: boolean) => void;
 };
 
 type DefaultCharacterPreferenceQueryResult = {
@@ -412,6 +412,9 @@ const LazyPlaygroundMcpSettingsModal = React.lazy(() =>
   })),
 );
 
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect;
+
 export const PlaygroundForm = ({
   droppedFiles,
   attachedResearchContext = null,
@@ -429,7 +432,7 @@ export const PlaygroundForm = ({
   onPrepareResearchFollowUp,
   stickyDockEnabled = false,
   onComposerLayoutChange,
-  onDraftMessageChange,
+  onDraftPresenceChange,
 }: Props) => {
   const { t: translate } = useTranslation(["playground", "common", "option"]);
   const t = React.useCallback(
@@ -1773,9 +1776,10 @@ export const PlaygroundForm = ({
     draftSaved,
   } = composerInput;
 
-  React.useEffect(() => {
-    onDraftMessageChange?.(form.values.message || "");
-  }, [form.values.message, onDraftMessageChange]);
+  const hasDraft = (form.values.message || "").trim().length > 0;
+  useIsomorphicLayoutEffect(() => {
+    onDraftPresenceChange?.(hasDraft);
+  }, [hasDraft, onDraftPresenceChange]);
 
   const { deferredInput: deferredComposerInput } = useDeferredComposerInput(
     form.values.message || "",

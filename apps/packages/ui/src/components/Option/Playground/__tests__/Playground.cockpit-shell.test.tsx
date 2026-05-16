@@ -69,6 +69,10 @@ const chatSettingsState = vi.hoisted(() => ({
   syncChatSettingsForServerChat: vi.fn(async (_params: unknown) => null),
 }));
 
+const cockpitChatRenderState = vi.hoisted(() => ({
+  starterDeckSignals: [] as Array<boolean | undefined>,
+}));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, defaultValue?: string) => defaultValue || key,
@@ -77,15 +81,17 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
   PlaygroundForm: ({
-    onDraftMessageChange,
+    onDraftPresenceChange,
   }: {
-    onDraftMessageChange?: (message: string) => void;
+    onDraftPresenceChange?: (hasDraft: boolean) => void;
   }) => (
     <div data-testid="playground-form">
       <textarea
         aria-label="Composer draft"
         data-testid="composer-textarea"
-        onChange={(event) => onDraftMessageChange?.(event.currentTarget.value)}
+        onChange={(event) =>
+          onDraftPresenceChange?.(event.currentTarget.value.trim().length > 0)
+        }
       />
     </div>
   ),
@@ -97,6 +103,7 @@ vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({
   }: {
     showStarterDeck?: boolean;
   }) => {
+    cockpitChatRenderState.starterDeckSignals.push(showStarterDeck);
     const legacyWouldShowStarterDeck =
       messageOptionState.value.messages.length === 0;
 
@@ -266,6 +273,7 @@ describe("Playground cockpit shell", () => {
     messageOptionState.value.regenerateLastMessage = vi.fn();
     sessionPersistenceState.value.sessionScopeReady = true;
     chatSettingsState.syncChatSettingsForServerChat.mockClear();
+    cockpitChatRenderState.starterDeckSignals = [];
   });
 
   it("renders the cockpit rails, main chat surface, and status strip by default", async () => {
@@ -349,6 +357,35 @@ describe("Playground cockpit shell", () => {
       expect(
         screen.getByTestId("playground-empty-mode-deck"),
       ).toBeInTheDocument();
+    });
+  });
+
+  it("does not re-render the chat surface for draft edits that keep the same blankness", async () => {
+    render(<Playground />);
+
+    expect(
+      await screen.findByTestId("playground-empty-mode-deck"),
+    ).toBeInTheDocument();
+
+    const composer = screen.getByTestId("composer-textarea");
+    fireEvent.change(composer, {
+      target: { value: "First non-empty draft" },
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("playground-empty-mode-deck")).toBeNull();
+    });
+    const renderCountAfterIntentChange =
+      cockpitChatRenderState.starterDeckSignals.length;
+
+    fireEvent.change(composer, {
+      target: { value: "First non-empty draft with more text" },
+    });
+
+    await waitFor(() => {
+      expect(cockpitChatRenderState.starterDeckSignals).toHaveLength(
+        renderCountAfterIntentChange,
+      );
     });
   });
 

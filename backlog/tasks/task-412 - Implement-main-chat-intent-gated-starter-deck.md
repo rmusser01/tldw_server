@@ -45,6 +45,14 @@ Verification:
 - Whitespace: `git diff --check` passed.
 - Browser proof: not captured because no tldw_server2 frontend/backend listener was running on the expected local ports. `lsof` showed unrelated tldw_chatbook on `8837` and llama-server on `9099`; no mocked data or alternate fake server was used.
 - Bandit skipped because touched runtime scope is frontend TypeScript plus Markdown task/plan files.
+
+Review fix:
+- Addressed Gemini/Qodo draft callback comments by changing the parent signal from full draft text to boolean draft presence.
+- `PlaygroundForm` now notifies with an isomorphic layout effect keyed on draft presence, avoiding per-keystroke parent re-renders and preventing a restored-draft starter-deck paint flash.
+- Added a regression assertion that non-empty-to-non-empty draft edits do not re-render the chat surface after the initial intent transition.
+- Re-ran focused tests: `bunx vitest run src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx src/components/Option/Playground/__tests__/PlaygroundChat.server-load-state.test.tsx src/components/Option/Playground/__tests__/PlaygroundEmpty.test.tsx src/components/Option/Playground/__tests__/PlaygroundForm.signals.guard.test.ts --config vitest.config.ts` passed with 4 files and 23 tests.
+- Re-ran TypeScript baseline check; it still fails on existing repo-wide errors, with no touched-file matches in `/tmp/chat-cockpit-intent-starter-tsc-review.log`.
+- Re-ran `git diff --check`; passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
