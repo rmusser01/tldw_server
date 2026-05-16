@@ -924,6 +924,15 @@ def test_create_generation_job_prompt_only_replay_returns_existing_request_id(
     assert len(manager.created) == 1
 
 
+def test_generation_job_response_request_id_prefers_stable_job_id_over_fresh_fallback() -> None:
+    result = persona_ep._persona_visual_generation_job_request_id(
+        {"id": 1234, "payload": {}},
+        fallback_request_id="request-second",
+    )
+
+    assert result == "1234"
+
+
 def test_create_generation_job_with_recipe_intent_builds_traceable_payload(
     persona_db: CharactersRAGDB,
 ) -> None:

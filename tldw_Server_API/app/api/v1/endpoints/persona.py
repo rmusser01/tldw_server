@@ -2229,13 +2229,12 @@ def _persona_visual_generation_job_request_id(
     for candidate in (
         job.get("request_id"),
         _persona_visual_generation_job_payload(job).get("request_id"),
-        fallback_request_id,
     ):
         normalized = str(candidate or "").strip()
         if normalized:
             return normalized
     stable_job_id = str(job.get("id") or job.get("uuid") or "").strip()
-    return stable_job_id or None
+    return stable_job_id or (str(fallback_request_id or "").strip() or None)
 
 
 def _persona_visual_generation_job_payload(job: dict[str, Any]) -> dict[str, Any]:

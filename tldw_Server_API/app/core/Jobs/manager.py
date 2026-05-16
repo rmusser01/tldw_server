@@ -1334,7 +1334,11 @@ class JobManager:
                                     "job_type": job_type,
                                 }
                             )
-                            emitted_job = {**d, "request_id": request_id, "trace_id": trace_id}
+                            emitted_job = {
+                                **d,
+                                "request_id": d.get("request_id") or request_id,
+                                "trace_id": d.get("trace_id") or trace_id,
+                            }
                             # Counters bump (PG, idempotent insert occurred)
                             try:
                                 if was_insert and JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
