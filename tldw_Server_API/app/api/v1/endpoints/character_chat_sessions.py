@@ -67,6 +67,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     GreetingSelectResponse,
     LorebookDiagnosticExportResponse,
     MessageResponse,
+    PromptPreviewResponse,
     PresetCreate,
     PresetDetail,
     PresetListResponse,
@@ -101,6 +102,10 @@ from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import (
     get_character_rate_limiter,
 )
+from tldw_Server_API.app.core.Character_Chat.world_book_prompt_context import (
+    apply_world_book_prompt_context,
+    build_world_book_prompt_context,
+)
 
 # Import shared constants
 from tldw_Server_API.app.core.Character_Chat.constants import (
@@ -128,6 +133,7 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import (
+    PersonaExemplarPromptAssembly,
     assemble_persona_exemplar_prompt,
 )
 
@@ -138,6 +144,11 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call,
     perform_chat_api_call_async,
     resolve_provider_and_model,
+)
+from tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope
+from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
+    evaluate_prompt_cost_guardrails,
+    load_prompt_cost_guardrail_config,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -4154,6 +4165,10 @@ _TOKEN_BUDGET_PRESET = 180
 _TOKEN_BUDGET_STEERING = 120
 _TOKEN_BUDGET_LOREBOOK = 420
 _TOKEN_BUDGET_WORLD_BOOK = 240
+_PERSONA_PREVIEW_MAX_ID_CHARS = 128
+_PERSONA_PREVIEW_MAX_TEXT_CHARS = 160
+_PERSONA_PREVIEW_MAX_ITEMS = 20
+_PERSONA_PREVIEW_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 
 # Priority order for truncation (highest priority first)
 _TRUNCATION_PRIORITY = [
@@ -4178,6 +4193,66 @@ _CONTRADICTORY_DIRECTIVE_PAIRS: tuple[tuple[str, str, str], ...] = (
 )
 
 
+def _normalize_persona_preview_id(value: Any, *, default: str = "none") -> str:
+    """Return a bounded identifier for persona prompt-preview diagnostics."""
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        return default
+    if (
+        len(raw_value) <= _PERSONA_PREVIEW_MAX_ID_CHARS
+        and _PERSONA_PREVIEW_SAFE_ID_RE.fullmatch(raw_value)
+    ):
+        return raw_value
+    digest = hashlib.sha256(raw_value.encode("utf-8")).hexdigest()[:16]
+    return f"hash:{digest}"
+
+
+def _truncate_persona_preview_text(value: Any) -> str:
+    """Return a compact text preview for prompt-preview diagnostics."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= _PERSONA_PREVIEW_MAX_TEXT_CHARS:
+        return text
+    return f"{text[:_PERSONA_PREVIEW_MAX_TEXT_CHARS].rstrip()}..."
+
+
+def _selected_persona_preview_reason(exemplar: dict[str, Any]) -> str:
+    """Return a bounded reason for a selected persona exemplar."""
+    bucket = _normalize_persona_preview_id(
+        exemplar.get("selection_bucket") or exemplar.get("kind"),
+        default="selected",
+    )
+    if bucket == "selected":
+        return bucket
+    return _normalize_persona_preview_id(f"{bucket}_selected")
+
+
+def _build_persona_preview_assembly(
+    *,
+    conversation: dict[str, Any],
+    exemplars: list[dict[str, Any]],
+    requested_scenario_tags: list[str] | None = None,
+    requested_tone: str | None = None,
+    current_turn_text: str | None = None,
+    conflicting_capability_tags: list[str] | None = None,
+) -> PersonaExemplarPromptAssembly | None:
+    """Build shared persona exemplar preview assembly for persona-backed chats."""
+    if conversation.get("assistant_kind") != "persona":
+        return None
+
+    persona_id = str(conversation.get("assistant_id") or "").strip()
+    if not persona_id:
+        return None
+
+    return assemble_persona_exemplar_prompt(
+        persona_id=persona_id,
+        exemplars=exemplars,
+        requested_scenario_tags=requested_scenario_tags,
+        requested_tone=requested_tone,
+        current_turn_text=current_turn_text,
+        conflicting_capability_tags=conflicting_capability_tags,
+    )
+
+
 def _build_persona_preview_sections(
     *,
     conversation: dict[str, Any],
@@ -4188,22 +4263,86 @@ def _build_persona_preview_sections(
     conflicting_capability_tags: list[str] | None = None,
 ) -> list[tuple[str, str, int]]:
     """Build persona exemplar preview sections using the shared assembly helper."""
-    if conversation.get("assistant_kind") != "persona":
-        return []
-
-    persona_id = str(conversation.get("assistant_id") or "").strip()
-    if not persona_id:
-        return []
-
-    assembly = assemble_persona_exemplar_prompt(
-        persona_id=persona_id,
+    assembly = _build_persona_preview_assembly(
+        conversation=conversation,
         exemplars=exemplars,
         requested_scenario_tags=requested_scenario_tags,
         requested_tone=requested_tone,
         current_turn_text=current_turn_text,
         conflicting_capability_tags=conflicting_capability_tags,
     )
+    if assembly is None:
+        return []
     return assembly.sections
+
+
+def _build_persona_preview_context(
+    *,
+    conversation: dict[str, Any],
+    assembly: PersonaExemplarPromptAssembly | None,
+    current_turn_source: str,
+    current_turn_text: str | None,
+) -> dict[str, Any]:
+    """Build a bounded effective-context preview for persona-backed prompt assembly."""
+    if conversation.get("assistant_kind") != "persona":
+        return {"active": False, "reason": "not_persona_chat"}
+
+    persona_id = str(conversation.get("assistant_id") or "").strip()
+    if not persona_id:
+        return {"active": False, "reason": "missing_persona_id"}
+
+    selected_exemplar_ids: list[str] = []
+    selected_exemplars: list[dict[str, str]] = []
+    rejected_exemplars: list[dict[str, str]] = []
+    section_names: list[str] = []
+    if assembly is not None:
+        section_names = [
+            _normalize_persona_preview_id(name)
+            for name, _, _ in assembly.sections[:_PERSONA_PREVIEW_MAX_ITEMS]
+        ]
+        selected_exemplar_ids = [
+            _normalize_persona_preview_id(item.get("id"))
+            for item in assembly.selected_exemplars[:_PERSONA_PREVIEW_MAX_ITEMS]
+            if item.get("id")
+        ]
+        selected_exemplars = [
+            {
+                "id": _normalize_persona_preview_id(item.get("id")),
+                "reason": _selected_persona_preview_reason(item),
+            }
+            for item in assembly.selected_exemplars[:_PERSONA_PREVIEW_MAX_ITEMS]
+            if item.get("id")
+        ]
+        rejected_exemplars = [
+            {
+                "id": _normalize_persona_preview_id(item.get("id")),
+                "reason": _normalize_persona_preview_id(item.get("reason"), default="unspecified"),
+            }
+            for item in assembly.rejected_exemplars[:_PERSONA_PREVIEW_MAX_ITEMS]
+            if item.get("id")
+        ]
+
+    applied = bool(section_names)
+    return {
+        "active": True,
+        "assistant_kind": "persona",
+        "assistant_id": _normalize_persona_preview_id(persona_id),
+        "persona_memory_mode": _normalize_persona_preview_id(
+            conversation.get("persona_memory_mode"),
+            default="read_only",
+        ),
+        "applied": applied,
+        "reason": "selected" if applied else "no_exemplars_selected",
+        "section_names": section_names,
+        "selected_exemplar_ids": selected_exemplar_ids,
+        "selected_exemplars": selected_exemplars,
+        "rejected_exemplars": rejected_exemplars,
+        "current_turn": {
+            "source": _normalize_persona_preview_id(current_turn_source),
+            "has_text": bool(str(current_turn_text or "").strip()),
+            "preview": _truncate_persona_preview_text(current_turn_text),
+        },
+    }
 
 
 def _estimate_tokens(text: str) -> int:
@@ -4263,6 +4402,8 @@ def _extract_directive_conflicts(text: str) -> list[dict[str, str]]:
 
 @router.post(
     "/{chat_id}/prompt-preview",
+    response_model=PromptPreviewResponse,
+    response_model_exclude_unset=True,
     summary="Preview assembled prompt with token budget breakdown",
     tags=["Chat Sessions"],
 )
@@ -4427,63 +4568,61 @@ async def prompt_assembly_preview(
 
         lorebook_text = ""
         lorebook_diagnostics: list[dict[str, Any]] = []
+        lorebook_cost_diagnostics: dict[str, Any] = {}
         try:
-            from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
-
-            wb_manager = WorldBookService(db)
-            recent_text = " ".join(
-                str(m.get("content", "")) for m in formatted if m.get("role") in ("user", "assistant")
-            )[-2000:]
-            if recent_text.strip():
-                world_book_character_id = (
+            world_book_context = build_world_book_prompt_context(
+                formatted,
+                db=db,
+                character_id=(
                     turn_context.get("active_character_id")
                     or conversation.get("character_id")
-                )
-                wb_result = wb_manager.process_context(
-                    text=recent_text,
-                    character_id=world_book_character_id,
-                    include_diagnostics=True,
-                )
-                if isinstance(wb_result, dict):
-                    wb_context = wb_result.get("processed_context", "")
-                    lorebook_diagnostics = wb_result.get("diagnostics") or []
-                    if wb_context and wb_context.strip():
-                        lorebook_text = f"World info:\n{wb_context.strip()}"
-                        insert_pos = 0
-                        for idx, msg in enumerate(formatted):
-                            role = str(msg.get("role", "")).strip().lower()
-                            if role == "system":
-                                insert_pos = idx + 1
-                            else:
-                                break
-                        formatted.insert(
-                            insert_pos,
-                            {"role": "system", "content": lorebook_text},
-                        )
+                ),
+            )
+            formatted = apply_world_book_prompt_context(formatted, world_book_context)
+            lorebook_text = world_book_context.text
+            lorebook_diagnostics = list(world_book_context.legacy_diagnostics)
+            lorebook_cost_diagnostics = dict(world_book_context.diagnostics) if lorebook_text else {}
         except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:
             pass
 
         persona_preview_sections: list[tuple[str, str, int]] = []
+        persona_preview_context: dict[str, Any] | None = None
         if conversation.get("assistant_kind") == "persona" and conversation.get("assistant_id"):
-            persona_preview_sections = _build_persona_preview_sections(
+            stripped_append_user_message = str(body.append_user_message or "").strip()
+            persona_current_turn_text = stripped_append_user_message or next(
+                (
+                    str(message.get("content") or "").strip()
+                    for message in reversed(formatted)
+                    if str(message.get("role") or "").strip().lower() == "user"
+                    and str(message.get("content") or "").strip()
+                ),
+                "",
+            )
+            persona_current_turn_source = (
+                "append_user_message"
+                if stripped_append_user_message
+                else ("history" if persona_current_turn_text else "none")
+            )
+            persona_exemplars = db.list_persona_exemplars(
+                user_id=str(current_user.id),
+                persona_id=str(conversation.get("assistant_id")),
+                include_disabled=False,
+                include_deleted=False,
+                limit=50,
+                offset=0,
+            )
+            persona_preview_assembly = _build_persona_preview_assembly(
                 conversation=conversation,
-                exemplars=db.list_persona_exemplars(
-                    user_id=str(current_user.id),
-                    persona_id=str(conversation.get("assistant_id")),
-                    include_disabled=False,
-                    include_deleted=False,
-                    limit=50,
-                    offset=0,
-                ),
-                current_turn_text=body.append_user_message or next(
-                    (
-                        str(message.get("content") or "").strip()
-                        for message in reversed(formatted)
-                        if str(message.get("role") or "").strip().lower() == "user"
-                        and str(message.get("content") or "").strip()
-                    ),
-                    "",
-                ),
+                exemplars=persona_exemplars,
+                current_turn_text=persona_current_turn_text,
+            )
+            if persona_preview_assembly is not None:
+                persona_preview_sections = persona_preview_assembly.sections
+            persona_preview_context = _build_persona_preview_context(
+                conversation=conversation,
+                assembly=persona_preview_assembly,
+                current_turn_source=persona_current_turn_source,
+                current_turn_text=persona_current_turn_text,
             )
 
         sections_raw: list[tuple[str, str, int]] = [
@@ -4514,6 +4653,8 @@ async def prompt_assembly_preview(
             }
             if name == "lorebook" and lorebook_diagnostics:
                 section_payload["diagnostics"] = lorebook_diagnostics
+            if name == "lorebook" and lorebook_cost_diagnostics:
+                section_payload["cost_diagnostics"] = lorebook_cost_diagnostics
             sections.append(section_payload)
 
         message_tokens = sum(_estimate_tokens(str(m.get("content", ""))) for m in messages)
@@ -4545,7 +4686,7 @@ async def prompt_assembly_preview(
         conflicts = _extract_scalar_conflicts(conflict_source_sections)
         conflicts.extend(_extract_directive_conflicts(conflict_text))
 
-        return {
+        response_payload = {
             "chat_id": chat_id,
             "character_id": turn_context.get("active_character_id") or conversation.get("character_id"),
             "character_name": char_name,
@@ -4560,6 +4701,9 @@ async def prompt_assembly_preview(
             "conflicts": conflicts or None,
             "examples": _PREVIEW_CONFLICT_EXAMPLES,
         }
+        if persona_preview_context is not None:
+            response_payload["persona_context"] = persona_preview_context
+        return response_payload
 
     except HTTPException:
         raise
@@ -4772,38 +4916,31 @@ async def character_chat_completion(
             )
 
         # Inject world book context and capture diagnostics for this turn.
+        pre_world_book_formatted_for_guardrails = [dict(message) for message in formatted]
         turn_lorebook_diagnostics: Optional[list[dict[str, Any]]] = None
+        turn_lorebook_cost_diagnostics: Optional[dict[str, Any]] = None
+        turn_lorebook_text_for_guardrails: Optional[str] = None
         try:
-            from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
-            wb_manager = WorldBookService(db)
-            recent_text = " ".join(
-                str(m.get("content", "")) for m in formatted if m.get("role") in ("user", "assistant")
-            )[-2000:]
-            if recent_text.strip():
-                world_book_character_id = (
+            world_book_context = build_world_book_prompt_context(
+                formatted,
+                db=db,
+                character_id=(
                     active_character_id
                     or conversation.get("character_id")
-                )
-                wb_result = wb_manager.process_context(
-                    text=recent_text,
-                    character_id=world_book_character_id,
-                    include_diagnostics=True,
-                )
-                if isinstance(wb_result, dict):
-                    wb_context = wb_result.get("processed_context", "")
-                    turn_lorebook_diagnostics = wb_result.get("diagnostics") or None
-                    if wb_context and wb_context.strip():
-                        # Insert world book context as a system message after existing system messages.
-                        insert_pos = 0
-                        for idx, msg in enumerate(formatted):
-                            if str(msg.get("role", "")).strip().lower() == "system":
-                                insert_pos = idx + 1
-                            else:
-                                break
-                        formatted.insert(insert_pos, {
-                            "role": "system",
-                            "content": f"World info:\n{wb_context.strip()}",
-                        })
+                ),
+            )
+            formatted = apply_world_book_prompt_context(formatted, world_book_context)
+            turn_lorebook_text_for_guardrails = world_book_context.text or None
+            turn_lorebook_diagnostics = (
+                list(world_book_context.legacy_diagnostics)
+                if world_book_context.legacy_diagnostics
+                else None
+            )
+            turn_lorebook_cost_diagnostics = (
+                dict(world_book_context.diagnostics)
+                if world_book_context.text
+                else None
+            )
         except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:
             pass  # world book injection is best-effort
 
@@ -4958,6 +5095,65 @@ async def character_chat_completion(
         legacy_allow_local = parse_boolean(os.getenv("ALLOW_LOCAL_LLM_CALLS"))
         offline_sim = provider == "local-llm" and not (enable_local_llm or disable_offline_sim or legacy_allow_local)
         streams_unified = str(os.getenv("STREAMS_UNIFIED", "0")).strip().lower() in {"1", "true", "on", "yes"}
+        turn_prompt_guardrail_diagnostics: Optional[dict[str, Any]] = None
+        prompt_guardrails_enabled = False
+        try:
+            prompt_guardrail_config = load_prompt_cost_guardrail_config()
+            prompt_guardrails_enabled = prompt_guardrail_config.enabled
+            if prompt_guardrail_config.enabled:
+                prompt_guardrail_envelope = build_prompt_cost_envelope(
+                    (
+                        pre_world_book_formatted_for_guardrails
+                        if turn_lorebook_text_for_guardrails
+                        else formatted
+                    ),
+                    world_book_text=turn_lorebook_text_for_guardrails,
+                )
+                prompt_guardrail_decision = evaluate_prompt_cost_guardrails(
+                    prompt_guardrail_envelope,
+                    request_options={"max_tokens": body.max_tokens, "streaming": bool(body.stream)},
+                    config=prompt_guardrail_config,
+                )
+                if prompt_guardrail_decision.action != "allow":
+                    turn_prompt_guardrail_diagnostics = prompt_guardrail_decision.to_response_metadata()
+                    log_metadata = {
+                        "provider": provider,
+                        "model": model,
+                        "streaming": bool(body.stream),
+                        "decision": turn_prompt_guardrail_diagnostics,
+                    }
+                    if prompt_guardrail_decision.action == "block":
+                        logger.warning(
+                            "Character chat prompt cost guardrail blocked request: {}",
+                            log_metadata,
+                        )
+                        raise HTTPException(
+                            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            detail={
+                                "type": "prompt_cost_guardrail_block",
+                                "message": "Prompt cost guardrail blocked request before provider dispatch.",
+                                "prompt_guardrails": turn_prompt_guardrail_diagnostics,
+                            },
+                        )
+                    logger.warning(
+                        "Character chat prompt cost guardrail warnings: {}",
+                        log_metadata,
+                    )
+        except HTTPException:
+            raise
+        except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug(
+                "Character chat prompt cost guardrail evaluation failed due to {}",
+                type(exc).__name__,
+            )
+            if prompt_guardrails_enabled:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={
+                        "type": "prompt_cost_guardrail_error",
+                        "message": "Prompt cost guardrail evaluation failed before provider dispatch.",
+                    },
+                ) from exc
         llm_resp = None
         if not offline_sim:
             # Enforce per-minute completion rate only for real provider calls
@@ -4975,6 +5171,8 @@ async def character_chat_completion(
                     max_tokens=body.max_tokens,
                     tools=body.tools,
                     tool_choice=body.tool_choice,
+                    billing_prompt_cache_intent=body.billing_prompt_cache_intent,
+                    inference_prefix_cache_intent=body.inference_prefix_cache_intent,
                     streaming=bool(body.stream),
                     user_identifier=str(current_user.id),
                     app_config=byok_resolution.app_config,
@@ -5391,6 +5589,10 @@ async def character_chat_completion(
                 metadata_extra["mood_topic"] = resolved_mood_topic
             if turn_lorebook_diagnostics:
                 metadata_extra["lorebook_diagnostics"] = turn_lorebook_diagnostics
+            if turn_lorebook_cost_diagnostics:
+                metadata_extra["lorebook_cost_diagnostics"] = turn_lorebook_cost_diagnostics
+            if turn_prompt_guardrail_diagnostics:
+                metadata_extra["prompt_guardrails"] = turn_prompt_guardrail_diagnostics
             validated_tool_calls = (
                 _validate_and_truncate_tool_calls(assistant_tool_calls)
                 if assistant_tool_calls

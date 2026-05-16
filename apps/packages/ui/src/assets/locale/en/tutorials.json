@@ -206,10 +206,10 @@
   },
   "moderation": {
     "basics": {
-      "label": "Content Controls Basics",
-      "description": "Learn how to set up content safety rules, blocklists, and test moderation.",
-      "heroTitle": "Moderation Dashboard",
-      "heroContent": "This is your content safety hub. The status badge shows whether your server is connected.",
+      "label": "Content Rules Basics",
+      "description": "Learn how to set up moderation policies, blocklists, overrides, and tests.",
+      "heroTitle": "Content Rules",
+      "heroContent": "This is your rule configuration hub. The status badge shows whether your server is connected.",
       "policyTitle": "Policy & Settings",
       "policyContent": "Start here. Set your base content safety policy — what categories to filter and how strictly.",
       "blocklistTitle": "Blocklist Studio",

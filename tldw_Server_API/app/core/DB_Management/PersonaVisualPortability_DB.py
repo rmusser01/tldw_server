@@ -418,6 +418,34 @@ class PersonaVisualPortabilityRepository:
             )
         return self.get_import_preview(preview_id, owner_user_id=owner_user_id)
 
+    def replace_import_preview_proposed_plan_json(
+        self,
+        preview_id: str,
+        proposed_plan_json: str | bytes,
+        *,
+        owner_user_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Overwrite stored preview plan JSON text through the repository layer."""
+        self._ensure_schema_initialized()
+        current = self.get_import_preview(preview_id, owner_user_id=owner_user_id)
+        if current is None:
+            return None
+
+        with self.db.transaction() as conn:
+            where_clause = "id = ?"
+            where_params: list[Any] = [str(preview_id)]
+            if owner_user_id is not None:
+                where_clause += " AND owner_user_id = ?"
+                where_params.append(str(owner_user_id))
+            _execute_portability_update(
+                conn,
+                table_name="persona_visual_pack_import_previews",
+                update_values=[("proposed_plan_json", proposed_plan_json)],
+                where_clause=where_clause,
+                where_params=where_params,
+            )
+        return self.get_import_preview(preview_id, owner_user_id=owner_user_id)
+
     def _ensure_schema_initialized(self) -> None:
         if not self._schema_initialized:
             self.initialize_schema()

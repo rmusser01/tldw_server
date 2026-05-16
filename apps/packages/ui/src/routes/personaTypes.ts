@@ -132,6 +132,11 @@ export type SetupLiveDetourState = {
   lastText: string
 }
 
+export type SetupVisualDetourState = {
+  source: "wizard_optional_card"
+  returnStep: PersonaSetupStep
+}
+
 export const DEFAULT_SETUP_REVIEW_SUMMARY: SetupReviewSummary = {
   starterCommands: { mode: "skipped" },
   confirmationMode: null,

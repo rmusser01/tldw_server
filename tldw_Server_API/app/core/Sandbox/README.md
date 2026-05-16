@@ -86,8 +86,14 @@ Current limitations:
 - Strict allowlist networking is not implemented for `vz_linux`, `vz_macos`, `seatbelt`, or `worktree`.
 - `vz_linux` VM creation is fail-closed at both Python admission and helper
   protocol layers: only `network_policy=deny_all` is accepted, and the helper
-  records the accepted policy in VM metadata/status details. The current
-  Virtualization.framework configuration does not attach a network device.
+  records the accepted policy in VM metadata/status details. The helper also
+  rejects malformed direct `create_vm` requests before boot, including
+  unsupported runtimes, invalid VM ids, non-absolute or NUL-bearing paths,
+  symlink leaf paths or user-controlled symlinked parent components, oversized
+  metadata, and out-of-range startup timeouts. Root-level macOS compatibility
+  prefixes such as `/tmp` and `/var` are allowed and subsequent components are
+  still checked. The current Virtualization.framework configuration does not
+  attach a network device.
 - `vz_linux` passes `SANDBOX_MAX_LOG_BYTES` to helper `exec_guest` as
   `max_output_bytes`, clamped to the helper protocol ceiling of 256 MiB, and
   also uses the effective cap when publishing stdout/stderr frames. Rebuilt
@@ -140,7 +146,7 @@ Current limitations:
 - The generic admin startup warning endpoint is `GET /api/v1/admin/startup-warnings`.
   It exposes current-process warning records only; there is no
   cross-process aggregation or persistence in this slice.
-- `tools/macos-vz-helper/scripts/vz-helperctl.py` is the preferred operator helper lifecycle command for `check`, `build`, `sign`, `start`, `status`, `restart-drill`, `stop`, `plist`, and `smoke`; it can generate launchd plist scaffolding but does not install or load services automatically.
+- `tools/macos-vz-helper/scripts/vz-helperctl.py` is the preferred operator helper lifecycle command for `check`, `build`, `sign`, `start`, `status`, `restart-drill`, `stop`, `plist`, `launchd`, and `smoke`; it can generate launchd plist scaffolding and run explicit launchd operator actions but does not install or load services automatically.
 - helper-backed template validation now distinguishes canonical bundles from
   raw-disk compatibility mode through `boot_mode` and `validation_strength`.
 - `SandboxImageStore` persists template manifests under
@@ -178,6 +184,11 @@ Current limitations:
   `tools/macos-vz-helper/scripts/vz-helperctl.py restart-drill` after the helper
   has been started through the managed wrapper. This is a local operator drill,
   not launchd automation or host reboot validation.
+- Manual LaunchAgent lifecycle checks can be run through
+  `tools/macos-vz-helper/scripts/vz-helperctl.py launchd ...`. The command
+  supports explicit `status`, `bootstrap`, `kickstart`, and `bootout` actions,
+  expects dry-run inspection before mutation, and only writes plist/runtime
+  scaffolding when `--write-plist` and `--create-dirs` are passed.
 - The host-gated CI acceptance policy for real `vz_linux` smoke lives in
   `Docs/Sandbox/vz-linux-host-gated-ci-acceptance-policy.md`. It defines
   manual/nightly gates, expected skips, artifact upload expectations, branch

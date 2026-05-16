@@ -6,6 +6,7 @@ import {
   BuddyShellRenderContextProvider,
   useBuddyShellRenderContext
 } from "@/components/Common/PersonaBuddy"
+import { usePersonaVisualRuntimeStore } from "@/store/persona-visual-runtime"
 import { SELECTED_ASSISTANT_STORAGE_KEY } from "@/utils/selected-assistant-storage"
 
 const mocks = vi.hoisted(() => ({
@@ -349,6 +350,10 @@ describe("SidepanelPersona", () => {
     mocks.buildPersonaWebSocketUrl.mockReset()
     mocks.fetchCompanionConversationPrompts.mockReset()
     mocks.buddyShellContextSnapshots = []
+    usePersonaVisualRuntimeStore.setState({
+      override: null,
+      runtimeDiagnostics: null
+    } as any)
     mocks.buildPersonaWebSocketUrl.mockReturnValue(
       "ws://persona.test/api/v1/persona/stream"
     )
@@ -445,6 +450,141 @@ describe("SidepanelPersona", () => {
     expect(screen.getByRole("tab", { name: "Scopes" })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "Policies" })).toBeInTheDocument()
     await waitForLiveSessionPanel()
+  })
+
+  it("renders degraded Persona/Buddy diagnostics from visual runtime state while controls stay available", async () => {
+    mocks.location.search = "?persona_id=research_assistant&tab=live"
+    mocks.capabilitiesState.capabilities = {
+      hasPersona: true,
+      hasPersonalization: true,
+      hasAudio: true,
+      hasMcp: true
+    } as any
+    usePersonaVisualRuntimeStore.setState({
+      runtimeDiagnostics: {
+        personaId: "research_assistant",
+        sessionId: null,
+        packId: "pack-1",
+        packTitle: "Broken Pack",
+        packLoadStatus: "error",
+        diagnostic: {
+          code: "load_failed",
+          severity: "warning",
+          title: "Visual pack did not load",
+          message: "The active visual pack could not be loaded."
+        },
+        updatedAt: 1_765_333_200_000
+      }
+    } as any)
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "persona-key"
+    })
+    mocks.fetchWithAuth.mockImplementation((path: string) => {
+      if (path.includes("/persona/catalog")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [
+            { id: "research_assistant", name: "Research Assistant" }
+          ]
+        })
+      }
+      if (path.includes("/persona/profiles/research_assistant")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "research_assistant",
+            version: 1,
+            buddy_summary: {
+              has_buddy: true,
+              persona_name: "Research Assistant",
+              role_summary: "Keeps research sessions moving",
+              visual: null
+            },
+            voice_defaults: {
+              voice_chat_trigger_phrases: ["hey research"],
+              wake_behavior: "continuous"
+            },
+            use_persona_state_context_default: true
+          })
+        })
+      }
+      if (path.includes("/persona/sessions")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => []
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        error: `unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(<SidepanelPersona />)
+
+    await waitForLiveSessionPanel()
+    const diagnostics = await screen.findByTestId("persona-buddy-diagnostics")
+
+    expect(diagnostics).toHaveTextContent("Persona Buddy degraded")
+    expect(diagnostics).toHaveTextContent("Visual pack did not load")
+    expect(diagnostics).toHaveTextContent("Pack ID: pack-1")
+    expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument()
+  })
+
+  it("shows profile load failures in Persona/Buddy diagnostics", async () => {
+    mocks.location.search = "?persona_id=research_assistant&tab=live"
+    mocks.capabilitiesState.capabilities = {
+      hasPersona: true,
+      hasPersonalization: true,
+      hasMcp: true
+    } as any
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "persona-key"
+    })
+    mocks.fetchWithAuth.mockImplementation((path: string) => {
+      if (path.includes("/persona/catalog")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [
+            { id: "research_assistant", name: "Research Assistant" }
+          ]
+        })
+      }
+      if (path.includes("/persona/profiles/research_assistant")) {
+        return Promise.resolve({
+          ok: false,
+          error: "Profile service offline",
+          json: async () => ({})
+        })
+      }
+      if (path.includes("/persona/sessions")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => []
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        error: `unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(<SidepanelPersona />)
+
+    await waitForLiveSessionPanel()
+    const diagnostics = await screen.findByTestId("persona-buddy-diagnostics")
+
+    expect(diagnostics).toHaveTextContent("Persona Buddy degraded")
+    expect(diagnostics).toHaveTextContent("Profile")
+    expect(diagnostics).toHaveTextContent("Load failed")
+    expect(diagnostics).toHaveTextContent("Profile service offline")
+    expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument()
   })
 
   it("boots persona selection and active tab from query params", async () => {
@@ -1184,6 +1324,100 @@ describe("SidepanelPersona", () => {
     }
   })
 
+  it("detours setup into visual buddy setup and returns to the wizard", async () => {
+    mocks.location.search = "?persona_id=garden-helper&tab=profiles"
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: ""
+    })
+
+    mocks.fetchWithAuth.mockImplementation((path: string) => {
+      if (path === "/api/v1/persona/catalog") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [{ id: "garden-helper", name: "Garden Helper" }]
+        })
+      }
+      if (path === "/api/v1/persona/profiles/garden-helper") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "garden-helper",
+            version: 2,
+            voice_defaults: {
+              confirmation_mode: "destructive_only"
+            },
+            setup: {
+              status: "in_progress",
+              version: 1,
+              current_step: "voice",
+              completed_steps: ["persona"],
+              completed_at: null,
+              last_test_type: null
+            },
+            use_persona_state_context_default: true
+          })
+        })
+      }
+      if (path.includes("/persona/profiles/garden-helper/setup-analytics")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            persona_id: "garden-helper",
+            summary: { total_runs: 0, completed_runs: 0, completion_rate: 0 }
+          })
+        })
+      }
+      if (path === "/api/v1/persona/profiles/garden-helper/visual-packs") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ packs: [], active_pack: null })
+        })
+      }
+      if (path === "/api/v1/persona/visual-starter-packs") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ starter_packs: [] })
+        })
+      }
+      if (path.includes("/visual-library")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ items: [] })
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        error: `unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(<SidepanelPersona />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("assistant-setup-overlay")).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Set up visual buddy" }))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("assistant-setup-overlay")).not.toBeInTheDocument()
+    })
+    expect(await screen.findByTestId("persona-visual-pack-editor")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Visuals" })).toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: "Profiles" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: "Commands" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: "Live Session" })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Return to setup" }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("assistant-setup-overlay")).toBeInTheDocument()
+    })
+  })
+
   it("captures starter command and safety choices into the setup handoff summary", async () => {
     mocks.location.search = "?persona_id=garden-helper&tab=profiles"
     mocks.getConfig.mockResolvedValue({
@@ -1509,6 +1743,212 @@ describe("SidepanelPersona", () => {
           (body) =>
             body.event_type === "handoff_action_clicked" &&
             body.action_target === "commands"
+        )
+      ).toBe(true)
+    })
+  })
+
+  it("smoke-tests setup from persona choice through starter retry and dry-run handoff", async () => {
+    mocks.location.search = "?persona_id=garden-helper&tab=profiles"
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: ""
+    })
+
+    let profileVersion = 2
+    let starterAttempts = 0
+    let currentVoiceDefaults = {
+      confirmation_mode: "destructive_only"
+    }
+    let currentSetup = {
+      status: "in_progress",
+      version: 1,
+      run_id: "setup-smoke-run",
+      current_step: "persona",
+      completed_steps: [],
+      completed_at: null,
+      last_test_type: null
+    }
+    const setupEventBodies: Array<Record<string, unknown>> = []
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = String(init?.method || "GET").toUpperCase()
+      if (path.includes("/persona/catalog")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [{ id: "garden-helper", name: "Garden Helper" }]
+        })
+      }
+      if (path.includes("/persona/profiles/garden-helper/setup-analytics")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            persona_id: "garden-helper",
+            summary: {
+              total_runs: 0,
+              completion_rate: 0,
+              first_post_setup_action_rate: 0
+            }
+          })
+        })
+      }
+      if (path.includes("/persona/profiles/garden-helper/setup-events") && method === "POST") {
+        setupEventBodies.push(init?.body || {})
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            event_id: init?.body?.event_id || "evt-setup-smoke",
+            run_id: init?.body?.run_id || "setup-smoke-run",
+            event_type: init?.body?.event_type || "step_viewed",
+            deduped: false,
+            created_at: "2026-03-14T10:00:00.000Z"
+          })
+        })
+      }
+      if (path.includes("/persona/profiles/garden-helper/voice-analytics")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            persona_id: "garden-helper",
+            summary: { total_runs: 0, matched_runs: 0, fallback_runs: 0 }
+          })
+        })
+      }
+      if (
+        path.includes("/persona/profiles/garden-helper/voice-commands/test") &&
+        method === "POST"
+      ) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            heard_text: init?.body?.heard_text,
+            matched: true,
+            command_name: "Search Notes"
+          })
+        })
+      }
+      if (
+        path.includes("/persona/profiles/garden-helper/voice-commands") &&
+        method === "POST"
+      ) {
+        starterAttempts += 1
+        if (starterAttempts === 1) {
+          return Promise.resolve({
+            ok: false,
+            error: "Failed to create starter command",
+            json: async () => ({})
+          })
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ id: "cmd-search-notes" })
+        })
+      }
+      if (path.includes("/persona/profiles/garden-helper")) {
+        if (method === "PATCH") {
+          profileVersion += 1
+          currentVoiceDefaults = {
+            ...currentVoiceDefaults,
+            ...(init?.body?.voice_defaults || {})
+          }
+          currentSetup = {
+            ...currentSetup,
+            ...(init?.body?.setup || {})
+          }
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "garden-helper",
+            version: profileVersion,
+            voice_defaults: currentVoiceDefaults,
+            setup: currentSetup,
+            use_persona_state_context_default: true
+          })
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        error: `unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(<SidepanelPersona />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("persona")
+    })
+
+    fireEvent.click(await screen.findByRole("button", { name: "Use Garden Helper persona" }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("voice")
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Save assistant defaults" }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("commands")
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Search Notes" }))
+
+    expect(await screen.findByText("Failed to create starter command")).toBeInTheDocument()
+    expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("commands")
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry Search Notes" }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("safety")
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Ask for destructive actions" }))
+    fireEvent.click(screen.getByRole("button", { name: "No external connections for now" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save safety choices" }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("test")
+    })
+
+    fireEvent.change(screen.getByPlaceholderText("Try a spoken phrase"), {
+      target: { value: "search notes for project alpha" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Run dry-run test" }))
+
+    await screen.findByText(/Matched Search Notes/i)
+
+    fireEvent.click(screen.getByRole("button", { name: "Finish with dry-run test" }))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("assistant-setup-overlay")).not.toBeInTheDocument()
+    })
+
+    expect(starterAttempts).toBe(2)
+    expect(currentSetup.status).toBe("completed")
+    expect(currentSetup.completed_steps).toEqual([
+      "persona",
+      "voice",
+      "commands",
+      "safety",
+      "test"
+    ])
+    expect(screen.getByTestId("persona-setup-handoff-card")).toHaveTextContent(
+      "Assistant setup complete"
+    )
+    expect(screen.getByTestId("persona-setup-handoff-card")).toHaveTextContent(
+      "Added 1 starter command"
+    )
+    expect(screen.getByTestId("persona-setup-handoff-card")).toHaveTextContent(
+      "Ask for destructive actions"
+    )
+    await waitFor(() => {
+      expect(
+        setupEventBodies.some(
+          (body) =>
+            body.event_type === "setup_completed" &&
+            body.completion_type === "dry_run"
         )
       ).toBe(true)
     })

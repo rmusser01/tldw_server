@@ -159,4 +159,4 @@ def _content_url(
 ) -> str:
     if content_url_builder is not None:
         return content_url_builder(pack, item)
-    return f"/api/v1/vn-assets/packs/{pack.id}/items/{item.id}/content"
+    return f"/api/v1/vn/vn-assets/packs/{pack.id}/items/{item.id}/content"

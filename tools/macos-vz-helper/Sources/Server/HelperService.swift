@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 struct HostFacts {
@@ -6,6 +7,9 @@ struct HostFacts {
 }
 
 enum HelperServiceError: Error {
+    case unsupportedRuntime(String)
+    case invalidCreateVMRequest(String)
+    case invalidCreateVMTimeout(String)
     case unsupportedNetworkPolicy(String)
     case invalidExecArgv(String)
     case invalidExecCwd(String)
@@ -23,6 +27,11 @@ final class HelperService {
     private static let maxExecEnvBytes = 32 * 1024
     private static let maxExecTimeoutSeconds: TimeInterval = 3_600
     private static let maxExecOutputBytes = 256 * 1024 * 1024
+    private static let maxCreateVMIDBytes = 128
+    private static let maxCreateVMTextBytes = 1024
+    private static let maxCreateVMPathBytes = 4096
+    private static let maxCreateVMTimeoutSeconds: TimeInterval = 3_600
+    private static let allowedCreateVMSymlinkPrefixes: Set<String> = ["/tmp", "/var"]
 
     private let protocolVersion = "1"
     private let helperVersion = "0.1.0"
@@ -108,6 +117,13 @@ final class HelperService {
         metadata: VMOwnershipMetadata = .unknown,
         networkPolicy: String = "deny_all"
     ) throws -> HelperVMResponse {
+        try validateCreateVMContract(
+            vmID: vmID,
+            templatePath: templatePath,
+            workspacePath: workspacePath,
+            readinessTimeoutSeconds: readinessTimeoutSeconds,
+            metadata: metadata
+        )
         let normalizedNetworkPolicy = try requireSupportedNetworkPolicy(networkPolicy)
         let normalizedMetadata = normalizeMetadata(
             metadata,
@@ -221,9 +237,10 @@ final class HelperService {
         workspacePath: String,
         networkPolicy: String
     ) -> VMOwnershipMetadata {
-        VMOwnershipMetadata(
+        let normalizedRuntime = normalizeRuntime(metadata.runtime)
+        return VMOwnershipMetadata(
             owner: metadata.owner.isEmpty ? "unknown" : metadata.owner,
-            runtime: metadata.runtime.isEmpty ? "vz_linux" : metadata.runtime,
+            runtime: normalizedRuntime.isEmpty ? "vz_linux" : normalizedRuntime,
             runID: metadata.runID,
             sessionID: metadata.sessionID,
             sessionMode: metadata.sessionMode,
@@ -250,8 +267,106 @@ final class HelperService {
         return normalized.isEmpty ? "deny_all" : normalized
     }
 
+    private func normalizeRuntime(_ runtime: String) -> String {
+        runtime.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
     private func networkPolicyErrorCode(_ networkPolicy: String) -> String {
         networkPolicy == "allowlist" ? "strict_allowlist_not_supported" : "unsupported_network_policy"
+    }
+
+    private func validateCreateVMContract(
+        vmID: String,
+        templatePath: String,
+        workspacePath: String,
+        readinessTimeoutSeconds: TimeInterval,
+        metadata: VMOwnershipMetadata
+    ) throws {
+        try validateCreateVMID(vmID)
+        try validateCreateVMPath(templatePath, reason: "template_path_invalid", required: true)
+        try validateCreateVMPath(workspacePath, reason: "workspace_path_invalid", required: true)
+        try validateCreateVMTimeout(readinessTimeoutSeconds)
+
+        let metadataRuntime = normalizeRuntime(metadata.runtime)
+        if !metadataRuntime.isEmpty, metadataRuntime != "vz_linux" {
+            throw HelperServiceError.unsupportedRuntime(metadataRuntime)
+        }
+
+        for (value, reason) in [
+            (metadata.owner, "owner_invalid"),
+            (metadata.runID, "run_id_invalid"),
+            (metadata.sessionID, "session_id_invalid"),
+            (metadata.templateID, "template_id_invalid"),
+            (metadata.planningSource, "planning_source_invalid"),
+            (metadata.createdAt, "created_at_invalid"),
+        ] {
+            try validateCreateVMText(value, reason: reason)
+        }
+        try validateCreateVMPath(metadata.templatePath, reason: "template_path_invalid", required: false)
+        try validateCreateVMPath(metadata.workspacePath, reason: "workspace_path_invalid", required: false)
+        try validateCreateVMPath(metadata.runManifestPath, reason: "run_manifest_path_invalid", required: false)
+    }
+
+    private func validateCreateVMID(_ vmID: String) throws {
+        guard !vmID.isEmpty,
+              vmID.trimmingCharacters(in: .whitespacesAndNewlines) == vmID,
+              !containsNUL(vmID),
+              vmID.utf8.count <= Self.maxCreateVMIDBytes else {
+            throw HelperServiceError.invalidCreateVMRequest("vm_id_invalid")
+        }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
+        guard vmID.unicodeScalars.allSatisfy({ allowed.contains($0) }) else {
+            throw HelperServiceError.invalidCreateVMRequest("vm_id_invalid")
+        }
+    }
+
+    private func validateCreateVMText(_ value: String, reason: String) throws {
+        guard !containsNUL(value),
+              !containsControlCharacter(value),
+              value.utf8.count <= Self.maxCreateVMTextBytes else {
+            throw HelperServiceError.invalidCreateVMRequest(reason)
+        }
+    }
+
+    private func validateCreateVMPath(_ value: String, reason: String, required: Bool) throws {
+        if value.isEmpty {
+            if required {
+                throw HelperServiceError.invalidCreateVMRequest(reason)
+            }
+            return
+        }
+        guard !containsNUL(value),
+              value.utf8.count <= Self.maxCreateVMPathBytes,
+              value.hasPrefix("/") else {
+            throw HelperServiceError.invalidCreateVMRequest(reason)
+        }
+
+        var currentPath = ""
+        for component in value.split(separator: "/", omittingEmptySubsequences: true) {
+            currentPath += "/\(component)"
+            var pathStat = stat()
+            errno = 0
+            let result = lstat(currentPath, &pathStat)
+            if result == 0 {
+                let type = pathStat.st_mode & S_IFMT
+                guard type != S_IFLNK || Self.allowedCreateVMSymlinkPrefixes.contains(currentPath) else {
+                    throw HelperServiceError.invalidCreateVMRequest(reason)
+                }
+                continue
+            }
+            guard errno == ENOENT else {
+                throw HelperServiceError.invalidCreateVMRequest(reason)
+            }
+            return
+        }
+    }
+
+    private func validateCreateVMTimeout(_ timeoutSeconds: TimeInterval) throws {
+        guard timeoutSeconds.isFinite,
+              timeoutSeconds > 0,
+              timeoutSeconds <= Self.maxCreateVMTimeoutSeconds else {
+            throw HelperServiceError.invalidCreateVMTimeout("timeout_out_of_range")
+        }
     }
 
     private func vmDetails(for record: VMRecord) -> [String: String] {

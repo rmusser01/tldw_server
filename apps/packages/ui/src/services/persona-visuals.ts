@@ -28,7 +28,12 @@ import type {
   PersonaVisualPackExportRequest,
   PersonaVisualPackExportResponse,
   PersonaVisualPackListResponse,
-  PersonaVisualPortabilityJobResponse
+  PersonaVisualPortabilityJobResponse,
+  PersonaVisualRendererCapabilitiesResponse,
+  PersonaVisualStarterPackCopyRequest,
+  PersonaVisualStarterPackDetail,
+  PersonaVisualStarterPackListResponse,
+  PersonaVisualStarterPackSummary
 } from "@/types/persona-visuals"
 
 type PersonaVisualFetchInit = {
@@ -72,6 +77,24 @@ const visualLibraryPath = (
   suffix = ""
 ): `/api/v1/persona/visual-library${string}` =>
   `/api/v1/persona/visual-library${suffix}`
+
+const visualStarterPackCollectionPath =
+  (): "/api/v1/persona/visual-starter-packs" =>
+    "/api/v1/persona/visual-starter-packs"
+
+const normalizeStarterPackId = (starterPackId: string): string => {
+  const normalizedId = starterPackId.trim()
+  if (!normalizedId) {
+    throw new PersonaVisualApiError("Starter pack id is required")
+  }
+  return normalizedId
+}
+
+const visualStarterPackDetailPath = (
+  starterPackId: string,
+  suffix = ""
+): `/api/v1/persona/visual-starter-packs/${string}` =>
+  `/api/v1/persona/visual-starter-packs/${encodeURIComponent(normalizeStarterPackId(starterPackId))}${suffix}`
 
 const normalizeBody = (
   body: PersonaVisualFetchInit["body"],
@@ -130,6 +153,17 @@ export const normalizePersonaVisualPackList = (
   }
 }
 
+export const normalizePersonaVisualStarterPackList = (
+  payload: PersonaVisualStarterPackSummary[] | PersonaVisualStarterPackListResponse
+): PersonaVisualStarterPackListResponse => {
+  if (Array.isArray(payload)) return { starter_packs: payload }
+  return {
+    starter_packs: Array.isArray(payload?.starter_packs)
+      ? payload.starter_packs
+      : []
+  }
+}
+
 export async function listPersonaVisualPacks(
   personaId: string
 ): Promise<PersonaVisualPackListResponse> {
@@ -137,6 +171,47 @@ export async function listPersonaVisualPacks(
     PersonaVisualPack[] | PersonaVisualPackListResponse
   >(personaVisualPath(personaId, "/visual-packs"))
   return normalizePersonaVisualPackList(payload)
+}
+
+export async function listPersonaVisualStarterPacks(): Promise<
+  PersonaVisualStarterPackListResponse
+> {
+  const payload = await fetchPersonaVisualJson<
+    PersonaVisualStarterPackSummary[] | PersonaVisualStarterPackListResponse
+  >(visualStarterPackCollectionPath())
+  return normalizePersonaVisualStarterPackList(payload)
+}
+
+export async function getPersonaVisualStarterPack(
+  starterPackId: string
+): Promise<PersonaVisualStarterPackDetail> {
+  return fetchPersonaVisualJson<PersonaVisualStarterPackDetail>(
+    visualStarterPackDetailPath(starterPackId)
+  )
+}
+
+export async function copyPersonaVisualStarterPack(
+  starterPackId: string,
+  payload: PersonaVisualStarterPackCopyRequest
+): Promise<PersonaVisualPack> {
+  return fetchPersonaVisualJson<PersonaVisualPack>(
+    visualStarterPackDetailPath(starterPackId, "/copy"),
+    {
+      method: "POST",
+      body: payload
+    }
+  )
+}
+
+export async function getPersonaVisualRendererCapabilities(): Promise<
+  PersonaVisualRendererCapabilitiesResponse
+> {
+  const payload = await fetchPersonaVisualJson<PersonaVisualRendererCapabilitiesResponse>(
+    "/api/v1/persona/visual-renderers"
+  )
+  return {
+    renderers: Array.isArray(payload?.renderers) ? payload.renderers : []
+  }
 }
 
 export async function getPersonaVisualPack(
@@ -241,7 +316,7 @@ export async function listPersonaVisualDuplicateTargets(): Promise<
   const payload = await fetchPersonaVisualJson<unknown>("/api/v1/persona/catalog")
   if (!Array.isArray(payload)) return []
   return payload
-    .map((item) => {
+    .map((item): PersonaVisualDuplicateTarget | null => {
       if (!item || typeof item !== "object") return null
       const candidate = item as { id?: unknown; name?: unknown }
       const id = String(candidate.id || "").trim()
@@ -428,7 +503,7 @@ export async function createPersonaVisualImportPreview(
   file: File
 ): Promise<PersonaVisualImportPreviewStartResponse> {
   const formData = new FormData()
-  formData.append("file", file)
+  formData.append("archive", file)
   return fetchPersonaVisualJson<PersonaVisualImportPreviewStartResponse>(
     personaVisualPath(personaId, "/visual-packs/import-previews"),
     {

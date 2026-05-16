@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useDemoMode } from "@/context/demo-mode"
+import { getDesignSystemState } from "@/design-system"
 import { useScrollToServerCard } from "@/hooks/useScrollToServerCard"
 import {
   useConnectionActions,
@@ -527,8 +528,10 @@ export const QuizWorkspace: React.FC = () => {
       }
     }
     if (uxState === "unconfigured" || uxState === "configuring_url") {
+      const setupRequiredState = getDesignSystemState("setup_required")
+
       return {
-        badgeLabel: "Setup required",
+        badgeLabel: setupRequiredState?.label ?? "",
         title: t("option:quiz.setupTitle", {
           defaultValue: "Finish setup to use Quiz Playground"
         }),

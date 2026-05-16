@@ -1919,6 +1919,11 @@ class LLMUsageLogRow(BaseModel):
     completion_tokens: int | None = None
     total_tokens: int | None = None
     total_cost_usd: float | None = None
+    cached_input_tokens: int = 0
+    cache_write_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    billable_input_tokens: int | None = None
+    estimate_source: str | None = None
     currency: str | None = None
     estimated: bool | None = None
     request_id: str | None = None
@@ -1951,6 +1956,16 @@ class LLMUsageSummaryRow(BaseModel):
     output_tokens: int
     total_tokens: int
     total_cost_usd: float
+    cached_input_tokens: int = 0
+    cache_write_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    billable_input_tokens: int = 0
+    provider_usage_count: int = 0
+    stream_estimate_count: int = 0
+    disconnect_estimate_count: int = 0
+    missing_usage_count: int = 0
+    local_diagnostic_count: int = 0
+    estimated_usage_count: int = 0
     latency_avg_ms: float | None = None
 
     model_config = ConfigDict(from_attributes=True)

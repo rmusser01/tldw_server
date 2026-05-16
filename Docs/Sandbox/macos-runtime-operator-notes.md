@@ -216,6 +216,12 @@ item and reports `live_vm_matches_blocked_cleanup` instead of deleting files.
   rejects unsupported policies before dispatch, and the Swift helper rejects
   direct `create_vm` requests unless `network_policy=deny_all`. The helper also
   echoes the accepted policy in VM metadata/status details for diagnostics.
+  Direct `create_vm` requests are also shape-checked before boot: unsupported
+  runtimes, invalid VM ids, non-absolute or NUL-bearing paths, symlink leaf
+  paths or user-controlled symlinked parent components, oversized metadata, and
+  out-of-range startup timeouts are rejected without registering a VM. Root-level
+  macOS compatibility prefixes such as `/tmp` and `/var` are allowed and
+  subsequent components are still checked.
 - The current `vz_linux` Virtualization.framework configuration omits network
   device attachment; guest command transport uses vsock rather than guest
   network access.
@@ -397,7 +403,7 @@ automated repair endpoint.
 - No APFS clone execution path yet
 - No allowlist networking for the new macOS runtimes
 - No `vz_macos` warm-session VM reuse yet
-- Managed helper lifecycle is available through `tools/macos-vz-helper/scripts/vz-helperctl.py`, but it remains operator-driven and does not install or load launchd services automatically
+- Managed helper lifecycle is available through `tools/macos-vz-helper/scripts/vz-helperctl.py`, including explicit `launchd` operator commands, but it remains operator-driven and does not install or load launchd services automatically
 - No automatic orphan VM termination during diagnostics or repair; orphan termination is explicit repair-only behavior and is limited to owned `vz_linux` helper VMs
 
 Current diagnostics are mixed-mode:
@@ -462,19 +468,70 @@ helper daemon for real `vz_linux` E2E, verifies ephemeral execution, verifies
 same-session VM reuse, verifies recovery diagnostics plus dry-run
 reconciliation repair planning, and stops the helper on exit.
 
-`restart-drill` is a narrower local helper lifecycle check. Use it after
-starting the helper through `vz-helperctl.py start` when you need to prove that
-the managed pid-file/socket workflow can stop the helper, start a replacement
-on the same paths, and reach healthy status again. It refuses absent or
-unmanaged helpers, preserves existing helper logs under the configured log
-directory, and does not run guest commands, mutate reconciliation state, manage
-launchd, or validate host reboot behavior.
+`restart-drill` validates the direct `vz-helperctl.py`-managed lifecycle. Use it
+after starting the helper through `vz-helperctl.py start` when you need to prove
+that the managed pid-file/socket workflow can stop the helper, start a
+replacement on the same paths, and reach healthy status again. It refuses
+absent or unmanaged helpers, preserves existing helper logs under the
+configured log directory, and does not run guest commands, mutate
+reconciliation state, manage launchd, or validate host reboot behavior.
 
 ```bash
 tools/macos-vz-helper/scripts/vz-helperctl.py start
 tools/macos-vz-helper/scripts/vz-helperctl.py restart-drill
 tools/macos-vz-helper/scripts/vz-helperctl.py stop
 ```
+
+`launchd` is available when operators want to manage the helper through a
+LaunchAgent instead of the direct pid-file wrapper. Treat it as an explicit
+procedure: run `--dry-run` first, write the plist only with `--write-plist`, and
+create runtime/log directories only with `--create-dirs`.
+
+```bash
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd status --dry-run
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd bootstrap \
+  --write-plist \
+  --create-dirs \
+  --dry-run
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd bootstrap \
+  --write-plist \
+  --create-dirs
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd kickstart
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd status
+tools/macos-vz-helper/scripts/vz-helperctl.py status
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd bootout
+```
+
+`launchd-drill` is the opt-in validation path for LaunchAgent bootstrap,
+kickstart, helper readiness, bootout, and optional real `vz_linux` smoke through
+the launchd-managed helper. Use isolated labels and private plist/runtime paths
+so the drill cannot take ownership of a user's existing service.
+
+```bash
+runtime_dir="$(mktemp -d "${TMPDIR:-/tmp}/tldw-vz-launchd-drill.XXXXXX")"
+chmod 700 "$runtime_dir"
+label="org.tldw.macos-vz-helper.drill.$$"
+trap 'tools/macos-vz-helper/scripts/vz-helperctl.py launchd bootout --label "$label" --plist-output "$runtime_dir/${label}.plist" >/dev/null 2>&1 || true; rm -rf "$runtime_dir"' EXIT
+
+tools/macos-vz-helper/scripts/vz-helperctl.py launchd-drill \
+  --socket "$runtime_dir/helper.sock" \
+  --log-dir "$runtime_dir/logs" \
+  --plist-output "$runtime_dir/${label}.plist" \
+  --label "$label" \
+  --write-plist \
+  --create-dirs \
+  --skip-smoke
+```
+
+Omit `--skip-smoke` and add `--bundle /path/to/canonical/bundle` when the
+prepared host should also run the real `vz_linux` smoke against the
+launchd-managed helper. The default direct-helper smoke path remains unchanged.
+
+The launchd path does not run from diagnostics, server startup, `status`,
+`plist`, or `smoke`. It also does not validate host reboot behavior; reboot
+testing remains a manual operator drill and must stay out of scheduled CI until
+a prepared runner can tolerate disruptive host lifecycle changes and preserve
+logs.
 
 Manual failure drills are opt-in and remain disabled for default smoke and
 scheduled host-gated runs. To include them, pass:

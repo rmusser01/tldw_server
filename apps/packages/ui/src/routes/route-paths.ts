@@ -7,8 +7,13 @@ export const CHAT_PATH = "/chat"
 export const CHAT_WORKSPACE_PATH = "/chat-workspace"
 export const RESEARCH_PATH = "/research"
 export const PROTOTYPE_WORKSPACES_PATH = "/prototype-workspaces"
+export const RESEARCH_STUDIO_PATH = "/research-studio"
 export const WORKSPACE_PLAYGROUND_PATH = "/workspace-playground"
+export const WORKSPACE_STUDIO_PATH = "/workspace-studio"
 export const DOCUMENT_WORKSPACE_PATH = "/document-workspace"
+export const MODERATION_REVIEW_PATH = "/moderation"
+export const MODERATION_RULES_PATH = "/moderation/rules"
+export const MODERATION_PLAYGROUND_LEGACY_PATH = "/moderation-playground"
 export const PRESENTATION_STUDIO_PATH = "/presentation-studio"
 export const PRESENTATION_STUDIO_NEW_PATH = "/presentation-studio/new"
 export const PRESENTATION_STUDIO_DETAIL_PATH = "/presentation-studio/:projectId"
@@ -22,7 +27,9 @@ export const ADMIN_SOURCES_PATH = "/admin/sources"
 export const VIEWPORT_CONSTRAINED_PATHS = [
   CHAT_WORKSPACE_PATH,
   DOCUMENT_WORKSPACE_PATH,
+  RESEARCH_STUDIO_PATH,
   WORKSPACE_PLAYGROUND_PATH,
+  WORKSPACE_STUDIO_PATH,
   "/media-multi",
 ] as const
 

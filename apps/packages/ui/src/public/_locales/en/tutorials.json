@@ -465,16 +465,16 @@
     "message": "Jump into Quiz mode from your selected deck to validate retention with assessments."
   },
   "moderation_basics_label": {
-    "message": "Content Controls Basics"
+    "message": "Content Rules Basics"
   },
   "moderation_basics_description": {
-    "message": "Learn how to set up content safety rules, blocklists, and test moderation."
+    "message": "Learn how to set up moderation policies, blocklists, overrides, and tests."
   },
   "moderation_basics_heroTitle": {
-    "message": "Moderation Dashboard"
+    "message": "Content Rules"
   },
   "moderation_basics_heroContent": {
-    "message": "This is your content safety hub. The status badge shows whether your server is connected."
+    "message": "This is your rule configuration hub. The status badge shows whether your server is connected."
   },
   "moderation_basics_policyTitle": {
     "message": "Policy & Settings"

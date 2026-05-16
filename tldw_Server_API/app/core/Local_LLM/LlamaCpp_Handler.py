@@ -6,7 +6,8 @@ import contextlib
 import os
 import platform
 import signal
-import subprocess  # For synchronous fallback if needed
+# Used without shell for managed process flags and bounded process cleanup.
+import subprocess  # nosec B404
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -273,14 +274,50 @@ class LlamaCppHandler(BaseLLMHandler):
         Starts the Llama.cpp server with the specified model.
         If a server is already running managed by this handler, it will be stopped first (model swap).
         """
-        if not Path(self.config.executable_path).is_file():
-            raise ServerError(f"Llama.cpp server executable not found at {self.config.executable_path}")
+        requested = Path(model_filename)
+        if requested.is_absolute() or ".." in requested.parts:
+            raise ServerError("Model filename must be a relative filename under the configured models directory.")
+        return await self.start_server_by_path(
+            self.models_dir / model_filename,
+            model_label=model_filename,
+            server_args=server_args,
+        )
 
-        model_path = self.models_dir / model_filename
+    async def start_server_by_path(
+        self,
+        model_path: Path,
+        *,
+        model_label: str | None = None,
+        server_args: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """
+        Starts the managed Llama.cpp server using a validated local GGUF path.
+        """
+        try:
+            model_path = model_path.expanduser().resolve()
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ServerError("Model path could not be resolved.") from exc
         if not self._is_path_allowed(model_path):
             raise ServerError("Model path must be under allowed directories.")
+        if model_path.suffix.lower() != ".gguf":
+            raise ServerError("Model path must reference a GGUF file.")
         if not model_path.is_file():
-            raise ModelNotFoundError(f"Model file {model_filename} not found in {self.models_dir}.")
+            raise ModelNotFoundError(f"Model file {model_path.name} was not found.")
+        return await self._start_server_for_model_path(
+            model_path,
+            model_label=model_label or model_path.name,
+            server_args=server_args,
+        )
+
+    async def _start_server_for_model_path(
+        self,
+        model_path: Path,
+        *,
+        model_label: str,
+        server_args: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        if not Path(self.config.executable_path).is_file():
+            raise ServerError(f"Llama.cpp server executable not found at {self.config.executable_path}")
 
         # --- Model Swapping Logic with Rollback ---
         prev_process = None
@@ -557,7 +594,7 @@ class LlamaCppHandler(BaseLLMHandler):
         from .http_utils import redact_cmd_args
         redacted_cmd = redact_cmd_args(command)
         self.logger.info(
-            f"Starting Llama.cpp server for {model_filename} on {host}:{port} with command: {' '.join(redacted_cmd)}")
+            f"Starting Llama.cpp server for {model_label} on {host}:{port} with command: {' '.join(redacted_cmd)}")
 
         stdout_redir = asyncio.subprocess.PIPE
         stderr_redir = asyncio.subprocess.PIPE
@@ -606,7 +643,7 @@ class LlamaCppHandler(BaseLLMHandler):
                         stderr_output = "(stderr read timed out after 5s)"
                         self.logger.warning("stderr read timed out during startup failure diagnosis")
                 self.logger.error(
-                    f"Llama.cpp server failed to start or become ready for {model_filename}. Exit code: {process.returncode}. Stderr: {stderr_output}"
+                    f"Llama.cpp server failed to start or become ready for {model_label}. Exit code: {process.returncode}. Stderr: {stderr_output}"
                 )
                 if log_file_handle:
                     log_file_handle.close()
@@ -620,7 +657,7 @@ class LlamaCppHandler(BaseLLMHandler):
                 raise ServerError(f"Llama.cpp server failed to start. Stderr: {stderr_output}")
 
             self._active_server_process = process
-            self._active_server_model = model_filename
+            self._active_server_model = model_label
             self._active_server_port = port
             self._active_server_host = host
             t1 = time.perf_counter()
@@ -633,13 +670,13 @@ class LlamaCppHandler(BaseLLMHandler):
                 self._active_server_log_handle = None
             self._start_stream_drainers(process)
 
-            self.logger.info(f"Llama.cpp server started for {model_filename} on {host}:{port} with PID {process.pid}.")
-            return {"status": "started", "pid": process.pid, "model": model_filename, "port": port, "host": host,
+            self.logger.info(f"Llama.cpp server started for {model_label} on {host}:{port} with PID {process.pid}.")
+            return {"status": "started", "pid": process.pid, "model": model_label, "port": port, "host": host,
                     "command": ' '.join(redacted_cmd)}
         except Exception as e:
             if log_file_handle:
                 log_file_handle.close()
-            self.logger.error(f"Exception starting Llama.cpp server for {model_filename}: {e}", exc_info=True)
+            self.logger.error(f"Exception starting Llama.cpp server for {model_label}: {e}", exc_info=True)
             raise ServerError(f"Exception starting Llama.cpp server: {e}") from e
 
     async def stop_server(self, pid: Optional[int] = None, port: Optional[int] = None) -> str:

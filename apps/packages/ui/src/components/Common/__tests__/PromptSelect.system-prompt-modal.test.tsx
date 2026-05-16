@@ -3,10 +3,15 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { OPEN_PROMPT_SELECT_EVENT } from "@/utils/prompt-select-events"
 
 const mocks = vi.hoisted(() => ({
   getAllPrompts: vi.fn(async () => []),
   getPromptById: vi.fn(async () => undefined)
+}))
+
+const registryLabels = vi.hoisted(() => ({
+  loading: "Loading via registry"
 }))
 
 vi.mock("react-i18next", () => ({
@@ -24,6 +29,24 @@ vi.mock("@/db/dexie/helpers", () => ({
   getAllPrompts: mocks.getAllPrompts,
   getPromptById: mocks.getPromptById
 }))
+
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+
+        return {
+          ...state,
+          label: key === "loading" ? registryLabels.loading : state.label
+        }
+      }
+    )
+  }
+})
 
 vi.mock("antd", async () => {
   const React = await import("react")
@@ -243,6 +266,49 @@ describe("PromptSelect system prompt modal", () => {
 
     await waitFor(() => {
       expect(props.setSystemPrompt).toHaveBeenCalledWith("")
+    })
+  })
+
+  it("uses the design-system loading label while resolving editor content", async () => {
+    const user = userEvent.setup()
+    mocks.getPromptById.mockReturnValue(new Promise(() => {}))
+    renderPromptSelect()
+
+    await user.click(
+      await screen.findByRole("button", { name: "selectAPrompt" })
+    )
+    await user.click(await screen.findByRole("menuitem", { name: /edit system prompt/i }))
+
+    expect(await screen.findByText("Loading via registry")).toBeInTheDocument()
+  })
+
+  it("returns focus to the launching rail trigger after prompt selection", async () => {
+    const user = userEvent.setup()
+    const { props } = renderPromptSelect({
+      selectedSystemPrompt: undefined
+    })
+    render(
+      <button type="button" data-testid="cockpit-prompt-select-trigger">
+        Select prompt from rail
+      </button>
+    )
+    const trigger = screen.getByTestId("cockpit-prompt-select-trigger")
+    trigger.focus()
+
+    window.dispatchEvent(
+      new CustomEvent(OPEN_PROMPT_SELECT_EVENT, {
+        detail: {
+          returnFocusSelector: "[data-testid='cockpit-prompt-select-trigger']",
+          source: "playground-cockpit"
+        }
+      })
+    )
+
+    await user.click(await screen.findByRole("menuitem", { name: /Prompt One/i }))
+
+    await waitFor(() => {
+      expect(props.setSelectedSystemPrompt).toHaveBeenCalledWith("prompt-1")
+      expect(trigger).toHaveFocus()
     })
   })
 })

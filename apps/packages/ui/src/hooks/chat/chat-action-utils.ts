@@ -9,6 +9,7 @@ import type { ImageGenerationEventSyncMode } from "@/utils/image-generation-chat
 import type { SaveMessageData } from "@/types/chat-modes";
 import type { ChatModelSettings } from "@/store/model";
 import { isGreetingMessageType } from "@/utils/character-greetings";
+import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -326,3 +327,19 @@ export const buildHistoryForModel = (
   buildHistoryFromMessages(
     items.filter((message) => shouldIncludeMessageForModel(message, modelId)),
   );
+
+export const resolveCompareModelSelection = (modelKey: string) => {
+  const rawModelKey = String(modelKey || "").trim();
+  const modelSelection = parseProviderQualifiedModelSelection(rawModelKey);
+  const selectedModel = modelSelection.modelId || rawModelKey;
+  const historyModelKey =
+    modelSelection.provider && selectedModel
+      ? `${modelSelection.provider}:${selectedModel}`
+      : selectedModel;
+
+  return {
+    selectedModel,
+    historyModelKey,
+    provider: modelSelection.provider,
+  };
+};

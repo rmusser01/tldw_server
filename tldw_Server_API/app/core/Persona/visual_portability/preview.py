@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import json
+import re
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from tldw_Server_API.app.core.Persona.visual_import_preview_validators import (
+    preview_renderer_import,
+)
 from tldw_Server_API.app.core.Persona.visuals import (
     PersonaVisualManifestError,
     validate_visual_manifest,
@@ -24,6 +28,8 @@ from .constants import (
     TRUST_MODE_UNTRUSTED_IMPORT,
 )
 from .fingerprints import canonical_payload_fingerprint, sha256_file, sha256_stream
+
+_INTEGER_TEXT_RE = re.compile(r"^[+-]?[0-9]+$")
 
 
 class PersonaVisualPackImportPreviewer:
@@ -65,27 +71,36 @@ class PersonaVisualPackImportPreviewer:
             visual_manifest = pack.get("visual_manifest")
             if not isinstance(visual_manifest, dict):
                 raise ValueError("malformed_metadata: metadata/pack.json")
-            available_asset_ids = {
-                str(asset["source_asset_id"])
-                for asset in assets
-                if asset.get("source_asset_id") not in (None, "")
-            }
-            available_dimensions = {
-                str(asset["source_asset_id"]): (int(asset["width"]), int(asset["height"]))
-                for asset in assets
-                if asset.get("source_asset_id") not in (None, "")
-                and asset.get("width") is not None
-                and asset.get("height") is not None
-            }
-            try:
-                manifest_validation = validate_visual_manifest(
-                    visual_manifest,
-                    available_asset_ids=available_asset_ids,
-                    available_asset_dimensions=available_dimensions,
-                    require_activatable=False,
-                )
-            except PersonaVisualManifestError as exc:
-                raise ValueError("malformed_visual_manifest") from exc
+            renderer_import_preview: dict[str, Any] | None = None
+            resolved_required_states: Mapping[str, str] = {}
+            if _uses_renderer_import_preview(visual_manifest):
+                renderer_import_preview = preview_renderer_import(
+                    manifest=visual_manifest,
+                    assets=assets,
+                ).to_dict()
+            else:
+                available_asset_ids = {
+                    str(asset["source_asset_id"])
+                    for asset in assets
+                    if asset.get("source_asset_id") not in (None, "")
+                }
+                available_dimensions = {
+                    str(asset["source_asset_id"]): (int(asset["width"]), int(asset["height"]))
+                    for asset in assets
+                    if asset.get("source_asset_id") not in (None, "")
+                    and asset.get("width") is not None
+                    and asset.get("height") is not None
+                }
+                try:
+                    manifest_validation = validate_visual_manifest(
+                        visual_manifest,
+                        available_asset_ids=available_asset_ids,
+                        available_asset_dimensions=available_dimensions,
+                        require_activatable=False,
+                    )
+                except PersonaVisualManifestError as exc:
+                    raise ValueError("malformed_visual_manifest") from exc
+                resolved_required_states = manifest_validation.resolved_required_states
 
         validation_warnings = _validation_warnings(assets)
         source_persona_id = str(pack.get("source_persona_id") or "")
@@ -126,6 +141,16 @@ class PersonaVisualPackImportPreviewer:
                 "manifest": "state_and_animation_ids",
             },
         }
+        preview_status = "completed"
+        if renderer_import_preview is not None:
+            proposed_plan["renderer_import_preview"] = renderer_import_preview
+            proposed_plan["commit_eligible"] = bool(renderer_import_preview.get("can_commit"))
+            proposed_plan["activation_eligible"] = bool(
+                renderer_import_preview.get("activation_eligible")
+            )
+            proposed_plan["commit_blockers"] = list(renderer_import_preview.get("blockers") or [])
+            if not proposed_plan["commit_eligible"]:
+                preview_status = "blocked"
         quota_estimate = {
             "asset_bytes": asset_summary["present_asset_bytes"],
             "present_asset_items": asset_summary["present_asset_items"],
@@ -136,11 +161,11 @@ class PersonaVisualPackImportPreviewer:
             pack=pack,
             assets=assets,
             asset_summary=asset_summary,
-            resolved_required_states=manifest_validation.resolved_required_states,
+            resolved_required_states=resolved_required_states,
         )
         self._progress(progress, "completed", {"archive_sha256": archive_sha256})
         return {
-            "status": "completed",
+            "status": preview_status,
             "archive_sha256": archive_sha256,
             "canonical_payload_fingerprint": preview_fingerprint,
             "schema_version": PERSONA_VISUAL_PACK_SCHEMA_VERSION,
@@ -211,6 +236,28 @@ def _section_list(value: Any, *, key: str, path: str) -> list[dict[str, Any]]:
             raise ValueError(f"malformed_metadata: {path}")
         records.append(dict(item))
     return records
+
+
+def _uses_renderer_import_preview(visual_manifest: Mapping[str, Any]) -> bool:
+    """Return whether archive preview should use renderer capability diagnostics."""
+
+    manifest_version = _coerce_manifest_version(visual_manifest.get("manifest_version"))
+    return manifest_version is not None and manifest_version != 1
+
+
+def _coerce_manifest_version(value: Any) -> int | None:
+    """Normalize JSON manifest version values used for preview-path routing."""
+
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return int(stripped) if _INTEGER_TEXT_RE.fullmatch(stripped) else None
+    return None
 
 
 def _validate_checksums(

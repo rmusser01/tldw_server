@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  resolveCompareModelSelection,
   resolveTurnFileRetrievalEnabled,
   resolveTurnRagMediaIds,
   shouldUseRagForTurn
@@ -105,5 +106,25 @@ describe("turn-level RAG media overrides", () => {
         ragMediaIds: [5]
       })
     ).toBe(false)
+  })
+})
+
+describe("compare model selection", () => {
+  it("uses a provider-qualified key for compare branch identity while keeping the API model bare", () => {
+    expect(
+      resolveCompareModelSelection("openrouter:anthropic/claude-3.5-sonnet")
+    ).toEqual({
+      selectedModel: "anthropic/claude-3.5-sonnet",
+      historyModelKey: "openrouter:anthropic/claude-3.5-sonnet",
+      provider: "openrouter"
+    })
+  })
+
+  it("keeps unqualified compare selections unchanged", () => {
+    expect(resolveCompareModelSelection("gpt-4o")).toEqual({
+      selectedModel: "gpt-4o",
+      historyModelKey: "gpt-4o",
+      provider: undefined
+    })
   })
 })

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from enum import Enum
 from fnmatch import fnmatch
 from pathlib import Path
@@ -175,6 +176,18 @@ class ExternalServerRegistryConfig(BaseModel):
     servers: list[ExternalMCPServerConfig] = Field(default_factory=list)
 
 
+@dataclass(slots=True)
+class ExternalServerRegistryPartialLoadError(RuntimeError):
+    """Raised when a registry loader can return only part of the runtime config."""
+
+    message: str
+    servers: list[ExternalMCPServerConfig]
+    errors: dict[str, str]
+
+    def __str__(self) -> str:
+        return self.message
+
+
 def _model_validate(model_cls: type[BaseModel], payload: Any) -> BaseModel:
     """Validate payload using either Pydantic v2 or v1 API."""
 
@@ -237,6 +250,7 @@ __all__ = [
     "ExternalMCPServerConfig",
     "ExternalRetryConfig",
     "ExternalServerRegistryConfig",
+    "ExternalServerRegistryPartialLoadError",
     "ExternalStdioConfig",
     "ExternalTimeoutConfig",
     "ExternalToolPolicy",

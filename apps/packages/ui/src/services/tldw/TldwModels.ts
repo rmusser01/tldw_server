@@ -39,6 +39,23 @@ const NON_CHAT_MODEL_HINTS = ["rerank", "moderation", "safety"]
 const hasAnyHint = (value: string, hints: string[]): boolean =>
   hints.some((hint) => value.includes(hint))
 
+const isAbortLikeModelFetchError = (error: unknown): boolean => {
+  const candidate = error as
+    | (Error & {
+        code?: unknown
+        status?: unknown
+      })
+    | null
+    | undefined
+  const message =
+    candidate instanceof Error ? candidate.message.toLowerCase() : ""
+  return (
+    candidate?.name === "AbortError" ||
+    candidate?.code === "REQUEST_ABORTED" ||
+    message.includes("abort")
+  )
+}
+
 export interface ModelInfo {
   id: string
   name: string
@@ -47,6 +64,9 @@ export interface ModelInfo {
   capabilities?: string[]
   contextLength?: number
   description?: string
+  isConfigured?: boolean
+  providerIsConfigured?: boolean
+  catalogOnly?: boolean
   modalities?: {
     input?: string[]
     output?: string[]
@@ -60,7 +80,7 @@ export class TldwModelsService {
   private readonly CACHE_DURATION = 15 * 60 * 1000 // 15 minutes
   private readonly FORCE_REFRESH_COOLDOWN = 30 * 1000
   private readonly CACHE_KEY = "tldwModelsCache"
-  private readonly CACHE_SCHEMA_VERSION = 2
+  private readonly CACHE_SCHEMA_VERSION = 3
   private storage = createSafeStorage({ area: "local" })
   private storageLoaded = false
   private storageInitPromise: Promise<void> | null = null
@@ -152,7 +172,7 @@ export class TldwModelsService {
     this.cacheScopeKey = scopeKey
 
     const now = Date.now()
-    
+
     // Return cached models if available and not expired
     if (!forceRefresh && this.cachedModels && (now - this.lastFetchTime) < this.CACHE_DURATION) {
       return this.cachedModels
@@ -172,12 +192,12 @@ export class TldwModelsService {
       return this.cachedModels || []
     }
 
-    const fetchPromise = (async () => {
+    const fetchFromServer = async () => {
       await tldwClient.initialize()
       const models = await tldwClient.getModels({
         refreshOpenRouter: options?.refreshOpenRouter === true
       })
-      
+
       // Transform tldw models to our format
       this.cachedModels = models.map(model => this.transformModel(model))
       this.lastFetchTime = Date.now()
@@ -185,25 +205,35 @@ export class TldwModelsService {
         this.lastForcedFetchTime = this.lastFetchTime
       }
       await this.persistCache()
-      
-      return this.cachedModels
-    })()
 
-    this.inFlightFetch = fetchPromise
-    try {
-      return await fetchPromise
-    } catch (error) {
+      return this.cachedModels
+    }
+
+    const fetchPromise = fetchFromServer().catch(async (error) => {
+      if (isAbortLikeModelFetchError(error) && !this.cachedModels) {
+        try {
+          return await fetchFromServer()
+        } catch (retryError) {
+          error = retryError
+        }
+      }
+
       if (!import.meta.env?.DEV) {
         console.error('Failed to fetch models from tldw:', error)
       }
-      
+
       // Return cached models if available, even if expired
       if (this.cachedModels) {
         return this.cachedModels
       }
-      
+
       // Return empty array as fallback
       return []
+    })
+
+    this.inFlightFetch = fetchPromise
+    try {
+      return await fetchPromise
     } finally {
       if (this.inFlightFetch === fetchPromise) {
         this.inFlightFetch = null
@@ -279,7 +309,7 @@ export class TldwModelsService {
   async getModelsByProvider(): Promise<Map<string, ModelInfo[]>> {
     const models = await this.getModels()
     const grouped = new Map<string, ModelInfo[]>()
-    
+
     for (const model of models) {
       const provider = model.provider
       if (!grouped.has(provider)) {
@@ -287,7 +317,7 @@ export class TldwModelsService {
       }
       grouped.get(provider)!.push(model)
     }
-    
+
     return grouped
   }
 
@@ -371,6 +401,9 @@ export class TldwModelsService {
       capabilities: caps.length ? Array.from(new Set(caps)) : undefined,
       contextLength: tldwModel.context_length,
       description: tldwModel.description,
+      isConfigured: tldwModel.is_configured,
+      providerIsConfigured: tldwModel.provider_is_configured,
+      catalogOnly: tldwModel.catalog_only,
       modalities: tldwModel.modalities
     }
   }

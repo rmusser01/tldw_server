@@ -38,6 +38,7 @@ jobs:
       NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
       TLDW_WEB_CMD: 'env NEXT_DISABLE_MEM_OVERRIDE=1 NODE_OPTIONS=--max-old-space-size=5120 bun run dev -- --webpack -p 8080'
       TLDW_ONBOARDING_EVIDENCE_TAG: ci-${{ github.run_id }}-${{ github.run_attempt }}
+      SKIP_WXT_PREPARE: '1'
 
     steps:
       - name: Checkout
@@ -146,6 +147,7 @@ jobs:
       NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
       TLDW_WEB_CMD: 'env NODE_OPTIONS=--max-old-space-size=4096 bun run start -- -p 8080'
       TLDW_SMOKE_HARD_GATE: '1'
+      SKIP_WXT_PREPARE: '1'
 
     steps:
       - name: Checkout

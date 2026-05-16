@@ -1,0 +1,10 @@
+projectName: basic-fixture
+statuses:
+  - To Do
+  - In Progress
+  - Done
+defaultStatus: To Do
+remoteOperations: false
+autoCommit: false
+bypassGitHooks: false
+checkActiveBranches: false

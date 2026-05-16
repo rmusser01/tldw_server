@@ -9,7 +9,7 @@ import { tldwModels } from "@/services/tldw"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useStoreMessageOption, type ToolChoice } from "@/store/option"
 import { useMcpToolsStore } from "@/store/mcp-tools"
-import { normalizeChatToolsForRequest } from "@/utils/chat-tools"
+import { resolveChatToolRequest } from "@/utils/chat-tools"
 import { resolveApiProviderForModel } from "@/utils/resolve-api-provider"
 
 const isValidReasoningEffort = (
@@ -71,12 +71,10 @@ export const pageAssistModel = async ({
   const {
     tools: storedTools,
     chatTools: storedChatTools,
+    toolCounts,
     healthState: mcpHealthState
   } = useMcpToolsStore.getState()
   const resolvedToolChoice = toolChoice ?? storedToolChoice
-  const resolvedTools = normalizeChatToolsForRequest(
-    tools ?? storedChatTools ?? storedTools
-  )
   const normalizedModelId = String(model || "").replace(/^tldw:/, "")
   let modelSupportsTools = false
   let modelSupportsMultimodal = false
@@ -90,18 +88,18 @@ export const pageAssistModel = async ({
     modelSupportsTools = false
     modelSupportsMultimodal = false
   }
-  const toolsEnabled =
-    modelSupportsTools &&
-    mcpHealthState !== "unavailable" &&
-    mcpHealthState !== "unhealthy"
-  const effectiveTools =
-    toolsEnabled &&
-    resolvedToolChoice !== "none" &&
-    Array.isArray(resolvedTools) &&
-    resolvedTools.length > 0
-      ? resolvedTools
-      : undefined
-  const effectiveToolChoice = effectiveTools ? resolvedToolChoice : undefined
+  const resolvedToolCandidates = tools ?? storedChatTools ?? storedTools
+  const hasStoredFilterCounts = Object.values(toolCounts).some(
+    (count) => count > 0
+  )
+  const toolRequest = resolveChatToolRequest({
+    tools: resolvedToolCandidates,
+    toolChoice: resolvedToolChoice,
+    modelSupportsTools,
+    mcpHealthState,
+    hasMcp: mcpHealthState !== "unavailable",
+    counts: !tools && hasStoredFilterCounts ? toolCounts : undefined
+  })
   const resolvedConversationId =
     conversationId && conversationId.trim().length > 0
       ? conversationId.trim()
@@ -153,7 +151,7 @@ export const pageAssistModel = async ({
     const headers = {
       ...(resolvedExtraHeadersBase ?? {})
     } as Record<string, unknown>
-    if (effectiveTools) {
+    if (toolRequest.tools) {
       headers["X-TLDW-Loop-Compat"] = "1"
     }
     return Object.keys(headers).length > 0 ? headers : undefined
@@ -253,8 +251,8 @@ export const pageAssistModel = async ({
       : isValidReasoningEffort(reasoningEffort)
         ? reasoningEffort
         : undefined,
-    toolChoice: effectiveToolChoice,
-    tools: effectiveTools,
+    toolChoice: toolRequest.toolChoice,
+    tools: toolRequest.tools,
     supportsMultimodal: modelSupportsMultimodal,
     saveToDb: resolvedSaveToDb,
     conversationId: finalConversationId,
@@ -264,6 +262,11 @@ export const pageAssistModel = async ({
     apiProvider: normalizedApiProvider,
     extraHeaders: resolvedExtraHeaders,
     extraBody: resolvedExtraBody,
-    researchContext
+    researchContext,
+    chatDebugMetadata: {
+      toolChoice: toolRequest.toolChoice,
+      toolOmissionReason: toolRequest.omittedReason,
+      toolCounts: toolRequest.counts
+    }
   })
 }

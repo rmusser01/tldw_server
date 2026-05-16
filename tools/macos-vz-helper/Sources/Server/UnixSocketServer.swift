@@ -138,29 +138,43 @@ final class UnixSocketServer {
                     key: "network_policy",
                     defaultValue: "deny_all"
                 )
-                let templatePath = request.request["template"]?.stringValue
-                    ?? request.request["template_path"]?.stringValue
-                    ?? ""
-                let workspacePath = request.request["workspace_path"]?.stringValue ?? ""
+                let templatePath = try optionalStringField(
+                    request.request,
+                    key: "template",
+                    defaultValue: try optionalStringField(
+                        request.request,
+                        key: "template_path",
+                        defaultValue: ""
+                    )
+                )
+                let workspacePath = try optionalStringField(request.request, key: "workspace_path", defaultValue: "")
                 let metadata = VMOwnershipMetadata(
-                    owner: request.request["owner"]?.stringValue ?? "unknown",
-                    runtime: request.request["runtime"]?.stringValue ?? "vz_linux",
-                    runID: request.request["run_id"]?.stringValue ?? "",
-                    sessionID: request.request["session_id"]?.stringValue ?? "",
+                    owner: try optionalStringField(request.request, key: "owner", defaultValue: "unknown"),
+                    runtime: try optionalStringField(request.request, key: "runtime", defaultValue: "vz_linux"),
+                    runID: try optionalStringField(request.request, key: "run_id", defaultValue: ""),
+                    sessionID: try optionalStringField(request.request, key: "session_id", defaultValue: ""),
                     sessionMode: request.request["session_mode"]?.boolValue ?? false,
-                    templateID: request.request["template_id"]?.stringValue ?? "",
+                    templateID: try optionalStringField(request.request, key: "template_id", defaultValue: ""),
                     templatePath: templatePath,
-                    runManifestPath: request.request["run_manifest_path"]?.stringValue ?? "",
-                    planningSource: request.request["planning_source"]?.stringValue ?? "",
+                    runManifestPath: try optionalStringField(request.request, key: "run_manifest_path", defaultValue: ""),
+                    planningSource: try optionalStringField(request.request, key: "planning_source", defaultValue: ""),
                     workspacePath: workspacePath,
                     createdAt: ""
                 )
                 return try encoder.encode(
                     try service.createVM(
-                        vmID: request.request["vm_name"]?.stringValue ?? request.request["run_id"]?.stringValue ?? "",
+                        vmID: try optionalStringField(
+                            request.request,
+                            key: "vm_name",
+                            defaultValue: try optionalStringField(request.request, key: "run_id", defaultValue: "")
+                        ),
                         templatePath: templatePath,
                         workspacePath: workspacePath,
-                        readinessTimeoutSeconds: TimeInterval(request.request["timeout_sec"]?.intValue ?? 30),
+                        readinessTimeoutSeconds: try optionalTimeIntervalField(
+                            request.request,
+                            key: "timeout_sec",
+                            defaultValue: 30
+                        ),
                         metadata: metadata,
                         networkPolicy: networkPolicy
                     )
@@ -655,6 +669,12 @@ final class UnixSocketServer {
             return "helper_socket_path_too_long"
         case UnixSocketServerError.unsupportedOperation:
             return "unsupported_operation"
+        case HelperServiceError.unsupportedRuntime:
+            return "runtime_unsupported"
+        case HelperServiceError.invalidCreateVMRequest:
+            return "create_vm_request_invalid"
+        case HelperServiceError.invalidCreateVMTimeout:
+            return "create_vm_timeout_invalid"
         case HelperServiceError.unsupportedNetworkPolicy(let policy):
             return policy == "allowlist" ? "strict_allowlist_not_supported" : "unsupported_network_policy"
         case HelperServiceError.invalidExecArgv:
@@ -699,6 +719,11 @@ final class UnixSocketServer {
             return "system_error_\(code)"
         case UnixSocketServerError.invalidRequest, is DecodingError:
             return "invalid_request"
+        case HelperServiceError.unsupportedRuntime(let runtime):
+            return runtime
+        case HelperServiceError.invalidCreateVMRequest(let reason),
+             HelperServiceError.invalidCreateVMTimeout(let reason):
+            return reason
         case HelperServiceError.unsupportedNetworkPolicy(let policy):
             return policy
         case HelperServiceError.invalidExecArgv(let reason),

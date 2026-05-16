@@ -456,6 +456,34 @@ class TestWorldBookService:
         # High priority should be processed first
         assert "High priority" in result["processed_context"]
 
+    def test_process_context_diagnostics_include_static_or_pinned_hint(self, service):
+        """Diagnostics should expose cache-safe static/pinned classification without raw metadata."""
+        service.get_world_book = MagicMock(
+            return_value={"id": 1, "name": "Test", "token_budget": 500, "enabled": 1}
+        )
+        service._entry_cache = {
+            1: [
+                WorldBookEntry(
+                    entry_id=1,
+                    world_book_id=1,
+                    keywords=["clock"],
+                    content="Clock tower lore",
+                    priority=100,
+                    enabled=True,
+                    metadata={"pinned": True},
+                )
+            ]
+        }
+
+        result = service.process_context(
+            text="clock",
+            world_book_ids=[1],
+            token_budget=1000,
+            include_diagnostics=True,
+        )
+
+        assert result["diagnostics"][0]["static_or_pinned"] is True
+
     def test_process_context_keyword_lookup_skips_non_candidate_literal_entries(self, service):
         """Normalized keyword lookup should avoid scanning unrelated literal entries."""
         service.get_world_book = MagicMock(

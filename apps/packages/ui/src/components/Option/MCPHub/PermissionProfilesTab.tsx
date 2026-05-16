@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
-import { Alert, Button, Card, Checkbox, Empty, Modal, Space, Tag, Typography } from "antd"
+import { Button, Card, Checkbox, Empty, Modal, Space, Tag, Typography } from "antd"
+import { EmptyState } from "@/components/ui/feedback"
+import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
 
 import {
   createPermissionProfile,
@@ -435,7 +437,11 @@ export const PermissionProfilesTab = () => {
                       })}
                     </Space>
                   ) : (
-                    <Empty description="No managed external servers are available yet." />
+                    <EmptyState
+                      variant="inline"
+                      size="sm"
+                      title="No managed external servers are available yet."
+                    />
                   )}
                 </Space>
               </Card>
@@ -457,21 +463,22 @@ export const PermissionProfilesTab = () => {
       {loading ? (
         <Card loading size="small" />
       ) : profiles.length === 0 ? (
-        <Empty
+        <EmptyState
+          variant="inline"
+          title="No permission profiles yet"
           description={
             <Space orientation="vertical" size={4}>
-              <Typography.Text type="secondary">No permission profiles yet</Typography.Text>
               <Typography.Text type="secondary" style={{ fontSize: 13 }}>
                 Profiles control which tools users and personas can access.
                 Before creating a profile, review the <Typography.Text strong>Tool Catalog</Typography.Text> to see available tools.
               </Typography.Text>
             </Space>
           }
-        >
-          <Button type="primary" onClick={() => setCreateOpen(true)}>
-            Create Profile
-          </Button>
-        </Empty>
+          primaryAction={{
+            label: "Create Profile",
+            onClick: () => setCreateOpen(true),
+          }}
+        />
       ) : (
         <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
           {profiles.map((profile) => (

@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo import (
     PrototypeWorkspacesRepo,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.exceptions import PrototypeTerminalRuntimeError
 
 from .models import (
     PrototypePreviewHandleRecord,
@@ -72,7 +73,7 @@ def _resolve_stable_signing_secret(signing_secret: str | None) -> str:
     )
 
 
-class PrototypePreviewHandleNotFound(RuntimeError):
+class PrototypePreviewHandleNotFound(PrototypeTerminalRuntimeError):
     """Raised when a preview handle cannot be found or renewed."""
 
 
@@ -108,9 +109,7 @@ class PrototypePreviewBroker:
     ) -> dict[str, Any]:
         workspace = await self._repo.get_workspace(prototype_workspace_id)
         if not workspace:
-            raise RuntimeError("prototype workspace not found")
-        if workspace.get("is_archived"):
-            raise RuntimeError("prototype workspace is archived")
+            raise PrototypeTerminalRuntimeError("prototype workspace not found")
         if not str(snapshot_id or "").strip():
             raise ValueError("snapshot_id is required")
         if not str(runtime_target_url or "").strip():
@@ -125,12 +124,12 @@ class PrototypePreviewBroker:
             preview_scope = PrototypePreviewScope.SESSION
             session = await self._repo.get_session(prototype_session_id)
             if not session or session.get("prototype_workspace_id") != prototype_workspace_id:
-                raise RuntimeError("prototype session not found in workspace")
+                raise PrototypeTerminalRuntimeError("prototype session not found in workspace")
             if session.get("is_revoked"):
-                raise RuntimeError("revoked session cannot receive preview grants")
+                raise PrototypeTerminalRuntimeError("revoked session cannot receive preview grants")
             expires_at = _normalize_iso8601(session.get("expires_at"))
             if expires_at and expires_at <= _utc_now():
-                raise RuntimeError("expired session cannot receive preview grants")
+                raise PrototypeTerminalRuntimeError("expired session cannot receive preview grants")
             await self._assert_session_actor_active(session)
             actor_key = actor_key_for_session(
                 actor_type=str(session.get("actor_type") or ""),
@@ -148,6 +147,23 @@ class PrototypePreviewBroker:
             prototype_workspace_id=prototype_workspace_id,
             prototype_session_id=prototype_session_id,
         )
+        requested_metadata = dict(metadata or {})
+        requested_metadata.pop("snapshot_id", None)
+        existing_active = await self._repo.get_active_preview_handle_for_scope(scope_id)
+        if self._active_record_matches_request(
+            existing_active,
+            actor_key=actor_key,
+            target_ref=str(runtime_target_url),
+            runtime_policy_profile=resolved_runtime_policy,
+            snapshot_id=str(snapshot_id),
+            runtime_profile_version=str(requested_metadata.get("runtime_profile_version") or "v1"),
+        ):
+            record = self._record_from_dict(existing_active)
+            self._sync_record_cache(record)
+            return await self.renew_preview_grant(record.handle_id)
+        if workspace.get("is_archived"):
+            raise PrototypeTerminalRuntimeError("prototype workspace is archived")
+
         handle_id = f"pph_{uuid.uuid4().hex}"
         now = _utc_now()
         record = PrototypePreviewHandleRecord(
@@ -160,8 +176,8 @@ class PrototypePreviewBroker:
             target_ref=str(runtime_target_url),
             runtime_policy_profile=resolved_runtime_policy,
             metadata={
+                **requested_metadata,
                 "snapshot_id": str(snapshot_id),
-                **(metadata or {}),
             },
             created_at=now.isoformat(),
         )
@@ -311,7 +327,7 @@ class PrototypePreviewBroker:
         record_dict = self._record_to_dict(record)
 
         if not await self._is_grant_still_authorized(record):
-            raise RuntimeError("preview handle is no longer authorized")
+            raise PrototypeTerminalRuntimeError("preview handle is no longer authorized")
 
         token, expires_at = self._mint_grant_token(
             preview_handle=handle_id,
@@ -398,8 +414,8 @@ class PrototypePreviewBroker:
         if not await self._session_actor_is_active(session):
             actor_type = str(session.get("actor_type") or "").strip().lower()
             if actor_type == "external_collaborator":
-                raise RuntimeError("revoked shared actor cannot receive preview grants")
-            raise RuntimeError("inactive session actor cannot receive preview grants")
+                raise PrototypeTerminalRuntimeError("revoked shared actor cannot receive preview grants")
+            raise PrototypeTerminalRuntimeError("inactive session actor cannot receive preview grants")
 
     async def _session_actor_is_active(self, session: dict[str, Any]) -> bool:
         actor_type = str(session.get("actor_type") or "").strip().lower()
@@ -491,6 +507,27 @@ class PrototypePreviewBroker:
         record.is_active = False
         record.revoked_at = revoked_at
         cls._active_scope_handles.pop(scope_id, None)
+
+    @staticmethod
+    def _active_record_matches_request(
+        row: dict[str, Any] | None,
+        *,
+        actor_key: str,
+        target_ref: str,
+        runtime_policy_profile: str,
+        snapshot_id: str,
+        runtime_profile_version: str,
+    ) -> bool:
+        if not row or not _coerce_bool(row.get("is_active")):
+            return False
+        metadata = row.get("metadata") or {}
+        return (
+            str(row.get("actor_key") or "") == actor_key
+            and str(row.get("target_ref") or "") == target_ref
+            and str(row.get("runtime_policy_profile") or "") == runtime_policy_profile
+            and str(metadata.get("snapshot_id") or "") == snapshot_id
+            and str(metadata.get("runtime_profile_version") or "v1") == runtime_profile_version
+        )
 
     @staticmethod
     def _record_from_dict(row: dict[str, Any]) -> PrototypePreviewHandleRecord:

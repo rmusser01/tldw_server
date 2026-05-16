@@ -193,7 +193,7 @@ describe("tutorial registry route matching", () => {
   it("includes basics tutorials for all P0/P1 page routes", () => {
     const expectedBasicsByRoute: Record<string, string> = {
       "/chat": "playground-basics",
-      "/workspace-playground": "workspace-playground-basics",
+      "/research-studio": "workspace-playground-basics",
       "/media": "media-basics",
       "/knowledge": "knowledge-basics",
       "/characters": "characters-basics",
@@ -214,7 +214,10 @@ describe("tutorial registry route matching", () => {
   it("normalizes legacy paths to canonical routes", () => {
     expect(normalizeTutorialRoute("/options/playground")).toBe("/chat")
     expect(normalizeTutorialRoute("#/workspace-playground?tab=chat")).toBe(
-      "/workspace-playground"
+      "/research-studio"
+    )
+    expect(normalizeTutorialRoute("/workspace-studio?tab=studio")).toBe(
+      "/research-studio"
     )
     expect(normalizeTutorialRoute("/options/media")).toBe("/media")
     expect(normalizeTutorialRoute("/options/knowledge")).toBe("/knowledge")

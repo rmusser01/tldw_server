@@ -1,10 +1,12 @@
 import { useState } from "react"
-import { Alert } from "antd"
+import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui"
 import { useStorageQuota } from "@/hooks/useStorageQuota"
 
 const DISMISS_KEY = "tldw:storage-quota-banner-dismissed"
 
 export function StorageQuotaBanner() {
+  const { t } = useTranslation(["common"])
   const { level, ratio, usedBytes, budgetBytes } = useStorageQuota()
 
   // Session-scoped dismiss (sessionStorage, not localStorage -- re-shows next session)
@@ -38,25 +40,42 @@ export function StorageQuotaBanner() {
   if (level === "exceeded") {
     return (
       <Alert
-        type="error"
-        showIcon
+        variant="error"
         data-testid="storage-quota-banner-exceeded"
-        title="Storage nearly full"
-        description={`Workspace storage is ${pct}% full (${usedMB}/${budgetMB} MB). New data may not save. Archive or delete old workspaces to free space.`}
-      />
+        title={t("common:storageQuota.exceededTitle", {
+          defaultValue: "Storage nearly full"
+        })}
+      >
+        {t("common:storageQuota.exceededDescription", {
+          defaultValue:
+            "Workspace storage is {{pct}}% full ({{usedMB}}/{{budgetMB}} MB). New data may not save. Archive or delete old workspaces to free space.",
+          pct,
+          usedMB,
+          budgetMB
+        })}
+      </Alert>
     )
   }
 
   // warning level
   return (
     <Alert
-      type="warning"
-      showIcon
-      closable
-      onClose={handleDismiss}
+      variant="warning"
+      dismissible
+      onDismiss={handleDismiss}
+      dismissLabel={t("common:close", { defaultValue: "Close" })}
       data-testid="storage-quota-banner-warning"
-      title="Storage getting full"
-      description={`Workspace storage is ${pct}% full (${usedMB}/${budgetMB} MB). Consider archiving old workspaces.`}
-    />
+      title={t("common:storageQuota.warningTitle", {
+        defaultValue: "Storage getting full"
+      })}
+    >
+      {t("common:storageQuota.warningDescription", {
+        defaultValue:
+          "Workspace storage is {{pct}}% full ({{usedMB}}/{{budgetMB}} MB). Consider archiving old workspaces.",
+        pct,
+        usedMB,
+        budgetMB
+      })}
+    </Alert>
   )
 }

@@ -1,6 +1,7 @@
 import React from "react"
 import { Button, Card, Empty, Space, Typography } from "antd"
 
+import { getDesignSystemState } from "@/design-system"
 import type { IngestionSourceItem } from "@/types/ingestion-sources"
 
 export type SourceItemsFilter = "all" | "detached" | "degraded"
@@ -20,6 +21,8 @@ export const SourceItemsTable: React.FC<SourceItemsTableProps> = ({
   onReattach,
   isReattaching = false
 }) => {
+  const degradedState = getDesignSystemState("degraded")
+
   return (
     <div className="space-y-4">
       <Space wrap>
@@ -34,7 +37,7 @@ export const SourceItemsTable: React.FC<SourceItemsTableProps> = ({
         <Button
           type={filter === "degraded" ? "primary" : "default"}
           onClick={() => onFilterChange("degraded")}>
-          Degraded
+          {degradedState.label}
         </Button>
       </Space>
 

@@ -142,6 +142,7 @@
   },
   "knowledge": {
     "title": "Knowledge Search",
+    "scopeNote": "Search and insert context for this chat. Open /knowledge for the full QA workspace.",
     "tabs": {
       "search": "Search",
       "qaSearch": "QA Search",
@@ -233,8 +234,8 @@
       "all": "All",
       "media": "Documents & Media",
       "notes": "Notes",
-      "characters": "Story Characters",
-      "chats": "Conversations",
+      "characters": "Characters",
+      "chats": "Chats",
       "kanban": "Task Boards"
     },
     "preset": "Preset",
@@ -513,6 +514,68 @@
     "createNewCharacter": "Create a New Character+",
     "importCharacter": "Import Character"
   },
+  "personaGarden": {
+    "visuals": {
+      "importPreviewUnsupportedExtension": "Choose a {{extension}} archive exported from Persona Visual Packs.",
+      "importPreviewUnsupportedMimeType": "Choose a Persona Visual pack archive with a supported zip media type.",
+      "importPreviewTerminalStatus": "Import preview {{status}} during {{stage}}.",
+      "importPreviewBlocked": "Import preview completed with blockers. Review diagnostics before committing.",
+      "importPreviewCompleted": "Import preview completed. Review the draft plan before committing.",
+      "importPreviewQueued": "Import preview queued. Refresh to check validation status.",
+      "importPreviewProcessing": "Import preview is processing{{stageSuffix}}",
+      "importPreviewStatus": "Import preview {{status}}: {{stage}}",
+      "importPreviewQueuedStatus": "Import preview queued.",
+      "importCommitTerminalStatus": "Import commit {{status}} during {{stage}}.",
+      "importCommitCompleted": "Import commit completed. Review and activate the new draft when ready.",
+      "importCommitQueued": "Import commit queued. Refresh to check draft creation status.",
+      "importCommitProcessing": "Import commit is processing{{stageSuffix}}",
+      "importCommitStatus": "Import commit {{status}}: {{stage}}",
+      "importCommitQueuedStatus": "Import commit queued. Imported packs remain drafts until activated.",
+      "starterHeading": "Default starter pack",
+      "starterDescription": "Copy a bundled sprite-frame pack as a draft, then review and activate it.",
+      "starterCopiedDraft": "Starter pack copied as a draft. Review and activate it when ready.",
+      "starterCopyError": "Failed to copy bundled starter pack.",
+      "starterSelectLabel": "Starter",
+      "starterDraftTitleLabel": "Draft title",
+      "starterCopyAsDraft": "Copy as draft",
+      "starterAssetUnit": "assets",
+      "starterBytesUnit": "bytes",
+      "setup": {
+        "activeDescription": "A visual buddy is active for this persona.",
+        "activeTag": "active",
+        "blankDescription": "Start blank when this persona needs custom states, poses, or assets instead of a bundled starter.",
+        "blankTag": "blank",
+        "bundledDefault": "Bundled default",
+        "catalogUnavailable": "Starter catalog unavailable.",
+        "checkingDefaults": "Checking bundled defaults.",
+        "chooseAnotherDefault": "Choose another default",
+        "compactEyebrow": "Visual buddy",
+        "compactHelp": "Add visuals after the guided assistant setup opens Persona Garden.",
+        "copyTag": "copy",
+        "defaultCountMany": "{{count}} bundled defaults available.",
+        "defaultCountOne": "1 bundled default available.",
+        "defaultCountUnknown": "Bundled default count unavailable.",
+        "defaultCountZero": "No bundled defaults available.",
+        "defaultFallbackDescription": "Copy the recommended starter as a draft.",
+        "draftsDescription": "Draft visual packs are ready to review. Activate one when it matches this persona.",
+        "emptyDescription": "No visual buddy is active for this persona. Choose a starter path to create an inactive pack for review.",
+        "emptyPack": "Empty pack",
+        "firstRunTag": "first run",
+        "heading": "Visual buddy setup",
+        "importDescription": "Import a visual pack through the existing preview flow, then review and enable it when ready.",
+        "importPack": "Import pack",
+        "loadingDefaults": "Loading bundled defaults.",
+        "openVisuals": "Set up visual buddy",
+        "optionalTag": "optional",
+        "portableArchive": "Portable archive",
+        "previewTag": "preview",
+        "recommendedDefault": "Recommended default",
+        "reviewTag": "review",
+        "startBlank": "Start blank",
+        "useDefault": "Use default"
+      }
+    }
+  },
   "persona": {
     "unsavedStateDiscardPrompt": "You have unsaved state-doc changes. Discard local drafts?",
     "unsavedStateDiscardPromptConnect": "You have unsaved state-doc changes. Connect and discard local drafts?",
@@ -522,6 +585,9 @@
     "unsavedStateDiscardPromptSessionSwitch": "You have unsaved state-doc changes. Switch session and discard local drafts?",
     "unsavedStateDiscardPromptRestoreState": "You have unsaved state-doc changes. Restore this state version and discard local drafts?",
     "unsavedStateDiscardPromptRouteTransition": "You have unsaved state-doc changes. Leave this page and discard local drafts?",
-    "unsavedStateBeforeUnloadPrompt": "You have unsaved state-doc changes. Leave this page without saving?"
+    "unsavedStateBeforeUnloadPrompt": "You have unsaved state-doc changes. Leave this page without saving?",
+    "setupLiveDetourNotice": "Finish this live test, then return to setup.",
+    "setupVisualDetourNotice": "Review visual setup, then return to assistant setup.",
+    "returnToSetup": "Return to setup"
   }
 }

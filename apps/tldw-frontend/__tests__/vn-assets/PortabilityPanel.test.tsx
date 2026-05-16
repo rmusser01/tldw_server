@@ -134,6 +134,7 @@ describe('PortabilityPanel', () => {
         include_full_provenance: true,
         strict: false,
         warn_for_sharing: true,
+        idempotency_key: expect.stringMatching(/^vn-export-/),
       });
     });
     expect(await screen.findByText('Export job: export-job')).toBeInTheDocument();
@@ -147,7 +148,10 @@ describe('PortabilityPanel', () => {
     await user.upload(screen.getByLabelText('Import VN pack archive'), archive);
 
     await waitFor(() => {
-      expect(mocks.createVNPackImportPreview).toHaveBeenCalledWith(archive);
+      expect(mocks.createVNPackImportPreview).toHaveBeenCalledWith(
+        archive,
+        expect.stringMatching(/^vn-import-preview-/)
+      );
     });
     expect(await screen.findByText('Preview status: completed')).toBeInTheDocument();
     expect(screen.getByText('Character resolution')).toBeInTheDocument();
@@ -166,6 +170,7 @@ describe('PortabilityPanel', () => {
         target_character_id: 42,
         target_pack_id: 9,
         conflict_decisions: { confirm_all_risky_diffs: true },
+        idempotency_key: expect.stringMatching(/^vn-import-commit-/),
       });
     });
   });

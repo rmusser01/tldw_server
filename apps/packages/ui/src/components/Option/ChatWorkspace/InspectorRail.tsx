@@ -1,3 +1,5 @@
+import { getDesignSystemState } from "@/design-system"
+
 export type InspectorRailStagedSource = {
   sourceId: string
   title: string
@@ -17,13 +19,14 @@ const panelClass = "rounded-md border border-border bg-surface px-3 py-2"
 const headingClass = "text-[11px] font-semibold text-text-muted"
 const valueClass = "mt-1 text-sm font-medium text-text"
 const mutedClass = "mt-1 text-xs text-text-muted"
+const READY_STATE_LABEL = getDesignSystemState("ready").label
 
 const getRuntimeLabel = (backendAvailable: boolean, streaming: boolean) => {
   if (!backendAvailable) {
     return "Server unavailable"
   }
 
-  return streaming ? "Streaming" : "Ready"
+  return streaming ? "Streaming" : READY_STATE_LABEL
 }
 
 export const InspectorRail = ({

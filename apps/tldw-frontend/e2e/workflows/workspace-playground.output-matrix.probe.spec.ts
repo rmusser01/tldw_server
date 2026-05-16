@@ -556,7 +556,7 @@ const generateAndDownloadOutput = async (
   await verifyDownloadedArtifact(download, output)
 }
 
-test.describe("Workspace Playground output matrix probe", () => {
+test.describe("Research Studio output matrix probe", () => {
   test.beforeEach(async ({ page }) => {
     await seedAuth(page)
     await page.setViewportSize(DESKTOP_VIEWPORT)

@@ -99,19 +99,22 @@ def test_build_promote_idempotency_key_uses_workspace_candidate_and_canonical_sn
 
 
 @pytest.mark.asyncio
-async def test_create_workspace_archives_partial_workspace_when_seed_snapshot_fails(
+async def test_create_workspace_rolls_back_partial_workspace_when_seed_snapshot_fails(
     repo,
     prototype_db,
     monkeypatch,
 ):
     module = importlib.import_module("tldw_Server_API.app.core.Prototype_Workspaces.service")
+    repo_module = importlib.import_module(
+        "tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo"
+    )
     service_cls = _load_attr(module, "PrototypeWorkspaceService")
     service = service_cls(repo=repo)
 
-    async def fail_create_snapshot(**_kwargs: Any) -> dict[str, Any]:
+    async def fail_create_snapshot(self: Any, **_kwargs: Any) -> dict[str, Any]:
         raise RuntimeError("seed snapshot failed")
 
-    monkeypatch.setattr(repo, "create_snapshot", fail_create_snapshot)
+    monkeypatch.setattr(repo_module.PrototypeWorkspacesRepo, "create_snapshot", fail_create_snapshot)
 
     with pytest.raises(RuntimeError, match="seed snapshot failed"):
         await service.create_workspace(
@@ -124,8 +127,7 @@ async def test_create_workspace_archives_partial_workspace_when_seed_snapshot_fa
         "SELECT archived_at FROM prototype_workspaces WHERE title = ?",
         ("Partial seed failure",),
     ).fetchone()
-    assert row is not None
-    assert row[0] is not None
+    assert row is None
 
 
 @pytest.mark.asyncio
@@ -135,6 +137,9 @@ async def test_save_session_snapshot_deletes_snapshot_when_session_state_update_
     monkeypatch,
 ):
     module = importlib.import_module("tldw_Server_API.app.core.Prototype_Workspaces.service")
+    repo_module = importlib.import_module(
+        "tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo"
+    )
     service_cls = _load_attr(module, "PrototypeWorkspaceService")
     service = service_cls(repo=repo)
     workspace, base_snapshot, session, _candidate = await _seed_promotable_workspace(repo, prototype_db)
@@ -142,7 +147,11 @@ async def test_save_session_snapshot_deletes_snapshot_when_session_state_update_
     async def fail_update_session_state(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         raise RuntimeError("session state update failed")
 
-    monkeypatch.setattr(repo, "update_session_state", fail_update_session_state)
+    async def fail_delete_snapshot(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("snapshot delete compensation should not be needed")
+
+    monkeypatch.setattr(repo_module.PrototypeWorkspacesRepo, "update_session_state", fail_update_session_state)
+    monkeypatch.setattr(repo_module.PrototypeWorkspacesRepo, "delete_snapshot", fail_delete_snapshot)
 
     with pytest.raises(RuntimeError, match="session state update failed"):
         await service.save_session_snapshot(

@@ -12,6 +12,15 @@ const state = {
   isSearching: false,
   error: null as string | null,
   queryStage: "idle" as string,
+  searchDetails: null as null | {
+    alsoConsidered?: Array<{
+      id: string
+      title: string
+      score: number | null
+      reason: string | null
+    }>
+    sourceStatus?: Record<string, unknown>
+  },
   preset: "balanced" as string,
   setPreset: vi.fn(),
   settings: {
@@ -57,6 +66,14 @@ const state = {
     mediaIds: [] as number[],
     noteIds: [] as string[],
   },
+  sourceHealth: {
+    loading: false,
+    error: null as string | null,
+    loadedAt: "2026-05-16T00:00:00Z",
+    sources: [] as unknown[],
+    bySource: {},
+  },
+  refreshSourceHealth: vi.fn(),
 }
 
 const layoutModeState = {
@@ -92,11 +109,19 @@ vi.mock("../history/HistoryPane", () => ({
 vi.mock("../context/KnowledgeContextBar", () => ({
   KnowledgeContextBar: ({
     contextChangedSinceLastRun,
+    sourceHealth,
+    onRefreshSourceHealth,
   }: {
     contextChangedSinceLastRun: boolean
+    sourceHealth?: { loadedAt: string | null }
+    onRefreshSourceHealth?: () => void
   }) => (
     <div data-testid="knowledge-context-bar">
       {contextChangedSinceLastRun ? "Scope changed" : "Scope unchanged"}
+      <span>{sourceHealth?.loadedAt ?? "No source health"}</span>
+      <button type="button" onClick={onRefreshSourceHealth}>
+        Refresh detailed source health
+      </button>
     </div>
   ),
 }))
@@ -104,11 +129,19 @@ vi.mock("../context/KnowledgeContextBar", () => ({
 vi.mock("../context/CompactToolbar", () => ({
   CompactToolbar: ({
     contextChangedSinceLastRun,
+    sourceHealth,
+    onRefreshSourceHealth,
   }: {
     contextChangedSinceLastRun: boolean
+    sourceHealth?: { loadedAt: string | null }
+    onRefreshSourceHealth?: () => void
   }) => (
     <div data-testid="knowledge-compact-toolbar">
       {contextChangedSinceLastRun ? "Scope changed" : "Scope unchanged"}
+      <span>{sourceHealth?.loadedAt ?? "No source health"}</span>
+      <button type="button" onClick={onRefreshSourceHealth}>
+        Refresh compact source health
+      </button>
     </div>
   ),
 }))
@@ -124,7 +157,15 @@ vi.mock("../composer/KnowledgeComposer", () => ({
 }))
 
 vi.mock("../empty/KnowledgeReadyState", () => ({
-  KnowledgeReadyState: () => <div data-testid="knowledge-ready-state" />,
+  KnowledgeReadyState: ({
+    sourceHealth,
+  }: {
+    sourceHealth?: { loadedAt: string | null }
+  }) => (
+    <div data-testid="knowledge-ready-state">
+      {sourceHealth?.loadedAt ?? "No source health"}
+    </div>
+  ),
 }))
 
 vi.mock("../empty/InlineRecentSessions", () => ({
@@ -136,7 +177,32 @@ vi.mock("../panels/AnswerWorkspace", () => ({
 }))
 
 vi.mock("../panels/NoResultsRecovery", () => ({
-  NoResultsRecovery: () => <div data-testid="knowledge-no-results-recovery" />,
+  NoResultsRecovery: ({
+    sourceHealth,
+    selectedSources,
+    onOpenQuickIngest,
+    onShowNearestMatches,
+    showNearestMatchesAvailable,
+  }: {
+    sourceHealth?: { loadedAt: string | null }
+    selectedSources?: string[]
+    onOpenQuickIngest?: () => void
+    onShowNearestMatches?: () => void
+    showNearestMatchesAvailable?: boolean
+  }) => (
+    <div data-testid="knowledge-no-results-recovery">
+      <span>{sourceHealth?.loadedAt ?? "No source health"}</span>
+      <span>{selectedSources?.join(",") ?? "No selected sources"}</span>
+      <button type="button" onClick={onOpenQuickIngest}>
+        Open Quick Ingest
+      </button>
+      {showNearestMatchesAvailable ? (
+        <button type="button" onClick={onShowNearestMatches}>
+          Show nearest matches
+        </button>
+      ) : null}
+    </div>
+  ),
 }))
 
 vi.mock("../evidence/EvidenceRail", () => ({
@@ -171,6 +237,7 @@ describe("KnowledgeQALayout evidence-rail transitions", () => {
     state.isSearching = false
     state.error = null
     state.queryStage = "idle"
+    state.searchDetails = null
     state.preset = "balanced"
     state.settings.sources = []
     state.settings.enable_web_fallback = true
@@ -184,9 +251,22 @@ describe("KnowledgeQALayout evidence-rail transitions", () => {
     state.lastSearchScope = null
     state.pinnedSourceFilters.mediaIds = []
     state.pinnedSourceFilters.noteIds = []
+    state.sourceHealth.loadedAt = "2026-05-16T00:00:00Z"
+    state.sourceHealth.error = null
+    state.refreshSourceHealth.mockClear()
+    delete (window as Window & { __tldwPendingQuickIngestOpen?: unknown })
+      .__tldwPendingQuickIngestOpen
     layoutModeState.mode = "simple"
     layoutModeState.isSimple = true
     layoutModeState.isResearch = false
+  })
+
+  it("uses a visible label for the persistent simple/detailed mode control", () => {
+    renderLayout()
+
+    expect(
+      screen.getByRole("button", { name: "Switch to detailed view" })
+    ).toHaveTextContent("Detailed")
   })
 
   it("keeps the evidence rail closed while the settings panel is open", async () => {
@@ -345,5 +425,76 @@ describe("KnowledgeQALayout evidence-rail transitions", () => {
     renderLayout()
 
     expect(screen.getByText("Scope changed")).toBeInTheDocument()
+  })
+
+  it("passes source health and refresh through the simple toolbar and ready state", async () => {
+    renderLayout()
+
+    expect(screen.getByTestId("knowledge-compact-toolbar")).toHaveTextContent(
+      "2026-05-16T00:00:00Z"
+    )
+    expect(screen.getByTestId("knowledge-ready-state")).toHaveTextContent(
+      "2026-05-16T00:00:00Z"
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh compact source health" }))
+
+    expect(state.refreshSourceHealth).toHaveBeenCalledOnce()
+  })
+
+  it("passes source health and refresh through the detailed context bar", () => {
+    layoutModeState.mode = "research"
+    layoutModeState.isSimple = false
+    layoutModeState.isResearch = true
+
+    renderLayout()
+
+    expect(screen.getByTestId("knowledge-context-bar")).toHaveTextContent(
+      "2026-05-16T00:00:00Z"
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh detailed source health" }))
+
+    expect(state.refreshSourceHealth).toHaveBeenCalledOnce()
+  })
+
+  it("passes source health and selected scope into no-results recovery", async () => {
+    state.hasSearched = true
+    state.settings.sources = ["media_db"]
+
+    renderLayout()
+
+    const recovery = await screen.findByTestId("knowledge-no-results-recovery")
+    expect(recovery).toHaveTextContent("2026-05-16T00:00:00Z")
+    expect(recovery).toHaveTextContent("media_db")
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Quick Ingest" }))
+    expect(
+      (window as Window & { __tldwPendingQuickIngestOpen?: unknown })
+        .__tldwPendingQuickIngestOpen
+    ).toMatchObject({
+      detail: { source: "knowledge_qa" },
+    })
+  })
+
+  it("shows nearest misses in no-results recovery from search metadata", async () => {
+    state.hasSearched = true
+    state.searchDetails = {
+      alsoConsidered: [
+        {
+          id: "near-1",
+          title: "Near miss",
+          score: 0.42,
+          reason: "below threshold",
+        },
+      ],
+    }
+
+    renderLayout()
+
+    fireEvent.click(await screen.findByRole("button", { name: "Show nearest matches" }))
+    expect(state.setEvidenceRailOpen).toHaveBeenCalledWith(true)
+    expect(state.setEvidenceRailTab).toHaveBeenCalledWith("details")
+    expect(state.focusSource).not.toHaveBeenCalled()
   })
 })

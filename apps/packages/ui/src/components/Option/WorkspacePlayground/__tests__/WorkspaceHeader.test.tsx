@@ -1,11 +1,13 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Modal } from "antd"
+import { getDesignSystemState } from "@/design-system"
 import {
   clearWorkspaceUndoActionsForTests,
   getWorkspaceUndoPendingCount
 } from "../undo-manager"
 import { WorkspaceHeader } from "../WorkspaceHeader"
+import { ConnectionPhase, type ConnectionState } from "@/types/connection"
 import {
   FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS,
   FEATURE_ROLLOUT_SUBJECT_ID_STORAGE_KEY
@@ -38,6 +40,32 @@ const mockNormalizeWorkspaceBannerImage = vi.fn()
 const mockTrackWorkspacePlaygroundTelemetry = vi.fn()
 const mockGetWorkspacePlaygroundTelemetryState = vi.fn()
 const mockResetWorkspacePlaygroundTelemetryState = vi.fn()
+const registryStateOverrides = vi.hoisted(() => ({
+  degradedLabel: "Registry Degraded",
+  missingDegraded: false
+}))
+const connectionConfigState = vi.hoisted(
+  (): {
+    loading: boolean
+    config: {
+      serverUrl: string
+      authMode: "single-user"
+      apiKey: string
+      accessToken: string
+    } | null
+  } => ({
+    loading: false,
+    config: {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user" as const,
+      apiKey: "test-api-key",
+      accessToken: ""
+    }
+  })
+)
+const fetchMockState = vi.hoisted(() => ({
+  fetch: vi.fn()
+}))
 
 const now = new Date("2026-02-18T12:00:00.000Z")
 
@@ -127,9 +155,9 @@ const mockStoreState = {
   restoreUndoSnapshot: mockRestoreUndoSnapshot
 }
 
-const mockConnectionStoreState = {
+const mockConnectionStoreState: { state: ConnectionState } = {
   state: {
-    phase: "connected" as const,
+    phase: ConnectionPhase.CONNECTED,
     serverUrl: "http://127.0.0.1:8000",
     lastCheckedAt: Date.now(),
     lastError: null as string | null,
@@ -145,6 +173,7 @@ const mockConnectionStoreState = {
     configStep: "none" as const,
     errorKind: "none" as const,
     hasCompletedFirstRun: true,
+    userPersona: null,
     lastConfigUpdatedAt: Date.now(),
     checksSinceConfigChange: 0
   }
@@ -182,6 +211,37 @@ vi.mock("@/store/connection", () => ({
     selector: (state: typeof mockConnectionStoreState) => unknown
   ) => selector(mockConnectionStoreState)
 }))
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: connectionConfigState.config,
+    loading: connectionConfigState.loading
+  })
+}))
+
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        if (key === "degraded" && registryStateOverrides.missingDegraded) {
+          return undefined as unknown as ReturnType<
+            typeof actual.getDesignSystemState
+          >
+        }
+        const state = actual.getDesignSystemState(key)
+        return {
+          ...state,
+          label:
+            key === "degraded"
+              ? registryStateOverrides.degradedLabel
+              : state.label
+        }
+      }
+    )
+  }
+})
 
 vi.mock("@/store/workspace-bundle", async () => {
   const actual = await vi.importActual<typeof import("@/store/workspace-bundle")>(
@@ -239,6 +299,13 @@ describe("WorkspaceHeader workspace browser modal", () => {
     vi.clearAllMocks()
     window.localStorage.clear()
     clearWorkspaceUndoActionsForTests()
+    connectionConfigState.loading = false
+    connectionConfigState.config = {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-api-key",
+      accessToken: ""
+    }
     mockStoreState.savedWorkspaces = [
       {
         id: "workspace-alpha",
@@ -283,7 +350,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
     })
     mockConnectionStoreState.state = {
       ...mockConnectionStoreState.state,
-      phase: "connected",
+      phase: ConnectionPhase.CONNECTED,
       isConnected: true,
       isChecking: false,
       errorKind: "none",
@@ -413,6 +480,8 @@ describe("WorkspaceHeader workspace browser modal", () => {
       ]
     })
     mockResetWorkspacePlaygroundTelemetryState.mockResolvedValue(undefined)
+    registryStateOverrides.degradedLabel = "Registry Degraded"
+    registryStateOverrides.missingDegraded = false
     mockNormalizeWorkspaceBannerImage.mockResolvedValue({
       dataUrl: "data:image/webp;base64,banner",
       mimeType: "image/webp",
@@ -421,6 +490,16 @@ describe("WorkspaceHeader workspace browser modal", () => {
       bytes: 16000,
       updatedAt: new Date("2026-02-25T10:00:00.000Z")
     })
+    connectionConfigState.config = {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-api-key",
+      accessToken: ""
+    }
+    fetchMockState.fetch.mockImplementation(async (input: RequestInfo | URL) => {
+      throw new Error(`unexpected fetch: ${String(input)}`)
+    })
+    vi.stubGlobal("fetch", fetchMockState.fetch)
   })
 
   it("opens view-all modal and filters workspaces by search query", async () => {
@@ -885,9 +964,9 @@ describe("WorkspaceHeader workspace browser modal", () => {
     })
     expect(shortcutsModal).toBeInTheDocument()
     expect(within(shortcutsModal).getByText("Search workspace")).toBeInTheDocument()
-    expect(within(shortcutsModal).getByText("Focus sources")).toBeInTheDocument()
-    expect(within(shortcutsModal).getByText("Focus chat")).toBeInTheDocument()
-    expect(within(shortcutsModal).getByText("Focus studio")).toBeInTheDocument()
+    expect(within(shortcutsModal).getByText("Focus sources pane")).toBeInTheDocument()
+    expect(within(shortcutsModal).getByText("Focus chat pane")).toBeInTheDocument()
+    expect(within(shortcutsModal).getByText("Focus studio pane")).toBeInTheDocument()
   })
 
   it("opens telemetry summary modal from settings menu", async () => {
@@ -987,6 +1066,66 @@ describe("WorkspaceHeader workspace browser modal", () => {
     expect(revokeObjectUrlSpy).toHaveBeenCalledWith("blob:workspace-telemetry")
   })
 
+  it("uses the design-system registry label without coupling telemetry to display copy", async () => {
+    mockConnectionStoreState.state = {
+      ...mockConnectionStoreState.state,
+      phase: ConnectionPhase.CONNECTED,
+      isConnected: true,
+      errorKind: "partial",
+      knowledgeStatus: "ready"
+    }
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    await waitFor(() => {
+      expect(mockTrackWorkspacePlaygroundTelemetry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "connectivity_state_changed",
+          to: "degraded"
+        })
+      )
+    })
+    expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith("degraded")
+  })
+
+  it("falls back when the degraded design-system registry entry is unavailable", async () => {
+    registryStateOverrides.missingDegraded = true
+    mockConnectionStoreState.state = {
+      ...mockConnectionStoreState.state,
+      phase: ConnectionPhase.CONNECTED,
+      isConnected: true,
+      errorKind: "partial",
+      knowledgeStatus: "ready"
+    }
+
+    expect(() => {
+      render(
+        <WorkspaceHeader
+          leftPaneOpen={true}
+          rightPaneOpen={true}
+          onToggleLeftPane={vi.fn()}
+          onToggleRightPane={vi.fn()}
+        />
+      )
+    }).not.toThrow()
+
+    await waitFor(() => {
+      expect(mockTrackWorkspacePlaygroundTelemetry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "connectivity_state_changed",
+          to: "degraded"
+        })
+      )
+    })
+  })
+
   it("loads rollout execution controls from localStorage in telemetry modal", async () => {
     window.localStorage.setItem(
       FEATURE_ROLLOUT_SUBJECT_ID_STORAGE_KEY,
@@ -1083,5 +1222,857 @@ describe("WorkspaceHeader workspace browser modal", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
     expect(screen.queryByText("Telemetry summary")).not.toBeInTheDocument()
+  })
+
+  it("creates an ACP-backed agent task for the current workspace", async () => {
+    fetchMockState.fetch.mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const body =
+          typeof init?.body === "string" ? JSON.parse(init.body) : undefined
+
+        if (
+          url ===
+          "http://127.0.0.1:8000/api/v1/agent-orchestration/workspaces/canonical-bridge"
+        ) {
+          expect(init?.method).toBe("POST")
+          expect((init?.headers as Record<string, string>)["X-API-KEY"]).toBe(
+            "test-api-key"
+          )
+          expect(body).toMatchObject({
+            canonical_workspace_id: "workspace-alpha",
+            canonical_workspace_source: "workspace_playground",
+            root_path: "/Users/macbook-dev/src/alpha",
+            metadata: {
+              created_from: "workspace_playground",
+              canonical_workspace_id: "workspace-alpha"
+            }
+          })
+          return {
+            ok: true,
+            json: async () => ({
+              id: 33,
+              name: "Alpha Research execution",
+              root_path: "/Users/macbook-dev/src/alpha",
+              canonical_workspace: {
+                acp_workspace_id: 33,
+                canonical_workspace_id: "workspace-alpha",
+                canonical_workspace_source: "workspace_playground",
+                link_status: "linked"
+              }
+            })
+          } as Response
+        }
+
+        if (
+          url ===
+          "http://127.0.0.1:8000/api/v1/agent-orchestration/projects"
+        ) {
+          expect(init?.method).toBe("POST")
+          expect(body).toMatchObject({
+            name: "Alpha Research agent work",
+            workspace_id: 33,
+            metadata: {
+              created_from: "workspace_playground",
+              canonical_workspace_id: "workspace-alpha",
+              acp_workspace_id: 33
+            }
+          })
+          return {
+            ok: true,
+            json: async () => ({
+              id: 44,
+              name: "Alpha Research agent work",
+              workspace_id: 33
+            })
+          } as Response
+        }
+
+        if (
+          url ===
+          "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/44/tasks"
+        ) {
+          expect(init?.method).toBe("POST")
+          expect(body).toMatchObject({
+            title: "Summarize workspace blockers",
+            description: "Review the current sources and identify blockers.",
+            agent_type: "codex",
+            metadata: {
+              created_from: "workspace_playground",
+              canonical_workspace_id: "workspace-alpha",
+              acp_workspace_id: 33
+            }
+          })
+          return {
+            ok: true,
+            json: async () => ({
+              id: 55,
+              project_id: 44,
+              title: "Summarize workspace blockers"
+            })
+          } as Response
+        }
+
+        throw new Error(`unexpected fetch: ${url}`)
+      }
+    )
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Create agent task"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "Create agent task"
+    })
+    fireEvent.change(within(modal).getByLabelText("Execution root path"), {
+      target: { value: "/Users/macbook-dev/src/alpha" }
+    })
+    fireEvent.change(within(modal).getByLabelText("Task title"), {
+      target: { value: "Summarize workspace blockers" }
+    })
+    fireEvent.change(within(modal).getByLabelText("Task description"), {
+      target: { value: "Review the current sources and identify blockers." }
+    })
+    fireEvent.change(within(modal).getByLabelText("Agent type"), {
+      target: { value: "codex" }
+    })
+    fireEvent.click(within(modal).getByRole("button", { name: "Create task" }))
+
+    await waitFor(() => {
+      expect(fetchMockState.fetch).toHaveBeenCalledTimes(3)
+      expect(within(modal).getByText("Agent task created")).toBeInTheDocument()
+      expect(within(modal).getByText("ACP workspace #33")).toBeInTheDocument()
+    })
+
+    fireEvent.click(within(modal).getByRole("button", { name: "Open Agent Tasks" }))
+    expect(mockNavigate).toHaveBeenCalledWith("/agent-tasks?workspace=workspace-alpha")
+  })
+
+  it("shows recent ACP run history for the current workspace and opens diagnostics", async () => {
+    fetchMockState.fetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/projects"
+      ) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 44,
+              name: "Alpha agent work",
+              canonical_workspace: {
+                canonical_workspace_id: "workspace-alpha",
+                link_status: "linked"
+              }
+            },
+            {
+              id: 77,
+              name: "Beta agent work",
+              canonical_workspace: {
+                canonical_workspace_id: "workspace-beta",
+                link_status: "linked"
+              }
+            }
+          ]
+        } as Response
+      }
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/44/tasks"
+      ) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 55,
+              project_id: 44,
+              title: "Summarize workspace blockers",
+              status: "complete",
+              canonical_workspace: {
+                canonical_workspace_id: "workspace-alpha"
+              }
+            }
+          ]
+        } as Response
+      }
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/tasks/55"
+      ) {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 55,
+            project_id: 44,
+            title: "Summarize workspace blockers",
+            status: "complete",
+            runs: [
+              {
+                id: 88,
+                task_id: 55,
+                status: "completed",
+                agent_type: "codex",
+                result_summary: "Identified two release blockers.",
+                started_at: "2026-05-13T13:00:00.000Z",
+                completed_at: "2026-05-13T13:05:00.000Z",
+                session: {
+                  session_id: "sess-alpha",
+                  available: true,
+                  links: {
+                    diagnostics: "/api/v1/acp/sessions/sess-alpha/diagnostics",
+                    artifacts: "/api/v1/acp/sessions/sess-alpha/artifacts",
+                    audit: "/api/v1/acp/sessions/sess-alpha/audit"
+                  }
+                },
+                history: {
+                  audit_event_count: 2,
+                  artifact_count: 1,
+                  diagnostic_count: 3,
+                  result: {
+                    preview: "Workspace run preview"
+                  }
+                }
+              }
+            ]
+          })
+        } as Response
+      }
+
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("ACP run history"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "ACP run history"
+    })
+    expect(await within(modal).findByText("Alpha agent work")).toBeInTheDocument()
+    expect(
+      within(modal).getByText("Summarize workspace blockers")
+    ).toBeInTheDocument()
+    expect(within(modal).getByText("sess-alpha")).toBeInTheDocument()
+    expect(within(modal).getByText("1 artifacts")).toBeInTheDocument()
+    expect(within(modal).getByText("3 diagnostics")).toBeInTheDocument()
+    expect(
+      within(modal).getByText("Identified two release blockers.")
+    ).toBeInTheDocument()
+
+    fireEvent.click(within(modal).getByRole("button", { name: "Open Agent Tasks" }))
+    expect(mockNavigate).toHaveBeenCalledWith("/agent-tasks?workspace=workspace-alpha")
+
+    fireEvent.click(within(modal).getByRole("button", { name: "Open diagnostics" }))
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "/acp-playground?session=sess-alpha&view=diagnostics"
+    )
+  })
+
+  it("aborts ACP run history requests when the modal closes", async () => {
+    let capturedSignal: AbortSignal | undefined
+    fetchMockState.fetch.mockImplementation(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        capturedSignal = init?.signal as AbortSignal | undefined
+        return new Promise<Response>(() => undefined)
+      }
+    )
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("ACP run history"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "ACP run history"
+    })
+    await waitFor(() => expect(capturedSignal).toBeInstanceOf(AbortSignal))
+
+    const closeButtons = within(modal).getAllByRole("button", { name: "Close" })
+    fireEvent.click(closeButtons[closeButtons.length - 1])
+
+    expect(capturedSignal?.aborted).toBe(true)
+  })
+
+  it("prioritizes newest workspace tasks before fetching ACP run detail", async () => {
+    const detailRequests: string[] = []
+
+    fetchMockState.fetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/projects"
+      ) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 44,
+              name: "Alpha agent work",
+              canonical_workspace: {
+                canonical_workspace_id: "workspace-alpha",
+                link_status: "linked"
+              }
+            }
+          ]
+        } as Response
+      }
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/44/tasks"
+      ) {
+        return {
+          ok: true,
+          json: async () =>
+            Array.from({ length: 13 }, (_value, index) => {
+              const id = index + 1
+              return {
+                id,
+                project_id: 44,
+                title: `Task ${id}`,
+                status: "complete",
+                created_at: `2026-05-13T13:${String(id).padStart(2, "0")}:00.000Z`,
+                updated_at: `2026-05-13T13:${String(id).padStart(2, "0")}:30.000Z`,
+                canonical_workspace: {
+                  canonical_workspace_id: "workspace-alpha"
+                }
+              }
+            })
+        } as Response
+      }
+
+      if (
+        url.startsWith(
+          "http://127.0.0.1:8000/api/v1/agent-orchestration/tasks/"
+        )
+      ) {
+        detailRequests.push(url)
+        const id = Number(url.split("/").pop())
+        return {
+          ok: true,
+          json: async () => ({
+            id,
+            project_id: 44,
+            title: `Task ${id}`,
+            status: "complete",
+            runs:
+              id === 13
+                ? [
+                    {
+                      id: 130,
+                      task_id: 13,
+                      status: "completed",
+                      result_summary: "Newest task run",
+                      completed_at: "2026-05-13T14:00:00.000Z",
+                      session: {
+                        session_id: "sess-newest",
+                        links: {
+                          diagnostics: "/api/v1/acp/sessions/sess-newest/diagnostics"
+                        }
+                      },
+                      history: {
+                        artifact_count: 0,
+                        diagnostic_count: 1,
+                        audit_event_count: 0
+                      }
+                    }
+                  ]
+                : []
+          })
+        } as Response
+      }
+
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("ACP run history"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "ACP run history"
+    })
+    expect(await within(modal).findByText("Newest task run")).toBeInTheDocument()
+    expect(detailRequests).toContain(
+      "http://127.0.0.1:8000/api/v1/agent-orchestration/tasks/13"
+    )
+    expect(detailRequests).not.toContain(
+      "http://127.0.0.1:8000/api/v1/agent-orchestration/tasks/1"
+    )
+  })
+
+  it("shows an empty ACP run history state for workspaces without runs", async () => {
+    fetchMockState.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => []
+    } as Response)
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("ACP run history"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "ACP run history"
+    })
+    expect(
+      await within(modal).findByText("No ACP runs linked to this workspace yet")
+    ).toBeInTheDocument()
+    expect(
+      within(modal).queryByText("Workspace setup needs attention")
+    ).not.toBeInTheDocument()
+  })
+
+  it("shows ACP run history load errors without setup guidance", async () => {
+    fetchMockState.fetch.mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({
+        detail: "Agent orchestration is temporarily unavailable"
+      })
+    } as Response)
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("ACP run history"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "ACP run history"
+    })
+    expect(
+      await within(modal).findByText(
+        "Agent orchestration is temporarily unavailable"
+      )
+    ).toBeInTheDocument()
+    expect(
+      within(modal).queryByText("Workspace setup needs attention")
+    ).not.toBeInTheDocument()
+  })
+
+  it("surfaces missing task errors instead of treating them as unsupported orchestration", async () => {
+    fetchMockState.fetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/projects"
+      ) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 44,
+              name: "Alpha agent work",
+              canonical_workspace: {
+                canonical_workspace_id: "workspace-alpha",
+                link_status: "linked"
+              }
+            }
+          ]
+        } as Response
+      }
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/44/tasks"
+      ) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 55,
+              project_id: 44,
+              title: "Deleted task",
+              status: "complete",
+              canonical_workspace: {
+                canonical_workspace_id: "workspace-alpha"
+              }
+            }
+          ]
+        } as Response
+      }
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/tasks/55"
+      ) {
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({
+            detail: "Task not found"
+          })
+        } as Response
+      }
+
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("ACP run history"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "ACP run history"
+    })
+    expect(await within(modal).findByText("Task not found")).toBeInTheDocument()
+    expect(
+      within(modal).queryByText("Agent orchestration is not available on this server.")
+    ).not.toBeInTheDocument()
+  })
+
+  it("shows unsupported ACP run history state without setup guidance", async () => {
+    fetchMockState.fetch.mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({
+        detail: "Not Found"
+      })
+    } as Response)
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("ACP run history"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "ACP run history"
+    })
+    expect(
+      await within(modal).findByText(
+        "Agent orchestration is not available on this server."
+      )
+    ).toBeInTheDocument()
+    expect(
+      within(modal).queryByText("Workspace setup needs attention")
+    ).not.toBeInTheDocument()
+  })
+
+  it("surfaces ACP bridge setup failures without creating project or task records", async () => {
+    fetchMockState.fetch.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        detail: {
+          code: "workspace_root_not_allowed",
+          message: "Root path is outside the configured ACP allowlist."
+        }
+      })
+    } as Response)
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Create agent task"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "Create agent task"
+    })
+    fireEvent.change(within(modal).getByLabelText("Execution root path"), {
+      target: { value: "/private/not-allowed" }
+    })
+    fireEvent.click(within(modal).getByRole("button", { name: "Create task" }))
+
+    await waitFor(() => {
+      expect(fetchMockState.fetch).toHaveBeenCalledTimes(1)
+      expect(
+        within(modal).getByText("Root path is outside the configured ACP allowlist.")
+      ).toBeInTheDocument()
+    })
+  })
+
+  it("waits for connection configuration before enabling task creation", async () => {
+    connectionConfigState.loading = true
+    connectionConfigState.config = null
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Create agent task"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "Create agent task"
+    })
+    const createTaskButton = within(modal).getByRole("button", {
+      name: "Create task"
+    })
+
+    expect(createTaskButton).toBeDisabled()
+    fireEvent.click(createTaskButton)
+    expect(fetchMockState.fetch).not.toHaveBeenCalled()
+  })
+
+  it("rolls back a created ACP project when task creation fails", async () => {
+    fetchMockState.fetch.mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+
+        if (
+          url ===
+          "http://127.0.0.1:8000/api/v1/agent-orchestration/workspaces/canonical-bridge"
+        ) {
+          return {
+            ok: true,
+            json: async () => ({
+              id: 33,
+              canonical_workspace: {
+                acp_workspace_id: 33
+              }
+            })
+          } as Response
+        }
+
+        if (
+          url ===
+          "http://127.0.0.1:8000/api/v1/agent-orchestration/projects"
+        ) {
+          return {
+            ok: true,
+            json: async () => ({
+              id: 44,
+              name: "Alpha Research agent work",
+              workspace_id: 33
+            })
+          } as Response
+        }
+
+        if (
+          url ===
+          "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/44/tasks"
+        ) {
+          return {
+            ok: false,
+            status: 500,
+            json: async () => ({
+              detail: "Task creation failed."
+            })
+          } as Response
+        }
+
+        if (
+          url ===
+          "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/44"
+        ) {
+          expect(init?.method).toBe("DELETE")
+          return {
+            ok: true,
+            json: async () => ({})
+          } as Response
+        }
+
+        throw new Error(`unexpected fetch: ${url}`)
+      }
+    )
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Create agent task"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "Create agent task"
+    })
+    fireEvent.change(within(modal).getByLabelText("Execution root path"), {
+      target: { value: "/Users/macbook-dev/src/alpha" }
+    })
+    fireEvent.change(within(modal).getByLabelText("Task title"), {
+      target: { value: "Summarize workspace blockers" }
+    })
+    fireEvent.click(within(modal).getByRole("button", { name: "Create task" }))
+
+    await waitFor(() => {
+      expect(fetchMockState.fetch).toHaveBeenCalledTimes(4)
+      expect(within(modal).getByText("Task creation failed.")).toBeInTheDocument()
+    })
+    expect(
+      fetchMockState.fetch.mock.calls.some(
+        ([input, init]) =>
+          String(input) ===
+            "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/44" &&
+          init?.method === "DELETE"
+      )
+    ).toBe(true)
+    expect(within(modal).queryByText("Agent task created")).not.toBeInTheDocument()
+  })
+
+  it("keeps the task handoff modal open while submission is in flight", async () => {
+    let resolveBridge: (response: Response) => void = () => {}
+
+    fetchMockState.fetch.mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+
+        if (
+          url ===
+          "http://127.0.0.1:8000/api/v1/agent-orchestration/workspaces/canonical-bridge"
+        ) {
+          return new Promise<Response>((resolve) => {
+            resolveBridge = resolve
+          })
+        }
+
+        if (
+          url ===
+          "http://127.0.0.1:8000/api/v1/agent-orchestration/projects"
+        ) {
+          return {
+            ok: true,
+            json: async () => ({
+              id: 44,
+              workspace_id: 33
+            })
+          } as Response
+        }
+
+        if (
+          url ===
+          "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/44/tasks"
+        ) {
+          expect(init?.method).toBe("POST")
+          return {
+            ok: true,
+            json: async () => ({
+              id: 55
+            })
+          } as Response
+        }
+
+        throw new Error(`unexpected fetch: ${url}`)
+      }
+    )
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Create agent task"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "Create agent task"
+    })
+    fireEvent.change(within(modal).getByLabelText("Execution root path"), {
+      target: { value: "/Users/macbook-dev/src/alpha" }
+    })
+    const createTaskButton = within(modal).getByRole("button", {
+      name: "Create task"
+    })
+    fireEvent.click(createTaskButton)
+
+    const cancelButton = within(modal).getByRole("button", { name: "Cancel" })
+    await waitFor(() => {
+      expect(cancelButton).toBeDisabled()
+      expect(createTaskButton).toBeDisabled()
+    })
+    fireEvent.click(cancelButton)
+    expect(
+      screen.getByRole("dialog", { name: "Create agent task" })
+    ).toBeInTheDocument()
+
+    resolveBridge({
+      ok: true,
+      json: async () => ({
+        id: 33,
+        canonical_workspace: {
+          acp_workspace_id: 33
+        }
+      })
+    } as Response)
+
+    await waitFor(() => {
+      expect(within(modal).getByText("Agent task created")).toBeInTheDocument()
+    })
   })
 })

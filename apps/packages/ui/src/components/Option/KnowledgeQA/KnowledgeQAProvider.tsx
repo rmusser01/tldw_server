@@ -25,6 +25,8 @@ import type {
   KnowledgeQAThread,
   CitationRef,
   SearchRuntimeDetails,
+  KnowledgeSourceStatus,
+  KnowledgeSourceHealthState,
   QueryStage,
   ScopeSnapshot,
   PinnedSourceFilters,
@@ -45,6 +47,10 @@ import { trackKnowledgeQaSearchMetric } from "@/utils/knowledge-qa-search-metric
 import { persistKnowledgeQaHistory } from "./historyStorage"
 import { mapKnowledgeQaSearchErrorMessage } from "./errorMessages"
 import { truncateAnswerPreview } from "./historyUtils"
+import {
+  EMPTY_SOURCE_HEALTH_STATE,
+  normalizeKnowledgeSourceHealth,
+} from "./sourceHealth"
 
 const LOCAL_THREAD_PREFIX = "local-"
 const DEFAULT_CHARACTER_NAME = "Helpful AI Assistant"
@@ -111,6 +117,7 @@ const initialState: KnowledgeQAState = {
     mediaIds: [],
     noteIds: [],
   },
+  sourceHealth: EMPTY_SOURCE_HEALTH_STATE,
 }
 
 const isLocalThreadId = (id: string | null | undefined) =>
@@ -174,6 +181,9 @@ type Action =
   | { type: "SET_QUERY_STAGE"; payload: QueryStage }
   | { type: "SET_LAST_SEARCH_SCOPE"; payload: ScopeSnapshot | null }
   | { type: "SET_PINNED_SOURCE_FILTERS"; payload: PinnedSourceFilters }
+  | { type: "SET_SOURCE_HEALTH_LOADING" }
+  | { type: "SET_SOURCE_HEALTH"; payload: KnowledgeSourceHealthState }
+  | { type: "SET_SOURCE_HEALTH_ERROR"; payload: string }
   | {
       type: "HYDRATE_RESTORED_SCOPE"
       payload: {
@@ -327,6 +337,26 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
       return { ...state, lastSearchScope: action.payload }
     case "SET_PINNED_SOURCE_FILTERS":
       return { ...state, pinnedSourceFilters: action.payload }
+    case "SET_SOURCE_HEALTH_LOADING":
+      return {
+        ...state,
+        sourceHealth: {
+          ...state.sourceHealth,
+          loading: true,
+          error: null,
+        },
+      }
+    case "SET_SOURCE_HEALTH":
+      return { ...state, sourceHealth: action.payload }
+    case "SET_SOURCE_HEALTH_ERROR":
+      return {
+        ...state,
+        sourceHealth: {
+          ...state.sourceHealth,
+          loading: false,
+          error: action.payload,
+        },
+      }
     case "HYDRATE_RESTORED_SCOPE": {
       const { nextPreset, nextSettings } = resolveHydratedScopeState(
         state.preset,
@@ -977,6 +1007,36 @@ function extractRetrievalCoverage(
   }
 }
 
+function normalizeSourceStatus(value: unknown): Record<string, KnowledgeSourceStatus> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {}
+  }
+
+  const normalized: Record<string, KnowledgeSourceStatus> = {}
+  for (const [sourceId, rawStatus] of Object.entries(value as Record<string, unknown>)) {
+    if (!sourceId || !rawStatus || typeof rawStatus !== "object" || Array.isArray(rawStatus)) {
+      continue
+    }
+
+    const record = rawStatus as Record<string, unknown>
+    const status =
+      typeof record.status === "string" && record.status.trim().length > 0
+        ? record.status.trim()
+        : "searched"
+    const count = normalizeIntegerMetric(record.count) ?? 0
+    const reason =
+      typeof record.reason === "string" && record.reason.trim().length > 0
+        ? record.reason.trim()
+        : null
+
+    normalized[sourceId] = reason
+      ? { status, count, reason }
+      : { status, count }
+  }
+
+  return normalized
+}
+
 function buildSearchDetailsFromResponse(
   response: {
     expandedQueries: string[]
@@ -1008,6 +1068,7 @@ function buildSearchDetailsFromResponse(
     response.metadata,
     results.length
   )
+  const sourceStatus = normalizeSourceStatus(response.metadata?.source_status)
 
   return {
     expandedQueries: response.expandedQueries,
@@ -1017,6 +1078,7 @@ function buildSearchDetailsFromResponse(
         ? settings.reranking_strategy
         : "unknown",
     averageRelevance: calculateAverageRelevance(results),
+    sourceStatus,
     webFallbackEnabled: Boolean(settings.enable_web_fallback),
     webFallbackTriggered:
       typeof webFallbackMetadata?.triggered === "boolean"
@@ -1063,6 +1125,7 @@ function buildSearchDetailsFromResponse(
 function buildSearchDetailsFromStreaming(
   results: RagResult[],
   whyPayload: unknown,
+  sourceStatusPayload: unknown,
   settings: RagSettings
 ): SearchRuntimeDetails {
   const why =
@@ -1078,6 +1141,7 @@ function buildSearchDetailsFromStreaming(
         ? settings.reranking_strategy
         : "unknown",
     averageRelevance: calculateAverageRelevance(results),
+    sourceStatus: normalizeSourceStatus(sourceStatusPayload),
     webFallbackEnabled: Boolean(settings.enable_web_fallback),
     webFallbackTriggered: false,
     webFallbackEngine: null,
@@ -1352,6 +1416,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
   const activeSearchRequestIdRef = useRef(0)
   const activeThreadHydrationRequestIdRef = useRef(0)
   const activeHistoryLoadRequestIdRef = useRef(0)
+  const sourceHealthRequestIdRef = useRef(0)
   const historyMutationVersionRef = useRef(0)
   const focusedSourceTimeoutRef = useRef<number | null>(null)
   const persistenceWarningShownRef = useRef(false)
@@ -1360,11 +1425,6 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
   const streamingFeatureEnabled = streamingFeatureFlag !== false
   const defaultCharacterIdRef = useRef<number | null>(null)
   const defaultCharacterPromiseRef = useRef<Promise<number | null> | null>(null)
-
-  // Initialize client
-  useEffect(() => {
-    tldwClient.initialize().catch(console.error)
-  }, [])
 
   useEffect(() => {
     if (state.currentThreadId || state.messages.length > 0) {
@@ -1840,6 +1900,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
           let streamAnswer = ""
           let receivedStreamEvent = false
           let streamWhyPayload: unknown = null
+          let streamSourceStatusPayload: unknown = null
 
           try {
             for await (const event of (tldwClient as {
@@ -1860,9 +1921,12 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
                 dispatch({ type: "SET_QUERY_STAGE", payload: "ranking" })
                 streamResults = mapStreamingContextsToResults(event.contexts)
                 streamWhyPayload = event?.why
+                streamSourceStatusPayload =
+                  event?.source_status ?? event?.metadata?.source_status ?? null
                 resolvedSearchDetails = buildSearchDetailsFromStreaming(
                   streamResults,
                   streamWhyPayload,
+                  streamSourceStatusPayload,
                   effectiveSettings
                 )
                 dispatch({
@@ -1922,6 +1986,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
               resolvedSearchDetails = buildSearchDetailsFromStreaming(
                 streamResults,
                 streamWhyPayload,
+                streamSourceStatusPayload,
                 effectiveSettings
               )
             }
@@ -2778,6 +2843,45 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "SET_PINNED_SOURCE_FILTERS", payload: normalized })
   }, [])
 
+  const refreshSourceHealth = useCallback(async () => {
+    const requestId = sourceHealthRequestIdRef.current + 1
+    sourceHealthRequestIdRef.current = requestId
+    dispatch({ type: "SET_SOURCE_HEALTH_LOADING" })
+    try {
+      const payload = await tldwClient.ragSourceHealth()
+      if (sourceHealthRequestIdRef.current !== requestId) return
+      dispatch({
+        type: "SET_SOURCE_HEALTH",
+        payload: normalizeKnowledgeSourceHealth(payload),
+      })
+    } catch {
+      if (sourceHealthRequestIdRef.current !== requestId) return
+      dispatch({
+        type: "SET_SOURCE_HEALTH_ERROR",
+        payload:
+          "Source health could not be loaded. You can still search selected sources.",
+      })
+    }
+  }, [])
+
+  // Initialize client and load safe pre-query source health once when ready.
+  useEffect(() => {
+    let cancelled = false
+
+    tldwClient
+      .initialize()
+      .then(() => {
+        if (!cancelled) {
+          void refreshSourceHealth()
+        }
+      })
+      .catch(console.error)
+
+    return () => {
+      cancelled = true
+    }
+  }, [refreshSourceHealth])
+
   const scrollToSource = useCallback((index: number) => {
     const element = document.getElementById(`source-card-${index}`)
     if (element) {
@@ -2913,6 +3017,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
       setEvidenceRailTab,
       setQueryStage,
       setPinnedSourceFilters,
+      refreshSourceHealth,
       persistRagContext,
       scrollToSource,
       scrollToCitation,
@@ -2946,6 +3051,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
       setEvidenceRailTab,
       setQueryStage,
       setPinnedSourceFilters,
+      refreshSourceHealth,
       persistRagContext,
       scrollToSource,
       scrollToCitation,

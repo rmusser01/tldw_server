@@ -79,11 +79,11 @@ export class WorkspacePlaygroundParityPage {
       if (!optionsUrl) {
         throw new Error("optionsUrl is required for extension parity navigation")
       }
-      await this.page.goto(`${optionsUrl}#/workspace-playground`, {
+      await this.page.goto(`${optionsUrl}#/research-studio`, {
         waitUntil: "domcontentloaded"
       })
     } else {
-      await this.page.goto("/workspace-playground", {
+      await this.page.goto("/research-studio", {
         waitUntil: "domcontentloaded"
       })
     }

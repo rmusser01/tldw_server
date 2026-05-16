@@ -118,8 +118,8 @@ const PolicySettingsPanel: React.FC<PolicySettingsPanelProps> = ({ settings, mes
     <div className="space-y-6 max-w-3xl">
       {/* 1. Master Toggle (read-only) */}
       <section className="rounded-lg border border-border bg-surface/50 p-4">
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
             <h3 className="font-semibold text-text">Moderation Enabled</h3>
             <p className="text-sm text-text-muted mt-0.5">
               Whether the moderation engine is active server-wide.
@@ -132,7 +132,7 @@ const PolicySettingsPanel: React.FC<PolicySettingsPanelProps> = ({ settings, mes
           </Tooltip>
         </div>
         <p className="text-xs text-text-muted mt-2 italic">
-          Read-only — reflects the server policy snapshot.
+          Read-only global policy — this value comes from server configuration and is not changed by runtime overrides below.
         </p>
       </section>
 
@@ -168,17 +168,17 @@ const PolicySettingsPanel: React.FC<PolicySettingsPanelProps> = ({ settings, mes
           </div>
         </div>
         <p className="text-xs text-text-muted mt-3 italic">
-          Read-only — reflects the server policy snapshot.
+          Read-only global defaults — user overrides can change the effective action for a selected user in the User Overrides tab.
         </p>
       </section>
 
       {/* 3. PII Detection Toggle (editable) */}
       <section className="rounded-lg border border-border bg-surface/50 p-4">
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
             <h3 className="font-semibold text-text">Personal Data Protection</h3>
             <p className="text-sm text-text-muted mt-0.5">
-              Enable built-in rules to detect and redact personal information.
+              Runtime override for built-in personal-data detection. Saving applies immediately; persistence is controlled separately.
             </p>
           </div>
           <Toggle checked={draft.piiEnabled} onChange={handlePiiToggle} label="PII detection" />
@@ -189,20 +189,20 @@ const PolicySettingsPanel: React.FC<PolicySettingsPanelProps> = ({ settings, mes
       <section className="rounded-lg border border-border bg-surface/50 p-4">
         <h3 className="font-semibold text-text mb-1">Content Categories</h3>
         <p className="text-sm text-text-muted mb-3">
-          Select which content categories the moderation engine should flag.
+          Runtime category override for this server session. Leave empty to use the server default category behavior.
         </p>
         <CategoryPicker value={draft.categoriesEnabled} onChange={handleCategoriesChange} />
       </section>
 
       {/* 5. Persist Toggle (warning-styled) */}
       <section className="rounded-lg border border-yellow-300 dark:border-yellow-700 bg-yellow-50 dark:bg-yellow-900/20 p-4">
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
             <h3 className="font-semibold text-yellow-800 dark:text-yellow-300">
               Persist to Disk
             </h3>
             <p className="text-sm text-yellow-700 dark:text-yellow-400 mt-0.5">
-              Write settings to config file so they survive server restarts.
+              Write runtime overrides to the server config file so these changes survive restarts.
             </p>
           </div>
           <Toggle checked={draft.persist} onChange={handlePersistToggle} label="Persist to disk" />
@@ -210,7 +210,7 @@ const PolicySettingsPanel: React.FC<PolicySettingsPanelProps> = ({ settings, mes
       </section>
 
       {/* 6. Save / Reset Buttons */}
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-3">
         <button
           type="button"
           onClick={handleSave}

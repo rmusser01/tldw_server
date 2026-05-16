@@ -1,19 +1,87 @@
+export const PERSONA_VISUAL_BUILTIN_STATES = [
+  "idle",
+  "wake_armed",
+  "listening",
+  "thinking",
+  "speaking",
+  "tool_running",
+  "approval_needed",
+  "error",
+  "offline"
+] as const
+
+export type PersonaVisualBuiltinStateId =
+  (typeof PERSONA_VISUAL_BUILTIN_STATES)[number]
+
+declare const personaVisualCustomStateIdBrand: unique symbol
+export type PersonaVisualCustomStateId = string & {
+  readonly [personaVisualCustomStateIdBrand]: "PersonaVisualCustomStateId"
+}
+
+export const PERSONA_VISUAL_PACK_ACTIVATED_EVENT =
+  "tldw:persona-visual-pack-activated"
+
 export type PersonaVisualStateId =
-  | "idle"
-  | "wake_armed"
-  | "listening"
-  | "thinking"
-  | "speaking"
-  | "tool_running"
-  | "approval_needed"
-  | "error"
-  | "offline"
+  | PersonaVisualBuiltinStateId
+  | PersonaVisualCustomStateId
+
+export const isPersonaVisualBuiltinStateId = (
+  value: string
+): value is PersonaVisualBuiltinStateId =>
+  (PERSONA_VISUAL_BUILTIN_STATES as readonly string[]).includes(value)
+
+export const asPersonaVisualCustomStateId = (
+  value: string
+): PersonaVisualCustomStateId => value as PersonaVisualCustomStateId
+
+export const asPersonaVisualStateId = (value: string): PersonaVisualStateId =>
+  isPersonaVisualBuiltinStateId(value)
+    ? value
+    : asPersonaVisualCustomStateId(value)
 
 export type PersonaVisualRendererType =
   | "sprite_frames"
   | "sprite_sheet"
   | "static_image"
   | "live2d"
+
+export type PersonaVisualRendererSetupStatus =
+  | "supported"
+  | "unsupported_renderer"
+  | "feature_gated"
+  | "dependency_missing"
+  | "license_review_required"
+
+export interface PersonaVisualRendererCapability {
+  renderer_type: string
+  display_name: string
+  manifest_versions: number[]
+  can_validate: boolean
+  can_activate: boolean
+  buddy_runtime_supported: boolean
+  import_supported: boolean
+  export_supported: boolean
+  disabled_reason?: string | null
+  renderer_contract_versions?: number[]
+  supported_asset_roles?: string[]
+  required_role_categories?: string[]
+  role_category_map?: Record<string, string[]>
+  allowed_mime_types?: string[]
+  allowed_extensions?: string[]
+  max_file_count?: number | null
+  max_total_bytes?: number | null
+  max_texture_width?: number | null
+  max_texture_height?: number | null
+  feature_flag?: string | null
+  setup_status?: PersonaVisualRendererSetupStatus
+  setup_blockers?: string[]
+  requires_static_fallback?: boolean
+  requires_license_ack?: boolean
+}
+
+export interface PersonaVisualRendererCapabilitiesResponse {
+  renderers: PersonaVisualRendererCapability[]
+}
 
 export type PersonaVisualPackStatus =
   | "draft"
@@ -63,9 +131,30 @@ export interface PersonaVisualAnimation {
   preview_asset_id?: string
 }
 
+export type PersonaVisualStateCatalogKind =
+  | "tool_variant"
+  | "reaction"
+  | "live_variant"
+  | "mcp_runtime"
+  | "mood"
+  | "pack_private"
+
+export interface PersonaVisualStateCatalogEntry {
+  label: string
+  kind: PersonaVisualStateCatalogKind
+  description?: string | null
+  tags?: string[]
+}
+
+export type PersonaVisualAuthoredTriggerSource =
+  | "live_state"
+  | "tool_category"
+  | "mcp_runtime"
+  | "tool_name"
+
 export interface PersonaVisualAuthoredTrigger {
   id: string
-  source: "live_state" | "tool_category" | "mcp_runtime"
+  source: PersonaVisualAuthoredTriggerSource
   match: string
   state: PersonaVisualStateId
   duration_ms: number
@@ -78,6 +167,7 @@ export interface PersonaVisualManifest {
   states: Partial<Record<PersonaVisualStateId, { animation_id: string }>>
   animations: Record<string, PersonaVisualAnimation>
   fallbacks?: Partial<Record<PersonaVisualStateId, PersonaVisualStateId[]>>
+  state_catalog?: Record<PersonaVisualCustomStateId, PersonaVisualStateCatalogEntry>
   authored_triggers?: PersonaVisualAuthoredTrigger[]
 }
 
@@ -127,6 +217,42 @@ export interface PersonaVisualPackCreate {
 }
 
 export interface PersonaVisualPackDuplicateRequest {
+  target_persona_id: string
+  title?: string | null
+}
+
+export interface PersonaVisualStarterPackAssetSummary {
+  asset_key: string
+  filename: string
+  mime_type: string
+  asset_role: PersonaVisualAssetRole | string
+  byte_size: number
+}
+
+export interface PersonaVisualStarterPackSummary {
+  id: string
+  title: string
+  description: string
+  renderer_type: PersonaVisualRendererType
+  manifest_version: number
+  states_offered: string[]
+  asset_count: number
+  total_bytes: number
+  tags: string[]
+  license_label: string
+}
+
+export interface PersonaVisualStarterPackDetail
+  extends PersonaVisualStarterPackSummary {
+  manifest: PersonaVisualManifest | Record<string, unknown>
+  assets: PersonaVisualStarterPackAssetSummary[]
+}
+
+export interface PersonaVisualStarterPackListResponse {
+  starter_packs: PersonaVisualStarterPackSummary[]
+}
+
+export interface PersonaVisualStarterPackCopyRequest {
   target_persona_id: string
   title?: string | null
 }
@@ -304,6 +430,31 @@ export interface PersonaVisualImportRequiredChoice {
   replaceable_pack_ids?: string[]
 }
 
+export interface PersonaVisualRendererImportPreview {
+  status?: string | null
+  renderer_type?: string | null
+  manifest_version?: number | null
+  renderer_contract_version?: number | null
+  can_commit?: boolean | null
+  activation_eligible?: boolean | null
+  blockers?: string[]
+  warnings?: string[]
+  normalized_role_categories?: Record<string, string[]>
+  setup_status?: string | null
+  setup_blockers?: string[]
+  disabled_reason?: string | null
+}
+
+export interface PersonaVisualImportProposedPlan extends Record<string, unknown> {
+  target_mode?: PersonaVisualImportTargetMode | string
+  target_modes?: Array<PersonaVisualImportTargetMode | string>
+  default_target_mode?: PersonaVisualImportTargetMode | string
+  commit_eligible?: boolean
+  activation_eligible?: boolean
+  commit_blockers?: string[]
+  renderer_import_preview?: PersonaVisualRendererImportPreview
+}
+
 export interface PersonaVisualImportPreviewResponse {
   preview_id: string
   job_id: string
@@ -319,7 +470,7 @@ export interface PersonaVisualImportPreviewResponse {
   bundle_summary: Record<string, unknown>
   validation_warnings: unknown[]
   conflicts: PersonaVisualImportConflict[]
-  proposed_plan: Record<string, unknown>
+  proposed_plan: PersonaVisualImportProposedPlan
   quota_estimate: Record<string, unknown>
   required_choices: PersonaVisualImportRequiredChoice[]
   target_warnings: unknown[]

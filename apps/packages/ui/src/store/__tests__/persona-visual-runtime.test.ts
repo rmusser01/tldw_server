@@ -4,7 +4,10 @@ import { usePersonaVisualRuntimeStore } from "../persona-visual-runtime"
 
 describe("persona visual runtime store", () => {
   beforeEach(() => {
-    usePersonaVisualRuntimeStore.setState({ override: null })
+    usePersonaVisualRuntimeStore.setState({
+      override: null,
+      runtimeDiagnostics: null
+    })
   })
 
   it("stores and clears expired runtime overrides", () => {
@@ -39,5 +42,31 @@ describe("persona visual runtime store", () => {
 
     usePersonaVisualRuntimeStore.getState().clearForSession("session-1")
     expect(usePersonaVisualRuntimeStore.getState().override).toBeNull()
+  })
+
+  it("clears runtime diagnostics only for the matching source", () => {
+    usePersonaVisualRuntimeStore.getState().setRuntimeDiagnostics({
+      sourceId: "sidepanel:persona-garden",
+      personaId: "persona-1",
+      sessionId: null,
+      packId: "pack-1",
+      packTitle: "Animated buddy",
+      packLoadStatus: "loaded",
+      visualState: "idle",
+      diagnostic: null,
+      updatedAt: 2000
+    })
+
+    usePersonaVisualRuntimeStore
+      .getState()
+      .clearRuntimeDiagnostics("web:persona-garden")
+    expect(usePersonaVisualRuntimeStore.getState().runtimeDiagnostics?.packId).toBe(
+      "pack-1"
+    )
+
+    usePersonaVisualRuntimeStore
+      .getState()
+      .clearRuntimeDiagnostics("sidepanel:persona-garden")
+    expect(usePersonaVisualRuntimeStore.getState().runtimeDiagnostics).toBeNull()
   })
 })

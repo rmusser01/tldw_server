@@ -53,6 +53,30 @@ class _ScopedSqliteUsageDb:
         )
 
 
+class _PgSummaryFallbackDb:
+    _is_sqlite = False
+
+    def __init__(self) -> None:
+        self.fetch_calls: list[tuple[str, tuple[object, ...]]] = []
+
+    async def fetch(self, query: str, *params: object) -> list[dict[str, object]]:
+        self.fetch_calls.append((str(query), params))
+        if len(self.fetch_calls) == 1:
+            raise RuntimeError("cache columns missing")
+        return [
+            {
+                "group_value": "openai",
+                "requests": 1,
+                "errors": 0,
+                "input_tokens": 100,
+                "output_tokens": 25,
+                "total_tokens": 125,
+                "total_cost_usd": 0.001,
+                "latency_avg_ms": 12.5,
+            }
+        ]
+
+
 def _admin_principal() -> AuthPrincipal:
     return AuthPrincipal(
         kind="user",
@@ -124,6 +148,41 @@ async def test_get_cost_attribution_returns_empty_items_when_admin_scope_has_no_
 
     assert result == {"group_by": "user", "range_days": 7, "items": []}
     assert db.execute_calls == []
+
+
+@pytest.mark.asyncio
+async def test_llm_usage_summary_pg_fallback_preserves_cache_summary_shape() -> None:
+    db = _PgSummaryFallbackDb()
+
+    rows = await admin_usage_service.fetch_llm_usage_summary(
+        db,
+        group_by="provider",
+        provider=None,
+        start=None,
+        end=None,
+        org_ids=None,
+    )
+
+    assert len(db.fetch_calls) == 2
+    fallback_sql = db.fetch_calls[1][0]
+    for fragment in (
+        "0 AS cached_input_tokens",
+        "0 AS cache_write_input_tokens",
+        "0 AS cache_read_input_tokens",
+        "SUM(COALESCE(prompt_tokens,0)) AS billable_input_tokens",
+        "0 AS provider_usage_count",
+        "0 AS stream_estimate_count",
+        "0 AS disconnect_estimate_count",
+        "0 AS missing_usage_count",
+        "0 AS local_diagnostic_count",
+        "SUM(CASE WHEN estimated THEN 1 ELSE 0 END) AS estimated_usage_count",
+    ):
+        assert fragment in fallback_sql
+    assert rows[0]["group_value"] == "openai"
+    assert rows[0]["cached_input_tokens"] == 0
+    assert rows[0]["billable_input_tokens"] == 0
+    assert rows[0]["estimated_usage_count"] == 0
+    assert rows[0]["latency_avg_ms"] == 12.5
 
 
 @pytest.mark.asyncio

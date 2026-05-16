@@ -28,7 +28,7 @@ const ALL_SHORTCUT_IDS = [
   "workflows", "writing-playground", "acp-playground",
   "skills", "kanban-playground",
   "model-playground", "data-tables",
-  "admin-server", "admin-integrations", "documentation", "moderation-playground",
+  "admin-server", "admin-integrations", "documentation", "moderation-review", "moderation-rules",
   "admin-llamacpp", "admin-mlx", "settings"
 ]
 

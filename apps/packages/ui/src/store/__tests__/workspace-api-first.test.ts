@@ -95,8 +95,10 @@ describe("workspace store API-first mutations", () => {
     "reviewing",
     "accepted",
     "needs_revision",
+    "rejected",
     "exported",
-    "assigned"
+    "assigned",
+    "archived"
   ])(
     "preserves server review status %s while deriving completed generation state",
     async (reviewStatus) => {
@@ -134,6 +136,128 @@ describe("workspace store API-first mutations", () => {
       })
     }
   )
+
+  it("maps traceable artifact contract fields into generated artifacts", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      id: "ws-traceable",
+      name: "Traceable WS",
+      version: 4,
+      sources: [],
+      artifacts: [
+        {
+          id: "art-traceable",
+          workspace_id: "ws-traceable",
+          artifact_type: "report",
+          title: "Reviewed ACP Brief",
+          status: "completed",
+          review_state: "accepted",
+          content_type: "text/markdown",
+          content: "# Brief\n\nAccepted body",
+          preview_text: "Accepted body",
+          summary: "A reviewed ACP brief",
+          total_tokens: 560,
+          total_cost_usd: 0.12,
+          owner_scope: "workspace",
+          owner_id: "workspace-owner",
+          project_id: "project-9",
+          task_id: "task-workspace-4",
+          source_collection_id: "collection-3",
+          root_artifact_id: "root-art-1",
+          artifact_version_id: "version-art-3",
+          previous_version_id: "version-art-2",
+          schema_version: 1,
+          producer_metadata: {
+            producer_type: "acp",
+            producer_id: "task-42",
+            run_id: "run-7",
+            session_id: "session-abc",
+            links: {
+              diagnostics: "/api/v1/acp/sessions/session-abc/diagnostics"
+            }
+          },
+          source_lineage: {
+            sources: [
+              {
+                source_id: "src-1",
+                source_type: "media",
+                label: "Transcript",
+                media_id: 42,
+                citation_spans: [{ start: 12, end: 48 }]
+              }
+            ]
+          },
+          review_metadata: {
+            reviewer_id: "reviewer-1",
+            decision: "accepted"
+          },
+          version_metadata: {
+            revision_reason: "Reviewer accepted the brief"
+          },
+          export_refs: [{ format: "md", file_id: 101, status: "ready" }],
+          redaction: {
+            support_safe: true,
+            redacted: false,
+            retention_class: "standard"
+          },
+          created_at: "2026-05-06T12:05:00Z",
+          completed_at: "2026-05-06T12:06:00Z",
+          version: 3
+        }
+      ],
+      notes: []
+    })
+
+    const state = await hydrateWorkspaceFromServer("ws-traceable", {
+      fetch: mockFetch
+    })
+
+    expect(state.artifacts[0]).toMatchObject({
+      id: "art-traceable",
+      status: "completed",
+      reviewStatus: "accepted",
+      contentType: "text/markdown",
+      previewText: "Accepted body",
+      summary: "A reviewed ACP brief",
+      ownerScope: "workspace",
+      ownerId: "workspace-owner",
+      projectId: "project-9",
+      taskId: "task-workspace-4",
+      sourceCollectionId: "collection-3",
+      rootArtifactId: "root-art-1",
+      artifactVersionId: "version-art-3",
+      previousVersionId: "version-art-2",
+      schemaVersion: 1,
+      producerMetadata: {
+        producerType: "acp",
+        producerId: "task-42",
+        runId: "run-7",
+        sessionId: "session-abc"
+      },
+      sourceLineage: [
+        {
+          sourceId: "src-1",
+          sourceType: "media",
+          title: "Transcript",
+          mediaId: 42,
+          citationCount: 1
+        }
+      ],
+      reviewMetadata: {
+        reviewerId: "reviewer-1",
+        decision: "accepted"
+      },
+      versionMetadata: {
+        revisionReason: "Reviewer accepted the brief"
+      },
+      exportRefs: [{ format: "markdown", fileId: 101, status: "ready" }],
+      exportTargets: ["markdown"],
+      redaction: {
+        supportSafe: true,
+        redacted: false,
+        retentionClass: "standard"
+      }
+    })
+  })
 
   it("does not mark unknown backend artifact statuses as completed", async () => {
     const mockFetch = vi.fn().mockResolvedValue({

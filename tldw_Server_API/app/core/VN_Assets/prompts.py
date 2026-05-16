@@ -8,6 +8,11 @@ from functools import lru_cache
 from math import ceil
 from typing import Any
 
+try:
+    from requests import RequestException
+except ImportError:  # pragma: no cover - requests is an application dependency.
+    RequestException = None  # type: ignore[assignment]
+
 
 DEFAULT_CHARACTER_BUDGET = 1500
 DEFAULT_WORLD_BOOK_BUDGET = 1000
@@ -16,6 +21,17 @@ DEFAULT_SLOT_BUDGET = 750
 DEFAULT_TOTAL_BUDGET = 4000
 
 SOURCE_BUCKETS = ("slot", "pack", "character", "world_book", "negative_prompt")
+TOKEN_ENCODER_FALLBACK_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    AttributeError,
+    KeyError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
+if RequestException is not None:
+    TOKEN_ENCODER_FALLBACK_EXCEPTIONS = TOKEN_ENCODER_FALLBACK_EXCEPTIONS + (RequestException,)
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,7 +173,7 @@ def _get_prompt_token_encoder() -> Any | None:
 
     try:
         return tiktoken.get_encoding("cl100k_base")
-    except (AttributeError, KeyError, RuntimeError, ValueError):
+    except TOKEN_ENCODER_FALLBACK_EXCEPTIONS:
         return None
 
 

@@ -66,6 +66,20 @@ import {
   type WorkspaceGlobalSearchResult
 } from "./workspace-global-search"
 import {
+  getResearchStudioTabFromSearch,
+  parseResearchStudioTab,
+  RESEARCH_STUDIO_DEFAULT_TAB,
+  readResearchStudioLastMobileTab,
+  writeResearchStudioLastMobileTab,
+  type ResearchStudioTab
+} from "./research-studio-route-state"
+import {
+  buildUnknownResearchStudioCapabilities,
+  isResearchStudioCapabilitiesStale,
+  normalizeResearchStudioCapabilities,
+  type ResearchStudioCapabilitiesResponse
+} from "./research-studio-capabilities"
+import {
   collectDescendantSourceIds,
   createWorkspaceOrganizationIndex
 } from "@/store/workspace-organization"
@@ -143,7 +157,7 @@ const normalizeVectorProcessingStatus = (
   return null
 }
 
-type WorkspaceTabKey = "sources" | "chat" | "studio"
+type WorkspaceTabKey = ResearchStudioTab
 
 type WorkspaceNoteKeywordLike =
   | string
@@ -797,13 +811,43 @@ const WorkspacePlaygroundBody: React.FC = () => {
   )
   const provenanceEnabled = provenanceFlagEnabled !== false
   const statusGuardrailsEnabled = statusGuardrailsFlagEnabled !== false
+  const [researchStudioCapabilities, setResearchStudioCapabilities] =
+    React.useState<ResearchStudioCapabilitiesResponse>(() =>
+      buildUnknownResearchStudioCapabilities("capabilities_not_loaded")
+    )
+  const [
+    researchStudioCapabilitiesFetchedAt,
+    setResearchStudioCapabilitiesFetchedAt
+  ] = React.useState<number | null>(null)
 
   // Mobile drawer state
   const [leftDrawerOpen, setLeftDrawerOpen] = React.useState(false)
   const [rightDrawerOpen, setRightDrawerOpen] = React.useState(false)
 
+  const initialRouteTabRef = React.useRef<WorkspaceTabKey | null>(
+    getResearchStudioTabFromSearch(
+      typeof window === "undefined" ? "" : window.location.search
+    )
+  )
+  const initialStoredMobileTabRef = React.useRef<WorkspaceTabKey | null>(
+    initialRouteTabRef.current ? null : readResearchStudioLastMobileTab()
+  )
+  const initialRouteTabAppliedRef = React.useRef(false)
+
   // Mobile tab state
-  const [activeTab, setActiveTab] = React.useState<WorkspaceTabKey>("chat")
+  const [activeTab, setActiveTab] = React.useState<WorkspaceTabKey>(
+    () =>
+      initialRouteTabRef.current ??
+      initialStoredMobileTabRef.current ??
+      RESEARCH_STUDIO_DEFAULT_TAB
+  )
+  const setActiveMobileTab = React.useCallback(
+    (tab: WorkspaceTabKey) => {
+      setActiveTab(tab)
+      writeResearchStudioLastMobileTab(tab)
+    },
+    []
+  )
 
   // Global search state
   const [globalSearchOpen, setGlobalSearchOpen] = React.useState(false)
@@ -1212,6 +1256,39 @@ const WorkspacePlaygroundBody: React.FC = () => {
     }
   }, [])
 
+  const refreshResearchStudioCapabilities = React.useCallback(async () => {
+    try {
+      const raw = await tldwClient.getResearchStudioCapabilities()
+      const normalized = normalizeResearchStudioCapabilities(raw)
+      setResearchStudioCapabilities(normalized)
+      setResearchStudioCapabilitiesFetchedAt(Date.now())
+      return normalized
+    } catch {
+      const fallback = buildUnknownResearchStudioCapabilities(
+        "capability_fetch_failed"
+      )
+      setResearchStudioCapabilities(fallback)
+      setResearchStudioCapabilitiesFetchedAt(Date.now())
+      return fallback
+    }
+  }, [])
+
+  const refreshResearchStudioCapabilitiesIfStale = React.useCallback(async () => {
+    if (
+      !isResearchStudioCapabilitiesStale(
+        researchStudioCapabilities,
+        researchStudioCapabilitiesFetchedAt
+      )
+    ) {
+      return researchStudioCapabilities
+    }
+    return refreshResearchStudioCapabilities()
+  }, [
+    refreshResearchStudioCapabilities,
+    researchStudioCapabilities,
+    researchStudioCapabilitiesFetchedAt
+  ])
+
   const closeGlobalSearch = React.useCallback(() => {
     setGlobalSearchOpen(false)
     setGlobalSearchQuery("")
@@ -1326,7 +1403,7 @@ const WorkspacePlaygroundBody: React.FC = () => {
     (pane: WorkspaceTabKey) => {
       if (pane === "sources") {
         if (isMobile) {
-          setActiveTab("sources")
+          setActiveMobileTab("sources")
         } else if (isDesktopLayout()) {
           setLeftPaneCollapsed(false)
         } else {
@@ -1345,7 +1422,7 @@ const WorkspacePlaygroundBody: React.FC = () => {
 
       if (pane === "studio") {
         if (isMobile) {
-          setActiveTab("studio")
+          setActiveMobileTab("studio")
         } else if (isDesktopLayout()) {
           setRightPaneCollapsed(false)
         } else {
@@ -1363,7 +1440,7 @@ const WorkspacePlaygroundBody: React.FC = () => {
       }
 
       if (isMobile) {
-        setActiveTab("chat")
+        setActiveMobileTab("chat")
       }
       window.setTimeout(() => {
         const chatInput = document.querySelector<HTMLElement>(
@@ -1380,8 +1457,18 @@ const WorkspacePlaygroundBody: React.FC = () => {
         firstFocusable?.focus()
       }, 0)
     },
-    [isMobile, setLeftPaneCollapsed, setRightPaneCollapsed]
+    [isMobile, setActiveMobileTab, setLeftPaneCollapsed, setRightPaneCollapsed]
   )
+
+  React.useEffect(() => {
+    if (initialRouteTabAppliedRef.current) return
+    initialRouteTabAppliedRef.current = true
+
+    const initialRouteTab = initialRouteTabRef.current
+    if (!initialRouteTab || initialRouteTab === "chat") return
+
+    focusWorkspacePane(initialRouteTab)
+  }, [focusWorkspacePane])
 
   const handleOpenSplitWorkspace = React.useCallback(() => {
     if (readyEffectiveSelectedSourceEntries.length === 0) {
@@ -1482,7 +1569,7 @@ const WorkspacePlaygroundBody: React.FC = () => {
 
       if (result.domain === "source" && result.sourceId) {
         if (isMobile) {
-          setActiveTab("sources")
+          setActiveMobileTab("sources")
         } else if (isDesktopLayout()) {
           setLeftPaneCollapsed(false)
         } else {
@@ -1497,7 +1584,7 @@ const WorkspacePlaygroundBody: React.FC = () => {
 
       if (result.domain === "chat" && result.chatMessageId) {
         if (isMobile) {
-          setActiveTab("chat")
+          setActiveMobileTab("chat")
         }
         window.setTimeout(() => {
           focusChatMessageById(result.chatMessageId!)
@@ -1507,7 +1594,7 @@ const WorkspacePlaygroundBody: React.FC = () => {
 
       if (result.domain === "note") {
         if (isMobile) {
-          setActiveTab("studio")
+          setActiveMobileTab("studio")
         } else if (isDesktopLayout()) {
           setRightPaneCollapsed(false)
         } else {
@@ -1525,6 +1612,7 @@ const WorkspacePlaygroundBody: React.FC = () => {
       focusSourceById,
       hydrateAndFocusNote,
       isMobile,
+      setActiveMobileTab,
       setLeftPaneCollapsed,
       setRightPaneCollapsed
     ]
@@ -1597,6 +1685,11 @@ const WorkspacePlaygroundBody: React.FC = () => {
   useEffect(() => {
     void refreshAccountStorageUsage()
   }, [refreshAccountStorageUsage])
+
+  useEffect(() => {
+    if (!isStoreHydrated) return
+    void refreshResearchStudioCapabilities()
+  }, [isStoreHydrated, refreshResearchStudioCapabilities])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -2134,6 +2227,14 @@ const WorkspacePlaygroundBody: React.FC = () => {
           provenanceEnabled={provenanceEnabled}
           statusGuardrailsEnabled={statusGuardrailsEnabled}
           contentWidthMode="full"
+          researchStudioCapabilities={researchStudioCapabilities}
+          researchStudioCapabilitiesStale={isResearchStudioCapabilitiesStale(
+            researchStudioCapabilities,
+            researchStudioCapabilitiesFetchedAt
+          )}
+          onRefreshResearchStudioCapabilities={
+            refreshResearchStudioCapabilitiesIfStale
+          }
         />
       )
     },
@@ -2176,7 +2277,14 @@ const WorkspacePlaygroundBody: React.FC = () => {
       <Suspense
         fallback={<WorkspacePaneFallback testId="workspace-studio-pane" />}
       >
-        <StudioPane onHide={options?.onHide} />
+        <StudioPane
+          onHide={options?.onHide}
+          onRequestSources={() => focusWorkspacePane("sources")}
+          researchStudioCapabilities={researchStudioCapabilities}
+          onRefreshResearchStudioCapabilities={
+            refreshResearchStudioCapabilitiesIfStale
+          }
+        />
       </Suspense>
     )
   }
@@ -2416,7 +2524,12 @@ const WorkspacePlaygroundBody: React.FC = () => {
 
           <Tabs
             activeKey={activeTab}
-            onChange={(key) => setActiveTab(key as WorkspaceTabKey)}
+            onChange={(key) => {
+              const nextTab = parseResearchStudioTab(key)
+              if (nextTab) {
+                setActiveMobileTab(nextTab)
+              }
+            }}
             items={mobileTabItems}
             centered
             destroyOnHidden
@@ -2499,6 +2612,14 @@ const WorkspacePlaygroundBody: React.FC = () => {
                 provenanceEnabled={provenanceEnabled}
                 statusGuardrailsEnabled={statusGuardrailsEnabled}
                 contentWidthMode={desktopChatContentWidthMode}
+                researchStudioCapabilities={researchStudioCapabilities}
+                researchStudioCapabilitiesStale={isResearchStudioCapabilitiesStale(
+                  researchStudioCapabilities,
+                  researchStudioCapabilitiesFetchedAt
+                )}
+                onRefreshResearchStudioCapabilities={
+                  refreshResearchStudioCapabilitiesIfStale
+                }
               />
             </main>
 

@@ -290,7 +290,7 @@ function KnowledgeQAContent() {
           <div className="text-center max-w-md">
             <WifiOff className="w-16 h-16 mx-auto mb-4 text-text-muted" />
             <h2 className="text-xl font-semibold mb-2">
-              Setup Required
+              Finish setup to use Knowledge QA
             </h2>
             <p className="text-text-muted mb-4">
               Complete the server setup to start searching your documents.

@@ -44,6 +44,120 @@ work. It keeps today's pack attached to one persona while leaving room for later
 duplicate-to-persona, import/export, and shared-library workflows without
 changing the core pack format.
 
+V1 validation and Buddy runtime support are intentionally limited to
+`sprite_frames`. PR #1608 added the renderer capability contract and authenticated
+`GET /api/v1/persona/visual-renderers` endpoint, with `sprite_frames` as the only
+enabled V1 activatable and Buddy-runtime renderer. Reserved renderer labels in
+API/UI types are still not support claims until backend manifest validation,
+import preview, Buddy runtime rendering, and capability reporting all agree on
+that renderer.
+
+Future renderer/provider adapter work is evaluated in
+`Docs/Design/2026-05-10-persona-visual-renderer-provider-adapter-evaluation.md`.
+That evaluation keeps Live2D, Rive, Lottie, Spine, and external MCP-compatible
+pack providers separate from the current V1 activation path. The renderer
+capability contract is now in place; sprite-sheet frame regions are supported
+inside `sprite_frames`, and any future non-sprite adapter should reuse the
+registry instead of adding another hardcoded renderer path.
+
+The renderer capability response is additive. Clients should continue to read
+the original fields (`renderer_type`, `manifest_versions`, `can_validate`,
+`can_activate`, `buddy_runtime_supported`, `import_supported`,
+`export_supported`, and `disabled_reason`) and may also read Manifest V2 planning
+metadata such as `renderer_contract_versions`, `supported_asset_roles`,
+`required_role_categories`, `role_category_map`, MIME/extension limits, texture
+limits, `setup_status`, `setup_blockers`, `requires_static_fallback`, and
+`requires_license_ack`. `sprite_frames` remains the only activatable
+Buddy-runtime renderer. A non-sprite renderer such as `live2d` can appear in the
+capability list with `can_validate: false`, `can_activate: false`,
+`buddy_runtime_supported: false`, and a blocker such as
+`runtime_adapter_not_implemented`; that is an explicit future/disabled state,
+not a runtime support claim.
+
+Renderer import-preview diagnostics are also split from archive parsing. The
+fixture-level validator in
+`tldw_Server_API/app/core/Persona/visual_import_preview_validators.py` accepts
+already-normalized manifest and asset metadata, resolves the renderer capability
+registry, and returns structured blockers, warnings, normalized role categories,
+commit eligibility, and activation eligibility. It does not parse archives,
+create asset rows, activate packs, or load renderer runtimes; the current V1
+archive preview and commit flow remains unchanged.
+
+Archive import preview now routes Manifest V2 renderer metadata through that
+validator and places the result in `proposed_plan.renderer_import_preview`.
+Known disabled renderers such as `live2d`, and unknown renderers, can therefore
+return review diagnostics without being treated as malformed V1 sprite-frame
+manifests. If the renderer preview is not commit-eligible, the preview row is
+stored with `status: "blocked"` and includes `commit_eligible: false`,
+`activation_eligible: false`, and `commit_blockers` in the proposed plan. This
+is still a review-only path: no asset rows or pack rows are committed, no pack is
+activated, no runtime renderer is loaded, and no MCP provider behavior is added.
+
+### Sprite Atlas Frames
+## Sprite Atlas Packs
+
+Sprite atlas support is part of the existing `sprite_frames` renderer. In this
+slice, `sprite_sheet` is an asset role, not a renderer type; manifests with
+`renderer_type: "sprite_sheet"` are still rejected by the V1 renderer capability
+contract.
+
+Atlas-backed animations reference one bounded raster asset from each frame and
+crop individual frames with a pixel `frames[].region` rectangle. The same atlas
+asset can be reused across multiple frames. Use `preview_frame` when the preview
+should use a specific atlas crop; it is a zero-based frame index and must satisfy
+`0 <= preview_frame < len(frames)`. `preview_asset_id` is better for
+separate-frame animations with distinct asset IDs.
+
+```json
+{
+  "manifest_version": 1,
+  "renderer_type": "sprite_frames",
+  "states": {
+    "idle": { "animation_id": "idle_loop" },
+    "listening": { "animation_id": "idle_loop" },
+    "thinking": { "animation_id": "idle_loop" },
+    "speaking": { "animation_id": "speak_loop" },
+    "error": { "animation_id": "idle_loop" }
+  },
+  "animations": {
+    "idle_loop": {
+      "frame_rate": 8,
+      "preview_frame": 1,
+      "frames": [
+        {
+          "asset_id": "atlas-main",
+          "region": { "x": 0, "y": 0, "width": 128, "height": 128 },
+          "duration_ms": 120
+        },
+        {
+          "asset_id": "atlas-main",
+          "region": { "x": 128, "y": 0, "width": 128, "height": 128 },
+          "duration_ms": 120
+        }
+      ]
+    },
+    "speak_loop": {
+      "frame_rate": 12,
+      "frames": [
+        {
+          "asset_id": "atlas-main",
+          "region": { "x": 0, "y": 128, "width": 128, "height": 128 }
+        }
+      ]
+    }
+  }
+}
+```
+
+The referenced asset row should use `asset_role: "sprite_sheet"` and must still
+be a bounded raster image accepted by the normal visual upload/import path.
+Backend validation rejects non-integer coordinates or dimensions, negative x/y
+coordinates, or non-positive width/height dimensions. It also rejects
+out-of-bounds regions when source dimensions are known. When dimensions are not
+yet available, draft validation can accept integer regions with non-negative x/y
+coordinates and positive width/height dimensions, and the Buddy renderer remains
+fail-soft at runtime if a region cannot be rendered safely.
+
 ## Personal Library
 
 The personal library is a user-scoped metadata layer over existing Persona
@@ -94,6 +208,80 @@ Runtime state triggers are transient session behavior; library reuse is a
 durable draft-creation action that must preserve review and explicit activation
 semantics.
 
+## Bundled Starter Catalog Scaffolds
+
+Bundled starter catalog entries are immutable server fixtures for first-run or
+recovery flows. They are not global Persona Visual pack rows, shared library
+entries, runtime assets, final character artwork, or completed animation packs.
+Listing the catalog returns safe fixture metadata only.
+
+The current bundled catalog exposes nine starter IDs in stable order:
+
+1. `research-buddy-basic`
+2. `migu-marker-basic`
+3. `minimal-helper-basic`
+4. `study-desk-intermediate`
+5. `tool-helper-intermediate`
+6. `object-creature-intermediate`
+7. `lofi-study-intricate`
+8. `action-guide-intricate`
+9. `elaborate-persona-intricate`
+
+These map to the approved basic, intermediate, and intricate tiers from the
+Persona Buddy default catalog design, but this slice only adds backend catalog
+scaffolds. The included PNGs are deliberately tiny deterministic fixtures, and
+the manifest animations are metadata examples that validate state/asset copying;
+they are not the final generated/imported buddy art or expressive animation
+frames. Real default buddy assets still need to be created through the approved
+neutral-pose-to-animation pipeline and can replace these fixture assets without
+changing the catalog copy contract.
+
+The scaffold fixtures establish stable copy-to-draft behavior, required-state
+coverage, custom-state examples, and an atlas-backed example while preserving
+the same explicit activation rule as user-created packs. The legacy
+`research-buddy-starter` id remains accepted as a compatibility alias for the
+research buddy scaffold, but it is not listed as a tenth catalog item.
+
+Starter catalog responses include production-readiness metadata so clients,
+review surfaces, and future generation workers can distinguish current
+scaffolds from final authored default assets:
+
+1. `complexity_tier` is one of `basic`, `intermediate`, or `intricate`.
+2. `production_status` is currently `scaffold` for all bundled starters.
+3. `neutral_anchor_required` is true when the final authored pack should begin
+   from a neutral identity anchor.
+4. `expected_asset_groups` lists the authored inputs expected before a scaffold
+   becomes production artwork, such as `identity_brief`, `neutral_anchor`,
+   `static_talking_reaction_sheet`, `animation_strips`, or
+   `animation_atlas`.
+5. `animation_coverage_notes` are bounded notes for reviewers and future
+   generation jobs. They describe the missing neutral-anchor-derived animation
+   work and do not grant runtime support by themselves.
+
+The neutral-anchor pipeline remains: identity brief, neutral anchor, optional
+static talking/reaction sheet, animation strips or atlas regions, review, then
+copy/import into an inactive draft with separate activation. The production
+metadata is catalog guidance for that pipeline; it does not create final art,
+run image generation, activate a pack, or change renderer support.
+
+Copying a bundled starter pack creates a normal user-owned draft pack attached
+to the selected target persona. The copy path validates the fixture manifest and
+assets, writes new asset files through the existing Persona Visual storage
+service, remaps fixture asset keys to newly created asset ids, and stores the
+resulting manifest on the new draft pack.
+
+Starter-pack copies do not activate automatically. If the target persona already
+has an active pack, that active pack stays active until the user explicitly
+activates the copied draft through the existing activation endpoint. This keeps
+bundled defaults aligned with the same review-before-activation rule used by
+imports, library reuse, and generated candidates.
+
+Current starter-pack API routes:
+
+1. `GET /api/v1/persona/visual-starter-packs`
+2. `GET /api/v1/persona/visual-starter-packs/{starter_pack_id}`
+3. `POST /api/v1/persona/visual-starter-packs/{starter_pack_id}/copy`
+
 Core implementation points:
 
 1. `persona_visual_library_items` in the ChaChaNotes persona store.
@@ -103,6 +291,45 @@ Core implementation points:
 4. `VisualPackEditor` for save/list/edit/remove/use controls in Persona Garden.
 5. `PersonaVisualsModule` for MCP discovery and draft reuse on top of the same
    reference-backed service semantics.
+6. `PersonaVisualStarterCatalogService` for bundled fixture listing and
+   copy-to-draft creation on top of the existing asset storage and manifest
+   validation path.
+
+## External MCP-Compatible Pack Providers
+
+External MCP-compatible Persona Visual pack providers are review-input sources,
+not Persona Visual storage owners or runtime plugins. The contract is documented
+in
+`Docs/Design/2026-05-13-persona-visual-external-mcp-provider-contract.md`.
+
+Provider output can describe one of four durable review inputs:
+
+1. a `.tldw-persona-vpack` portable archive for import preview.
+2. a generated-candidate payload for an existing draft pack.
+3. a proposed manifest patch for an existing draft pack.
+4. a request to create a new inactive draft pack.
+
+Every provider result must be treated as untrusted until the tldw server
+validates it. Provider output must not activate a pack, mutate an active pack,
+write assets directly, bypass import preview, submit runtime renderer code, or
+grant renderer support by assertion. Renderer support still comes from the
+server renderer capability registry, and non-sprite proposals still need the
+Manifest V2 static fallback and renderer diagnostics described above.
+
+Portable archive provider results enter the same staged import flow as user
+uploads: preview first, explicit conflict choices where needed, commit to a
+reviewed draft only, and separate user activation later. Generated-candidate
+and manifest-patch provider results should use the same review semantics as
+local generation: provider asset handles are intake placeholders until the
+server validates metadata, copies bytes through approved storage paths, and
+assigns real asset ids.
+
+Provider provenance is metadata only. It must not override user ownership,
+persona scope, activation state, or personal-library source references. The
+server must sanitize provenance before storage and reject secrets, API keys,
+tokens, host-local identifiers, or local filesystem paths in provider-supplied
+metadata. The personal library remains reference-backed and must not gain source
+display snapshots from provider metadata.
 
 ## Import Preview And Commit
 

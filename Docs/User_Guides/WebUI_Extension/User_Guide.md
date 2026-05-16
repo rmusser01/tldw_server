@@ -80,7 +80,7 @@ Top navigation groups features into tabs. Notable areas include:
   - Embeddings and Vector Stores tabs: manage providers/models, warmups, caches, collections, upserts, and queries.
 
 - Chatbooks
-  - Chatbooks: export/import content and manage background jobs.
+  - Chatbooks: export/import content, import OpenWebUI "Export Chats" JSON files and uploaded webui.db databases, then run attachment hydration from the Chatbooks import tab to restore referenced images/files from a server-local OpenWebUI data root.
 
 - Bring Your Own Keys (BYOK)
   - Multi-user only: store per-user provider keys and optional org/team shared keys.

@@ -10,15 +10,33 @@ from loguru import logger
 from .request_resolution import ResolvedRAGRequest
 
 _SOURCE_ALIASES = {
-    "character": "character_cards",
-    "characters": "character_cards",
-    "character_cards_db": "character_cards",
-    "chats": "character_cards",
-    "chat": "character_cards",
+    "character": "characters",
+    "characters": "characters",
+    "character_cards": "characters",
+    "character_cards_db": "characters",
+    "chat": "chats",
+    "chats": "chats",
+    "chat_history": "chats",
+    "chat_history_db": "chats",
+    "conversation": "chats",
+    "conversations": "chats",
     "notes_db": "notes",
     "media": "media_db",
     "media_db_path": "media_db",
     "kanban_db": "kanban",
+    "task_board": "kanban",
+    "task_boards": "kanban",
+    "tasks": "kanban",
+    "prompt": "prompts",
+    "prompts_db": "prompts",
+    "worldbook": "world_books",
+    "worldbooks": "world_books",
+    "world_book": "world_books",
+    "world_books_db": "world_books",
+    "dictionary": "dictionaries",
+    "chat_dictionary": "dictionaries",
+    "chat_dictionaries": "dictionaries",
+    "chat_dictionaries_db": "dictionaries",
 }
 
 
@@ -82,7 +100,7 @@ def build_retrieval_plan(resolved: ResolvedRAGRequest) -> RetrievalPlan:
         "media_db": f"user_{user_key}_media_embeddings",
         "notes": f"user_{user_key}_notes_embeddings",
     }
-    if "character_cards" in sources:
+    if "characters" in sources:
         collection_names["character_cards"] = f"user_{user_key}_character_embeddings"
     if "kanban" in sources:
         collection_names["kanban"] = f"user_{user_key}_kanban_embeddings"

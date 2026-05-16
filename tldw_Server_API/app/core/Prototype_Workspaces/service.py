@@ -9,6 +9,7 @@ from typing import Any
 from tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo import (
     PrototypeWorkspacesRepo,
 )
+from tldw_Server_API.app.core.exceptions import PrototypeTerminalRuntimeError
 
 from .models import (
     PrototypePromotionResult,
@@ -72,18 +73,18 @@ class PrototypeWorkspaceService:
         runtime_policy: dict[str, Any] | None = None,
         designated_promoter_ids: list[int] | None = None,
     ) -> dict[str, Any]:
-        workspace = await self._repo.create_workspace(
-            owner_user_id=int(owner_user_id),
-            title=title,
-            description=description,
-            creation_source=creation_source,
-            preview_policy=preview_policy,
-            share_policy=share_policy,
-            runtime_policy=runtime_policy,
-            designated_promoter_ids=designated_promoter_ids,
-        )
-        try:
-            seed_snapshot = await self._repo.create_snapshot(
+        async with self._repo.transaction() as repo:
+            workspace = await repo.create_workspace(
+                owner_user_id=int(owner_user_id),
+                title=title,
+                description=description,
+                creation_source=creation_source,
+                preview_policy=preview_policy,
+                share_policy=share_policy,
+                runtime_policy=runtime_policy,
+                designated_promoter_ids=designated_promoter_ids,
+            )
+            seed_snapshot = await repo.create_snapshot(
                 prototype_workspace_id=workspace["id"],
                 snapshot_id=f"psnap_{uuid.uuid4().hex}",
                 created_by_user_id=int(owner_user_id),
@@ -91,7 +92,7 @@ class PrototypeWorkspaceService:
                 prompt_summary=prompt,
                 diff_summary={"creation_source": creation_source},
             )
-            updated = await self._repo.update_workspace_state(
+            updated = await repo.update_workspace_state(
                 workspace["id"],
                 canonical_snapshot_id=seed_snapshot["snapshot_id"],
                 last_known_good_snapshot_id=seed_snapshot["snapshot_id"],
@@ -101,9 +102,6 @@ class PrototypeWorkspaceService:
             if not updated or updated.get("canonical_snapshot_id") != seed_snapshot["snapshot_id"]:
                 raise RuntimeError("failed to persist prototype workspace seed snapshot")
             return updated
-        except Exception:
-            await self._repo.archive_workspace(workspace["id"])
-            raise
 
     async def create_or_reuse_branch_session(
         self,
@@ -119,9 +117,9 @@ class PrototypeWorkspaceService:
     ) -> dict[str, Any]:
         workspace = await self._repo.get_workspace(prototype_workspace_id)
         if not workspace:
-            raise ValueError("prototype workspace not found")
+            raise PrototypeTerminalRuntimeError("prototype workspace not found")
         if workspace.get("is_archived"):
-            raise RuntimeError("archived workspaces cannot create branch sessions")
+            raise PrototypeTerminalRuntimeError("archived workspaces cannot create branch sessions")
 
         resolved_base_snapshot_id = str(
             base_snapshot_id
@@ -130,7 +128,7 @@ class PrototypeWorkspaceService:
             or ""
         ).strip()
         if not resolved_base_snapshot_id:
-            raise ValueError("prototype workspace does not have a canonical snapshot")
+            raise PrototypeTerminalRuntimeError("prototype workspace does not have a canonical snapshot")
         await self._assert_branch_actor_active(
             actor_type=actor_type,
             actor_shared_actor_id=actor_shared_actor_id,
@@ -142,6 +140,7 @@ class PrototypeWorkspaceService:
             actor_type=actor_type,
             actor_user_id=actor_user_id,
             actor_shared_actor_id=actor_shared_actor_id,
+            share_link_id=share_link_id,
         )
         if existing:
             return {
@@ -202,46 +201,64 @@ class PrototypeWorkspaceService:
         prompt_summary: str | None = None,
         preview_health: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        session = await self._repo.get_session(prototype_session_id)
-        if not session:
-            raise ValueError("prototype session not found")
-        workspace = await self._repo.get_workspace(str(session["prototype_workspace_id"]))
-        if not workspace:
-            raise ValueError("prototype workspace not found")
-        if workspace.get("is_archived"):
-            raise RuntimeError("archived workspaces cannot save snapshots")
-        await self._assert_session_is_active(session)
+        async with self._repo.transaction() as repo:
+            session = await repo.get_session(prototype_session_id)
+            if not session:
+                raise PrototypeTerminalRuntimeError("prototype session not found")
+            workspace = await repo.get_workspace(str(session["prototype_workspace_id"]))
+            if not workspace:
+                raise PrototypeTerminalRuntimeError("prototype workspace not found")
 
-        new_snapshot_id = str(snapshot_id or f"psnap_{uuid.uuid4().hex}")
-        snapshot = await self._repo.create_snapshot(
-            prototype_workspace_id=str(session["prototype_workspace_id"]),
-            snapshot_id=new_snapshot_id,
-            created_by_user_id=session.get("actor_user_id"),
-            created_by_shared_actor_id=session.get("actor_shared_actor_id"),
-            parent_snapshot_id=str(
-                session.get("last_saved_snapshot_id")
-                or session.get("base_snapshot_id")
-                or ""
-            ).strip()
-            or None,
-            created_from_session_id=prototype_session_id,
-            storage_ref=storage_ref,
-            diff_summary=diff_summary,
-            prompt_summary=prompt_summary,
-            preview_health=preview_health,
-        )
-        try:
-            updated_session = await self._repo.update_session_state(
+            new_snapshot_id = str(snapshot_id or f"psnap_{uuid.uuid4().hex}")
+            existing_snapshot = await repo.get_snapshot(new_snapshot_id) if snapshot_id else None
+            if existing_snapshot:
+                if (
+                    existing_snapshot.get("prototype_workspace_id") != session.get("prototype_workspace_id")
+                    or existing_snapshot.get("created_from_session_id") != prototype_session_id
+                ):
+                    raise ValueError("snapshot_id already belongs to a different prototype save")
+                if session.get("last_saved_snapshot_id") != existing_snapshot.get("snapshot_id"):
+                    updated_session = await repo.update_session_state(
+                        prototype_session_id,
+                        last_saved_snapshot_id=existing_snapshot["snapshot_id"],
+                        last_activity_at=_utc_now(),
+                    )
+                    if (
+                        not updated_session
+                        or updated_session.get("last_saved_snapshot_id") != existing_snapshot.get("snapshot_id")
+                    ):
+                        raise RuntimeError("failed to persist session snapshot state")
+                return existing_snapshot
+
+            if workspace.get("is_archived"):
+                raise PrototypeTerminalRuntimeError("archived workspaces cannot save snapshots")
+            await self._assert_session_is_active(session, repo=repo)
+
+            snapshot = await repo.create_snapshot(
+                prototype_workspace_id=str(session["prototype_workspace_id"]),
+                snapshot_id=new_snapshot_id,
+                created_by_user_id=session.get("actor_user_id"),
+                created_by_shared_actor_id=session.get("actor_shared_actor_id"),
+                parent_snapshot_id=str(
+                    session.get("last_saved_snapshot_id")
+                    or session.get("base_snapshot_id")
+                    or ""
+                ).strip()
+                or None,
+                created_from_session_id=prototype_session_id,
+                storage_ref=storage_ref,
+                diff_summary=diff_summary,
+                prompt_summary=prompt_summary,
+                preview_health=preview_health,
+            )
+            updated_session = await repo.update_session_state(
                 prototype_session_id,
                 last_saved_snapshot_id=snapshot["snapshot_id"],
                 last_activity_at=_utc_now(),
             )
             if not updated_session or updated_session.get("last_saved_snapshot_id") != snapshot["snapshot_id"]:
                 raise RuntimeError("failed to persist session snapshot state")
-        except Exception:
-            await self._repo.delete_snapshot(snapshot["snapshot_id"])
-            raise
-        return snapshot
+            return snapshot
 
     async def promote_candidate(
         self,
@@ -255,7 +272,7 @@ class PrototypeWorkspaceService:
     ) -> dict[str, Any]:
         workspace = await self._repo.get_workspace(prototype_workspace_id)
         if not workspace:
-            raise ValueError("prototype workspace not found")
+            raise PrototypeTerminalRuntimeError("prototype workspace not found")
 
         reviewer_id = int(reviewer_user_id)
         if not self._is_promoter(workspace, reviewer_id):
@@ -263,17 +280,17 @@ class PrototypeWorkspaceService:
 
         candidate = await self._repo.get_snapshot(candidate_snapshot_id)
         if not candidate or candidate.get("prototype_workspace_id") != prototype_workspace_id:
-            raise ValueError("candidate snapshot not found in prototype workspace")
+            raise PrototypeTerminalRuntimeError("candidate snapshot not found in prototype workspace")
 
         promotion_request = None
         if promotion_request_id:
             promotion_request = await self._repo.get_promotion_request(promotion_request_id)
             if not promotion_request:
-                raise ValueError("promotion request not found")
+                raise PrototypeTerminalRuntimeError("promotion request not found")
             if promotion_request.get("prototype_workspace_id") != prototype_workspace_id:
-                raise ValueError("promotion request does not belong to prototype workspace")
+                raise PrototypeTerminalRuntimeError("promotion request does not belong to prototype workspace")
             if promotion_request.get("candidate_snapshot_id") != candidate_snapshot_id:
-                raise ValueError("promotion request candidate does not match requested candidate")
+                raise PrototypeTerminalRuntimeError("promotion request candidate does not match requested candidate")
 
         canonical_snapshot_id = str(workspace.get("canonical_snapshot_id") or "").strip()
         resolved_review_baseline_snapshot_id = str(
@@ -457,26 +474,32 @@ class PrototypeWorkspaceService:
             return
         actor = await self._repo.get_shared_actor(str(actor_shared_actor_id or ""))
         if not actor or actor.get("is_revoked") or actor.get("revoked_at"):
-            raise RuntimeError("revoked shared actor cannot create or reuse branch sessions")
+            raise PrototypeTerminalRuntimeError("revoked shared actor cannot create or reuse branch sessions")
         expires_at = _normalize_datetime(actor.get("expires_at"))
         if expires_at and expires_at <= datetime.now(timezone.utc):
-            raise RuntimeError("expired shared actor cannot create or reuse branch sessions")
+            raise PrototypeTerminalRuntimeError("expired shared actor cannot create or reuse branch sessions")
 
-    async def _assert_session_is_active(self, session: dict[str, Any]) -> None:
+    async def _assert_session_is_active(
+        self,
+        session: dict[str, Any],
+        *,
+        repo: PrototypeWorkspacesRepo | None = None,
+    ) -> None:
         if session.get("is_revoked") or session.get("revoked_at"):
-            raise RuntimeError("revoked session cannot save snapshots")
+            raise PrototypeTerminalRuntimeError("revoked session cannot save snapshots")
         expires_at = _normalize_datetime(session.get("expires_at"))
         if expires_at and expires_at <= datetime.now(timezone.utc):
-            raise RuntimeError("expired session cannot save snapshots")
+            raise PrototypeTerminalRuntimeError("expired session cannot save snapshots")
         actor_type = str(session.get("actor_type") or "").strip().lower()
         if actor_type != "external_collaborator":
             return
-        actor = await self._repo.get_shared_actor(str(session.get("actor_shared_actor_id") or ""))
+        actor_repo = repo or self._repo
+        actor = await actor_repo.get_shared_actor(str(session.get("actor_shared_actor_id") or ""))
         if not actor or actor.get("is_revoked") or actor.get("revoked_at"):
-            raise RuntimeError("revoked shared actor cannot save snapshots")
+            raise PrototypeTerminalRuntimeError("revoked shared actor cannot save snapshots")
         actor_expires_at = _normalize_datetime(actor.get("expires_at"))
         if actor_expires_at and actor_expires_at <= datetime.now(timezone.utc):
-            raise RuntimeError("expired shared actor cannot save snapshots")
+            raise PrototypeTerminalRuntimeError("expired shared actor cannot save snapshots")
 
 
 class PrototypePromotionService(PrototypeWorkspaceService):

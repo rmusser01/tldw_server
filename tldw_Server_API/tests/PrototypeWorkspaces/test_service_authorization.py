@@ -46,67 +46,45 @@ async def test_create_or_reuse_branch_session_rejects_revoked_at_only_shared_act
 
 
 @pytest.mark.asyncio
-async def test_save_session_snapshot_rejects_revoked_at_only_session(repo, monkeypatch):
+async def test_save_session_snapshot_rejects_revoked_at_only_session(repo):
     service = PrototypeWorkspaceService(repo=repo)
     workspace = await _seed_workspace(service)
-
-    async def revoked_session(_prototype_session_id: str) -> dict[str, Any]:
-        return {
-            "id": "pss_revoked",
-            "prototype_workspace_id": workspace["id"],
-            "base_snapshot_id": workspace["canonical_snapshot_id"],
-            "actor_type": "internal_collaborator",
-            "actor_user_id": 2,
-            "revoked_at": _revoked_at(),
-        }
-
-    async def create_snapshot(**_kwargs: Any) -> dict[str, Any]:
-        return {"snapshot_id": "psnap_should_not_be_created"}
-
-    async def update_session_state(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-        return {}
-
-    monkeypatch.setattr(repo, "get_session", revoked_session)
-    monkeypatch.setattr(repo, "create_snapshot", create_snapshot)
-    monkeypatch.setattr(repo, "update_session_state", update_session_state)
+    session_result = await service.create_or_reuse_branch_session(
+        prototype_workspace_id=workspace["id"],
+        actor_type="internal_collaborator",
+        actor_user_id=2,
+    )
+    session = session_result["session"]
+    await repo.update_session_state(session["id"], revoked_at=_revoked_at())
 
     with pytest.raises(RuntimeError, match="revoked session"):
         await service.save_session_snapshot(
-            prototype_session_id="pss_revoked",
+            prototype_session_id=session["id"],
             snapshot_id="psnap_blocked",
         )
 
 
 @pytest.mark.asyncio
-async def test_save_session_snapshot_rejects_revoked_at_only_shared_actor(repo, monkeypatch):
+async def test_save_session_snapshot_rejects_revoked_at_only_shared_actor(repo):
     service = PrototypeWorkspaceService(repo=repo)
     workspace = await _seed_workspace(service)
-
-    async def external_session(_prototype_session_id: str) -> dict[str, Any]:
-        return {
-            "id": "pss_external",
-            "prototype_workspace_id": workspace["id"],
-            "base_snapshot_id": workspace["canonical_snapshot_id"],
-            "actor_type": "external_collaborator",
-            "actor_shared_actor_id": "pactor_revoked",
-        }
-
-    async def revoked_actor(_shared_actor_id: str) -> dict[str, Any]:
-        return {"id": "pactor_revoked", "revoked_at": _revoked_at()}
-
-    async def create_snapshot(**_kwargs: Any) -> dict[str, Any]:
-        return {"snapshot_id": "psnap_should_not_be_created"}
-
-    async def update_session_state(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-        return {}
-
-    monkeypatch.setattr(repo, "get_session", external_session)
-    monkeypatch.setattr(repo, "get_shared_actor", revoked_actor)
-    monkeypatch.setattr(repo, "create_snapshot", create_snapshot)
-    monkeypatch.setattr(repo, "update_session_state", update_session_state)
+    actor = await repo.create_shared_actor(
+        prototype_workspace_id=workspace["id"],
+        share_link_id=91,
+        display_name="Revoked stakeholder",
+        runtime_policy_profile="locked_collab",
+    )
+    session_result = await service.create_or_reuse_branch_session(
+        prototype_workspace_id=workspace["id"],
+        actor_type="external_collaborator",
+        actor_shared_actor_id=actor["id"],
+        share_link_id=91,
+    )
+    session = session_result["session"]
+    await repo.revoke_shared_actor(actor["id"], revoked_at=_revoked_at())
 
     with pytest.raises(RuntimeError, match="revoked shared actor"):
         await service.save_session_snapshot(
-            prototype_session_id="pss_external",
+            prototype_session_id=session["id"],
             snapshot_id="psnap_blocked",
         )

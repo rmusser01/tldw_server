@@ -1,4 +1,12 @@
-export type RagSource = "media_db" | "notes" | "characters" | "chats" | "kanban"
+export type RagSource =
+  | "media_db"
+  | "notes"
+  | "chats"
+  | "characters"
+  | "kanban"
+  | "prompts"
+  | "world_books"
+  | "dictionaries"
 export type RagStrategy = "standard" | "agentic"
 export type RagSearchMode = "fts" | "vector" | "hybrid"
 export type RagFtsLevel = "media" | "chunk"

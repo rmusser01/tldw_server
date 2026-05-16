@@ -92,6 +92,7 @@
 - Local Dev Tips:
   - connect to `/api/v1/persona/stream` with a websocket client and send `{ "type": "user_message", "text": "<query>" }`
   - inspect persisted persona sessions via `/api/v1/persona/sessions`
+  - when the optional runtime explorer is enabled, fallback, circuit-open, and safe-denial paths emit a `notice` event with `RUNTIME_EXPLORER_*` reason codes and bounded `runtime_explorer` diagnostics; disabled mode emits no runtime-explorer notice
 - Pitfalls & Gotchas:
   - personas are created from characters conceptually, but evolve independently after creation
   - do not store exemplar text snapshots in turn metadata when compact IDs/reasons are sufficient

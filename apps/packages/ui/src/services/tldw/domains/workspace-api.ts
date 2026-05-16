@@ -20,6 +20,8 @@ type SkillsListPayload = SkillsListResponse & {
   pagination?: OffsetPaginationMeta
 }
 
+export type WorkspaceArtifactJsonRecord = Record<string, unknown>
+
 export interface WorkspaceApiResponse {
   id: string
   name: string | null
@@ -57,9 +59,28 @@ export interface WorkspaceArtifactApiResponse {
   artifact_type: string
   title: string
   status: string
+  review_state?: string | null
+  content_type?: string | null
   content: string | null
+  preview_text?: string | null
+  summary?: string | null
   total_tokens: number | null
   total_cost_usd: number | null
+  owner_scope?: string | null
+  owner_id?: string | null
+  project_id?: string | null
+  task_id?: string | null
+  source_collection_id?: string | null
+  root_artifact_id?: string | null
+  artifact_version_id?: string | null
+  previous_version_id?: string | null
+  producer_metadata?: WorkspaceArtifactJsonRecord | null
+  source_lineage?: WorkspaceArtifactJsonRecord | WorkspaceArtifactJsonRecord[] | null
+  review_metadata?: WorkspaceArtifactJsonRecord | null
+  version_metadata?: WorkspaceArtifactJsonRecord | null
+  export_refs?: WorkspaceArtifactJsonRecord[] | null
+  redaction?: WorkspaceArtifactJsonRecord | null
+  schema_version?: number | null
   created_at: string
   completed_at: string | null
   version: number

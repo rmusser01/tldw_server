@@ -4,7 +4,11 @@ export interface VNPlayErrorInfo {
   status?: number;
 }
 
-const RECOVERABLE_TURN_CODES = new Set(['stale_scene_version', 'turn_in_progress']);
+const RECOVERABLE_TURN_CODES = new Set([
+  'stale_scene_version',
+  'turn_in_progress',
+  'restore_action_in_progress',
+]);
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -73,5 +77,5 @@ export function isRecoverableVNPlayConflict(error: unknown): boolean {
   const info = getVNPlayErrorInfo(error);
   if (info.code && RECOVERABLE_TURN_CODES.has(info.code)) return true;
   if (info.status === 409) return true;
-  return /stale_scene_version|turn_in_progress/i.test(info.message);
+  return /stale_scene_version|turn_in_progress|restore_action_in_progress/i.test(info.message);
 }

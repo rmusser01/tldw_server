@@ -10,11 +10,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import json
 import os
 import time
 from datetime import date, datetime, timezone
 from sqlite3 import Error as SQLiteError
-from typing import Any
+from typing import Any, Mapping
 
 from loguru import logger
 
@@ -24,6 +25,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.Metrics import increment_counter
 
+from .llm_usage_normalizer import normalize_llm_usage
 from .pricing_catalog import get_pricing_catalog
 
 try:  # pragma: no cover - ledger optional during upgrades/tests
@@ -225,15 +227,45 @@ def _apply_pii_settings_to_meta(
     return ip_out, ""
 
 
-def compute_costs(provider: str, model: str, prompt_tokens: int, completion_tokens: int) -> tuple[float, float, float, bool]:
+def compute_costs(
+    provider: str,
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    *,
+    cache_read_input_tokens: int = 0,
+    cache_write_input_tokens: int = 0,
+    billable_input_tokens: int | None = None,
+) -> tuple[float, float, float, bool]:
     """
     Compute (prompt_cost, completion_cost, total_cost, estimated)
     given provider, model and token counts.
     """
     catalog = get_pricing_catalog()
-    in_per_1k, out_per_1k, est = catalog.get_rates(provider, model)
-    prompt_cost = (max(0, prompt_tokens) / 1000.0) * in_per_1k
-    completion_cost = (max(0, completion_tokens) / 1000.0) * out_per_1k
+    rates, est = catalog.get_rate_details(provider, model)
+    in_per_1k = rates["prompt"]
+    out_per_1k = rates["completion"]
+    prompt_total = max(0, int(prompt_tokens or 0))
+    completion_total = max(0, int(completion_tokens or 0))
+    cache_read = min(max(0, int(cache_read_input_tokens or 0)), prompt_total)
+    cache_write = min(max(0, int(cache_write_input_tokens or 0)), max(0, prompt_total - cache_read))
+
+    if "cache_read" not in rates and "cache_write" not in rates:
+        prompt_cost = (prompt_total / 1000.0) * in_per_1k
+    else:
+        if billable_input_tokens is None:
+            normal_input = max(0, prompt_total - cache_read - cache_write)
+        else:
+            max_normal_input = max(0, prompt_total - cache_read - cache_write)
+            normal_input = min(max(0, int(billable_input_tokens or 0)), max_normal_input)
+        cache_read_rate = rates.get("cache_read", in_per_1k)
+        cache_write_rate = rates.get("cache_write", in_per_1k)
+        prompt_cost = (
+            (normal_input / 1000.0) * in_per_1k
+            + (cache_read / 1000.0) * cache_read_rate
+            + (cache_write / 1000.0) * cache_write_rate
+        )
+    completion_cost = (completion_total / 1000.0) * out_per_1k
     total_cost = prompt_cost + completion_cost
     return prompt_cost, completion_cost, total_cost, est
 
@@ -259,6 +291,12 @@ async def log_llm_usage(
     user_agent: str | None = None,
     token_name: str | None = None,
     conversation_id: str | None = None,
+    usage_metadata: Mapping[str, Any] | None = None,
+    choice_count: int | None = None,
+    estimate_source: str | None = None,
+    prompt_fingerprint: str | None = None,
+    prompt_fingerprint_version: str | None = None,
+    world_book_fingerprint: str | None = None,
 ) -> None:
     """
     Insert a single llm_usage_log row. Computes costs if needed.
@@ -272,10 +310,40 @@ async def log_llm_usage(
         pt = int(prompt_tokens or 0)
         ct = int(completion_tokens or 0)
         tt = int(total_tokens) if total_tokens is not None else pt + ct
+        resolved_estimate_source = estimate_source
+        if resolved_estimate_source is None:
+            resolved_estimate_source = "provider_usage" if usage_metadata is not None else "missing_usage"
+        # Normalize provider cache/cost metadata without changing the legacy
+        # prompt/completion/total token columns used by existing callers.
+        normalized_usage = normalize_llm_usage(
+            provider=provider,
+            usage=usage_metadata,
+            prompt_tokens=pt,
+            completion_tokens=ct,
+            total_tokens=tt,
+            choice_count=choice_count,
+            estimate_source=resolved_estimate_source,
+        )
+        raw_usage_metadata_json = None
+        if usage_metadata is not None:
+            raw_usage_metadata_json = json.dumps(
+                dict(normalized_usage.raw_usage_metadata),
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            )
 
-        p_cost, c_cost, t_cost, est_flag = compute_costs(provider, model, pt, ct)
+        p_cost, c_cost, t_cost, est_flag = compute_costs(
+            provider,
+            model,
+            pt,
+            ct,
+            cache_read_input_tokens=normalized_usage.cache_read_input_tokens,
+            cache_write_input_tokens=normalized_usage.cache_write_input_tokens,
+            billable_input_tokens=normalized_usage.billable_input_tokens,
+        )
         if estimated is None:
-            estimated = est_flag
+            estimated = est_flag or normalized_usage.estimate_source != "provider_usage"
 
         settings = get_settings()
         effective_remote_ip = remote_ip
@@ -409,6 +477,17 @@ async def log_llm_usage(
             user_agent=effective_user_agent,
             token_name=effective_token_name,
             conversation_id=(str(conversation_id).strip() if conversation_id is not None else None),
+            cached_input_tokens=normalized_usage.cached_input_tokens,
+            cache_write_input_tokens=normalized_usage.cache_write_input_tokens,
+            cache_read_input_tokens=normalized_usage.cache_read_input_tokens,
+            billable_input_tokens=normalized_usage.billable_input_tokens,
+            reasoning_tokens=normalized_usage.reasoning_tokens,
+            choice_count=normalized_usage.choice_count,
+            estimate_source=normalized_usage.estimate_source,
+            prompt_fingerprint=prompt_fingerprint,
+            prompt_fingerprint_version=prompt_fingerprint_version,
+            world_book_fingerprint=world_book_fingerprint,
+            raw_usage_metadata_json=raw_usage_metadata_json,
         )
 
         # Shadow-write daily token usage into the shared ResourceDailyLedger so

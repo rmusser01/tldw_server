@@ -194,6 +194,97 @@ Instead, the exchange flow creates or resumes a `Prototype Shared Actor` that is
 
 This preserves auditability and keeps owner-only controls separate from collaborator capabilities.
 
+## Risk Gate 1 Security Contract
+
+The current productionization security model is documented in `Docs/Security/Prototype_Workspaces_Threat_Model.md`.
+
+The short version:
+
+- owner APIs must re-check AuthNZ owner or designated-promoter authority server-side
+- public share exchange must keep invalid, expired, revoked, exhausted, missing, and mismatched link states non-enumerating where possible
+- external shared actors are scoped to one prototype workspace and one share-link id
+- collaborator session tokens must be rechecked against active shared-actor state, not trusted only because their signature is valid
+- resume cookies are signed browser-binding hints and rotate their stored binding secret on successful resume
+- preview grants are short-lived broker-issued grants behind opaque handles
+- promotion submission must bind the token, active shared actor, branch session, candidate snapshot, and workspace before creating a request
+
+Frontend/backend state names, HTTP status expectations, retryability, and Risk Gate 4 open questions live in `Docs/API-related/Prototype_Workspaces_Contract_Matrix.md`.
+
+## Risk Gate 2 Persistence Contract
+
+Prototype workspace persistence is owned by the AuthNZ repository boundary in `PrototypeWorkspacesRepo`.
+
+Transaction rules:
+
+- workspace creation and seed snapshot creation run in one AuthNZ transaction
+- session snapshot save and session pointer update run in one AuthNZ transaction
+- publish promotion still compensates around preview-broker side effects because preview grants include in-memory broker state plus persisted handles
+- repository transaction adapters preserve the existing `?` placeholder style and convert to PostgreSQL `$N` placeholders when the underlying `DatabasePool` is PostgreSQL-backed
+
+Cleanup and retention rules:
+
+- archived workspaces are soft-archived first and can be deleted after the configured archive-retention cutoff; cascading foreign keys remove related prototype rows
+- expired shared actors are soft-revoked by setting `revoked_at`; they are retained for audit until their workspace is deleted
+- expired sessions are soft-revoked by setting `revoked_at`, `runtime_status = "revoked"`, and `preview_status = "revoked"`
+- active preview handles attached to archived workspaces or revoked/expired sessions are deactivated and receive `revoked_at`
+- inactive preview handles can be deleted after their inactive-preview cutoff
+- old pending promotion requests can be marked `stale`; approved, rejected, promoted, or already stale requests are not rewritten by cleanup
+
+SQLite/PostgreSQL behavior:
+
+- migration 086 is the SQLite migration source for the prototype tables
+- PostgreSQL compatibility is through the AuthNZ `DatabasePool` execution contract and repository table discovery via `information_schema`
+- all repository SQL remains parameterized; no user input is interpolated into SQL strings
+- cleanup accepts explicit cutoff timestamps so callers own retention policy and scheduling
+
+Query/index review:
+
+| Path | Query shape | Index coverage |
+| --- | --- | --- |
+| owner workspace detail | `prototype_workspaces.id`, workspace snapshots by `prototype_workspace_id` | primary key plus `idx_prototype_snapshots_workspace_created` |
+| branch-session inventory | sessions by `prototype_workspace_id`, active first, ordered by update time | `idx_prototype_sessions_workspace_active_updated` |
+| active session reuse | workspace, base snapshot, actor type, actor identity, share link, revoked/expiry/runtime filters | `idx_prototype_sessions_active_lookup` |
+| active shared actor check | workspace-scoped actor activity and expiry checks | primary key plus `idx_prototype_shared_actors_active_lookup` |
+| promotion listings/review | workspace and status with update-time cleanup | `idx_prototype_promotion_requests_workspace_status_updated` |
+| cleanup retention sweep | global archived, revoked, expired, and inactive-preview cutoffs | `idx_prototype_workspaces_archived_at_cleanup`, `idx_prototype_sessions_revoked_at_cleanup`, `idx_prototype_sessions_expires_at_cleanup`, `idx_prototype_shared_actors_expires_revoked_cleanup`, `idx_prototype_preview_handles_inactive_revoked_cleanup` |
+| preview handle lookup | handle id, active scope replacement, workspace/session cleanup scans | primary key plus preview handle workspace/session/scope indexes |
+
+## Risk Gate 3 Runtime Job Contract
+
+Prototype runtime orchestration uses the shared Jobs module with domain `prototype_workspaces` and queue `default`.
+
+Runtime job types:
+
+- `branch_session_bootstrap`
+- `preview_boot`
+- `snapshot_save`
+- `publish_validate_and_promote`
+
+Worker result shape:
+
+- successful job handlers return `status`, `job_type`, and `retryable`
+- terminal publish outcomes also return stable `failure_code` and relevant snapshot ids
+- payload errors use `failure_code = "invalid_job_payload"` and `retryable = false`
+- expected permission failures use `failure_code = "permission_denied"` and `retryable = false`
+- retryable runtime failures use `failure_code = "runtime_retryable"` and `retryable = true`
+- terminal runtime failures such as archived workspaces, revoked actors, expired sessions, and missing resources use `failure_code = "runtime_terminal"` and `retryable = false`
+
+Retry/idempotency guarantees:
+
+- branch bootstrap jobs use workspace, actor, canonical snapshot, and request nonce in the idempotency key; repeated execution reuses an active compatible branch session
+- preview boot jobs use scope, snapshot, runtime profile version, and target fingerprint in the idempotency key; repeated execution for the same active scope/snapshot/target/profile renews the existing handle instead of minting a second handle
+- preview boot replacement with a different target revokes the previous active handle for the scope and rolls back to the previous active handle only when the scope is still unclaimed after persistence failure
+- snapshot-save jobs use session and save request id in the idempotency key; repeated execution with the same explicit snapshot id returns the existing session-owned snapshot and preserves a single saved snapshot row
+- publish validation and promotion jobs use workspace, candidate snapshot, and baseline snapshot in the idempotency key; stale or failed validation returns a terminal result without advancing canonical or last-known-good pointers
+
+Cancellation and timeout boundary:
+
+- queued prototype jobs inherit the shared Jobs cancellation behavior and can be cancelled before acquisition
+- processing cancellation is best-effort at the shared worker boundary; the current Risk Gate 3 handlers are short transactional units and rely on idempotent retry/compensation rather than mid-operation interruption
+- worker shutdown uses `WorkerSDK.stop()` via the injected stop event and does not acquire new prototype jobs after shutdown starts
+- lease expiry and retry are owned by the shared Jobs manager; retry-safe service operations are the prototype-specific protection against duplicate effects after worker restart or completion-ack failure
+- runtime host process termination, long-running sandbox teardown, and operator-facing timeout controls remain later runtime-hosting work; this gate documents that boundary rather than introducing a parallel timeout system
+
 ## Preview Broker Guarantees
 
 Preview access is brokered through `preview_handle` records and signed preview grants.

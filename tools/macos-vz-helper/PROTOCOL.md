@@ -146,6 +146,28 @@ identifies the planner, for example `image_store`.
 `network_policy` defaults to `deny_all`; helper-side VM creation rejects any
 other value and returns `strict_allowlist_not_supported` for `allowlist`.
 
+The helper enforces the `create_vm` request contract before VM boot:
+
+- `runtime`, when present, must be `vz_linux`.
+- `vm_name` or `run_id` must provide a non-empty VM id using only
+  alphanumeric characters, `.`, `_`, and `-`, capped at 128 UTF-8 bytes.
+- `template` or `template_path` and `workspace_path` must be absolute, non-NUL
+  paths capped at 4096 UTF-8 bytes. Symlink leaf paths and user-controlled
+  symlinked parent components are rejected before boot; root-level macOS
+  compatibility prefixes such as `/tmp` and `/var` are allowed and subsequent
+  components are still checked. The helper does not require these paths to be
+  under one root yet because compatibility templates and session workspaces
+  remain intentionally flexible.
+- `run_manifest_path`, when present, follows the same absolute path and symlink
+  rules.
+- ownership/provenance text metadata is bounded and rejects NUL/control
+  characters.
+- `timeout_sec` must be finite, positive, and no greater than 3600 seconds.
+
+Malformed JSON shape or non-string fields return `invalid_request`. Semantic
+denials return `runtime_unsupported`, `create_vm_request_invalid`, or
+`create_vm_timeout_invalid`, with `message` carrying the stable reason.
+
 Response:
 
 ```json
@@ -338,6 +360,11 @@ the unprefixed keys when `guest_*` keys are absent during mixed-version rollouts
 - `vz_linux` helper VM creation accepts only `network_policy=deny_all` until a
   separately verified allowlist implementation exists. The accepted policy is
   echoed in VM metadata and status details.
+- `vz_linux` helper VM creation also validates request shape before boot:
+  unsupported runtimes, invalid VM ids, non-absolute or NUL-bearing paths,
+  symlink leaf paths or user-controlled symlinked parent components, oversized
+  metadata, and out-of-range startup timeouts are rejected without registering a
+  VM.
 - `vz_linux` guest-agent readiness metadata is additive in protocol version `1`.
   `guest_version`, `guest_workspace_root`, `guest_capabilities_known`, and
   `guest_capabilities` are diagnostic details only. Older guests may omit

@@ -3839,14 +3839,32 @@
   "quickIngest_keywordsAria": {
     "message": "Keywords for this item"
   },
+  "moderationReview_nav": {
+    "message": "Moderation Review"
+  },
+  "moderationReview_title": {
+    "message": "Moderation Review"
+  },
+  "moderationReview_desc": {
+    "message": "Review flagged items, escalations, and decisions"
+  },
+  "moderationRules_nav": {
+    "message": "Content Rules"
+  },
+  "moderationRules_title": {
+    "message": "Content Rules"
+  },
+  "moderationRules_desc": {
+    "message": "Configure moderation policies, blocklists, and testing"
+  },
   "moderationPlayground_nav": {
-    "message": "Moderation Playground"
+    "message": "Content Rules"
   },
   "moderationPlayground_title": {
-    "message": "Moderation Playground"
+    "message": "Content Rules"
   },
   "moderationPlayground_subtitle": {
-    "message": "Family safety controls and server guardrails in one place."
+    "message": "Configure moderation policies, blocklists, user overrides, and rule tests."
   },
   "header_modelPlayground": {
     "message": "Model Playground"

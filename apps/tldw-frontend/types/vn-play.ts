@@ -1,4 +1,4 @@
-export type VNPlayMode = 'freeform' | 'story';
+export type VNPlayMode = 'freeform' | 'story' | 'scripted_story';
 export type VNPlaySessionStatus = 'active' | 'paused' | 'completed' | 'archived' | 'failed';
 export type VNPlayTrustLevel = 'local' | 'trusted_restore' | 'untrusted_import' | 'mixed';
 export type VNPlayLinkedChatMode = 'read_only_context';
@@ -7,6 +7,8 @@ export type VNPlaySetupTrustSource = 'local_pack' | 'latest_import_journal' | 'u
 export type VNPlaySetupWarningSeverity = 'info' | 'warning' | 'high_risk';
 export type VNPlaySetupCompatibilityStatus = 'compatible' | 'different_character' | 'unknown';
 export type VNPlaySetupEmptyStateScope = 'global' | 'filter' | 'page';
+export type VNPlayBranchRestoreTarget = 'branch_latest' | 'choice_point';
+export type VNPlayBranchWarningSeverity = 'info' | 'warning' | 'high_risk';
 export type VNPlayTurnStatus =
   | 'pending'
   | 'model_calling'
@@ -15,11 +17,15 @@ export type VNPlayTurnStatus =
   | 'completed'
   | 'abandoned'
   | 'cancelled';
+export type VNPlayGenerationRawDebugState = 'absent' | 'available' | 'redacted' | 'revealed';
 
 export interface VNPlayChoice {
   id: string;
   text: string;
   metadata?: Record<string, unknown>;
+  source?: string;
+  generation_id?: number;
+  revision_id?: number;
 }
 
 export interface VNPlaySceneAsset {
@@ -47,6 +53,9 @@ export interface VNPlaySceneState {
   weather?: string | null;
   active_branch_node_id?: number | null;
   visible_choices?: VNPlayChoice[] | Array<Record<string, unknown>>;
+  waiting_generation_request_id?: number | null;
+  waiting_generation_confirmation?: Record<string, unknown> | null;
+  waiting_reason?: string | null;
   transcript_cursor?: number | null;
   scene_version: number;
   warnings?: unknown[];
@@ -66,6 +75,12 @@ export interface VNPlaySession {
   asset_manifest_version?: string | null;
   source_world_book_ids?: number[];
   content_rating?: string;
+  script_id?: number | null;
+  script_version_id?: number | null;
+  script_manifest_snapshot_id?: number | null;
+  script_policy_snapshot_id?: number | null;
+  script_generation_profile_snapshot_id?: number | null;
+  script_position?: Record<string, unknown> | null;
   trust_level?: VNPlayTrustLevel;
   linked_chat_mode?: VNPlayLinkedChatMode;
   seed?: string | null;
@@ -89,6 +104,9 @@ export interface VNPlaySessionCreate {
   asset_manifest_version?: string | null;
   source_world_book_ids?: number[];
   content_rating?: string;
+  script_id?: number;
+  script_version_id?: number;
+  acknowledgements?: string[];
   trust_level?: VNPlayTrustLevel;
   linked_chat_mode?: VNPlayLinkedChatMode;
   seed?: string | null;
@@ -140,10 +158,42 @@ export interface VNPlaySetupAssetPackOption {
   recommended: boolean;
 }
 
+export interface VNPlaySetupScriptVersionOption {
+  id: number;
+  script_id: number;
+  title: string;
+  version_number: number;
+  label?: string | null;
+  asset_pack_id: number;
+  manifest_snapshot_id: number;
+  policy_snapshot_id: number;
+  generation_profile_snapshot_id?: number | null;
+  policy_profile_id: string;
+  generation_profile_id: string;
+  generation_profile_key: string;
+  generation_profile_snapshot_immutable: boolean;
+  provider_class?: string | null;
+  max_automatic_generation_batch_count?: number | null;
+  moderation_required?: boolean | null;
+  estimated_cost_class?: string | null;
+  supported_output_schemas: string[];
+  dynamic_choice_support: boolean;
+  scene_update_support: boolean;
+  confirmation_required: boolean;
+  content_rating: string;
+  ready: boolean;
+  warning_summary: VNPlaySetupWarningSummary;
+  recommended: boolean;
+}
+
 export interface VNPlaySetupDefaults {
   mode?: VNPlayMode | null;
   character_id?: number | null;
   asset_pack_id?: number | null;
+  script_id?: number | null;
+  script_version_id?: number | null;
+  policy_profile_id?: string | null;
+  generation_profile_id?: string | null;
   content_rating?: string | null;
 }
 
@@ -164,6 +214,7 @@ export interface VNPlaySetupOptionsResponse {
   characters: VNPlaySetupCharacterOption[];
   selected_character?: VNPlaySetupCharacterOption | null;
   asset_packs: VNPlaySetupAssetPackOption[];
+  script_versions: VNPlaySetupScriptVersionOption[];
   defaults: VNPlaySetupDefaults;
   pagination: {
     characters: VNPlaySetupPagination;
@@ -252,7 +303,96 @@ export interface VNPlayCheckpoint {
 
 export interface VNPlayRestoreRequest {
   checkpoint_id: number;
+  client_scene_version: number;
   idempotency_key: string;
+}
+
+export interface VNPlayGenerationActionRequest {
+  client_scene_version: number;
+  idempotency_key: string;
+}
+
+export interface VNPlayGenerationProfileSummary {
+  profile_key: string;
+  snapshot_id: number;
+  provider_class?: string | null;
+  moderation_required?: boolean | null;
+  estimated_cost_class?: string | null;
+}
+
+export interface VNPlayGenerationHistoryItem {
+  id: number;
+  generation_id: number;
+  generation_point_key: string;
+  revision_number: number;
+  status: string;
+  active: boolean;
+  output_schema: string;
+  public_output: Record<string, unknown>;
+  applied_visuals?: Array<Record<string, unknown>>;
+  rejected_visuals?: Array<Record<string, unknown>>;
+  public_error_code?: string | null;
+  source?: string;
+  profile: VNPlayGenerationProfileSummary;
+  created_at?: string | null;
+}
+
+export interface VNPlayOffsetPagination {
+  mode: 'offset';
+  total?: number | null;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  next_offset?: number | null;
+}
+
+export interface VNPlayGenerationHistoryResponse {
+  items: VNPlayGenerationHistoryItem[];
+  pagination: VNPlayOffsetPagination;
+  total?: number | null;
+  limit?: number | null;
+  offset?: number | null;
+  has_more?: boolean | null;
+  next_offset?: number | null;
+}
+
+export type VNPlayGenerationRevisionListResponse = VNPlayGenerationHistoryResponse;
+
+export interface VNPlayGenerationListQuery {
+  generation_id?: number;
+  generation_point_key?: string;
+  status?: string;
+  active?: boolean;
+  source?: string;
+  created_after?: string;
+  created_before?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface VNPlayGenerationDebugQuery {
+  include_blocked_raw?: boolean;
+  confirm?: string;
+}
+
+export interface VNPlayGenerationRevisionDebugResponse {
+  id: number;
+  generation_id: number;
+  generation_request_id: number;
+  generation_point_key: string;
+  revision_number: number;
+  status: string;
+  output_schema: string;
+  public_output: Record<string, unknown>;
+  raw_output_debug_state: VNPlayGenerationRawDebugState;
+  raw_output_debug?: Record<string, unknown> | null;
+  parser_diagnostics?: Record<string, unknown>;
+  moderation_diagnostics?: Record<string, unknown>;
+  model_metadata?: Record<string, unknown>;
+  usage_metadata?: Record<string, unknown>;
+  request?: Record<string, unknown>;
+  profile: VNPlayGenerationProfileSummary;
+  created_at?: string | null;
 }
 
 export interface VNPlayBranch {
@@ -265,4 +405,94 @@ export interface VNPlayBranch {
   status?: string;
   created_at?: string | null;
   updated_at?: string | null;
+}
+
+export interface VNPlayBranchWarning {
+  code: string;
+  severity: VNPlayBranchWarningSeverity;
+  recoverable: boolean;
+  message?: string | null;
+  branch_id?: number | null;
+  event_id?: number | null;
+}
+
+export interface VNPlayBranchEventRange {
+  start_event_id?: number | null;
+  start_sequence_number?: number | null;
+  latest_event_id?: number | null;
+  latest_sequence_number?: number | null;
+}
+
+export interface VNPlayBranchRestoreCapability {
+  supported: boolean;
+  default_target?: VNPlayBranchRestoreTarget | null;
+  target_names: VNPlayBranchRestoreTarget[];
+  targets: Partial<Record<VNPlayBranchRestoreTarget, Record<string, number | null> | null>>;
+}
+
+export interface VNPlayGeneratedChoiceRef {
+  generation_id: number;
+  revision_id: number;
+  choice_id: string;
+}
+
+export interface VNPlayBranchPathStep {
+  branch_id: number;
+  branch_label?: string | null;
+  choice_id?: string | null;
+  choice_text?: string | null;
+  generated_choice?: VNPlayGeneratedChoiceRef | null;
+  depth: number;
+}
+
+export interface VNPlayBranchNavigationNode {
+  branch_id: number;
+  parent_branch_id?: number | null;
+  parent_event_id?: number | null;
+  choice_selected_event_id?: number | null;
+  branch_label?: string | null;
+  choice_id?: string | null;
+  choice_text?: string | null;
+  generated_choice?: VNPlayGeneratedChoiceRef | null;
+  branch_path: Record<string, unknown>[];
+  depth: number;
+  status: string;
+  is_active: boolean;
+  is_on_active_path: boolean;
+  event_range: VNPlayBranchEventRange;
+  subtree_event_range: VNPlayBranchEventRange;
+  restore: VNPlayBranchRestoreCapability;
+  warnings: VNPlayBranchWarning[];
+}
+
+export interface VNPlayBranchNavigationResponse {
+  session_id: number;
+  mode: VNPlayMode;
+  scene_version: number;
+  last_event_id?: number | null;
+  active_branch_node_id?: number | null;
+  active_path: VNPlayBranchPathStep[];
+  branches: VNPlayBranchNavigationNode[];
+  warnings: VNPlayBranchWarning[];
+}
+
+export interface VNPlayBranchRestoreRequest {
+  client_scene_version: number;
+  idempotency_key: string;
+  target: VNPlayBranchRestoreTarget;
+}
+
+export interface VNPlayBranchRestoreResponse {
+  status: string;
+  replayed: boolean;
+  restore_event_id: number;
+  target_event_id?: number | null;
+  scene_version: number;
+  session: VNPlaySession;
+  current_scene: VNPlaySceneState;
+  branch_navigation: VNPlayBranchNavigationResponse;
+  branch_id?: number | null;
+  checkpoint_id?: number | null;
+  save_slot_id?: number | null;
+  target?: VNPlayBranchRestoreTarget | null;
 }

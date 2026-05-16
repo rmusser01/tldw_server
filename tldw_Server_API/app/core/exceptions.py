@@ -61,6 +61,60 @@ class CodeGraphJobError(RuntimeError):
         self.retryable = retryable
 
 
+class PrototypeJobError(RuntimeError):
+    """Worker-visible prototype job failure with explicit retry metadata."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool,
+        failure_code: str,
+        backoff_seconds: int | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.failure_code = failure_code
+        self.backoff_seconds = backoff_seconds
+        self.details = details or {}
+
+
+class PrototypeTerminalRuntimeError(PrototypeJobError):
+    """Terminal prototype runtime state failure that should not be retried."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_code: str = "runtime_terminal",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            retryable=False,
+            failure_code=failure_code,
+            details=details,
+        )
+
+
+class PrototypeJobPayloadError(ValueError):
+    """Terminal prototype job payload error that should not be retried."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_code: str = "invalid_job_payload",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.retryable = False
+        self.failure_code = failure_code
+        self.backoff_seconds = None
+        self.details = details or {}
+
+
 class AuditLogError(RuntimeError):
     """Raised when persisting an audit event fails."""
 
@@ -107,6 +161,22 @@ class APIValidationError(HTTPException):
     def __init__(self, detail: Any, *, status_code: int | None = None) -> None:
         resolved_status = status_code if status_code is not None else DEFAULT_VALIDATION_STATUS
         super().__init__(status_code=resolved_status, detail=detail)
+
+
+class VNScriptAuthoringError(ValueError):
+    """Raised when VN script authoring preview/apply input cannot be patched."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        status_code: int = 400,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.status_code = status_code
+        self.details = details or {}
 
 
 class SyncCallInEventLoopError(BadRequestError):
@@ -162,6 +232,10 @@ class InvalidStoragePathError(StoragePathValidationError):
 
 class StorageUnavailableError(StoragePathValidationError):
     """Raised when storage base directories cannot be resolved."""
+
+
+class WorkspaceArtifactExportStateError(ValueError):
+    """Raised when a workspace artifact version is not eligible for export."""
 
 
 class InvalidStorageUserIdError(StoragePathValidationError):

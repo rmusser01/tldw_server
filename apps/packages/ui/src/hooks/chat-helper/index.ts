@@ -15,6 +15,24 @@ import { buildAssistantErrorContent } from "@/utils/chat-error-message"
 
 let didLogSetHistoryMissing = false
 
+const buildFallbackHistoryTitle = (userMessage: string): string => {
+  const normalized = userMessage.replace(/\s+/g, " ").trim()
+  return normalized.length > 0 ? normalized.slice(0, 80) : "Untitled Chat"
+}
+
+const generateTitleWithFallback = async (
+  selectedModel: string,
+  userMessage: string
+): Promise<string> => {
+  try {
+    const title = await generateTitle(selectedModel, userMessage, userMessage)
+    const trimmed = typeof title === "string" ? title.trim() : ""
+    return trimmed.length > 0 ? trimmed : buildFallbackHistoryTitle(userMessage)
+  } catch {
+    return buildFallbackHistoryTitle(userMessage)
+  }
+}
+
 const resolveHistorySetter = (
   candidate: unknown
 ): ((history: ChatHistory) => void) | null => {
@@ -166,7 +184,7 @@ export const saveMessageOnError = async ({
 
       return historyId
     } else {
-      const title = await generateTitle(selectedModel, userMessage, userMessage)
+      const title = await generateTitleWithFallback(selectedModel, userMessage)
       const newHistoryId = await saveHistory(title, false, message_source)
       updatePageTitle(title)
       if (!isRegenerating) {
@@ -267,7 +285,7 @@ export const saveMessageOnError = async ({
     return historyId
   } else {
     // Create new history on error
-    const title = await generateTitle(selectedModel, userMessage, userMessage)
+    const title = await generateTitleWithFallback(selectedModel, userMessage)
     const newHistoryId = await saveHistory(title, false, message_source)
     updatePageTitle(title)
     try {

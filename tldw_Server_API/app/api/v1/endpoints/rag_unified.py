@@ -15,12 +15,14 @@ from typing import Any, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal, get_request_user, rbac_rate_limit, RequirePermission, TokenScopeGuard, User
 
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 
 # Dependencies
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
@@ -28,6 +30,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 # Schemas
 from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import (
     ImplicitFeedbackEvent,
+    KnowledgeSourceHealthResponse,
     UnifiedBatchRequest,
     UnifiedBatchResponse,
     UnifiedRAGRequest,
@@ -36,6 +39,7 @@ from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import (
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_READ
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
     AgenticConfig,
@@ -65,8 +69,9 @@ from tldw_Server_API.app.core.RAG.rag_service.response_mapping import (
     rag_result_from_unified_search_result,
     rag_result_to_response,
 )
+from tldw_Server_API.app.core.RAG.rag_service.source_health import build_source_health_entries
 from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import stream_rag_events
-from tldw_Server_API.app.core.config import get_config_value
+from tldw_Server_API.app.core.config import get_config_value, settings
 
 # Unified Pipeline
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
@@ -102,6 +107,7 @@ def _build_unified_pipeline_kwargs(
     media_db: Any,
     chacha_db: CharactersRAGDB,
     current_user: Optional[User],
+    prompts_db: Optional[PromptsDatabase] = None,
     resolved_request: Optional[ResolvedRAGRequest] = None,
     retrieval_plan: Optional[RetrievalPlan] = None,
 ) -> dict[str, Any]:
@@ -121,8 +127,11 @@ def _build_unified_pipeline_kwargs(
     payload["notes_db_path"] = db_paths.get("notes_db_path")
     payload["character_db_path"] = db_paths.get("character_db_path")
     payload["kanban_db_path"] = db_paths.get("kanban_db_path")
+    payload["prompts_db_path"] = db_paths.get("prompts_db_path")
     payload["media_db"] = media_db
     payload["chacha_db"] = chacha_db
+    if prompts_db is not None:
+        payload["prompts_db"] = prompts_db
     payload["index_namespace"] = retrieval_plan.index_namespace
     payload["retrieval_plan"] = retrieval_plan
     payload["user_id"] = resolved_request.user_id
@@ -174,6 +183,7 @@ def _build_standard_request_bundle(
     db_paths: dict[str, Optional[str]],
     media_db: Any,
     chacha_db: CharactersRAGDB,
+    prompts_db: Optional[PromptsDatabase] = None,
 ) -> ResolvedRequestBundle:
     """Resolve a standard request once and attach endpoint-owned pipeline resources."""
     return build_request_bundle(
@@ -188,6 +198,7 @@ def _build_standard_request_bundle(
             db_paths=db_paths,
             media_db=media_db,
             chacha_db=chacha_db,
+            prompts_db=prompts_db,
             current_user=current_user,
             resolved_request=resolved_request,
             retrieval_plan=retrieval_plan,
@@ -362,6 +373,106 @@ def _resolve_kanban_db_path(current_user: Optional[User], request_user_id: Optio
     except (RuntimeError, ValueError, OSError, TypeError):
         logger.debug("Failed to resolve kanban DB path", exc_info=True)
         return None
+
+
+def _resolve_source_health_user_id(current_user: Optional[User], request_user_id: Optional[str] = None) -> Optional[str]:
+    """Resolve a filesystem-safe user directory component without creating storage."""
+    candidates: list[Any] = []
+    if current_user is not None:
+        for attr in ("id", "id_int"):
+            candidates.append(getattr(current_user, attr, None))
+    candidates.append(request_user_id)
+
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        raw = str(candidate).strip()
+        if raw.isdigit() and int(raw) > 0:
+            return raw
+    try:
+        fallback = DatabasePaths.get_single_user_id()
+        fallback_raw = str(fallback).strip()
+        if fallback_raw.isdigit() and int(fallback_raw) > 0:
+            return fallback_raw
+    except (RuntimeError, ValueError, OSError, TypeError):
+        logger.debug("Failed to resolve single-user ID for source health path", exc_info=True)
+    return None
+
+
+def _resolve_existing_source_db_paths(
+    current_user: Optional[User],
+    request_user_id: Optional[str] = None,
+) -> dict[str, str]:
+    """Return existing source database paths without creating source storage."""
+    user_id = _resolve_source_health_user_id(current_user, request_user_id)
+    if user_id is None:
+        return {}
+
+    user_dir = DatabasePaths.resolve_user_db_base_dir() / user_id
+    candidates = {
+        "media_db": user_dir / DatabasePaths.MEDIA_DB_NAME,
+        "chacha_db": user_dir / DatabasePaths.CHACHA_DB_NAME,
+        "prompts_db": user_dir / DatabasePaths.PROMPTS_SUBDIR / DatabasePaths.PROMPTS_DB_NAME,
+        "kanban_db": user_dir / DatabasePaths.KANBAN_DB_NAME,
+    }
+    return {
+        source_key: str(path)
+        for source_key, path in candidates.items()
+        if path.is_file()
+    }
+
+
+def _media_db_uses_non_file_storage() -> bool:
+    """Return whether Media DB search is configured for non-file content storage."""
+    backend_mode_hint = (
+        os.getenv("CONTENT_DB_MODE")
+        or os.getenv("TLDW_CONTENT_DB_BACKEND")
+        or str(settings.get("CONTENT_DB_BACKEND", "sqlite"))
+    )
+    return backend_mode_hint.strip().lower() in {"postgres", "postgresql"}
+
+
+def _build_source_health_source_sets(
+    *,
+    existing_paths: dict[str, str],
+    media_backend_uses_non_file_storage: bool = False,
+) -> tuple[set[Any], set[Any]]:
+    """Derive ready and empty source sets without creating source storage."""
+    configured: set[Any] = set()
+    empty: set[Any] = set()
+    if "media_db" in existing_paths or media_backend_uses_non_file_storage:
+        configured.add("media_db")
+    else:
+        empty.add("media_db")
+    if "chacha_db" in existing_paths:
+        configured.update(
+            {
+                "notes",
+                "chats",
+                "characters",
+                "world_books",
+                "dictionaries",
+            }
+        )
+    else:
+        empty.update(
+            {
+                "notes",
+                "chats",
+                "characters",
+                "world_books",
+                "dictionaries",
+            }
+        )
+    if "prompts_db" in existing_paths:
+        configured.add("prompts")
+    else:
+        empty.add("prompts")
+    if "kanban_db" in existing_paths:
+        configured.add("kanban")
+    else:
+        empty.add("kanban")
+    return configured, empty
 
 
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
@@ -971,6 +1082,35 @@ async def list_vlm_backends():
     return {"backends": backends}
 
 
+@router.get(
+    "/source-health",
+    response_model=KnowledgeSourceHealthResponse,
+    summary="Knowledge source health",
+    description="Read-only pre-query source readiness for Knowledge QA.",
+    dependencies=[
+        Depends(check_rate_limit),
+        Depends(rbac_rate_limit("rag.search")),
+        Depends(RequirePermission(MEDIA_READ)),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="rag.search", count_as="call")),
+    ],
+)
+async def source_health_endpoint(
+    current_user: User = Depends(get_request_user),
+) -> KnowledgeSourceHealthResponse:
+    """Return safe pre-query readiness for canonical Knowledge QA sources."""
+    existing_paths = await run_in_threadpool(_resolve_existing_source_db_paths, current_user)
+    configured_sources, empty_sources = _build_source_health_source_sets(
+        existing_paths=existing_paths,
+        media_backend_uses_non_file_storage=_media_db_uses_non_file_storage(),
+    )
+    return KnowledgeSourceHealthResponse(
+        sources=build_source_health_entries(
+            configured_sources=configured_sources,
+            empty_sources=empty_sources,
+        )
+    )
+
+
 @router.post(
     "/search",
     response_model=UnifiedRAGResponse,
@@ -1017,7 +1157,8 @@ async def unified_search_endpoint(
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_request_user),
     media_db: Any = Depends(get_media_db_for_user),
-    chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user)
+    chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    prompts_db: PromptsDatabase = Depends(get_prompts_db_for_user),
 ):
     """
     Unified RAG search with all features as parameters.
@@ -1061,6 +1202,7 @@ async def unified_search_endpoint(
             "notes_db_path": chacha_db.db_path if chacha_db else None,
             "character_db_path": chacha_db.db_path if chacha_db else None,
             "kanban_db_path": _resolve_kanban_db_path(current_user, request.user_id),
+            "prompts_db_path": getattr(prompts_db, "db_path_str", None) if prompts_db else None,
         }
         standard_bundle = _build_standard_request_bundle(
             request,
@@ -1068,6 +1210,7 @@ async def unified_search_endpoint(
             db_paths=db_paths,
             media_db=media_db,
             chacha_db=chacha_db,
+            prompts_db=prompts_db,
         )
         strategy_value = str(standard_bundle.resolved_request.strategy).strip().lower()
 
@@ -1246,7 +1389,8 @@ async def unified_batch_endpoint(
     current_user: User = Depends(get_request_user),
     principal: AuthPrincipal = Depends(get_auth_principal),
     media_db: Any = Depends(get_media_db_for_user),
-    chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user)
+    chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    prompts_db: PromptsDatabase = Depends(get_prompts_db_for_user),
 ):
     """
     Batch processing endpoint for multiple queries.
@@ -1287,6 +1431,7 @@ async def unified_batch_endpoint(
             "notes_db_path": chacha_db.db_path if chacha_db else None,
             "character_db_path": chacha_db.db_path if chacha_db else None,
             "kanban_db_path": _resolve_kanban_db_path(current_user, request.user_id),
+            "prompts_db_path": getattr(prompts_db, "db_path_str", None) if prompts_db else None,
         }
 
         batch_bundle = _build_batch_request_bundle(
@@ -1360,6 +1505,7 @@ async def unified_batch_endpoint(
             max_concurrent=request.max_concurrent,
             media_db=media_db,
             chacha_db=chacha_db,
+            prompts_db=prompts_db,
             on_query_done=on_query_done,
             **kwargs
         )
@@ -1541,6 +1687,7 @@ async def resume_batch_endpoint(
     principal: AuthPrincipal = Depends(get_auth_principal),
     media_db: Any = Depends(get_media_db_for_user),
     chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    prompts_db: PromptsDatabase = Depends(get_prompts_db_for_user),
 ):
     """Resume a batch RAG operation from a previously saved checkpoint."""
     try:
@@ -1603,6 +1750,7 @@ async def resume_batch_endpoint(
             "notes_db_path": chacha_db.db_path if chacha_db else None,
             "character_db_path": chacha_db.db_path if chacha_db else None,
             "kanban_db_path": _resolve_kanban_db_path(current_user, checkpoint.config.get("user_id")),
+            "prompts_db_path": getattr(prompts_db, "db_path_str", None) if prompts_db else None,
         }
         resume_request = _build_resume_batch_request(
             checkpoint.config,
@@ -1663,6 +1811,7 @@ async def resume_batch_endpoint(
             query_indices=remaining_indices,
             media_db=media_db,
             chacha_db=chacha_db,
+            prompts_db=prompts_db,
             **kwargs,
         )
 
@@ -1742,7 +1891,8 @@ async def unified_search_stream_endpoint(
     request: UnifiedRAGRequest,
     current_user: User = Depends(get_request_user),
     media_db: Any = Depends(get_media_db_for_user),
-    chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user)
+    chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    prompts_db: PromptsDatabase = Depends(get_prompts_db_for_user),
 ):
     if not request.enable_generation:
         raise HTTPException(status_code=400, detail="enable_generation must be true for streaming.")
@@ -1755,6 +1905,7 @@ async def unified_search_stream_endpoint(
         "notes_db_path": chacha_db.db_path if chacha_db else None,
         "character_db_path": chacha_db.db_path if chacha_db else None,
         "kanban_db_path": None,
+        "prompts_db_path": getattr(prompts_db, "db_path_str", None) if prompts_db else None,
     }
     stream_bundle = _build_standard_request_bundle(
         request,
@@ -1762,11 +1913,14 @@ async def unified_search_stream_endpoint(
         db_paths=shared_db_paths,
         media_db=media_db,
         chacha_db=chacha_db,
+        prompts_db=prompts_db,
     )
     resolved_request = stream_bundle.resolved_request
     kanban_db_path = _resolve_kanban_db_path(current_user, resolved_request.user_id)
     stream_pipeline_kwargs = dict(stream_bundle.pipeline_kwargs)
     stream_pipeline_kwargs["kanban_db_path"] = kanban_db_path
+    stream_pipeline_kwargs["prompts_db_path"] = getattr(prompts_db, "db_path_str", None) if prompts_db else None
+    stream_pipeline_kwargs["prompts_db"] = prompts_db
     stream_pipeline_kwargs["resolved_request"] = resolved_request
     stream_pipeline_kwargs["retrieval_plan"] = stream_bundle.retrieval_plan
     request_defaults = {

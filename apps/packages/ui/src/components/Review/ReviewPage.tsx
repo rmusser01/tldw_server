@@ -57,6 +57,7 @@ import {
 } from "@/services/settings/ui-settings"
 import { resolveApiProviderForModel } from "@/utils/resolve-api-provider"
 import { DEFAULT_ANALYSIS_SUMMARY_PROMPT } from "@/utils/default-prompts"
+import { getDesignSystemState } from "@/design-system"
 const Markdown = React.lazy(() => import("@/components/Common/Markdown"))
 
 type MediaItem = any
@@ -415,7 +416,10 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
       }
       if (/(ready|completed|done|success)/.test(v)) {
         return {
-          label: t("review:reviewPage.statusReady", "Ready"),
+          label: t(
+            "review:reviewPage.statusReady",
+            getDesignSystemState("ready")?.label
+          ),
           color: "green"
         }
       }
@@ -1729,8 +1733,8 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
                 </span>
                 <span className="text-[11px] text-text-muted">{c.meta}</span>
               </div>
-              <Tag color={c.status === "Processing" ? "orange" : "green"}>
-                {c.status}
+              <Tag color={c.statusKey === "processing" ? "orange" : "green"}>
+                {c.statusLabel}
               </Tag>
             </div>
             <div className="divide-y divide-border">

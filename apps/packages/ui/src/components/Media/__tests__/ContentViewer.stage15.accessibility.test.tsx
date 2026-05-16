@@ -4,6 +4,10 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { ContentViewer } from '../ContentViewer'
 
+const registryLabels = vi.hoisted(() => ({
+  loading: 'Loading via registry'
+}))
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (_key: string, fallbackOrOptions?: string | { defaultValue?: string }) => {
@@ -12,6 +16,24 @@ vi.mock('react-i18next', () => ({
     }
   })
 }))
+
+vi.mock('@/design-system', async (importActual) => {
+  const actual = await importActual<typeof import('@/design-system')>()
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+
+        return {
+          ...state,
+          label: key === 'loading' ? registryLabels.loading : state.label
+        }
+      }
+    )
+  }
+})
 
 vi.mock('@/hooks/useSetting', async () => {
   const React = await import('react')
@@ -85,7 +107,7 @@ describe('ContentViewer stage 15 content announcements', () => {
 
     const liveRegion = screen.getByTestId('content-selection-live-region')
     await waitFor(() =>
-      expect(liveRegion).toHaveTextContent('Loading Accessibility Item One')
+      expect(liveRegion).toHaveTextContent('Loading via registry Accessibility Item One')
     )
 
     rerender(

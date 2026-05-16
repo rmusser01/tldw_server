@@ -34,6 +34,7 @@ export type ClientPath =
   | "/api/v1/web-clipper/save"
   | "/api/v1/web-clipper/{clip_id}"
   | "/api/v1/web-clipper/{clip_id}/enrichments"
+  | "/api/v1/research-studio/capabilities"
   | "/api/v1/rag/health"
   | "/api/v1/rag/search"
   | "/api/v1/rag/search/stream"
@@ -282,6 +283,12 @@ export type ClientPath =
   | "/api/v1/moderation/blocklist/append"
   | "/api/v1/moderation/blocklist/{item_id}"
   | "/api/v1/moderation/blocklist/lint"
+  | "/api/v1/moderation/review/items"
+  | "/api/v1/moderation/review/items/{item_id}"
+  | "/api/v1/moderation/review/items/{item_id}/decision"
+  | "/api/v1/moderation/review/items/{item_id}/undo"
+  | "/api/v1/moderation/review/bulk-decision"
+  | "/api/v1/moderation/review/audit"
   | "/api/v1/moderation/test"
 
 

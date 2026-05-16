@@ -50,7 +50,7 @@ const seedLocalStorage = {
   "tldw-tutorials": JSON.stringify({
     state: {
       completedTutorials: ["playground", "chat", "notes", "media", "settings"],
-      seenPromptPages: ["/", "/chat", "/notes", "/media", "/settings", "/playground", "/workspace-playground"]
+      seenPromptPages: ["/", "/chat", "/notes", "/media", "/settings", "/playground", "/research-studio"]
     },
     version: 0
   })
@@ -64,7 +64,7 @@ const recoverOptionsErrorStateIfNeeded = async (page: Page): Promise<void> => {
   }
 }
 
-test.describe("Workspace Playground parity (extension)", () => {
+test.describe("Research Studio parity (extension)", () => {
   test("passes baseline + deterministic studio parity contract", async () => {
     const pageErrors: string[] = []
     const consoleErrors: string[] = []

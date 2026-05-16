@@ -11,18 +11,42 @@ const messageOptionState = vi.hoisted(() => ({
     history: [],
     historyId: "history-1",
     serverChatId: "chat-1",
+    serverChatTitle: "Research chat",
+    serverChatLoadState: "loaded" as "idle" | "loading" | "loaded" | "failed",
+    serverChatLoadError: null as string | null,
+    serverChatState: "active" as string | null,
+    serverChatTopic: null as string | null,
+    serverChatSource: "webui" as string | null,
     isLoading: false,
     setHistoryId: vi.fn(),
     setHistory: vi.fn(),
     setMessages: vi.fn(),
+    selectedSystemPrompt: null as string | null,
     setSelectedSystemPrompt: vi.fn(),
+    selectedQuickPrompt: null as string | null,
+    setSelectedQuickPrompt: vi.fn(),
+    selectedModel: null as string | null,
     setSelectedModel: vi.fn(),
     setServerChatId: vi.fn(),
+    contextFiles: [],
     setContextFiles: vi.fn(),
     createChatBranch: vi.fn(),
     streaming: false,
     selectedCharacter: null,
     setSelectedCharacter: vi.fn(),
+    selectedAssistant: null,
+    setSelectedAssistant: vi.fn(),
+    serverChatPersonaMemoryMode: null as "read_only" | "read_write" | null,
+    temporaryChat: false,
+    webSearch: false,
+    toolChoice: "none" as const,
+    setToolChoice: vi.fn(),
+    selectedKnowledge: null,
+    setSelectedKnowledge: vi.fn(),
+    ragMediaIds: null as number[] | null,
+    setRagMediaIds: vi.fn(),
+    stopStreamingRequest: vi.fn(),
+    regenerateLastMessage: vi.fn(),
     compareMode: false,
     compareFeatureEnabled: false
   }
@@ -386,6 +410,7 @@ vi.mock("@/hooks/useMessageOption", () => ({
 vi.mock("@/hooks/usePlaygroundSessionPersistence", () => ({
   usePlaygroundSessionPersistence: () => ({
     restoreSession: vi.fn(async () => false),
+    sessionScopeReady: true,
     hasPersistedSession: false,
     persistedHistoryId: null,
     persistedServerChatId: null
@@ -469,6 +494,15 @@ vi.mock("@/hooks/useCharacterGreeting", () => ({
   useCharacterGreeting: () => undefined
 }))
 
+vi.mock("react-router-dom", async () => {
+  const actual =
+    await vi.importActual<typeof import("react-router-dom")>("react-router-dom")
+  return {
+    ...actual,
+    useNavigate: () => vi.fn()
+  }
+})
+
 describe("Playground research context integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -477,8 +511,28 @@ describe("Playground research context integration", () => {
     artifactsState.value.isOpen = false
     storeOptionState.value.compareParentByHistory = {}
     storeOptionState.value.setSelectedQuickPrompt = vi.fn()
+    messageOptionState.value.messages = []
+    messageOptionState.value.history = []
     messageOptionState.value.serverChatId = "chat-1"
+    messageOptionState.value.serverChatTitle = "Research chat"
+    messageOptionState.value.serverChatLoadState = "loaded"
+    messageOptionState.value.serverChatLoadError = null
+    messageOptionState.value.serverChatState = "active"
+    messageOptionState.value.serverChatTopic = null
+    messageOptionState.value.serverChatSource = "webui"
     messageOptionState.value.historyId = "history-1"
+    messageOptionState.value.selectedSystemPrompt = null
+    messageOptionState.value.selectedQuickPrompt = null
+    messageOptionState.value.setSelectedQuickPrompt =
+      storeOptionState.value.setSelectedQuickPrompt
+    messageOptionState.value.contextFiles = []
+    messageOptionState.value.selectedKnowledge = null
+    messageOptionState.value.ragMediaIds = null
+    messageOptionState.value.selectedCharacter = null
+    messageOptionState.value.selectedAssistant = null
+    messageOptionState.value.temporaryChat = false
+    messageOptionState.value.webSearch = false
+    messageOptionState.value.toolChoice = "none"
     chatSettingsState.syncChatSettingsForServerChat.mockResolvedValue(null)
     chatSettingsState.applyChatSettingsPatch.mockResolvedValue(null)
   })

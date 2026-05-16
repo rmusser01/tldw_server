@@ -5,7 +5,7 @@
 1. [Introduction](#introduction)
 2. [Getting Started](#getting-started)
 3. [Exporting Content](#exporting-content)
-4. [Importing Chatbooks](#importing-chatbooks)
+4. [Importing Content](#importing-content)
 5. [Managing Jobs](#managing-jobs)
 6. [Best Practices](#best-practices)
 7. [Troubleshooting](#troubleshooting)
@@ -15,7 +15,7 @@
 
 ### What is a Chatbook?
 
-A Chatbook is your personal content archive - a portable file that contains your conversations, notes, characters, and other content from the tldw_server platform. Think of it as a comprehensive backup or a way to share curated collections of your work.
+A Chatbook is your personal content archive - a portable file that contains your conversations, notes, characters, and other content from the tldw_server platform. Think of it as a comprehensive backup or a way to share curated collections of your work. The same import area can also migrate normal OpenWebUI "Export Chats" JSON files and uploaded OpenWebUI `webui.db` databases into tldw conversations.
 
 ### Why Use Chatbooks?
 
@@ -37,6 +37,8 @@ Chatbooks can contain:
 - 📄 **Documents**: Generated summaries and reports
 - 🎨 **Media**: Images, audio, and video files (optional)
 - 🔢 **Embeddings**: Vector representations for search (optional)
+
+OpenWebUI imports are handled as conversation imports: each valid OpenWebUI chat becomes a tldw conversation with message branches, timestamps, models, file references, folder metadata, and source metadata preserved where available. Database imports also mirror source folders into tldw folders under `OpenWebUI / <selected user>`.
 
 ## Getting Started
 
@@ -151,14 +153,79 @@ For more control over what to export:
 }
 ```
 
-## Importing Chatbooks
+## Importing Content
 
-### Basic Import
+### Basic Chatbook Import
 
 1. Click "Import Chatbook"
-2. Select your `.chatbook` file
-3. Choose conflict resolution strategy
-4. Click "Import"
+2. Select "Chatbook archive" as the source
+3. Select your `.chatbook` file
+4. Choose conflict resolution strategy
+5. Click "Import"
+
+### OpenWebUI Chat Import
+
+The same import tab can also import OpenWebUI chats from two sources:
+
+- **OpenWebUI JSON**: the normal JSON file produced by OpenWebUI's "Export Chats" action.
+- **OpenWebUI database**: an uploaded `webui.db` or `.sqlite` database copied from an OpenWebUI instance.
+
+#### Importing OpenWebUI JSON
+
+1. Click "Import Chatbook"
+2. Select "OpenWebUI JSON" as the source
+3. Select the `.json` file produced by OpenWebUI's chat export
+4. Preview the file and review the chat, message, branch, duplicate, attachment-reference, malformed-chat, and warning counts
+5. Choose `skip` to avoid reimporting existing chats, or `rename` to intentionally create a second copy
+6. Click "Import"
+
+OpenWebUI import creates one tldw conversation for each valid OpenWebUI chat. It preserves all valid message branches as parent-linked message trees, not only the currently selected branch. Duplicate detection uses the OpenWebUI source reference stored on imported conversations, so repeated imports default to skipping previously imported chats.
+
+#### Importing an OpenWebUI Database
+
+Use database import when you have local access to the OpenWebUI SQLite database and want to preserve source folder organization:
+
+1. Click "Import Chatbook"
+2. Select "OpenWebUI database" as the source
+3. Select the copied `webui.db`, `.db`, or `.sqlite` file
+4. Preview the database and review the detected users, chat counts, message counts, folder counts, and attachment-reference counts
+5. Select exactly one selected OpenWebUI user to import
+6. Confirm the destination namespace shown in preview, such as `OpenWebUI / <selected user> / source folders`
+7. Choose `skip` to avoid reimporting existing chats, or `rename` to intentionally create a second copy
+8. Click "Import"
+
+Database import reads chats only for the selected source user. It does not import every user from the database by default. Folder paths are mirrored into tldw folders under `OpenWebUI / <selected user> / ...`; if the same folder name is already used elsewhere, tldw keeps the displayed path but safely disambiguates the backing collection name.
+
+OpenWebUI import first preserves files, images, and artifacts as metadata references. The import step does not copy binaries from the OpenWebUI attachment store. Use the separate attachment hydration workflow below after the conversations are imported. The WebUI shows the OpenWebUI attachment hydration panel directly under the OpenWebUI import preview and results in the Chatbooks import tab. Use it when preview reports attachment references or when imported messages show missing OpenWebUI images/files.
+
+#### Hydrating OpenWebUI Attachments
+
+OpenWebUI attachment hydration is a follow-up step for imported conversations. V1 hydrates only referenced files preserved during OpenWebUI JSON or database import; it does not scan every file in an OpenWebUI instance and does not connect to a live OpenWebUI server.
+
+Before hydrating, copy or mount the OpenWebUI data directory on the tldw_server host. The data root must contain:
+
+- `webui.db`
+- `uploads/`
+
+The data root and all resolved files must be under configured allowed roots. Configure those roots with `Files.ingestion_source_allowed_roots` in `config.txt`, or with `INGESTION_SOURCE_ALLOWED_ROOTS` / `TLDW_INGESTION_SOURCE_ALLOWED_ROOTS`. Multiple roots can be separated with commas or the platform path separator. If no allowed roots are configured, or if the OpenWebUI data root resolves outside them, preview and jobs are rejected.
+
+To hydrate from the WebUI:
+
+1. Import the OpenWebUI JSON or database first.
+2. In the Chatbooks import tab, use the OpenWebUI attachment hydration panel.
+3. Enter the server-local OpenWebUI data root.
+4. Enter the imported tldw conversation IDs to scan. For database imports, keep the selected OpenWebUI source user when shown.
+5. Click "Preview attachments" and review referenced, resolved, missing, image, media, and warning counts.
+6. Leave "Process supported files" off unless you want supported non-image files processed after registration.
+7. Click "Run hydration job" only after the preview matches the intended root and scope.
+
+Image files are copied into tldw-owned storage and message metadata is updated so imported image references can resolve from tldw. Non-image files are registered in the Media DB when available. Processing supported non-image files is opt-in and defaults to false; without that opt-in, hydration registers the file reference but does not run ingestion processing.
+
+Hydration output storage uses `OPENWEBUI_HYDRATION_MEDIA_STORAGE_PATH` when set, otherwise `MEDIA_STORAGE_PATH`, otherwise the server's default media storage directory.
+
+Hydration requires a single-user session or a user/admin allowed to operate on the imported conversations. Common warnings include missing files, unsupported file types, oversized files, path rejected, and path outside allowed roots.
+
+OpenWebUI v1 import does not import admin exports, import embeddings, apply content selections, or import unreferenced OpenWebUI files.
 
 ### Conflict Resolution Strategies
 
@@ -173,6 +240,7 @@ When importing content that already exists:
 - **Behavior**: Replaces existing items with imported versions
 - **Use When**: Imported version is more recent or authoritative
 - **Example**: Restoring from a backup after data corruption
+- **OpenWebUI**: Not available for OpenWebUI JSON or database imports in v1
 
 #### Rename
 - **Behavior**: Adds imported items with modified names
@@ -191,25 +259,32 @@ When importing content that already exists:
   - Example: "Research Note" becomes "[Imported] Research Note"
   - Useful for identifying imported content
 
-- **Import Media**: Include media files from the chatbook
-  - Default: true (recommended)
-  - Set to false to save space
+- **Import Media**: Not supported yet
+  - Default: false
+  - Keep this set to false; the server rejects true values in v1
+  - OpenWebUI JSON and database imports preserve attachment references first; use OpenWebUI attachment hydration after import to copy referenced images and register supported files
 
-- **Import Embeddings**: Include vector embeddings
-  - Default: false (recreated as needed)
-  - Set to true for exact search behavior
+- **Import Embeddings**: Not supported yet
+  - Default: false
+  - Keep this set to false; the server rejects true values in v1
+  - OpenWebUI JSON and database imports do not import embeddings
 
 ### Preview Before Import
 
-Always preview a chatbook before importing:
+Always preview a chatbook or OpenWebUI export before importing:
 
 1. Click "Preview Chatbook"
 2. Select the file
 3. Review:
    - Total items by type
+   - OpenWebUI chat/message/branch counts when importing JSON
+   - OpenWebUI database users, folder counts, and selected-user destination namespace when importing `webui.db`
+   - OpenWebUI hydration referenced/resolved file counts before running a hydration job
+   - Duplicate and malformed-chat counts
    - Creation date
    - Author information
    - Size
+   - Warnings
 4. Decide on import strategy
 
 ## Managing Jobs
@@ -422,13 +497,13 @@ A: Not currently. You need to start a new export job.
 ### Import Questions
 
 **Q: Will importing duplicate my content?**
-A: Depends on conflict resolution. Use "skip" to avoid duplicates.
+A: Depends on conflict resolution. Use "skip" to avoid duplicates. OpenWebUI JSON and database imports default to `skip` and detect existing imported chats by `source=openwebui` plus the OpenWebUI external reference. Use `rename` only when you want a second copy.
 
 **Q: Can I preview what will be imported?**
 A: Yes, use the preview endpoint to see contents without importing.
 
 **Q: What happens to media files during import?**
-A: They're imported if import_media is true and you have sufficient storage quota.
+A: Chatbook media import is not supported yet; keep `import_media=false`. OpenWebUI JSON and database imports preserve file, image, and artifact references first. Run OpenWebUI attachment hydration after import when you have the server-local OpenWebUI data root and want to copy referenced images or register supported files.
 
 **Q: Can I undo an import?**
 A: No automatic undo. Keep backups before importing.

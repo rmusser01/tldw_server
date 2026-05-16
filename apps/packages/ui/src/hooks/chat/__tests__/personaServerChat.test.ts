@@ -170,4 +170,69 @@ describe("ensurePersonaServerChat", () => {
       personaMemoryMode: "read_write"
     })
   })
+
+  it("resets stale character-backed server chat metadata before creating persona chat", async () => {
+    const setters = createSetterBundle()
+    const createChat = vi.fn().mockResolvedValue({
+      id: "persona-chat-4",
+      title: "Garden persona chat",
+      assistant_kind: "persona",
+      assistant_id: "garden-helper",
+      persona_memory_mode: "read_only",
+      character_id: null
+    })
+    const ensureServerChatHistoryId = vi.fn().mockResolvedValue("history-4")
+
+    const result = await ensurePersonaServerChat({
+      assistant: {
+        kind: "persona",
+        id: "garden-helper",
+        name: "Garden Helper"
+      },
+      serverChatId: "character-chat-1",
+      serverChatTitle: "Old character chat",
+      serverChatAssistantKind: "character",
+      serverChatAssistantId: "42",
+      serverChatPersonaMemoryMode: "read_write",
+      serverChatState: "resolved",
+      serverChatTopic: "Old topic",
+      serverChatClusterId: "old-cluster",
+      serverChatSource: "old-source",
+      serverChatExternalRef: "old-ref",
+      historyId: "history-old",
+      temporaryChat: false,
+      createChat,
+      ensureServerChatHistoryId,
+      invalidateServerChatHistory: vi.fn(),
+      ...setters
+    })
+
+    expect(setters.setServerChatId.mock.calls[0]).toEqual([null])
+    expect(setters.setServerChatTitle.mock.calls[0]).toEqual([null])
+    expect(setters.setServerChatCharacterId.mock.calls[0]).toEqual([null])
+    expect(setters.setServerChatAssistantKind.mock.calls[0]).toEqual([null])
+    expect(setters.setServerChatAssistantId.mock.calls[0]).toEqual([null])
+    expect(setters.setServerChatPersonaMemoryMode.mock.calls[0]).toEqual([null])
+    expect(setters.setServerChatMetaLoaded.mock.calls[0]).toEqual([false])
+    expect(createChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistant_kind: "persona",
+        assistant_id: "garden-helper",
+        persona_memory_mode: "read_write"
+      }),
+      undefined
+    )
+    expect(setters.setServerChatId).toHaveBeenLastCalledWith("persona-chat-4")
+    expect(setters.setServerChatAssistantKind).toHaveBeenLastCalledWith(
+      "persona"
+    )
+    expect(setters.setServerChatAssistantId).toHaveBeenLastCalledWith(
+      "garden-helper"
+    )
+    expect(result).toEqual({
+      chatId: "persona-chat-4",
+      historyId: "history-4",
+      personaMemoryMode: "read_write"
+    })
+  })
 })

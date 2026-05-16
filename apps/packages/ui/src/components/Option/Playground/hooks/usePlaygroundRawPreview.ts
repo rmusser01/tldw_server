@@ -2,7 +2,8 @@ import React from "react"
 import { resolveApiProviderForModel } from "@/utils/resolve-api-provider"
 import {
   captureChatRequestDebugSnapshot,
-  type ChatRequestDebugSnapshot
+  type ChatRequestDebugSnapshot,
+  type ChatToolRequestDebugMetadata
 } from "@/services/tldw/chat-request-debug"
 import type {
   ChatCompletionRequest,
@@ -11,7 +12,7 @@ import type {
 } from "@/services/tldw/TldwApiClient"
 import { parseJsonObject } from "./utils"
 import { formatPinnedResults } from "@/utils/rag-format"
-import { normalizeChatToolsForRequest } from "@/utils/chat-tools"
+import { resolveChatToolRequest } from "@/utils/chat-tools"
 
 // ---------------------------------------------------------------------------
 // Deps interface
@@ -91,6 +92,11 @@ const omitUndefinedFields = <T extends Record<string, unknown>>(payload: T): T =
   Object.fromEntries(
     Object.entries(payload).filter(([, value]) => value !== undefined)
   ) as T
+
+type PreviewChatRequestBuild = {
+  request: ChatCompletionRequest
+  metadata: ChatToolRequestDebugMetadata
+}
 
 export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
   const {
@@ -228,25 +234,20 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
         explicitProvider: currentChatModelSettings.apiProvider
       })
       const modelSupportsTools = supportsCapability(normalizedModel, "tools")
-      const toolsAllowed =
-        modelSupportsTools &&
-        hasMcp &&
-        mcpHealthState !== "unavailable" &&
-        mcpHealthState !== "unhealthy"
-      const normalizedTools = normalizeChatToolsForRequest(mcpTools)
-      const effectiveTools =
-        toolsAllowed &&
-        toolChoice !== "none" &&
-        normalizedTools &&
-        normalizedTools.length > 0
-          ? normalizedTools
-          : undefined
-      const rawPreviewToolChoice =
-        toolChoice === "auto" ||
-        toolChoice === "none" ||
-        toolChoice === "required"
-          ? toolChoice
-          : undefined
+      const toolRequest = resolveChatToolRequest({
+        tools: mcpTools,
+        toolChoice,
+        modelSupportsTools,
+        mcpHealthState,
+        hasMcp
+      })
+      const parsedExtraHeaders = parseJsonObject(currentChatModelSettings.extraHeaders)
+      const previewExtraHeaders = {
+        ...(parsedExtraHeaders ?? {})
+      }
+      if (toolRequest.tools) {
+        previewExtraHeaders["X-TLDW-Loop-Compat"] = "1"
+      }
       const request = omitUndefinedFields({
         messages: toPreviewHistoryMessages(normalizedModel, draftMessage, draftImage),
         model: normalizedModel,
@@ -262,11 +263,11 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
           currentChatModelSettings.reasoningEffort === "high"
             ? currentChatModelSettings.reasoningEffort
             : undefined,
-        ...(effectiveTools
+        ...(toolRequest.tools
           ? {
-              tools: effectiveTools,
-              ...(rawPreviewToolChoice
-                ? { tool_choice: rawPreviewToolChoice }
+              tools: toolRequest.tools,
+              ...(toolRequest.toolChoice
+                ? { tool_choice: toolRequest.toolChoice }
                 : {})
             }
           : {}),
@@ -277,7 +278,10 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
         slash_command_injection_mode:
           currentChatModelSettings.slashCommandInjectionMode,
         api_provider: resolvedProvider || undefined,
-        extra_headers: parseJsonObject(currentChatModelSettings.extraHeaders),
+        extra_headers:
+          Object.keys(previewExtraHeaders).length > 0
+            ? previewExtraHeaders
+            : undefined,
         extra_body: parseJsonObject(currentChatModelSettings.extraBody),
         thinking_budget_tokens:
           currentChatModelSettings.llamaThinkingBudgetTokens,
@@ -294,7 +298,15 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
           : undefined,
         research_context: compareModeActive ? undefined : researchContext
       } satisfies Record<string, unknown>) as ChatCompletionRequest
-      return request
+      return {
+        request,
+        metadata: {
+          model: normalizedModel,
+          toolChoice: toolRequest.toolChoice,
+          toolOmissionReason: toolRequest.omittedReason,
+          toolCounts: toolRequest.counts
+        }
+      } satisfies PreviewChatRequestBuild
     },
     [
       currentChatModelSettings,
@@ -453,7 +465,7 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
     }
 
     if (limitedModels.length === 1) {
-      const request = await buildNormalPreviewRequest(
+      const preview = await buildNormalPreviewRequest(
         limitedModels[0],
         draftMessage,
         draftImage
@@ -463,11 +475,12 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
         method: "POST",
         mode: "stream",
         sentAt: new Date().toISOString(),
-        body: request
+        body: preview.request,
+        metadata: preview.metadata
       } satisfies ChatRequestDebugSnapshot
     }
 
-    const requests = await Promise.all(
+    const previews = await Promise.all(
       limitedModels.map((modelId) =>
         buildNormalPreviewRequest(modelId, draftMessage, draftImage)
       )
@@ -479,7 +492,10 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
       sentAt: new Date().toISOString(),
       body: {
         compare_mode: true,
-        requests
+        requests: previews.map((preview) => preview.request)
+      },
+      metadata: {
+        toolRequests: previews.map((preview) => preview.metadata)
       }
     } satisfies ChatRequestDebugSnapshot
   }, [
@@ -526,7 +542,8 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
         endpoint: snapshot.endpoint,
         method: snapshot.method,
         mode: snapshot.mode,
-        body: snapshot.body
+        body: snapshot.body,
+        metadata: snapshot.metadata
       })
     } catch (error) {
       console.error("Failed to build current request preview", error)

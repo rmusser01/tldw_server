@@ -94,6 +94,18 @@ def build_snapshot_save_idempotency_key(
     return f"prototype:snapshot-save:{prototype_session_id}:{request_id}"
 
 
+def build_snapshot_save_snapshot_id(
+    *,
+    prototype_session_id: str,
+    save_request_id: str,
+) -> str:
+    request_id = str(save_request_id or "").strip()
+    if not request_id:
+        raise ValueError("save_request_id is required")
+    digest = hashlib.sha256(f"{prototype_session_id}:{request_id}".encode("utf-8")).hexdigest()[:32]
+    return f"psnap_{digest}"
+
+
 def build_promote_idempotency_key(
     *,
     prototype_workspace_id: str,
@@ -195,6 +207,11 @@ class PrototypeWorkspaceJobs:
         if not workspace:
             raise ValueError("prototype workspace not found")
 
+        resolved_runtime_profile_version = runtime_profile_version or "v1"
+        runtime_metadata = {
+            **(metadata or {}),
+            "runtime_profile_version": resolved_runtime_profile_version,
+        }
         return self._normalize_job_row(self._jobs_manager.create_job(
             domain=PROTOTYPE_DOMAIN,
             queue=self._queue,
@@ -204,8 +221,8 @@ class PrototypeWorkspaceJobs:
                 "prototype_session_id": prototype_session_id,
                 "snapshot_id": snapshot_id,
                 "runtime_target_url": runtime_target_url,
-                "metadata": metadata or {},
-                "runtime_profile_version": runtime_profile_version or "v1",
+                "metadata": runtime_metadata,
+                "runtime_profile_version": resolved_runtime_profile_version,
             },
             owner_user_id=str(workspace["owner_user_id"]),
             idempotency_key=build_preview_boot_idempotency_key(
@@ -213,7 +230,7 @@ class PrototypeWorkspaceJobs:
                 prototype_session_id=prototype_session_id,
                 snapshot_id=snapshot_id,
                 runtime_target_url=runtime_target_url,
-                runtime_profile_version=runtime_profile_version,
+                runtime_profile_version=resolved_runtime_profile_version,
             ),
         ))
 
@@ -235,13 +252,17 @@ class PrototypeWorkspaceJobs:
         if not workspace:
             raise ValueError("prototype workspace not found")
 
+        resolved_snapshot_id = snapshot_id or build_snapshot_save_snapshot_id(
+            prototype_session_id=prototype_session_id,
+            save_request_id=save_request_id,
+        )
         return self._normalize_job_row(self._jobs_manager.create_job(
             domain=PROTOTYPE_DOMAIN,
             queue=self._queue,
             job_type=PrototypeJobType.SNAPSHOT_SAVE.value,
             payload={
                 "prototype_session_id": prototype_session_id,
-                "snapshot_id": snapshot_id,
+                "snapshot_id": resolved_snapshot_id,
                 "save_request_id": save_request_id,
                 "storage_ref": storage_ref,
                 "diff_summary": diff_summary or {},

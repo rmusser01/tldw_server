@@ -48,6 +48,18 @@ _USER_DB_BASE_DIR_ALLOWED_ROOT_ENVS = (
 )
 _INGESTION_SOURCE_ALLOWED_ROOTS_SECTION = "Files"
 _INGESTION_SOURCE_ALLOWED_ROOTS_KEY = "ingestion_source_allowed_roots"
+_OPTIONAL_EMPTY_VALUE_FIELDS = {
+    ("LlamaCpp", "executable_path"),
+    ("LlamaCpp", "models_dir"),
+    ("LlamaCpp", "default_host"),
+    ("LlamaCpp", "default_port"),
+    ("LlamaCpp", "default_threads"),
+    ("LlamaCpp", "default_n_gpu_layers"),
+    ("LlamaCpp", "default_ctx_size"),
+    ("LlamaCpp", "port_probe_max"),
+    ("LlamaCpp", "allowed_paths"),
+    ("LlamaCpp", "log_output_file"),
+}
 
 _remote_access_hook: Callable[[bool], None] | None = None
 
@@ -278,6 +290,14 @@ def _coerce_to_string(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     return str(value)
+
+
+def validate_config_value_single_line(section: str, key: str, value: Any) -> str:
+    """Return a config value string after rejecting multiline injection chars."""
+    text = _coerce_to_string(value)
+    if any(char in text for char in ("\r", "\n", "\x00")):
+        raise ValueError(f"Invalid config value for {section}.{key}: line breaks and NUL bytes are not allowed.")
+    return text
 
 
 def _infer_type(raw_value: str) -> str:
@@ -571,7 +591,8 @@ def _write_config_preserving_comments(config_path: Path, updates: dict[str, dict
 
     # Prepare a mutable copy of updates: section -> key -> str(value)
     pending: dict[str, dict[str, str]] = {
-        section: {k: _coerce_to_string(v) for k, v in items.items()} for section, items in updates.items()
+        section: {k: validate_config_value_single_line(section, k, v) for k, v in items.items()}
+        for section, items in updates.items()
     }
 
     current_section: str | None = None
@@ -649,6 +670,7 @@ def _validate_updates(parser: ConfigParser, updates: dict[str, dict[str, Any]]) 
         if not parser.has_section(section):
             raise ValueError(f"Unknown section '{section}' in updates")
         for key, new_value in items.items():
+            serialized_value = validate_config_value_single_line(section, key, new_value)
             allows_new_ingestion_roots = (
                 section == _INGESTION_SOURCE_ALLOWED_ROOTS_SECTION
                 and key == _INGESTION_SOURCE_ALLOWED_ROOTS_KEY
@@ -666,12 +688,14 @@ def _validate_updates(parser: ConfigParser, updates: dict[str, dict[str, Any]]) 
 
             current_value = parser.get(section, key, fallback="")
             expected_type = _infer_type(current_value)
+            if serialized_value.strip() == "" and (section, key) in _OPTIONAL_EMPTY_VALUE_FIELDS:
+                continue
 
             # Accept any string when expected type is string
             if expected_type == "string":
                 continue
 
-            raw = str(new_value)
+            raw = serialized_value
             if expected_type == "boolean":
                 lowered = raw.strip().lower()
                 if lowered not in {"true", "false", "yes", "no", "on", "off", "1", "0"}:

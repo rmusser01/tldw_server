@@ -45,6 +45,7 @@ import {
 } from "lucide-react"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useServerOnline } from "@/hooks/useServerOnline"
+import { READY_STATE_LABEL } from "@/design-system"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 import { MarkdownPreview } from "@/components/Common/MarkdownPreview"
 import { TldwChatService } from "@/services/tldw/TldwChat"
@@ -2255,7 +2256,7 @@ export const WritingPlayground = () => {
               </Button>
             </Tooltip>
             <Tag color={diagnosticsSummary.status === "warning" ? "gold" : diagnosticsSummary.status === "busy" ? "blue" : "green"} className="!m-0">
-              {diagnosticsSummary.status === "warning" ? t("option:writingPlayground.diagnosticsWarning", "Warning") : diagnosticsSummary.status === "busy" ? t("option:writingPlayground.diagnosticsBusy", "Busy") : t("option:writingPlayground.diagnosticsReady", "Ready")}
+              {diagnosticsSummary.status === "warning" ? t("option:writingPlayground.diagnosticsWarning", "Warning") : diagnosticsSummary.status === "busy" ? t("option:writingPlayground.diagnosticsBusy", "Busy") : t("option:writingPlayground.diagnosticsReady", READY_STATE_LABEL)}
             </Tag>
             <Button type="text" size="small" icon={<Settings className="h-4 w-4" />} onClick={() => setInspectorOpen((prev) => !prev)} aria-label={t("option:writingPlayground.toggleInspector", "Toggle settings")} className={inspectorOpen ? "text-primary" : ""} />
           </div>

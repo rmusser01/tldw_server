@@ -383,8 +383,80 @@ describe("useCharacterGreeting", () => {
     await Promise.resolve()
     await Promise.resolve()
 
+    rerender({ currentCharacter: { ...selectedCharacter } })
+    await Promise.resolve()
+    await Promise.resolve()
+
     expect(mocks.getCharacter).toHaveBeenCalledTimes(1)
     expect(messageState[0]?.message).toBeTruthy()
     expect(historyState[0]?.content).toBeTruthy()
+  })
+
+  it("does not rewrite an already injected greeting when the same character is rehydrated", async () => {
+    const selectedCharacter = {
+      id: "char-stable",
+      name: "Stable Guide",
+      greeting: "Hello again",
+      alternateGreetings: ["Welcome back"]
+    } as Character
+    const greetingOptions = buildGreetingOptionsFromEntries(
+      collectGreetingEntries(selectedCharacter)
+    )
+    const selectedGreeting = greetingOptions[0]
+    if (!selectedGreeting) {
+      throw new Error("Test setup failed: missing greeting option")
+    }
+    mocks.settings = {
+      greetingEnabled: true,
+      greetingSelectionId: selectedGreeting.id,
+      greetingsChecksum: buildGreetingsChecksumFromOptions(greetingOptions),
+      useCharacterDefault: false
+    }
+
+    let messageState: Message[] = []
+    let historyState: ChatHistory = []
+    const setMessages = vi.fn(
+      (next: Message[] | ((prev: Message[]) => Message[])) => {
+        messageState = applyMessageUpdate(messageState, next)
+      }
+    )
+    const setHistory = vi.fn(
+      (next: ChatHistory | ((prev: ChatHistory) => ChatHistory)) => {
+        historyState = applyHistoryUpdate(historyState, next)
+      }
+    )
+    const setSelectedCharacter = vi.fn()
+
+    const { rerender } = renderHook(
+      ({ currentCharacter }: { currentCharacter: Character | null }) =>
+        useCharacterGreeting({
+          playgroundReady: true,
+          selectedCharacter: currentCharacter,
+          serverChatId: null,
+          historyId: "history-stable",
+          messagesLength: messageState.length,
+          setMessages,
+          setHistory,
+          setSelectedCharacter
+        }),
+      {
+        initialProps: {
+          currentCharacter: selectedCharacter
+        }
+      }
+    )
+
+    await waitFor(() => {
+      expect(messageState[0]?.message).toBe(selectedGreeting.text)
+    })
+    const messageWrites = setMessages.mock.calls.length
+    const historyWrites = setHistory.mock.calls.length
+
+    rerender({ currentCharacter: { ...selectedCharacter } })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(setMessages).toHaveBeenCalledTimes(messageWrites)
+    expect(setHistory).toHaveBeenCalledTimes(historyWrites)
   })
 })

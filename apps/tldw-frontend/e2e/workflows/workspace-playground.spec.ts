@@ -1,7 +1,7 @@
 /**
- * Workspace Playground Workflow E2E Tests
+ * Research Studio Workflow E2E Tests
  *
- * Dedicated interaction coverage for /workspace-playground beyond smoke checks.
+ * Dedicated interaction coverage for /research-studio beyond smoke checks.
  */
 import { test, expect, assertNoCriticalErrors } from "../utils/fixtures"
 import { seedAuth } from "../utils/helpers"
@@ -35,7 +35,7 @@ const setWorkspaceSelectedModel = async (page: Parameters<typeof seedAuth>[0]) =
   }, SUMMARY_TEST_MODEL)
 }
 
-test.describe("Workspace Playground Workflow", () => {
+test.describe("Research Studio Workflow", () => {
   test.beforeEach(async ({ page }) => {
     await seedAuth(page)
     await page.setViewportSize(DESKTOP_VIEWPORT)
@@ -681,7 +681,7 @@ test.describe("Workspace Playground Workflow", () => {
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
-            source: { title: "Workspace Studio Summary Source" },
+            source: { title: "Research Studio Summary Source" },
             content: { text: SUMMARY_SOURCE_TEXT }
           })
         })
@@ -698,7 +698,7 @@ test.describe("Workspace Playground Workflow", () => {
     await workspacePage.seedSources([
       {
         mediaId: 8_844_001,
-        title: "Workspace Studio Summary Source",
+        title: "Research Studio Summary Source",
         type: "document",
         status: "ready"
       }
@@ -758,7 +758,7 @@ test.describe("Workspace Playground Workflow", () => {
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
-            source: { title: "Workspace Studio Reload Source" },
+            source: { title: "Research Studio Reload Source" },
             content: { text: SUMMARY_SOURCE_TEXT }
           })
         })
@@ -775,7 +775,7 @@ test.describe("Workspace Playground Workflow", () => {
     await workspacePage.seedSources([
       {
         mediaId: 8_844_002,
-        title: "Workspace Studio Reload Source",
+        title: "Research Studio Reload Source",
         type: "document",
         status: "ready"
       }

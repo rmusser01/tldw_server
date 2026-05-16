@@ -605,25 +605,40 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     )
   })
 
-  it("renders work product templates without removing existing output buttons", () => {
+  it("renders work products before secondary output actions", () => {
     renderStudioPane()
+
+    const workProductsLabel = screen.getByText("Work Products")
+    const otherOutputsLabel = screen.getByText("Other outputs")
 
     expect(
       screen.getByRole("button", { name: /executive brief/i })
     ).toBeInTheDocument()
     expect(screen.getByText(/decision-ready summary/i)).toBeInTheDocument()
+    expect(
+      workProductsLabel.compareDocumentPosition(otherOutputsLabel) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
     expect(screen.getByRole("button", { name: "Summary" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Report" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Slides" })).toBeEnabled()
   })
 
-  it("keeps executive brief generation unavailable until source requirements are met", () => {
+  it("shows source readiness instead of unavailable generation actions until sources are selected", () => {
     workspaceStoreState.selectedSourceIds = []
 
     renderStudioPane()
 
+    expect(screen.getByTestId("studio-source-readiness")).toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: /executive brief/i })
-    ).toHaveAttribute("aria-disabled", "true")
+      screen.queryByRole("button", { name: /executive brief/i })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Summary" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /More outputs/i })
+    ).not.toBeInTheDocument()
   })
 
   it("generates executive brief artifacts with template review metadata", async () => {

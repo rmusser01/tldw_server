@@ -434,9 +434,9 @@ def get_retry_delay(error: Exception, attempt: int = 1) -> int:
         return error.context['retry_after']
 
     # Exponential backoff with jitter
-    import random
+    import secrets
     base_delay = 2 ** attempt
-    jitter = random.uniform(0, 1)
+    jitter = secrets.randbelow(1000) / 1000
     return int(base_delay + jitter)
 
 

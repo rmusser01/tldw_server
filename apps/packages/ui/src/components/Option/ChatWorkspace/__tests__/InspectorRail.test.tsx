@@ -1,8 +1,26 @@
 import { render, screen } from "@testing-library/react"
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { InspectorRail } from "../InspectorRail"
+
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+
+        return {
+          ...state,
+          label: key === "ready" ? "Ready via registry" : state.label
+        }
+      }
+    )
+  }
+})
 
 describe("InspectorRail", () => {
   it("shows real scope and staged source state", () => {
@@ -25,6 +43,7 @@ describe("InspectorRail", () => {
     expect(screen.getByText("Operator Notes")).toBeInTheDocument()
     expect(screen.getByText("gpt-test")).toBeInTheDocument()
     expect(screen.getByText("Analyst")).toBeInTheDocument()
+    expect(screen.getByText("Ready via registry")).toBeInTheDocument()
   })
 
   it("labels inactive v1 panels honestly", () => {

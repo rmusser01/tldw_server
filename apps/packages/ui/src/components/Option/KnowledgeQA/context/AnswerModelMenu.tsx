@@ -144,9 +144,16 @@ export function AnswerModelMenu({
       effectiveProviderKey
     : "Default"
 
-  const summary = generationModel?.trim()
-    ? generationModel.trim()
-    : `${providerLabel} default`
+  const trimmedGenerationModel = generationModel?.trim() || ""
+  const summary = trimmedGenerationModel
+    ? trimmedGenerationModel
+    : generationProvider
+      ? `${providerLabel} default`
+      : "Server default"
+  const resolvedDefaultDetail =
+    !generationProvider && !trimmedGenerationModel && effectiveProviderKey
+      ? ` (${providerLabel} default when available)`
+      : ""
 
   return (
     <div className={cn("relative", className)} ref={containerRef}>
@@ -157,7 +164,7 @@ export function AnswerModelMenu({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label="Choose answer model"
-        title={`Answer generation uses ${summary}`}
+        title={`Answer generation uses ${summary}${resolvedDefaultDetail}`}
       >
         <Sparkles className="h-3.5 w-3.5" />
         <span className="max-w-[11rem] truncate">AI: {summary}</span>

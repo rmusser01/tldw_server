@@ -48,6 +48,7 @@ class ACPSandboxConfig:
     max_concurrent_sessions_per_user: int = 5
     max_tokens_per_session: int = 1_000_000
     max_session_duration_seconds: int = 14400  # 4h default
+    session_retention_days: int = 30
     audit_retention_days: int = 30
 
 
@@ -357,6 +358,9 @@ def load_acp_sandbox_config() -> ACPSandboxConfig:
     max_duration = _parse_int(
         os.getenv("ACP_MAX_SESSION_DURATION_SECONDS") or section.get("max_session_duration_seconds"), 14400
     )
+    session_retention = _parse_int(
+        os.getenv("ACP_SESSION_RETENTION_DAYS") or section.get("session_retention_days"), 30
+    )
     audit_retention = _parse_int(
         os.getenv("ACP_AUDIT_RETENTION_DAYS") or section.get("audit_retention_days"), 30
     )
@@ -382,5 +386,6 @@ def load_acp_sandbox_config() -> ACPSandboxConfig:
         max_concurrent_sessions_per_user=max_concurrent,
         max_tokens_per_session=max_tokens,
         max_session_duration_seconds=max_duration,
+        session_retention_days=session_retention,
         audit_retention_days=audit_retention,
     )

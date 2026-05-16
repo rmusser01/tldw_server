@@ -58,4 +58,21 @@ describe("header shortcut defaults", () => {
       ])
     )
   })
+
+  it("migrates stored moderation playground shortcuts to review and rules", () => {
+    const normalized = normalizeSettingValue(
+      HEADER_SHORTCUT_SELECTION_SETTING,
+      ["chat", "moderation-playground", "settings"]
+    )
+
+    expect(normalized).toEqual(
+      expect.arrayContaining([
+        "chat",
+        "moderation-review",
+        "moderation-rules",
+        "settings"
+      ])
+    )
+    expect(normalized).not.toContain("moderation-playground")
+  })
 })

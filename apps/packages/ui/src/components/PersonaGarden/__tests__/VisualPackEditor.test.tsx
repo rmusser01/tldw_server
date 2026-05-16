@@ -2,6 +2,8 @@ import React from "react"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import { asPersonaVisualCustomStateId } from "@/types/persona-visuals"
+
 const mocks = vi.hoisted(() => ({
   fetchWithAuth: vi.fn(),
   translate: vi.fn(
@@ -129,6 +131,55 @@ const readyGenerationReadiness = {
   reasons: []
 }
 
+const mockVisualPackBackgroundGet = (path: string, method: string) => {
+  if (method !== "GET") return null
+  if (path.endsWith("/generation-readiness")) {
+    return okResponse(readyGenerationReadiness)
+  }
+  if (path === "/api/v1/persona/catalog") {
+    return okResponse([])
+  }
+  if (path === "/api/v1/persona/visual-library") {
+    return okResponse({ items: [] })
+  }
+  return null
+}
+
+const starterCatalogPayload = {
+  starter_packs: [
+    {
+      id: "research-buddy-starter",
+      title: "Research Buddy Starter",
+      description: "Bundled starter",
+      renderer_type: "sprite_frames",
+      manifest_version: 1,
+      states_offered: ["idle", "thinking"],
+      asset_count: 1,
+      total_bytes: 512,
+      tags: ["starter"],
+      license_label: "bundled"
+    }
+  ]
+}
+
+const makeVisualPack = (
+  overrides: Partial<{
+    id: string
+    title: string
+    status: string
+    persona_id: string
+  }> = {}
+) => ({
+  id: overrides.id || "pack-1",
+  persona_id: overrides.persona_id || "persona-1",
+  title: overrides.title || "Animated pack",
+  renderer_type: "sprite_frames",
+  status: overrides.status || "draft",
+  manifest: structuredClone(baseManifest),
+  assets: visualAssets,
+  version: 3
+})
+
 describe("VisualPackEditor", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -148,6 +199,994 @@ describe("VisualPackEditor", () => {
         return key
       }
     )
+  })
+
+  it("shows the setup choice card when there is no active pack and no packs", async () => {
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse({ packs: [], active_pack: null })
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    const setupCard = await screen.findByTestId("visual-buddy-setup-choice-card")
+    expect(setupCard).toHaveTextContent("Visual buddy setup")
+    expect(setupCard).toHaveTextContent(
+      "No visual buddy is active for this persona."
+    )
+    expect(setupCard).toHaveTextContent("Research Buddy Starter")
+  })
+
+  it("hides the setup choice card when there is an active pack", async () => {
+    const pack = makeVisualPack({ status: "active" })
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse({ packs: [pack], active_pack: pack })
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await screen.findByTestId("persona-visual-pack-status")
+    expect(screen.queryByTestId("visual-buddy-setup-choice-card")).not.toBeInTheDocument()
+  })
+
+  it("hides the setup choice card when active_pack is returned outside packs", async () => {
+    const activePack = makeVisualPack({ id: "active-pack", status: "active" })
+    const draftPack = makeVisualPack({ id: "draft-pack", status: "draft" })
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse({ packs: [draftPack], active_pack: activePack })
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    expect(await screen.findByTestId("persona-visual-pack-status")).toHaveTextContent(
+      "active"
+    )
+    expect(screen.queryByTestId("visual-buddy-setup-choice-card")).not.toBeInTheDocument()
+  })
+
+  it("does not show setup choices before active pack state is known", async () => {
+    const activePack = makeVisualPack({ status: "active" })
+    const packsDeferred = deferredResponse<any>()
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return packsDeferred.promise
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
+        "/api/v1/persona/visual-starter-packs",
+        expect.objectContaining({ method: "GET" })
+      )
+    )
+    expect(screen.queryByTestId("visual-buddy-setup-choice-card")).not.toBeInTheDocument()
+
+    await act(async () => {
+      packsDeferred.resolve({
+        ok: true,
+        json: async () => ({ packs: [activePack], active_pack: activePack })
+      })
+    })
+
+    await screen.findByTestId("persona-visual-pack-status")
+    expect(screen.queryByTestId("visual-buddy-setup-choice-card")).not.toBeInTheDocument()
+  })
+
+  it("ignores stale pack-list responses after switching personas", async () => {
+    const activePack = makeVisualPack({
+      id: "persona-2-pack",
+      persona_id: "persona-2",
+      status: "active"
+    })
+    const personaOnePacks = deferredResponse<any>()
+    const personaTwoPacks = deferredResponse<any>()
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return personaOnePacks.promise
+      }
+      if (path === "/api/v1/persona/profiles/persona-2/visual-packs" && method === "GET") {
+        return personaTwoPacks.promise
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([
+          { id: "persona-1", name: "Garden Helper" },
+          { id: "persona-2", name: "Active Helper" }
+        ])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    const { rerender } = render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
+        "/api/v1/persona/profiles/persona-1/visual-packs",
+        expect.objectContaining({ method: "GET" })
+      )
+    )
+
+    rerender(
+      <VisualPackEditor
+        selectedPersonaId="persona-2"
+        selectedPersonaName="Active Helper"
+        isActive
+      />
+    )
+
+    await act(async () => {
+      personaOnePacks.resolve({
+        ok: true,
+        json: async () => ({ packs: [], active_pack: null })
+      })
+    })
+    expect(screen.queryByTestId("visual-buddy-setup-choice-card")).not.toBeInTheDocument()
+
+    await waitFor(() =>
+      expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
+        "/api/v1/persona/profiles/persona-2/visual-packs",
+        expect.objectContaining({ method: "GET" })
+      )
+    )
+
+    await act(async () => {
+      personaTwoPacks.resolve({
+        ok: true,
+        json: async () => ({
+          packs: [activePack],
+          active_pack: activePack
+        })
+      })
+    })
+
+    await screen.findByTestId("persona-visual-pack-status")
+    expect(screen.queryByTestId("visual-buddy-setup-choice-card")).not.toBeInTheDocument()
+  })
+
+  it("does not reuse loaded setup state after switching personas", async () => {
+    const activePack = makeVisualPack({
+      id: "persona-2-pack",
+      persona_id: "persona-2",
+      status: "active"
+    })
+    const personaTwoPacks = deferredResponse<any>()
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse({ packs: [], active_pack: null })
+      }
+      if (path === "/api/v1/persona/profiles/persona-2/visual-packs" && method === "GET") {
+        return personaTwoPacks.promise
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([
+          { id: "persona-1", name: "Garden Helper" },
+          { id: "persona-2", name: "Active Helper" }
+        ])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    const { rerender } = render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await screen.findByTestId("visual-buddy-setup-choice-card")
+
+    rerender(
+      <VisualPackEditor
+        selectedPersonaId="persona-2"
+        selectedPersonaName="Active Helper"
+        isActive
+      />
+    )
+
+    expect(screen.queryByTestId("visual-buddy-setup-choice-card")).not.toBeInTheDocument()
+
+    await act(async () => {
+      personaTwoPacks.resolve({
+        ok: true,
+        json: async () => ({
+          packs: [activePack],
+          active_pack: activePack
+        })
+      })
+    })
+
+    await screen.findByTestId("persona-visual-pack-status")
+    expect(screen.queryByTestId("visual-buddy-setup-choice-card")).not.toBeInTheDocument()
+  })
+
+  it("clears pack loading when inactive state invalidates an in-flight load", async () => {
+    const personaPacks = deferredResponse<any>()
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return personaPacks.promise
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    const { rerender } = render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    const refreshButton = await screen.findByTestId(
+      "persona-visual-pack-refresh-button"
+    )
+    await waitFor(() => expect(refreshButton).toBeDisabled())
+
+    rerender(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive={false}
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-refresh-button")).toBeEnabled()
+    )
+    expect(screen.getByTestId("persona-visual-pack-refresh-button")).toHaveTextContent(
+      "Refresh"
+    )
+  })
+
+  it("ignores stale draft creation after switching personas", async () => {
+    const createDeferred = deferredResponse<any>()
+    const staleDraft = makeVisualPack({
+      id: "stale-draft",
+      persona_id: "persona-1",
+      title: "Stale draft"
+    })
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse({ packs: [], active_pack: null })
+      }
+      if (path === "/api/v1/persona/profiles/persona-2/visual-packs" && method === "GET") {
+        return okResponse({ packs: [], active_pack: null })
+      }
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "POST") {
+        return createDeferred.promise
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([
+          { id: "persona-1", name: "Garden Helper" },
+          { id: "persona-2", name: "Active Helper" }
+        ])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    const { rerender } = render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await screen.findByTestId("visual-buddy-setup-choice-card")
+    fireEvent.change(screen.getByTestId("persona-visual-pack-title-input"), {
+      target: { value: "Stale draft" }
+    })
+    fireEvent.click(screen.getByTestId("persona-visual-create-pack"))
+
+    rerender(
+      <VisualPackEditor
+        selectedPersonaId="persona-2"
+        selectedPersonaName="Active Helper"
+        isActive
+      />
+    )
+    await screen.findByTestId("visual-buddy-setup-choice-card")
+
+    await act(async () => {
+      createDeferred.resolve({
+        ok: true,
+        json: async () => staleDraft
+      })
+    })
+
+    expect(screen.queryByText("Stale draft")).not.toBeInTheDocument()
+    expect(screen.getByTestId("visual-buddy-setup-choice-card")).toBeInTheDocument()
+  })
+
+  it("shows draft-review setup copy when drafts exist but no active pack exists", async () => {
+    const oldDraft = makeVisualPack({ id: "old-draft", title: "Old draft" })
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse({ packs: [oldDraft], active_pack: null })
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    const setupCard = await screen.findByTestId("visual-buddy-setup-choice-card")
+    expect(setupCard).toHaveTextContent(
+      "Draft visual packs are ready to review."
+    )
+    expect(setupCard).toHaveTextContent("review")
+  })
+
+  it("copies the recommended default as a selected inactive draft without activating it", async () => {
+    const calls: string[] = []
+    const copiedDraft = makeVisualPack({
+      id: "copied-draft",
+      title: "Research Buddy Starter",
+      status: "draft"
+    })
+    let packsResponse = { packs: [], active_pack: null as any }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse(packsResponse)
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (
+        path === "/api/v1/persona/visual-starter-packs/research-buddy-starter/copy" &&
+        method === "POST"
+      ) {
+        expect(parseJsonBody(init?.body)).toEqual({ target_persona_id: "persona-1" })
+        packsResponse = { packs: [copiedDraft], active_pack: null }
+        return okResponse(copiedDraft)
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Use default" }))
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue(
+        "copied-draft"
+      )
+    )
+    expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent("draft")
+    expect(calls).toContain(
+      "POST /api/v1/persona/visual-starter-packs/research-buddy-starter/copy"
+    )
+    expect(calls.some((call) => call.includes("/activate"))).toBe(false)
+  })
+
+  it("keeps the copied draft selected after reload instead of falling back to an older draft", async () => {
+    const calls: string[] = []
+    const oldDraft = makeVisualPack({ id: "old-draft", title: "Old draft" })
+    const copiedDraft = makeVisualPack({
+      id: "copied-draft",
+      title: "Copied starter",
+      status: "draft"
+    })
+    let visualPackListCalls = 0
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        visualPackListCalls += 1
+        return okResponse(
+          visualPackListCalls === 1
+            ? { packs: [oldDraft], active_pack: null }
+            : { packs: [oldDraft, copiedDraft], active_pack: null }
+        )
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (
+        path === "/api/v1/persona/visual-starter-packs/research-buddy-starter/copy" &&
+        method === "POST"
+      ) {
+        return okResponse(copiedDraft)
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    expect(await screen.findByTestId("persona-visual-pack-select")).toHaveValue(
+      "old-draft"
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Use default" }))
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue(
+        "copied-draft"
+      )
+    )
+    expect(calls.some((call) => call.includes("/activate"))).toBe(false)
+  })
+
+  it("ignores stale starter copy responses after switching personas", async () => {
+    const calls: string[] = []
+    const copyDeferred = deferredResponse<any>()
+    const staleCopiedDraft = makeVisualPack({
+      id: "stale-copied-draft",
+      title: "Stale copied starter",
+      status: "draft",
+      persona_id: "persona-1"
+    })
+    const activePack = makeVisualPack({
+      id: "persona-2-active",
+      title: "Active persona two",
+      status: "active",
+      persona_id: "persona-2"
+    })
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse({ packs: [], active_pack: null })
+      }
+      if (path === "/api/v1/persona/profiles/persona-2/visual-packs" && method === "GET") {
+        return okResponse({ packs: [activePack], active_pack: activePack })
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (
+        path === "/api/v1/persona/visual-starter-packs/research-buddy-starter/copy" &&
+        method === "POST"
+      ) {
+        return copyDeferred.promise
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([
+          { id: "persona-1", name: "Garden Helper" },
+          { id: "persona-2", name: "Active Helper" }
+        ])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    const { rerender } = render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Use default" }))
+    await waitFor(() =>
+      expect(calls).toContain(
+        "POST /api/v1/persona/visual-starter-packs/research-buddy-starter/copy"
+      )
+    )
+
+    rerender(
+      <VisualPackEditor
+        selectedPersonaId="persona-2"
+        selectedPersonaName="Active Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue(
+        "persona-2-active"
+      )
+    )
+
+    await act(async () => {
+      copyDeferred.resolve({
+        ok: true,
+        json: async () => staleCopiedDraft
+      })
+    })
+
+    expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue(
+      "persona-2-active"
+    )
+    expect(screen.queryByText("Stale copied starter")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("visual-buddy-setup-choice-card")).not.toBeInTheDocument()
+    expect(
+      calls.filter(
+        (call) =>
+          call === "GET /api/v1/persona/profiles/persona-1/visual-packs"
+      )
+    ).toHaveLength(1)
+  })
+
+  it("disables Use default when starter catalog loading fails while keeping import and blank choices usable", async () => {
+    const clickFileInput = vi
+      .spyOn(HTMLInputElement.prototype, "click")
+      .mockImplementation(() => undefined)
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse({ packs: [], active_pack: null })
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return Promise.reject(new Error("catalog failed"))
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    const setupCard = await screen.findByTestId("visual-buddy-setup-choice-card")
+    await waitFor(() =>
+      expect(within(setupCard).getByRole("button", { name: "Use default" })).toBeDisabled()
+    )
+    fireEvent.click(within(setupCard).getByRole("button", { name: "Start blank" }))
+    expect(screen.getByTestId("persona-visual-pack-title-input")).toHaveFocus()
+    fireEvent.click(within(setupCard).getByRole("button", { name: "Import pack" }))
+    expect(clickFileInput).toHaveBeenCalled()
+    expect(screen.getByTestId("persona-visual-import-preview-input")).toHaveFocus()
+  })
+
+  it("focuses the draft title input when Start blank is selected", async () => {
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse({ packs: [], active_pack: null })
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Start blank" }))
+    expect(screen.getByTestId("persona-visual-pack-title-input")).toHaveFocus()
+  })
+
+  it("focuses import preview from the Import pack setup choice when there are no packs", async () => {
+    const clickFileInput = vi
+      .spyOn(HTMLInputElement.prototype, "click")
+      .mockImplementation(() => undefined)
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse({ packs: [], active_pack: null })
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Import pack" }))
+    expect(clickFileInput).toHaveBeenCalled()
+    expect(screen.getByTestId("persona-visual-import-preview-input")).toHaveFocus()
+  })
+
+  it("opens the starter picker and copies the chosen non-recommended starter", async () => {
+    const calls: string[] = []
+    const copiedDraft = makeVisualPack({
+      id: "alt-copied-draft",
+      title: "Alt starter",
+      status: "draft"
+    })
+    let packsResponse = { packs: [], active_pack: null as any }
+    const catalogWithAlternates = {
+      starter_packs: [
+        ...starterCatalogPayload.starter_packs,
+        {
+          id: "alt-starter",
+          title: "Alt Starter",
+          description: "Alternate bundled starter",
+          renderer_type: "sprite_frames",
+          manifest_version: 1,
+          states_offered: ["idle", "speaking"],
+          asset_count: 2,
+          total_bytes: 1024,
+          tags: ["alt", "starter"],
+          license_label: "bundled-alt"
+        }
+      ]
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse(packsResponse)
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(catalogWithAlternates)
+      }
+      if (
+        path === "/api/v1/persona/visual-starter-packs/alt-starter/copy" &&
+        method === "POST"
+      ) {
+        packsResponse = { packs: [copiedDraft], active_pack: null }
+        return okResponse(copiedDraft)
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Choose another default" }))
+    const picker = await screen.findByTestId("persona-visual-starter-picker")
+    expect(picker).toHaveTextContent("Alt Starter")
+    expect(picker).toHaveTextContent("Alternate bundled starter")
+    expect(picker).toHaveTextContent("sprite_frames")
+    expect(picker).toHaveTextContent("alt")
+    expect(picker).toHaveTextContent("bundled-alt")
+
+    fireEvent.click(within(picker).getByTestId("persona-visual-copy-starter-alt-starter"))
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue(
+        "alt-copied-draft"
+      )
+    )
+    expect(calls).toContain(
+      "POST /api/v1/persona/visual-starter-packs/alt-starter/copy"
+    )
+    expect(calls.some((call) => call.includes("research-buddy-starter/copy"))).toBe(false)
   })
 
   it("localizes loading and refresh labels while candidates are loading", async () => {
@@ -172,7 +1211,7 @@ describe("VisualPackEditor", () => {
               defaultValue?: string
             }
       ) => {
-        if (key === "common:loading") return "Localized loading"
+        if (key === "common:loading.title") return "Localized loading"
         if (key === "common:refresh") return "Localized refresh"
         if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
         if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
@@ -184,6 +1223,8 @@ describe("VisualPackEditor", () => {
       if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
         return okResponse([pack])
       }
+      const backgroundResponse = mockVisualPackBackgroundGet(path, method)
+      if (backgroundResponse) return backgroundResponse
       if (
         path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
         method === "GET"
@@ -191,6 +1232,21 @@ describe("VisualPackEditor", () => {
         return new Promise((resolve) => {
           resolveCandidates = resolve
         })
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse({ starter_packs: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generation-readiness" &&
+        method === "GET"
+      ) {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
       }
       return Promise.resolve({
         ok: false,
@@ -209,8 +1265,11 @@ describe("VisualPackEditor", () => {
     )
 
     expect(await screen.findByTestId("persona-visual-pack-status")).toHaveTextContent("draft")
+    const candidatesRefreshButton = await screen.findByTestId(
+      "persona-visual-candidates-refresh-button"
+    )
     await waitFor(() =>
-      expect(screen.getAllByRole("button", { name: "Localized loading" })).toHaveLength(1)
+      expect(candidatesRefreshButton).toHaveTextContent("Localized loading")
     )
 
     resolveCandidates({
@@ -219,8 +1278,75 @@ describe("VisualPackEditor", () => {
     })
 
     await waitFor(() =>
-      expect(screen.getAllByRole("button", { name: "Localized refresh" })).toHaveLength(2)
+      expect(candidatesRefreshButton).toHaveTextContent("Localized refresh")
     )
+  })
+
+  it("preserves the current pack selection when refreshing packs", async () => {
+    const activePack = {
+      id: "pack-active",
+      persona_id: "persona-1",
+      title: "Active pack",
+      renderer_type: "sprite_frames",
+      status: "active",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+    const draftPack = {
+      id: "pack-draft",
+      persona_id: "persona-1",
+      title: "Draft pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 4
+    }
+    let listRequests = 0
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        listRequests += 1
+        return okResponse({
+          packs: [activePack, draftPack],
+          active_pack: activePack
+        })
+      }
+      if (
+        path.startsWith("/api/v1/persona/profiles/persona-1/visual-packs/") &&
+        path.endsWith("/generated-candidates") &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    const select = await screen.findByTestId("persona-visual-pack-select")
+    await waitFor(() => expect(select).toHaveValue("pack-active"))
+
+    fireEvent.change(select, { target: { value: "pack-draft" } })
+    expect(select).toHaveValue("pack-draft")
+
+    fireEvent.click(screen.getByTestId("persona-visual-pack-refresh-button"))
+
+    await waitFor(() => expect(listRequests).toBeGreaterThan(1))
+    expect(select).toHaveValue("pack-draft")
   })
 
   it("shows selected pack health diagnostics from the shared visual pack classifier", async () => {
@@ -240,6 +1366,8 @@ describe("VisualPackEditor", () => {
       if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
         return okResponse([pack])
       }
+      const backgroundResponse = mockVisualPackBackgroundGet(path, method)
+      if (backgroundResponse) return backgroundResponse
       if (
         path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
         method === "GET"
@@ -370,6 +1498,9 @@ describe("VisualPackEditor", () => {
       />
     )
 
+    expect(await screen.findByTestId("persona-visual-pack-status")).toHaveTextContent(
+      "draft"
+    )
     const portability = await screen.findByTestId("persona-visual-portability-copy")
     expect(portability).toHaveTextContent(
       "Import preview validates a portable pack archive before it changes this persona"
@@ -383,6 +1514,300 @@ describe("VisualPackEditor", () => {
 
     expect(screen.getByTestId("persona-visual-generation-review-copy")).toHaveTextContent(
       "Generated candidates stay in review until accepted"
+    )
+  })
+
+  it("copies a bundled starter pack as an inactive draft before activation", async () => {
+    const calls: string[] = []
+    const copiedPack = {
+      id: "starter-copy-1",
+      persona_id: "persona-1",
+      title: "Research Buddy Starter",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 1
+    }
+    let starterCopied = false
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse(starterCopied ? [copiedPack] : [])
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse({
+          starter_packs: [
+            {
+              id: "research-buddy-starter",
+              title: "Research Buddy Starter",
+              description: "A deterministic sprite-frame starter.",
+              renderer_type: "sprite_frames",
+              manifest_version: 1,
+              states_offered: ["idle", "listening", "thinking", "speaking", "error"],
+              asset_count: 1,
+              total_bytes: 92,
+              tags: ["starter", "sprite_frames"],
+              license_label: "bundled"
+            }
+          ]
+        })
+      }
+      if (
+        path === "/api/v1/persona/visual-starter-packs/research-buddy-starter/copy" &&
+        method === "POST"
+      ) {
+        starterCopied = true
+        expect(parseJsonBody(init?.body)).toMatchObject({
+          target_persona_id: "persona-1"
+        })
+        return okResponse(copiedPack)
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/starter-copy-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/starter-copy-1/generation-readiness" &&
+        method === "GET"
+      ) {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-empty")).toHaveTextContent(
+        "does not have a visual pack yet"
+      )
+    )
+    const setupCard = await screen.findByTestId("visual-buddy-setup-choice-card")
+    expect(setupCard).toHaveTextContent("Research Buddy Starter")
+
+    fireEvent.click(within(setupCard).getByRole("button", { name: "Use default" }))
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue(
+        "starter-copy-1"
+      )
+    )
+    expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent("draft")
+    expect(
+      calls.some((call) => call.includes("/starter-copy-1/activate"))
+    ).toBe(false)
+  })
+
+  it("keeps a copied starter draft visible when the post-copy pack refresh fails", async () => {
+    const copiedPack = {
+      id: "starter-copy-1",
+      persona_id: "persona-1",
+      title: "Research Buddy Starter",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 1
+    }
+    let packListRequests = 0
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        packListRequests += 1
+        if (packListRequests > 1) {
+          return Promise.resolve({
+            ok: false,
+            status: 503,
+            error: "Pack refresh failed",
+            json: async () => ({ detail: "Pack refresh failed" })
+          })
+        }
+        return okResponse([])
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (
+        path === "/api/v1/persona/visual-starter-packs/research-buddy-starter/copy" &&
+        method === "POST"
+      ) {
+        expect(parseJsonBody(init?.body)).toMatchObject({
+          target_persona_id: "persona-1"
+        })
+        return okResponse(copiedPack)
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/starter-copy-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/starter-copy-1/generation-readiness" &&
+        method === "GET"
+      ) {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    const setupCard = await screen.findByTestId("visual-buddy-setup-choice-card")
+    fireEvent.click(within(setupCard).getByRole("button", { name: "Use default" }))
+
+    await waitFor(() => expect(screen.getByText("Pack refresh failed")).toBeInTheDocument())
+    expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue(
+      "starter-copy-1"
+    )
+  })
+
+  it("ignores stale starter pack responses after switching personas", async () => {
+    const firstStarterResponse = deferredResponse<{
+      ok: boolean
+      json: () => Promise<unknown>
+    }>()
+    let starterRequests = 0
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs" &&
+        method === "GET"
+      ) {
+        return okResponse([])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-2/visual-packs" &&
+        method === "GET"
+      ) {
+        return okResponse([])
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        starterRequests += 1
+        if (starterRequests === 1) return firstStarterResponse.promise
+        return okResponse({
+          starter_packs: [
+            {
+              id: "persona-2-starter",
+              title: "Persona 2 Starter",
+              renderer_type: "sprite_frames",
+              manifest_version: 1,
+              states_offered: ["idle"],
+              asset_count: 1,
+              total_bytes: 96,
+              tags: []
+            }
+          ]
+        })
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([
+          { id: "persona-1", name: "First Persona" },
+          { id: "persona-2", name: "Second Persona" }
+        ])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    const { rerender } = render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="First Persona"
+        isActive
+      />
+    )
+
+    await waitFor(() => expect(starterRequests).toBe(1))
+
+    rerender(
+      <VisualPackEditor
+        selectedPersonaId="persona-2"
+        selectedPersonaName="Second Persona"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("visual-buddy-setup-choice-card")).toHaveTextContent(
+        "Persona 2 Starter"
+      )
+    )
+
+    await act(async () => {
+      firstStarterResponse.resolve({
+        ok: true,
+        json: async () => ({
+          starter_packs: [
+            {
+              id: "persona-1-starter",
+              title: "Persona 1 Starter",
+              renderer_type: "sprite_frames",
+              manifest_version: 1,
+              states_offered: ["idle"],
+              asset_count: 1,
+              total_bytes: 96,
+              tags: []
+            }
+          ]
+        })
+      })
+      await firstStarterResponse.promise
+    })
+
+    expect(screen.getByTestId("visual-buddy-setup-choice-card")).toHaveTextContent(
+      "Persona 2 Starter"
+    )
+    expect(screen.getByTestId("visual-buddy-setup-choice-card")).not.toHaveTextContent(
+      "Persona 1 Starter"
     )
   })
 
@@ -526,7 +1951,7 @@ describe("VisualPackEditor", () => {
     expect(
       within(reusePanel).getByRole("button", { name: /duplicate to persona/i })
     ).toBeDisabled()
-    expect(within(reusePanel).getByRole("button", { name: /import archive/i })).toBeDisabled()
+    expect(within(reusePanel).getByRole("button", { name: /import archive/i })).toBeEnabled()
     expect(
       within(reusePanel).getByRole("button", { name: /use personal library/i })
     ).toBeEnabled()
@@ -646,6 +2071,21 @@ describe("VisualPackEditor", () => {
       const method = init?.method || "GET"
       if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
         return okResponse([pack])
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
       }
       if (
         path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/manifest" &&
@@ -769,6 +2209,21 @@ describe("VisualPackEditor", () => {
       if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
         return okResponse([pack])
       }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
       if (
         path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/manifest" &&
         method === "PATCH"
@@ -812,8 +2267,13 @@ describe("VisualPackEditor", () => {
         "draft"
       )
     )
-    expect(screen.getByTestId("persona-visual-validation-errors")).toHaveTextContent(
-      "listening"
+    expect(screen.getByTestId("visual-buddy-setup-choice-card")).toHaveTextContent(
+      "review"
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-validation-errors")).toHaveTextContent(
+        "Missing required visual states: listening, thinking, speaking, error"
+      )
     )
     expect(screen.getByTestId("persona-visual-activate-button")).toBeDisabled()
 
@@ -828,7 +2288,9 @@ describe("VisualPackEditor", () => {
         "PATCH /api/v1/persona/profiles/persona-1/visual-packs/pack-1/manifest"
       )
     )
-    expect(screen.queryByTestId("persona-visual-validation-errors")).not.toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.queryByTestId("persona-visual-validation-errors")).not.toBeInTheDocument()
+    )
 
     fireEvent.click(screen.getByTestId("persona-visual-activate-button"))
     await waitFor(() =>
@@ -837,6 +2299,7 @@ describe("VisualPackEditor", () => {
       )
     )
     expect(await screen.findByTestId("persona-visual-pack-status")).toHaveTextContent("active")
+    expect(screen.queryByTestId("visual-buddy-setup-choice-card")).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId("persona-visual-deactivate-button"))
     await waitFor(() =>
@@ -844,6 +2307,97 @@ describe("VisualPackEditor", () => {
         "POST /api/v1/persona/profiles/persona-1/visual-packs/deactivate"
       )
     )
+    expect(await screen.findByTestId("visual-buddy-setup-choice-card")).toHaveTextContent(
+      "review"
+    )
+  })
+
+  it("ignores stale activation after switching personas", async () => {
+    const activateDeferred = deferredResponse<any>()
+    const pack = makeVisualPack({
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Draft to activate",
+      status: "draft"
+    })
+    const activatedPack = {
+      ...pack,
+      status: "active"
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (path === "/api/v1/persona/profiles/persona-2/visual-packs" && method === "GET") {
+        return okResponse({ packs: [], active_pack: null })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/activate" &&
+        method === "POST"
+      ) {
+        return activateDeferred.promise
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([
+          { id: "persona-1", name: "Garden Helper" },
+          { id: "persona-2", name: "Active Helper" }
+        ])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    const { rerender } = render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent(
+        "draft"
+      )
+    )
+    fireEvent.click(screen.getByTestId("persona-visual-activate-button"))
+
+    rerender(
+      <VisualPackEditor
+        selectedPersonaId="persona-2"
+        selectedPersonaName="Active Helper"
+        isActive
+      />
+    )
+    await screen.findByTestId("visual-buddy-setup-choice-card")
+
+    await act(async () => {
+      activateDeferred.resolve({
+        ok: true,
+        json: async () => activatedPack
+      })
+    })
+
+    expect(screen.queryByText("Draft to activate")).not.toBeInTheDocument()
+    expect(screen.getByTestId("visual-buddy-setup-choice-card")).toBeInTheDocument()
   })
 
   it("enqueues generation jobs and accepts or rejects review candidates", async () => {
@@ -953,6 +2507,307 @@ describe("VisualPackEditor", () => {
         )
       ).toHaveLength(2)
     )
+  })
+
+  it("clamps stale generation target states after switching packs", async () => {
+    const queuedPayloads: any[] = []
+    const customState = asPersonaVisualCustomStateId("tool.notes_search")
+    const customManifest = {
+      ...structuredClone(baseManifest),
+      state_catalog: {
+        [customState]: {
+          label: "Searching notes",
+          kind: "tool_variant"
+        }
+      },
+      states: {
+        ...structuredClone(baseManifest).states,
+        [customState]: { animation_id: "thinking" }
+      }
+    }
+    const customPack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Custom pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: customManifest,
+      assets: visualAssets,
+      version: 3
+    }
+    const plainPack = {
+      id: "pack-2",
+      persona_id: "persona-1",
+      title: "Plain pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 1
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([customPack, plainPack])
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-2/generation-jobs" &&
+        method === "POST"
+      ) {
+        queuedPayloads.push(parseJsonBody(init?.body))
+        return okResponse({ job_id: "job-created", status: "queued" })
+      }
+      const backgroundResponse = mockVisualPackBackgroundGet(path, method)
+      if (backgroundResponse) return backgroundResponse
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue("pack-1")
+    )
+    fireEvent.change(screen.getByTestId("persona-visual-generation-target-state-select"), {
+      target: { value: "tool.notes_search" }
+    })
+    expect(screen.getByTestId("persona-visual-generation-target-state-select")).toHaveValue(
+      "tool.notes_search"
+    )
+
+    fireEvent.change(screen.getByTestId("persona-visual-pack-select"), {
+      target: { value: "pack-2" }
+    })
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue("pack-2")
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-generation-target-state-select")).toHaveValue(
+        "thinking"
+      )
+    )
+
+    fireEvent.change(screen.getByTestId("persona-visual-generation-prompt-input"), {
+      target: { value: "make a thinking pose" }
+    })
+    fireEvent.click(screen.getByTestId("persona-visual-generation-enqueue-button"))
+
+    await waitFor(() => expect(queuedPayloads).toHaveLength(1))
+    expect(queuedPayloads[0]).toMatchObject({
+      target_state: "thinking"
+    })
+  })
+
+  it("ignores stale generated candidate lists after switching personas", async () => {
+    const staleCandidate = {
+      id: "stale-candidate",
+      pack_id: "pack-1",
+      persona_id: "persona-1",
+      job_id: "job-stale",
+      status: "review",
+      proposed_manifest_patch: {},
+      generated_asset_ids: ["asset-a"],
+      generated_assets: [visualAssets[0]],
+      prompt: "stale generated pose",
+      failure_reason: null,
+      created_at: "2026-05-09T00:00:00Z",
+      last_modified: "2026-05-09T00:00:00Z",
+      version: 1
+    }
+    const packOne = makeVisualPack({ id: "pack-1", persona_id: "persona-1" })
+    const packTwo = makeVisualPack({ id: "pack-2", persona_id: "persona-2" })
+    const candidatesDeferred = deferredResponse<any>()
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([packOne])
+      }
+      if (path === "/api/v1/persona/profiles/persona-2/visual-packs" && method === "GET") {
+        return okResponse([packTwo])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return candidatesDeferred.promise
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-2/visual-packs/pack-2/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([
+          { id: "persona-1", name: "Garden Helper" },
+          { id: "persona-2", name: "Active Helper" }
+        ])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    const { rerender } = render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
+        "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates",
+        expect.objectContaining({ method: "GET" })
+      )
+    )
+
+    rerender(
+      <VisualPackEditor
+        selectedPersonaId="persona-2"
+        selectedPersonaName="Active Helper"
+        isActive
+      />
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent(
+        "draft"
+      )
+    )
+
+    await act(async () => {
+      candidatesDeferred.resolve({
+        ok: true,
+        json: async () => ({ candidates: [staleCandidate] })
+      })
+    })
+
+    expect(screen.queryByText("stale generated pose")).not.toBeInTheDocument()
+  })
+
+  it("ignores stale accepted candidate reviews after switching personas", async () => {
+    const reviewDeferred = deferredResponse<any>()
+    const candidate = {
+      id: "candidate-1",
+      pack_id: "pack-1",
+      persona_id: "persona-1",
+      job_id: "job-1",
+      status: "review",
+      proposed_manifest_patch: {},
+      generated_asset_ids: ["asset-a"],
+      generated_assets: [visualAssets[0]],
+      prompt: "candidate to accept",
+      failure_reason: null,
+      created_at: "2026-05-09T00:00:00Z",
+      last_modified: "2026-05-09T00:00:00Z",
+      version: 1
+    }
+    const packOne = makeVisualPack({ id: "pack-1", persona_id: "persona-1" })
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([packOne])
+      }
+      if (path === "/api/v1/persona/profiles/persona-2/visual-packs" && method === "GET") {
+        return okResponse({ packs: [], active_pack: null })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [candidate] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/candidates/candidate-1/review" &&
+        method === "POST"
+      ) {
+        return reviewDeferred.promise
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([
+          { id: "persona-1", name: "Garden Helper" },
+          { id: "persona-2", name: "Active Helper" }
+        ])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    const { rerender } = render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    expect(await screen.findByText("candidate to accept")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("persona-visual-candidate-accept-candidate-1"))
+
+    rerender(
+      <VisualPackEditor
+        selectedPersonaId="persona-2"
+        selectedPersonaName="Active Helper"
+        isActive
+      />
+    )
+    await screen.findByTestId("visual-buddy-setup-choice-card")
+
+    await act(async () => {
+      reviewDeferred.resolve({
+        ok: true,
+        json: async () => ({ ...candidate, status: "accepted" })
+      })
+    })
+
+    expect(screen.queryByText("candidate to accept")).not.toBeInTheDocument()
+    expect(screen.getByTestId("visual-buddy-setup-choice-card")).toBeInTheDocument()
   })
 
   it("disables visual generation when the Jobs worker is unavailable", async () => {
@@ -1941,6 +3796,7 @@ describe("VisualPackEditor", () => {
       version: 1
     }
     let importCommitted = false
+    let importCommitStarts = 0
 
     mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
       const method = init?.method || "GET"
@@ -1959,7 +3815,8 @@ describe("VisualPackEditor", () => {
         method === "POST"
       ) {
         const form = init?.body as FormData
-        expect((form.get("file") as File).name).toBe("portable.tldw-persona-vpack")
+        expect(form.get("file")).toBeNull()
+        expect((form.get("archive") as File).name).toBe("portable.tldw-persona-vpack")
         return okResponse({
           preview_id: "preview-1",
           job_id: "preview-job-1",
@@ -2004,6 +3861,7 @@ describe("VisualPackEditor", () => {
           "/api/v1/persona/profiles/persona-1/visual-packs/import-previews/preview-1/commit" &&
         method === "POST"
       ) {
+        importCommitStarts += 1
         expect(parseJsonBody(init?.body)).toMatchObject({
           trust_mode: "untrusted_import",
           target_mode: "create_new"
@@ -2092,13 +3950,16 @@ describe("VisualPackEditor", () => {
       "create_new"
     )
 
-    expect(screen.getByTestId("persona-visual-import-commit-button")).toBeEnabled()
-    fireEvent.click(screen.getByTestId("persona-visual-import-commit-button"))
+    const commitButton = screen.getByTestId("persona-visual-import-commit-button")
+    expect(commitButton).toBeEnabled()
+    fireEvent.click(commitButton)
+    fireEvent.click(commitButton)
     await waitFor(() =>
       expect(screen.getByTestId("persona-visual-import-commit-status")).toHaveTextContent(
         "queued"
       )
     )
+    expect(importCommitStarts).toBe(1)
     expect(screen.getByTestId("persona-visual-import-commit-stage")).toHaveTextContent(
       "queued"
     )
@@ -2113,14 +3974,729 @@ describe("VisualPackEditor", () => {
         "completed"
       )
     )
-    expect(screen.getByTestId("persona-visual-import-commit-refresh-button")).toBeDisabled()
     await waitFor(() =>
-      expect(screen.getByTestId("persona-visual-pack-select")).toHaveTextContent(
-        "Imported Visuals"
+      expect(screen.getByTestId("persona-visual-pack-select")).toHaveValue(
+        "pack-imported"
       )
     )
+    expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent("draft")
     expect(
       calls.some((call) => call.includes("/activate") || call.includes("/manifest"))
+    ).toBe(false)
+  })
+
+  it("rejects unsupported visual import archive filenames before upload", async () => {
+    const calls: string[] = []
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([
+          { id: "persona-1", name: "Garden Helper" },
+          { id: "persona-2", name: "Active Helper" }
+        ])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent(
+        "draft"
+      )
+    )
+    const archive = new File(["not a portable pack"], "visuals.zip", {
+      type: "application/zip"
+    })
+    fireEvent.change(screen.getByTestId("persona-visual-import-preview-input"), {
+      target: { files: [archive] }
+    })
+
+    expect(
+      await screen.findByTestId("persona-visual-import-preview-file-error")
+    ).toHaveTextContent(".tldw-persona-vpack")
+    expect(screen.getByTestId("persona-visual-import-preview-button")).toBeDisabled()
+
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-button"))
+
+    expect(
+      calls.some((call) => call.includes("/visual-packs/import-previews"))
+    ).toBe(false)
+  })
+
+  it("rejects unsupported visual import archive media types before upload", async () => {
+    const calls: string[] = []
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent(
+        "draft"
+      )
+    )
+    const archive = new File(["not a portable archive"], "portable.tldw-persona-vpack", {
+      type: "text/plain"
+    })
+    fireEvent.change(screen.getByTestId("persona-visual-import-preview-input"), {
+      target: { files: [archive] }
+    })
+
+    expect(
+      await screen.findByTestId("persona-visual-import-preview-file-error")
+    ).toHaveTextContent("supported zip media type")
+    expect(screen.getByTestId("persona-visual-import-preview-button")).toBeDisabled()
+
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-button"))
+
+    expect(
+      calls.some((call) => call.includes("/visual-packs/import-previews"))
+    ).toBe(false)
+  })
+
+  it("shows import preview failure copy from the job response", async () => {
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/import-previews" &&
+        method === "POST"
+      ) {
+        return okResponse({
+          preview_id: "preview-1",
+          job_id: "preview-job-1",
+          portability_job_id: "portability-preview-1",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "queued",
+          stage: "queued"
+        })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/import-previews/preview-1" &&
+        method === "GET"
+      ) {
+        return okResponse({
+          preview_id: "preview-1",
+          job_id: "preview-job-1",
+          portability_job_id: "portability-preview-1",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "failed",
+          visual_status: "failed",
+          stage: "validate_archive",
+          bundle_summary: {},
+          validation_warnings: [],
+          conflicts: [],
+          proposed_plan: {},
+          quota_estimate: {},
+          required_choices: [],
+          target_warnings: [],
+          error_code: "invalid_archive",
+          error_message: "The archive could not be opened as a Persona Visual pack."
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent(
+        "draft"
+      )
+    )
+    const archive = new File(["portable archive"], "portable.tldw-persona-vpack", {
+      type: "application/octet-stream"
+    })
+    fireEvent.change(screen.getByTestId("persona-visual-import-preview-input"), {
+      target: { files: [archive] }
+    })
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-preview-status")).toHaveTextContent(
+        "queued"
+      )
+    )
+
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-refresh-button"))
+
+    expect(
+      await screen.findByTestId("persona-visual-import-preview-job-copy")
+    ).toHaveTextContent("The archive could not be opened as a Persona Visual pack.")
+  })
+
+  it("ignores stale import preview responses after switching personas", async () => {
+    const calls: string[] = []
+    const previewDeferred = deferredResponse<any>()
+    const activePack = makeVisualPack({
+      id: "persona-2-pack",
+      persona_id: "persona-2",
+      status: "active"
+    })
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse({ packs: [], active_pack: null })
+      }
+      if (path === "/api/v1/persona/profiles/persona-2/visual-packs" && method === "GET") {
+        return okResponse({ packs: [activePack], active_pack: activePack })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/import-previews" &&
+        method === "POST"
+      ) {
+        return previewDeferred.promise
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([
+          { id: "persona-1", name: "Garden Helper" },
+          { id: "persona-2", name: "Active Helper" }
+        ])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    const { rerender } = render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    const archive = new File(["portable archive"], "portable.tldw-persona-vpack", {
+      type: "application/octet-stream"
+    })
+    fireEvent.change(await screen.findByTestId("persona-visual-import-preview-input"), {
+      target: { files: [archive] }
+    })
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-button"))
+    await waitFor(() =>
+      expect(calls).toContain(
+        "POST /api/v1/persona/profiles/persona-1/visual-packs/import-previews"
+      )
+    )
+
+    rerender(
+      <VisualPackEditor
+        selectedPersonaId="persona-2"
+        selectedPersonaName="Active Helper"
+        isActive
+      />
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent(
+        "active"
+      )
+    )
+
+    await act(async () => {
+      previewDeferred.resolve({
+        ok: true,
+        json: async () => ({
+          preview_id: "stale-preview",
+          job_id: "stale-preview-job",
+          portability_job_id: "stale-portability-preview",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "queued",
+          stage: "queued"
+        })
+      })
+    })
+
+    expect(screen.queryByTestId("persona-visual-import-preview-status")).not.toBeInTheDocument()
+  })
+
+  it("ignores stale import commit responses after switching personas", async () => {
+    const calls: string[] = []
+    const commitDeferred = deferredResponse<any>()
+    const pack = makeVisualPack({ id: "pack-1", status: "draft" })
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (path === "/api/v1/persona/profiles/persona-2/visual-packs" && method === "GET") {
+        return okResponse({ packs: [], active_pack: null })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/import-previews" &&
+        method === "POST"
+      ) {
+        return okResponse({
+          preview_id: "preview-1",
+          job_id: "preview-job-1",
+          portability_job_id: "portability-preview-1",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "queued",
+          stage: "queued"
+        })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/import-previews/preview-1" &&
+        method === "GET"
+      ) {
+        return okResponse({
+          preview_id: "preview-1",
+          job_id: "preview-job-1",
+          portability_job_id: "portability-preview-1",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "completed",
+          visual_status: "completed",
+          stage: "completed",
+          bundle_summary: {
+            pack_title: "Imported Visuals",
+            asset_count: 2,
+            assets_with_bytes: 2
+          },
+          validation_warnings: [],
+          conflicts: [],
+          proposed_plan: { target_mode: "create_new" },
+          quota_estimate: { asset_bytes: 512 },
+          required_choices: [],
+          target_warnings: []
+        })
+      }
+      if (
+        path ===
+          "/api/v1/persona/profiles/persona-1/visual-packs/import-previews/preview-1/commit" &&
+        method === "POST"
+      ) {
+        return commitDeferred.promise
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([
+          { id: "persona-1", name: "Garden Helper" },
+          { id: "persona-2", name: "Active Helper" }
+        ])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    const { rerender } = render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent(
+        "draft"
+      )
+    )
+    const archive = new File(["portable archive"], "portable.tldw-persona-vpack", {
+      type: "application/octet-stream"
+    })
+    fireEvent.change(screen.getByTestId("persona-visual-import-preview-input"), {
+      target: { files: [archive] }
+    })
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-button"))
+    await screen.findByTestId("persona-visual-import-preview-status")
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-refresh-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-preview-status")).toHaveTextContent(
+        "completed"
+      )
+    )
+
+    fireEvent.click(screen.getByTestId("persona-visual-import-commit-button"))
+    await waitFor(() =>
+      expect(calls).toContain(
+        "POST /api/v1/persona/profiles/persona-1/visual-packs/import-previews/preview-1/commit"
+      )
+    )
+
+    rerender(
+      <VisualPackEditor
+        selectedPersonaId="persona-2"
+        selectedPersonaName="Active Helper"
+        isActive
+      />
+    )
+    await screen.findByTestId("visual-buddy-setup-choice-card")
+
+    await act(async () => {
+      commitDeferred.resolve({
+        ok: true,
+        json: async () => ({
+          job_id: "stale-import-job",
+          portability_job_id: "stale-portability-import",
+          operation: "import_commit",
+          preview_id: "preview-1",
+          target_persona_id: "persona-1",
+          status: "queued",
+          stage: "queued"
+        })
+      })
+    })
+
+    expect(screen.queryByTestId("persona-visual-import-commit-status")).not.toBeInTheDocument()
+    expect(screen.getByTestId("visual-buddy-setup-choice-card")).toBeInTheDocument()
+  })
+
+  it("surfaces blocked renderer import diagnostics and disables commit", async () => {
+    const calls: string[] = []
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/import-previews" &&
+        method === "POST"
+      ) {
+        return okResponse({
+          preview_id: "preview-live2d",
+          job_id: "preview-job-live2d",
+          portability_job_id: "portability-preview-live2d",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "queued",
+          stage: "queued"
+        })
+      }
+      if (
+        path ===
+          "/api/v1/persona/profiles/persona-1/visual-packs/import-previews/preview-live2d" &&
+        method === "GET"
+      ) {
+        return okResponse({
+          preview_id: "preview-live2d",
+          job_id: "preview-job-live2d",
+          portability_job_id: "portability-preview-live2d",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "completed",
+          visual_status: "blocked",
+          stage: "blocked",
+          archive_sha256: "sha-live2d-preview",
+          canonical_payload_fingerprint: "fingerprint-live2d-preview",
+          schema_version: "persona_visual_pack.v2",
+          bundle_summary: {
+            pack_title: "Imported Live2D Visuals",
+            asset_count: 2,
+            assets_with_bytes: 2
+          },
+          validation_warnings: [],
+          conflicts: [],
+          proposed_plan: {
+            target_mode: "create_new",
+            commit_eligible: false,
+            activation_eligible: false,
+            commit_blockers: ["runtime_adapter_not_implemented"],
+            renderer_import_preview: {
+              status: "feature_gated",
+              renderer_type: "live2d",
+              manifest_version: 2,
+              renderer_contract_version: 1,
+              can_commit: false,
+              activation_eligible: false,
+              blockers: ["runtime_adapter_not_implemented"],
+              warnings: ["requires_license_ack"],
+              normalized_role_categories: {
+                model: ["source-model"],
+                texture: ["source-texture"]
+              },
+              setup_status: "feature_gated",
+              setup_blockers: [],
+              disabled_reason: "runtime_adapter_not_implemented"
+            }
+          },
+          quota_estimate: { asset_bytes: 2048 },
+          required_choices: [],
+          target_warnings: []
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent(
+        "draft"
+      )
+    )
+    const archive = new File(["portable archive"], "portable.tldw-persona-vpack", {
+      type: "application/octet-stream"
+    })
+    fireEvent.change(screen.getByTestId("persona-visual-import-preview-input"), {
+      target: { files: [archive] }
+    })
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-preview-status")).toHaveTextContent(
+        "queued"
+      )
+    )
+
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-refresh-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-preview-status")).toHaveTextContent(
+        "completed"
+      )
+    )
+
+    const diagnostics = screen.getByTestId(
+      "persona-visual-import-renderer-diagnostics"
+    )
+    expect(diagnostics).toHaveTextContent("live2d")
+    expect(diagnostics).toHaveTextContent("feature_gated")
+    expect(diagnostics).toHaveTextContent("runtime_adapter_not_implemented")
+    expect(diagnostics).toHaveTextContent("requires_license_ack")
+    expect(diagnostics).toHaveTextContent("source-model")
+    expect(diagnostics).toHaveTextContent("Activation unavailable")
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.rendererDiagnosticsTitle",
+      { defaultValue: "Renderer diagnostics" }
+    )
+    expect(mocks.translate).toHaveBeenCalledWith("common:unknown", {
+      defaultValue: "unknown"
+    })
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.manifestVersion",
+      { defaultValue: "Manifest v" }
+    )
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.contractVersion",
+      { defaultValue: "Contract v" }
+    )
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.activationUnavailable",
+      { defaultValue: "Activation unavailable" }
+    )
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.commitBlockers",
+      { defaultValue: "Commit blockers" }
+    )
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.rendererWarnings",
+      { defaultValue: "Warnings" }
+    )
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.assetRoles",
+      { defaultValue: "Asset roles" }
+    )
+    expect(mocks.translate).toHaveBeenCalledWith(
+      "sidepanel:personaGarden.visuals.importCommitBlocked",
+      {
+        defaultValue: "Commit unavailable until preview blockers are resolved"
+      }
+    )
+
+    expect(screen.getByTestId("persona-visual-import-commit-button")).toBeDisabled()
+    fireEvent.click(screen.getByTestId("persona-visual-import-commit-button"))
+    expect(
+      calls.some((call) => call.includes("/commit"))
     ).toBe(false)
   })
 
@@ -2266,7 +4842,9 @@ describe("VisualPackEditor", () => {
     await waitFor(() =>
       expect(screen.getByTestId("persona-visual-import-conflict-choice")).toBeInTheDocument()
     )
-    expect(screen.getByTestId("persona-visual-import-commit-button")).toBeDisabled()
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-commit-button")).toBeDisabled()
+    )
 
     fireEvent.change(screen.getByTestId("persona-visual-import-target-mode"), {
       target: { value: "replace_draft" }
@@ -2455,6 +5033,172 @@ describe("VisualPackEditor", () => {
     expect(commitAttempts).toBe(2)
     expect(screen.getByTestId("persona-visual-import-commit-status")).toHaveTextContent(
       "queued"
+    )
+  })
+
+  it("ignores duplicate import commit refresh clicks while a status request is in flight", async () => {
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+    const statusResponse = deferredResponse<{
+      ok: boolean
+      json: () => Promise<unknown>
+    }>()
+    let statusRequests = 0
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/import-previews" &&
+        method === "POST"
+      ) {
+        return okResponse({
+          preview_id: "preview-1",
+          job_id: "preview-job-1",
+          portability_job_id: "portability-preview-1",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "queued",
+          stage: "queued"
+        })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/import-previews/preview-1" &&
+        method === "GET"
+      ) {
+        return okResponse({
+          preview_id: "preview-1",
+          job_id: "preview-job-1",
+          portability_job_id: "portability-preview-1",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "completed",
+          visual_status: "completed",
+          stage: "completed",
+          bundle_summary: {
+            pack_title: "Imported Visuals",
+            asset_count: 2,
+            assets_with_bytes: 2
+          },
+          validation_warnings: [],
+          conflicts: [],
+          proposed_plan: { target_mode: "create_new" },
+          quota_estimate: {},
+          required_choices: [],
+          target_warnings: []
+        })
+      }
+      if (
+        path ===
+          "/api/v1/persona/profiles/persona-1/visual-packs/import-previews/preview-1/commit" &&
+        method === "POST"
+      ) {
+        return okResponse({
+          job_id: "import-job-1",
+          portability_job_id: "portability-import-1",
+          operation: "import_commit",
+          preview_id: "preview-1",
+          target_persona_id: "persona-1",
+          status: "queued",
+          stage: "queued"
+        })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/imports/import-job-1" &&
+        method === "GET"
+      ) {
+        statusRequests += 1
+        return statusResponse.promise
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent(
+        "draft"
+      )
+    )
+    const archive = new File(["portable archive"], "portable.tldw-persona-vpack", {
+      type: "application/octet-stream"
+    })
+    fireEvent.change(screen.getByTestId("persona-visual-import-preview-input"), {
+      target: { files: [archive] }
+    })
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-preview-status")).toHaveTextContent(
+        "queued"
+      )
+    )
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-refresh-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-preview-status")).toHaveTextContent(
+        "completed"
+      )
+    )
+    fireEvent.click(screen.getByTestId("persona-visual-import-commit-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-commit-status")).toHaveTextContent(
+        "queued"
+      )
+    )
+
+    const refreshButton = screen.getByTestId(
+      "persona-visual-import-commit-refresh-button"
+    )
+    await act(async () => {
+      refreshButton.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      refreshButton.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
+
+    expect(statusRequests).toBe(1)
+    statusResponse.resolve({
+      ok: true,
+      json: async () => ({
+        job_id: "import-job-1",
+        portability_job_id: "portability-import-1",
+        operation: "import_commit",
+        persona_id: "persona-1",
+        pack_id: null,
+        status: "failed",
+        visual_status: "failed",
+        stage: "failed",
+        error_message: "Archive failed validation"
+      })
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-commit-status")).toHaveTextContent(
+        "failed"
+      )
     )
   })
 

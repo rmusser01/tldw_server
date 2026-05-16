@@ -110,6 +110,7 @@ class MediaRepository:
         if source_hash is not None:
             source_hash_str = str(source_hash).strip()
             source_hash_norm = source_hash_str if source_hash_str else None
+        owner_lookup_value = str(owner_user_id).strip() if owner_user_id is not None else None
         raw_url_input = str(url).strip() if url is not None else ""
         if raw_url_input:
             dedupe_url_candidates = media_dedupe_url_candidates(raw_url_input)
@@ -298,11 +299,19 @@ class MediaRepository:
                 )
 
                 if not row:
-                    row = _fetchone(
-                        "SELECT id, uuid, version, url, content_hash, source_hash, visibility, owner_user_id, org_id, team_id "
-                        "FROM Media WHERE content_hash = ? AND deleted = 0 LIMIT 1",
-                        (content_hash,),
-                    )
+                    if owner_lookup_value:
+                        row = _fetchone(
+                            "SELECT id, uuid, version, url, content_hash, source_hash, visibility, owner_user_id, org_id, team_id "
+                            "FROM Media WHERE content_hash = ? AND deleted = 0 "
+                            "AND COALESCE(CAST(owner_user_id AS TEXT), client_id) = ? LIMIT 1",
+                            (content_hash, owner_lookup_value),
+                        )
+                    else:
+                        row = _fetchone(
+                            "SELECT id, uuid, version, url, content_hash, source_hash, visibility, owner_user_id, org_id, team_id "
+                            "FROM Media WHERE content_hash = ? AND deleted = 0 LIMIT 1",
+                            (content_hash,),
+                        )
 
                 if row:
                     media_id = row["id"]

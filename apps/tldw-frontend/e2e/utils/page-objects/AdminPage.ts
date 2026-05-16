@@ -128,6 +128,21 @@ export class AdminPage extends BasePage {
     return this.page.locator(".ant-select").first()
   }
 
+  /** Llamacpp: Readiness card */
+  get llamacppReadinessCard(): Locator {
+    return this.page.locator(".ant-card", { hasText: /Readiness/i }).first()
+  }
+
+  /** Llamacpp: Inventory card */
+  get llamacppInventoryCard(): Locator {
+    return this.page.locator(".ant-card", { hasText: /Inventory/i }).first()
+  }
+
+  /** Llamacpp: Launch card */
+  get llamacppLaunchCard(): Locator {
+    return this.page.locator(".ant-card", { hasText: /Launch/i }).first()
+  }
+
   /** Llamacpp: Start Server button */
   get llamacppStartButton(): Locator {
     return this.page.getByRole("button", { name: /Start Server/i })
@@ -143,6 +158,11 @@ export class AdminPage extends BasePage {
     return this.page.getByRole("button", { name: /^Stop$/i })
   }
 
+  /** Llamacpp: explicit provider wiring action */
+  get llamacppUseInChatButton(): Locator {
+    return this.page.getByRole("button", { name: /Use this in Chat/i })
+  }
+
   /** Llamacpp: Export preset button */
   get llamacppExportPresetButton(): Locator {
     return this.page.getByRole("button", { name: /Export preset/i })
@@ -153,9 +173,9 @@ export class AdminPage extends BasePage {
     return this.page.getByRole("button", { name: /Import preset/i })
   }
 
-  /** Llamacpp: Load Model card */
+  /** Llamacpp: legacy alias for the launch card */
   get llamacppLoadModelCard(): Locator {
-    return this.page.locator(".ant-card", { hasText: /Load Model/i }).first()
+    return this.llamacppLaunchCard
   }
 
   /* ------------------------------------------------------------------ */

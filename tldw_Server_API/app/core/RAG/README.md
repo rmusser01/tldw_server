@@ -94,7 +94,7 @@ Operations routes:
 
 Configuration enters through request fields, profile defaults, and application settings. Endpoint resolution follows this precedence: explicit request value, profile default, search/default helper value, then schema default.
 
-Public `search_mode` values are `fts`, `vector`, and `hybrid`. Public request `sources` are `media_db`, `notes`, `characters`, `chats`, `kanban`, and `sql`.
+Public `search_mode` values are `fts`, `vector`, and `hybrid`. Public request `sources` are `media_db`, `notes`, `chats`, `characters`, `kanban`, `prompts`, `world_books`, `dictionaries`, and `sql`.
 
 Public request `rag_profile` values are `fast`, `balanced`, and `accuracy`. `rag_service/profiles.py` also contains internal helper profiles such as `production`, `research`, and `cheap`; do not assume they are accepted directly by `UnifiedRAGRequest`.
 
@@ -145,7 +145,7 @@ Citation, hard-citation, claim, numeric fidelity, and post-verification features
 
 Multi-tenant or production usage should avoid assumptions about raw SQL fallbacks and should preserve user and tenant scoping through injected adapters, paths, and permissions.
 
-The public source values are normalized before retrieval. `characters` and `chats` are separate public source values but currently share the character-card/ChaChaNotes-backed retrieval path. Do not advertise additional public sources unless normalization, retriever wiring, discovery output, and tests are all updated.
+The public source values are normalized before retrieval: `media_db`, `notes`, `chats`, `characters`, `kanban`, `prompts`, `world_books`, `dictionaries`, and `sql`. `characters` and `chats` are separate public source values; `characters` maps to character-card data, while `chats` maps to chat history. `metadata.source_status` reports each requested source as `searched`, `empty`, or `unavailable` with counts and clear reasons. Generated, test, and workspace-scoped artifacts are filtered from global retrieval unless `workspace_id` is provided.
 
 ## Related Documentation
 

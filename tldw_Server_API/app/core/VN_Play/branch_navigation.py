@@ -63,6 +63,7 @@ def build_branch_navigation(
             "branch_label": branch["branch_label"],
             "choice_id": branch["choice_id"],
             "choice_text": branch["choice_text"],
+            "generated_choice": branch["generated_choice"],
             "branch_path": branch["branch_path"],
             "depth": branch["depth"],
             "status": branch["status"],
@@ -186,6 +187,7 @@ def _build_branch_index(branches: Sequence[Mapping[str, Any]]) -> dict[str, Any]
             "status": _text_value(branch.get("status")) or "active",
             "choice_id": branch_path[-1].get("choice_id") if branch_path else None,
             "choice_text": _branch_choice_text(branch, branch_path),
+            "generated_choice": branch_path[-1].get("generated_choice") if branch_path else None,
         }
         normalized.append(branch_data)
         if (
@@ -228,6 +230,9 @@ def _normalized_branch_path(value: Any) -> list[dict[str, Any]]:
             "choice_presented_event_id": _int_value(raw_step.get("choice_presented_event_id")),
             "scene_version": _int_value(raw_step.get("scene_version")),
         }
+        generated_choice = _generated_choice_metadata(raw_step.get("generated_choice"))
+        if generated_choice is not None:
+            step["generated_choice"] = generated_choice
         choice_text = raw_step.get("choice_text", raw_step.get("choice_label", raw_step.get("text")))
         if choice_text is not None:
             step["choice_text"] = str(choice_text)
@@ -253,6 +258,21 @@ def _branch_choice_text(
             return str(choice_text)
     branch_label = branch.get("branch_label")
     return str(branch_label) if branch_label is not None else None
+
+
+def _generated_choice_metadata(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    generation_id = _int_value(value.get("generation_id"))
+    revision_id = _int_value(value.get("revision_id"))
+    choice_id = value.get("choice_id")
+    if generation_id is None or revision_id is None or not isinstance(choice_id, str):
+        return None
+    return {
+        "generation_id": generation_id,
+        "revision_id": revision_id,
+        "choice_id": choice_id,
+    }
 
 
 def _event_branch_ids(
@@ -432,13 +452,17 @@ def _active_path_ids(active_branch_id: int | None, parents: Mapping[int, int | N
 
 
 def _active_path_step(node: Mapping[str, Any]) -> dict[str, Any]:
-    return {
+    step = {
         "branch_id": node["branch_id"],
         "branch_label": node["branch_label"],
         "choice_id": node["choice_id"],
         "choice_text": node["choice_text"],
         "depth": node["depth"],
     }
+    generated_choice = node.get("generated_choice")
+    if isinstance(generated_choice, Mapping):
+        step["generated_choice"] = dict(generated_choice)
+    return step
 
 
 def _ancestor_chain(branch_id: int, parents: Mapping[int, int | None]) -> list[int]:

@@ -16,11 +16,17 @@ import { PersonaPolicySummary } from "@/components/Option/MCPHub"
 import type { PersonaTurnDetectionValues } from "@/components/PersonaGarden/PersonaTurnDetectionControls"
 import { AssistantVoiceCard } from "@/components/PersonaGarden/AssistantVoiceCard"
 import { AssistantDefaultsPanel } from "@/components/PersonaGarden/AssistantDefaultsPanel"
+import { PersonaBuddyDiagnosticsPanel } from "@/components/PersonaGarden/PersonaBuddyDiagnosticsPanel"
+import {
+  buildPersonaBuddyDiagnostics,
+  type PersonaBuddyProfileState
+} from "@/components/PersonaGarden/personaBuddyDiagnostics"
 import {
   PersonaSetupHandoffCard,
 } from "@/components/PersonaGarden/PersonaSetupHandoffCard"
 import { AssistantSetupWizard } from "@/components/PersonaGarden/AssistantSetupWizard"
 import { PersonaGardenTabs } from "@/components/PersonaGarden/PersonaGardenTabs"
+import { VisualBuddySetupChoiceCard } from "@/components/PersonaGarden/VisualBuddySetupChoiceCard"
 import {
   SetupSafetyConnectionsStep,
 } from "@/components/PersonaGarden/SetupSafetyConnectionsStep"
@@ -192,6 +198,9 @@ const SidepanelPersona = ({
     number | null
   >(null)
   const [personaProfileLoading, setPersonaProfileLoading] = React.useState(false)
+  const [personaProfileError, setPersonaProfileError] = React.useState<string | null>(
+    null
+  )
   const [liveSessionVoiceDefaultsBaseline, setLiveSessionVoiceDefaultsBaseline] =
     React.useState<PersonaVoiceDefaults | null>(null)
   const [activeTab, setActiveTab] = React.useState<PersonaGardenTabKey>("live")
@@ -221,8 +230,12 @@ const SidepanelPersona = ({
   })
   const setBuddyShellRenderContext = useSetBuddyShellRenderContext()
   const visualRuntimeOverride = usePersonaVisualRuntimeStore((state) => state.override)
+  const visualRuntimeDiagnostics = usePersonaVisualRuntimeStore(
+    (state) => state.runtimeDiagnostics
+  )
   const [buddyShellLiveContext, setBuddyShellLiveContext] = React.useState({
     live_voice_state: "idle",
+    active_tool_name: "",
     active_tool_status: "",
     wake_armed: false,
     recovery_mode: "none"
@@ -264,6 +277,7 @@ const SidepanelPersona = ({
           null,
         live_session_id: sessionId,
         live_voice_state: buddyShellLiveContext.live_voice_state,
+        active_tool_name: buddyShellLiveContext.active_tool_name,
         active_tool_status: buddyShellLiveContext.active_tool_status,
         wake_armed: buddyShellLiveContext.wake_armed,
         recovery_mode: buddyShellLiveContext.recovery_mode,
@@ -301,6 +315,7 @@ const SidepanelPersona = ({
       setSavedPersonaSetup(null)
       setSavedPersonaProfileVersion(null)
       setPersonaProfileLoading(false)
+      setPersonaProfileError(null)
       if (!connected) {
         setLiveSessionVoiceDefaultsBaseline(null)
       }
@@ -311,6 +326,7 @@ const SidepanelPersona = ({
     setSavedPersonaBuddySummary(null)
     setSavedPersonaBuddySummaryPersonaId(null)
     setPersonaProfileLoading(true)
+    setPersonaProfileError(null)
     ;(async () => {
       try {
         const response = await tldwClient.fetchWithAuth(
@@ -329,14 +345,20 @@ const SidepanelPersona = ({
           setSavedPersonaProfileVersion(
             typeof payload?.version === "number" ? payload.version : null
           )
+          setPersonaProfileError(null)
         }
-      } catch {
+      } catch (profileError) {
         if (!cancelled) {
           setSavedPersonaBuddySummary(null)
           setSavedPersonaBuddySummaryPersonaId(null)
           setSavedPersonaVoiceDefaults(null)
           setSavedPersonaSetup(null)
           setSavedPersonaProfileVersion(null)
+          setPersonaProfileError(
+            profileError instanceof Error
+              ? profileError.message
+              : "Failed to load persona profile"
+          )
         }
       } finally {
         if (!cancelled) {
@@ -580,11 +602,13 @@ const SidepanelPersona = ({
   React.useEffect(() => {
     setBuddyShellLiveContext({
       live_voice_state: liveVoiceController.state,
+      active_tool_name: liveVoiceController.activeToolName,
       active_tool_status: liveVoiceController.activeToolStatus,
       wake_armed: liveVoiceController.wakeArmed,
       recovery_mode: liveVoiceController.recoveryMode
     })
   }, [
+    liveVoiceController.activeToolName,
     liveVoiceController.activeToolStatus,
     liveVoiceController.recoveryMode,
     liveVoiceController.state,
@@ -877,6 +901,9 @@ const SidepanelPersona = ({
     ),
     [renderSetupHandoffCard]
   )
+  const effectiveActiveTab: PersonaGardenTabKey = setupOrch.setupVisualDetour
+    ? "visuals"
+    : activeTab
 
   const renderLazyPersonaTab = React.useCallback(
     (
@@ -886,7 +913,7 @@ const SidepanelPersona = ({
         includeSetupHandoff?: boolean
       }
     ) => {
-      if (activeTab !== tab) {
+      if (effectiveActiveTab !== tab) {
         return null
       }
 
@@ -902,7 +929,7 @@ const SidepanelPersona = ({
 
       return withSetupHandoff(tab, tabContent)
     },
-    [activeTab, withSetupHandoff]
+    [effectiveActiveTab, withSetupHandoff]
   )
 
   // ── Persona unsupported check ──
@@ -1119,6 +1146,82 @@ const SidepanelPersona = ({
       }
     : undefined
 
+  const activeBuddySummary =
+    (savedPersonaBuddySummaryPersonaId === selectedPersonaId
+      ? savedPersonaBuddySummary
+      : null) ??
+    selectedCatalogPersona?.buddy_summary ??
+    null
+  const personaProfileState: PersonaBuddyProfileState = personaProfileLoading
+    ? "loading"
+    : personaProfileError
+      ? "error"
+      : selectedPersonaId
+        ? "loaded"
+        : "idle"
+  const activeVisualRuntimeDiagnostics =
+    visualRuntimeDiagnostics &&
+    visualRuntimeDiagnostics.personaId === normalizedLivePersonaId &&
+    (!sessionId ||
+      !visualRuntimeDiagnostics.sessionId ||
+      visualRuntimeDiagnostics.sessionId === sessionId)
+      ? visualRuntimeDiagnostics
+      : null
+  const liveSessionLastEvent = error
+    ? `error: ${error}`
+    : connecting
+      ? "connecting"
+      : connected
+        ? "connected"
+        : sessionId
+          ? "disconnected"
+          : null
+  const personaBuddyDiagnostics = buildPersonaBuddyDiagnostics({
+    selectedPersona: {
+      id: selectedPersonaId,
+      name: selectedPersonaName
+    },
+    profileState: personaProfileState,
+    profileError: personaProfileError,
+    buddySummary: activeBuddySummary,
+    capabilities,
+    capabilitiesLoading: capsLoading,
+    liveSession: {
+      connected,
+      connecting,
+      sessionId,
+      error,
+      lastEvent: liveSessionLastEvent
+    },
+    liveVoice: {
+      state: liveVoiceController.state,
+      recoveryMode: liveVoiceController.recoveryMode,
+      warning: liveVoiceController.warning,
+      warningReasonCode: liveVoiceController.warningReasonCode,
+      activeToolStatus: liveVoiceController.activeToolStatus,
+      textOnlyDueToTtsFailure: liveVoiceController.textOnlyDueToTtsFailure,
+      manualModeRequired: liveVoiceController.manualModeRequired
+    },
+    wake: {
+      armed: liveVoiceController.wakeArmed,
+      detectorState: liveVoiceController.wakeDetectorState,
+      warning: liveVoiceController.wakeWarning,
+      warningReasonCode: liveVoiceController.wakeWarningReasonCode,
+      triggerPhrases: liveVoiceController.wakeTriggerPhrases,
+      behavior: liveVoiceController.sessionWakeBehavior
+    },
+    visual: {
+      packId: activeVisualRuntimeDiagnostics?.packId ?? null,
+      packTitle: activeVisualRuntimeDiagnostics?.packTitle ?? null,
+      packLoadStatus: activeVisualRuntimeDiagnostics?.packLoadStatus ?? "idle",
+      visualState: activeVisualRuntimeDiagnostics?.visualState ?? resolvedLiveVisualState,
+      diagnostic: activeVisualRuntimeDiagnostics?.diagnostic ?? null
+    }
+  })
+  const personaBuddyDiagnosticsPanel = !isCompanionMode ? (
+    <PersonaBuddyDiagnosticsPanel diagnostics={personaBuddyDiagnostics} />
+  ) : null
+
   const assistantVoiceCard = (
     <AssistantVoiceCard
       resolvedDefaults={resolvedLivePersonaVoiceDefaults}
@@ -1319,13 +1422,18 @@ const SidepanelPersona = ({
     <>
       {setupOrch.setupLiveDetour ? (
         <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-sky-100">
-          <div>Finish this live test, then return to setup.</div>
+          <div>
+            {t(
+              "sidepanel:persona.setupLiveDetourNotice",
+              "Finish this live test, then return to setup."
+            )}
+          </div>
           <button
             type="button"
             className="mt-2 rounded-md border border-sky-500/40 px-3 py-2 text-sm font-medium text-sky-100"
             onClick={setupOrch.handleReturnToSetupFromLiveDetour}
           >
-            Return to setup
+            {t("sidepanel:persona.returnToSetup", "Return to setup")}
           </button>
         </div>
       ) : null}
@@ -1337,6 +1445,23 @@ const SidepanelPersona = ({
     </>
   )
 
+  const setupVisualDetourReturnPanel = setupOrch.setupVisualDetour ? (
+    <div className="mb-3 rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-sky-100">
+      <div>
+        {t(
+          "sidepanel:persona.setupVisualDetourNotice",
+          "Review visual setup, then return to assistant setup."
+        )}
+      </div>
+      <button
+        type="button"
+        className="mt-2 rounded-md border border-sky-500/40 px-3 py-2 text-sm font-medium text-sky-100"
+        onClick={setupOrch.handleReturnToSetupFromVisualDetour}
+      >
+        {t("sidepanel:persona.returnToSetup", "Return to setup")}
+      </button>
+    </div>
+  ) : null
   const pendingPlanCard = pendingPlan ? (
     <div className="rounded-lg border border-border bg-surface p-3">
       <Typography.Text strong>
@@ -1788,6 +1913,7 @@ const SidepanelPersona = ({
         <LazyLiveSessionPanel
           controls={liveSessionControls}
           assistantVoice={assistantVoiceCard}
+          diagnostics={personaBuddyDiagnosticsPanel}
           error={liveSessionStatusPanels}
           pendingPlan={pendingPlanCard}
           transcript={transcriptPanel}
@@ -1854,7 +1980,7 @@ const SidepanelPersona = ({
         <LazyVisualPackEditor
           selectedPersonaId={selectedPersonaId}
           selectedPersonaName={selectedPersonaName}
-          isActive={activeTab === "visuals"}
+          isActive={effectiveActiveTab === "visuals"}
           onOpenPersonaVisuals={(personaId) => {
             setSelectedPersonaId(personaId)
             setActiveTab("visuals")
@@ -1926,6 +2052,9 @@ const SidepanelPersona = ({
       )
     }
   ]
+  const visibleTabItems = setupOrch.setupVisualDetour
+    ? tabItems.filter((item) => item.key === "visuals")
+    : tabItems
 
   // ── Early-return gates ──
   if (uxState === "error_auth" || uxState === "configuring_auth") {
@@ -2078,7 +2207,7 @@ const SidepanelPersona = ({
         </div>
       ) : (
         <div className="flex flex-1 flex-col p-3">
-          {setupOrch.personaSetupWizard.isSetupRequired && !setupOrch.setupCommandDetour && !setupOrch.setupLiveDetour ? (
+          {setupOrch.personaSetupWizard.isSetupRequired && !setupOrch.setupCommandDetour && !setupOrch.setupLiveDetour && !setupOrch.setupVisualDetour ? (
             <AssistantSetupWizard
               catalog={catalog.map((persona) => ({
                 id: String(persona.id || ""),
@@ -2089,6 +2218,16 @@ const SidepanelPersona = ({
               postSetupTargetTab={setupOrch.setupIntentTargetTab || activeTab}
               progressItems={setupOrch.assistantSetupProgressItems}
               onResetSetup={setupOrch.handleResetSetup}
+              visualSetupContent={
+                <VisualBuddySetupChoiceCard
+                  selectedPersonaId={selectedPersonaId}
+                  selectedPersonaName={selectedPersonaName}
+                  hasActiveVisual={false}
+                  packCount={0}
+                  compact
+                  onOpenVisuals={setupOrch.handleOpenVisualSetupDetour}
+                />
+              }
               voiceStepContent={
                 setupOrch.personaSetupWizard.currentStep === "voice" ? (
                   <AssistantDefaultsPanel
@@ -2179,11 +2318,14 @@ const SidepanelPersona = ({
               onCreatePersona={setupOrch.handleCreatePersonaForSetup}
             />
           ) : (
-            <PersonaGardenTabs
-              activeKey={activeTab}
-              onChange={handlePersonaTabChange}
-              items={tabItems}
-            />
+            <>
+              {setupVisualDetourReturnPanel}
+              <PersonaGardenTabs
+                activeKey={effectiveActiveTab}
+                onChange={handlePersonaTabChange}
+                items={visibleTabItems}
+              />
+            </>
           )}
         </div>
       )}

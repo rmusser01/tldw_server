@@ -54,24 +54,24 @@ Each slice should have its own Backlog task before edits begin. `TASK-378` only 
 - Modify `tldw_Server_API/app/core/Chat/chat_service.py` only enough to expose a safe hook point if tests need it.
 
 **Implementation Steps:**
-- [ ] Write failing unit tests for message canonicalization:
+- [x] Write failing unit tests for message canonicalization:
   - same logical prompt produces same fingerprint despite dict key order;
   - changed message order changes the aggregate fingerprint;
   - large text is hashed rather than copied into diagnostics;
   - unsupported message parts are represented by bounded type markers.
-- [ ] Write failing unit tests for segment accounting:
+- [x] Write failing unit tests for segment accounting:
   - static/system messages are counted separately from user/history;
   - world-book and retrieval segments can be passed explicitly;
   - token estimates are present and never negative;
   - fingerprint version is included in every envelope.
-- [ ] Implement `PromptSegment`, `PromptCostEnvelope`, and helpers:
+- [x] Implement `PromptSegment`, `PromptCostEnvelope`, and helpers:
   - `canonicalize_messages(messages: Sequence[Mapping[str, Any]]) -> str`
   - `fingerprint_text(text: str, *, version: str = "prompt-v1") -> str`
   - `estimate_segment_tokens(text: str) -> int`
   - `build_prompt_cost_envelope(...) -> PromptCostEnvelope`
-- [ ] Keep the token estimator conservative and local. Reuse existing chat token-estimate helpers if available; do not add a tokenizer dependency in this slice.
-- [ ] Add redaction limits for diagnostic payloads: IDs, counts, hashes, and bounded numeric estimates only.
-- [ ] Run focused tests.
+- [x] Keep the token estimator conservative and local. Reuse existing chat token-estimate helpers if available; do not add a tokenizer dependency in this slice.
+- [x] Add redaction limits for diagnostic payloads: IDs, counts, hashes, and bounded numeric estimates only.
+- [x] Run focused tests.
 
 **Tests:**
 ```bash
@@ -103,22 +103,22 @@ feat(chat): add prompt cost envelope primitives
 - Modify `tldw_Server_API/tests/Character_Chat/test_world_book_and_limits.py` if existing expectations need to assert diagnostics.
 
 **Implementation Steps:**
-- [ ] Write failing tests proving preview and completion code paths receive identical world-book text/fingerprint for the same inputs.
-- [ ] Write failing tests for bounded diagnostics:
+- [x] Write failing tests proving preview and completion code paths receive identical world-book text/fingerprint for the same inputs.
+- [x] Write failing tests for bounded diagnostics:
   - matched book IDs and entry IDs are present;
   - trigger text is not persisted verbatim;
   - dropped entries and token-budget truncation are visible;
   - static/pinned entries are flagged when current metadata supports it.
-- [ ] Implement `WorldBookPromptContext`:
+- [x] Implement `WorldBookPromptContext`:
   - `text: str`
   - `system_message: Mapping[str, str] | None`
   - `diagnostics: Mapping[str, Any]`
   - `fingerprint: str`
   - `estimated_tokens: int`
-- [ ] Move duplicated `WorldBookService.process_context(... include_diagnostics=True)` orchestration behind `build_world_book_prompt_context(...)`.
-- [ ] Preserve existing insertion order: world-book system message after existing system messages and before conversational turns.
-- [ ] Wire preview and completion-v2 endpoints to the helper.
-- [ ] Add a guard in tests that preview envelope fingerprint equals provider-send fingerprint when no final prompt mutation occurs.
+- [x] Move duplicated `WorldBookService.process_context(... include_diagnostics=True)` orchestration behind `build_world_book_prompt_context(...)`.
+- [x] Preserve existing insertion order: world-book system message after existing system messages and before conversational turns.
+- [x] Wire preview and completion-v2 endpoints to the helper.
+- [x] Add a guard in tests that preview envelope fingerprint equals provider-send fingerprint when no final prompt mutation occurs.
 
 **Tests:**
 ```bash
@@ -153,14 +153,14 @@ feat(character-chat): add world-book prompt diagnostics
 - Modify `tldw_Server_API/app/core/Chat/chat_service.py` only at usage-log call sites.
 
 **Implementation Steps:**
-- [ ] Write failing tests for usage metadata shapes:
+- [x] Write failing tests for usage metadata shapes:
   - OpenAI-style nested prompt token details;
   - Anthropic-style cache creation/read fields;
   - Gemini-style cache metadata when present;
   - OpenRouter provider-routing metadata when present;
   - OpenAI-compatible local server with no cache fields;
   - malformed or oversized raw metadata.
-- [ ] Implement `NormalizedLLMUsage` with fields:
+- [x] Implement `NormalizedLLMUsage` with fields:
   - `input_tokens`
   - `output_tokens`
   - `total_tokens`
@@ -172,10 +172,10 @@ feat(character-chat): add world-book prompt diagnostics
   - `choice_count`
   - `estimate_source`
   - `raw_usage_metadata`
-- [ ] Implement provider-specific extractors that fail closed to standard token fields.
-- [ ] Bound `raw_usage_metadata` by size, key allowlist/denylist, and nesting depth.
-- [ ] Add `estimate_source` values such as `provider_usage`, `stream_estimate`, `disconnect_estimate`, and `missing_usage`.
-- [ ] Wire usage normalization into non-stream and stream completion logging without changing persisted schema yet. Store only in process-local structured data until Stage 4.
+- [x] Implement provider-specific extractors that fail closed to standard token fields.
+- [x] Bound `raw_usage_metadata` by size, key allowlist/denylist, and nesting depth.
+- [x] Add `estimate_source` values such as `provider_usage`, `stream_estimate`, `disconnect_estimate`, and `missing_usage`.
+- [x] Wire usage normalization into non-stream and stream completion logging without changing persisted schema yet. Store only in process-local structured data until Stage 4.
 
 **Tests:**
 ```bash
@@ -212,7 +212,7 @@ feat(usage): normalize llm cache usage metadata
 - Add or modify `tldw_Server_API/tests/AuthNZ_Postgres/test_authnz_llm_usage_log_router_columns_pg.py`
 
 **Implementation Steps:**
-- [ ] Write failing SQLite migration tests for new nullable `llm_usage_log` columns:
+- [x] Write failing SQLite migration tests for new nullable `llm_usage_log` columns:
   - `cached_input_tokens`
   - `cache_write_input_tokens`
   - `cache_read_input_tokens`
@@ -225,15 +225,16 @@ feat(usage): normalize llm cache usage metadata
   - `world_book_fingerprint`
   - `raw_usage_metadata_json`
 - [ ] Write/update Postgres migration tests for the same logical fields when the fixture is available.
-- [ ] Extend repository insert logic with compatibility fallback for pre-migration schemas.
-- [ ] Add pricing catalog fields for cache-read/cache-write rates without requiring every model entry to provide them.
-- [ ] Update `compute_costs(...)` to:
+- [x] Write/update Postgres migration tests for the same logical fields when the fixture is available.
+- [x] Extend repository insert logic with compatibility fallback for pre-migration schemas.
+- [x] Add pricing catalog fields for cache-read/cache-write rates without requiring every model entry to provide them.
+- [x] Update `compute_costs(...)` to:
   - use cache-specific rates when present;
   - fall back to current prompt-token pricing when missing;
   - never make cached token cost negative;
   - keep old return keys stable.
-- [ ] Wire `NormalizedLLMUsage` into `log_llm_usage(...)` and repository insert.
-- [ ] Run focused migration/usage tests.
+- [x] Wire `NormalizedLLMUsage` into `log_llm_usage(...)` and repository insert.
+- [x] Run focused migration/usage tests.
 
 **Tests:**
 ```bash
@@ -263,6 +264,8 @@ feat(usage): persist cache-aware llm usage fields
 
 **Goal:** Add pre-dispatch prompt/cost guardrails that can warn or block surprising prompt growth before the provider call.
 
+**Status:** Complete in `TASK-383` / commit `feat(chat): add prompt cost guardrails`.
+
 **Success Criteria:**
 - Guardrails can detect large static/world-book segments, cache-busting fingerprint churn, high output-token caps, high `n`/choice counts, and reasoning-token risk.
 - Default behavior is non-breaking and warn-only unless configured otherwise.
@@ -277,19 +280,19 @@ feat(usage): persist cache-aware llm usage fields
 - Modify config documentation if new settings are exposed.
 
 **Implementation Steps:**
-- [ ] Write failing guardrail tests for:
+- [x] Write failing guardrail tests for:
   - warn-only over threshold;
   - hard block over configured max;
   - fingerprint churn across adjacent turns;
   - high `max_tokens`/`max_completion_tokens`;
   - high `n`;
   - reasoning-effort risk when provider parameters indicate it.
-- [ ] Implement `PromptCostGuardrailConfig` and `PromptCostGuardrailDecision`.
-- [ ] Load config from existing config/env helpers, with disabled/warn-only defaults.
-- [ ] Evaluate guardrails after final prompt templating and world-book insertion, before provider dispatch.
-- [ ] Attach guardrail warnings to existing metadata/diagnostics surfaces without exposing full prompt text.
-- [ ] Ensure a blocked request logs a structured reason and returns a descriptive 4xx response.
-- [ ] Run focused tests plus existing chat token-estimate tests.
+- [x] Implement `PromptCostGuardrailConfig` and `PromptCostGuardrailDecision`.
+- [x] Load config from existing config/env helpers, with disabled/warn-only defaults.
+- [x] Evaluate guardrails after final prompt templating and world-book insertion, before provider dispatch.
+- [x] Attach guardrail warnings to existing metadata/diagnostics surfaces without exposing full prompt text.
+- [x] Ensure a blocked request logs a structured reason and returns a descriptive 4xx response.
+- [x] Run focused tests plus existing chat token-estimate tests.
 
 **Tests:**
 ```bash
@@ -324,24 +327,26 @@ feat(chat): add prompt cost guardrails
 - Modify `tldw_Server_API/app/core/Chat/chat_service.py` only to pass explicit intent metadata, not provider-specific payload details.
 
 **Implementation Steps:**
-- [ ] Verify current official provider documentation on the implementation date before changing adapter payloads. Record the checked URLs and date in the Backlog task or PR notes.
-- [ ] Write failing tests for provider-neutral `BillingPromptCacheIntent`.
-- [ ] Write failing adapter tests for outbound request shapes:
+- [x] Verify current official provider documentation on the implementation date before changing adapter payloads. Record the checked URLs and date in the Backlog task or PR notes.
+- [x] Write failing tests for provider-neutral `BillingPromptCacheIntent`.
+- [x] Write failing adapter tests for outbound request shapes:
   - OpenAI cache-capable prompt sections when supported;
   - Anthropic cache-control blocks at approved message/content boundaries;
   - Gemini cached-content references only when explicitly provided;
   - OpenRouter provider routing/metadata only through allowed keys.
-- [ ] Implement provider-neutral cache intent types:
+- [x] Implement provider-neutral cache intent types:
   - `enabled`
   - `scope`
   - `ttl_seconds`
   - `static_segment_fingerprint`
   - `provider_hint`
   - `fail_open`
-- [ ] Add provider support declarations so unsupported providers ignore cache intent with a diagnostic warning.
-- [ ] Ensure `extra_body` remains a caller escape hatch but is not treated as confirmed cache activation unless the adapter reports it.
-- [ ] Add accounting metadata for "cache intent requested" versus "provider usage proved cache hit/read/write".
-- [ ] Run focused LLM adapter tests.
+- [x] Add provider support declarations so unsupported providers ignore cache intent with a diagnostic warning.
+- [x] Ensure `extra_body` remains a caller escape hatch but is not treated as confirmed cache activation unless the adapter reports it.
+- [x] Add accounting metadata for "cache intent requested" versus "provider usage proved cache hit/read/write".
+- [x] Run focused LLM adapter tests.
+
+**Status:** Complete. The full `tests/LLM_Adapters/unit` directory was attempted on 2026-05-15 but hit an unrelated baseline `CustomOpenAIAdapter2` explicit-base-URL failure and later the repo-level 300s app-fixture timeout. Focused changed-provider and registry coverage passed.
 
 **Tests:**
 ```bash
@@ -380,18 +385,18 @@ feat(llm): add opt-in provider prompt cache intents
   - `tldw_Server_API/tests/LLM_Calls/test_llamacpp_request_extensions.py`
 
 **Implementation Steps:**
-- [ ] Write failing diagnostics tests for vLLM:
+- [x] Write failing diagnostics tests for vLLM:
   - prefix-cache hint is diagnostic-only;
   - no billing-cache fields are invented;
   - request shape instability produces a warning.
-- [ ] Write failing diagnostics tests for llama.cpp:
+- [x] Write failing diagnostics tests for llama.cpp:
   - startup flags such as `prompt_cache`, `prompt_cache_all`, `prompt_cache_ro`, `cache_prompt`, and `cache_reuse` are surfaced when known;
   - request extensions remain behind existing allow/strict-filter rules;
   - prompt-cache read-only mode is reported distinctly from writable cache mode.
-- [ ] Implement `InferencePrefixCacheIntent` and local diagnostics separately from `BillingPromptCacheIntent`.
-- [ ] Attach diagnostics to internal usage metadata or response diagnostics where available.
-- [ ] Keep all local cache usage cost-neutral in `compute_costs(...)`.
-- [ ] Run focused local adapter tests.
+- [x] Implement `InferencePrefixCacheIntent` and local diagnostics separately from `BillingPromptCacheIntent`.
+- [x] Attach diagnostics to internal usage metadata or response diagnostics where available.
+- [x] Keep all local cache usage cost-neutral in `compute_costs(...)`.
+- [x] Run focused local adapter tests.
 
 **Tests:**
 ```bash
@@ -402,6 +407,39 @@ python -m pytest \
   tldw_Server_API/tests/LLM_Calls/test_vllm_strict_filter.py \
   tldw_Server_API/tests/LLM_Calls/test_llamacpp_request_extensions.py \
   -v
+```
+
+Verified on 2026-05-15:
+```bash
+source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+python -m pytest \
+  tldw_Server_API/tests/LLM_Calls/test_local_cache_diagnostics.py \
+  tldw_Server_API/tests/LLM_Calls/test_capability_registry.py \
+  tldw_Server_API/tests/Chat/unit/test_chat_request_schemas.py \
+  tldw_Server_API/tests/LLM_Calls/test_llamacpp_strict_filter.py \
+  tldw_Server_API/tests/LLM_Calls/test_vllm_strict_filter.py \
+  tldw_Server_API/tests/LLM_Calls/test_llamacpp_request_extensions.py \
+  -q --tb=short --disable-warnings
+# 61 passed, 5 warnings
+python -m py_compile \
+  tldw_Server_API/app/core/LLM_Calls/local_cache_diagnostics.py \
+  tldw_Server_API/app/core/LLM_Calls/providers/local_adapters.py \
+  tldw_Server_API/app/core/Chat/chat_orchestrator.py \
+  tldw_Server_API/app/api/v1/schemas/chat_request_schemas.py \
+  tldw_Server_API/app/core/LLM_Calls/capability_registry.py \
+  tldw_Server_API/tests/LLM_Calls/test_local_cache_diagnostics.py \
+  tldw_Server_API/tests/LLM_Calls/test_llamacpp_strict_filter.py \
+  tldw_Server_API/tests/LLM_Calls/test_vllm_strict_filter.py \
+  tldw_Server_API/tests/LLM_Calls/test_llamacpp_request_extensions.py
+git diff --check
+python -m bandit -r \
+  tldw_Server_API/app/core/LLM_Calls/local_cache_diagnostics.py \
+  tldw_Server_API/app/core/LLM_Calls/providers/local_adapters.py \
+  tldw_Server_API/app/core/Chat/chat_orchestrator.py \
+  tldw_Server_API/app/api/v1/schemas/chat_request_schemas.py \
+  tldw_Server_API/app/core/LLM_Calls/capability_registry.py \
+  -f json -o /tmp/bandit_local_cache_stage7.json
+# Bandit results: []
 ```
 
 **Commit Message:**
@@ -427,23 +465,32 @@ feat(llm): add local prompt cache diagnostics
 - Update relevant documentation under `Docs/` if the API surface changes.
 
 **Implementation Steps:**
-- [ ] Locate the current usage summary/reporting endpoints and services.
-- [ ] Write failing tests for aggregate cache metrics and redaction behavior.
-- [ ] Extend query layer to include cache-aware columns with backward-compatible defaults.
-- [ ] Add API response fields only where schema versioning/backward compatibility is clear.
-- [ ] Add docs for interpreting:
+- [x] Locate the current usage summary/reporting endpoints and services.
+- [x] Write failing tests for aggregate cache metrics and redaction behavior.
+- [x] Extend query layer to include cache-aware columns with backward-compatible defaults.
+- [x] Add API response fields only where schema versioning/backward compatibility is clear.
+- [x] Add docs for interpreting:
   - `cached_input_tokens`
   - `cache_write_input_tokens`
   - `cache_read_input_tokens`
   - `billable_input_tokens`
   - `estimate_source`
   - local diagnostic-only cache fields.
-- [ ] Run endpoint/reporting tests.
+- [x] Run endpoint/reporting tests.
 
 **Tests:**
 ```bash
 source .venv/bin/activate
-python -m pytest tldw_Server_API/tests/Usage -v
+python -m pytest tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py -q --tb=short -x
+# Result: 1 passed, 2 warnings
+
+python -m pytest \
+  tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py \
+  tldw_Server_API/tests/Admin/test_admin_usage_service.py \
+  tldw_Server_API/tests/Usage/test_llm_usage_aggregator.py \
+  tldw_Server_API/tests/Usage/test_usage_tracker_sqlite.py \
+  -q --tb=short --disable-warnings
+# Result: 15 passed, 2 warnings
 ```
 
 **Commit Message:**

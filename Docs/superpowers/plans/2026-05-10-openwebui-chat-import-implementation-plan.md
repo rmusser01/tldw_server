@@ -41,7 +41,7 @@
 - [ ] Add regression tests proving archive mode still rejects `.json` and still validates archive integrity.
 - [ ] Add a multipart test proving `source_format` is honored when sent as a form field, because the current WebUI upload helper sends upload options through FormData fields.
 
-**Status:** Not Started
+**Status:** Complete
 
 ---
 
@@ -81,7 +81,7 @@
 - [ ] Test malformed chats are counted and warned while valid chats remain previewable.
 - [ ] Test preview duplicate flags using a fake duplicate lookup callback or service stub.
 
-**Status:** Not Started
+**Status:** Complete
 
 ---
 
@@ -110,7 +110,7 @@
 - [ ] Test conversation settings merge preserves existing settings keys while adding `openwebui_import`.
 - [ ] Test message metadata merge preserves existing `extra` keys while adding `openwebui_import`.
 
-**Status:** Not Started
+**Status:** Complete
 
 ---
 
@@ -154,7 +154,7 @@
 - [ ] Test conversation and message metadata persistence paths.
 - [ ] Test metadata write failures become warnings without failing the chat import.
 
-**Status:** Not Started
+**Status:** Complete
 
 ---
 
@@ -188,7 +188,7 @@
 - [ ] Add worker test proving JSON dispatch does not call `_import_chatbook_sync()`.
 - [ ] Add cleanup tests for invalid JSON preview/import paths where practical.
 
-**Status:** Not Started
+**Status:** Complete
 
 ---
 
@@ -224,7 +224,7 @@
 - [ ] Test unsupported controls are hidden or disabled in OpenWebUI mode.
 - [ ] Test OpenWebUI preview summary renders counts and warnings.
 
-**Status:** Not Started
+**Status:** Complete
 
 ---
 
@@ -248,14 +248,15 @@
 - [ ] Update the Backlog task with touched files, verification commands, skips, and final summary.
 
 **Verification Commands:**
-- [ ] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chatbooks/test_openwebui_import_adapter.py -v`
-- [ ] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_api_preview.py tldw_Server_API/tests/Chatbooks/test_chatbooks_jobs_worker_import_defaults.py -v`
-- [ ] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/ChaChaNotesDB -k "conversation or metadata" -v`
-- [ ] `bunx vitest run apps/packages/ui/src/components/Option/Chatbooks/__tests__`
-- [ ] `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/chatbooks.py tldw_Server_API/app/core/Chatbooks tldw_Server_API/app/core/DB_Management/chacha -f json -o /tmp/bandit_openwebui_chat_import.json`
-- [ ] Run a manual browser smoke test of `/chatbooks` import mode if a frontend dev server is available in the implementation session.
+- [x] `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Chatbooks/test_openwebui_import_adapter.py tldw_Server_API/tests/Chatbooks/test_openwebui_import_service.py tldw_Server_API/tests/Chatbooks/test_chatbooks_api_error_and_preview_mapping.py::test_preview_openwebui_json_source_format_skips_archive_validation tldw_Server_API/tests/Chatbooks/test_chatbooks_api_error_and_preview_mapping.py::test_import_openwebui_json_source_format_skips_archive_validation tldw_Server_API/tests/Chatbooks/test_chatbooks_jobs_worker_import_defaults.py -v` - 11 passed.
+- [x] `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/ChaChaNotesDB -k "conversation or metadata" -v` - 62 passed, 235 deselected.
+- [x] `bun run test src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx src/components/Option/Chatbooks/__tests__/ContentTypePicker.error-state.test.tsx` - 4 passed.
+- [x] `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/chatbooks.py tldw_Server_API/app/core/Chatbooks tldw_Server_API/app/core/DB_Management/chacha -f json -o /tmp/bandit_openwebui_chat_import.json` - 0 findings.
+- [x] `git diff --check` - clean.
+- [ ] Full `test_chatbooks_api_preview.py` was not rerun because this implementation session previously observed the baseline `test_preview_manifest_version_ok` path hanging; targeted preview/import endpoint coverage was run instead.
+- [ ] Manual browser smoke test was not run; the focused component and client tests covered the import source selector and multipart upload contract.
 
-**Status:** Not Started
+**Status:** Complete
 
 ---
 

@@ -10,18 +10,22 @@ describe("header shortcut safety group", () => {
     expect(safety!.titleDefault).toBe("Safety")
   })
 
-  it("safety group contains family-guardrails, moderation-playground, and guardian", () => {
+  it("safety group contains family-guardrails, moderation review, content rules, and guardian", () => {
     const safety = groups.find((g) => g.id === "safety")!
     const ids = safety.items.map((i) => i.id)
     expect(ids).toContain("family-guardrails")
-    expect(ids).toContain("moderation-playground")
+    expect(ids).toContain("moderation-review")
+    expect(ids).toContain("moderation-rules")
+    expect(ids).not.toContain("moderation-playground")
     expect(ids).toContain("guardian")
   })
 
-  it("moderation-playground is no longer in the tools group", () => {
+  it("moderation routes are no longer in the tools group", () => {
     const tools = groups.find((g) => g.id === "tools")
     if (tools) {
       const ids = tools.items.map((i) => i.id)
+      expect(ids).not.toContain("moderation-review")
+      expect(ids).not.toContain("moderation-rules")
       expect(ids).not.toContain("moderation-playground")
     }
   })

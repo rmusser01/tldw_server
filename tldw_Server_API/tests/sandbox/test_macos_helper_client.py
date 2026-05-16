@@ -37,4 +37,14 @@ def test_helper_client_raises_custom_exception_when_helper_unavailable(monkeypat
     client = MacOSVirtualizationHelperClient()
 
     with pytest.raises(MacOSVirtualizationHelperUnavailable, match="macos_virtualization_helper_unavailable"):
-        client.create_vm({"runtime": "vz_linux", "vm_name": "run-123"})
+        client.create_vm(
+            {
+                "runtime": "vz_linux",
+                "vm_name": "run-123",
+                "run_id": "run-123",
+                "template": "/tmp/template.img",
+                "workspace_path": "/tmp/workspace",
+                "network_policy": "deny_all",
+                "timeout_sec": 30,
+            }
+        )

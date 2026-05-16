@@ -1828,6 +1828,18 @@ class WorldBookService:
             if keyword == "":
                 keyword = None
 
+            entry_metadata = entry.metadata or {}
+            static_or_pinned = any(
+                _coerce_metadata_bool(entry_metadata.get(key), default=False)
+                for key in (
+                    "static",
+                    "pinned",
+                    "always_on",
+                    "constant",
+                    "cache_static",
+                    "cache_pinned",
+                )
+            )
             diagnostics_by_key[entry_key] = {
                 "entry_id": int(entry.entry_id) if entry.entry_id is not None else None,
                 "world_book_id": int(entry.world_book_id) if entry.world_book_id is not None else None,
@@ -1837,6 +1849,7 @@ class WorldBookService:
                 "priority": int(entry.priority),
                 "regex_match": bool(entry.regex_match),
                 "appendable": _coerce_metadata_bool(entry.metadata.get("appendable", False)) if entry.metadata else False,
+                "static_or_pinned": static_or_pinned,
                 "content_preview": (entry.content or "")[:240],
                 "depth_level": depth_level,
             }

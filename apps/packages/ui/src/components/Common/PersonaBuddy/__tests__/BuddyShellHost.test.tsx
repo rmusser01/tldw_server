@@ -11,7 +11,12 @@ import {
   DEFAULT_PERSONA_BUDDY_SHELL_POSITIONS,
   usePersonaBuddyShellStore
 } from "@/store/persona-buddy-shell"
+import { usePersonaVisualRuntimeStore } from "@/store/persona-visual-runtime"
 import type { PersonaBuddyRenderContext } from "@/types/persona-buddy"
+import {
+  asPersonaVisualCustomStateId,
+  PERSONA_VISUAL_PACK_ACTIVATED_EVENT
+} from "@/types/persona-visuals"
 import { BuddyShellHost } from "../BuddyShellHost"
 
 const mocks = vi.hoisted(() => ({
@@ -182,6 +187,10 @@ describe("BuddyShellHost", () => {
           ...DEFAULT_PERSONA_BUDDY_SHELL_POSITIONS["sidepanel-desktop"]
         }
       }
+    })
+    usePersonaVisualRuntimeStore.setState({
+      override: null,
+      runtimeDiagnostics: null
     })
   })
 
@@ -507,6 +516,178 @@ describe("BuddyShellHost", () => {
     })
   })
 
+  it("reloads the active visual pack when the persona editor activates one", async () => {
+    const visualPack = buildVisualPack("persona-1")
+    visualMocks.listPersonaVisualPacks
+      .mockResolvedValue({
+        packs: [visualPack],
+        active_pack: visualPack
+      })
+      .mockResolvedValueOnce({
+        packs: [],
+        active_pack: null
+      })
+
+    renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        live_voice_state: "idle"
+      },
+      root: "sidepanel"
+    })
+
+    await waitFor(() => {
+      expect(visualMocks.listPersonaVisualPacks).toHaveBeenCalledWith("persona-1")
+    })
+    expect(screen.queryByTestId("persona-visual-frame")).not.toBeInTheDocument()
+
+    fireEvent(
+      window,
+      new CustomEvent(PERSONA_VISUAL_PACK_ACTIVATED_EVENT, {
+        detail: {
+          personaId: "persona-1",
+          packId: visualPack.id
+        }
+      })
+    )
+
+    await waitFor(() => {
+      expect(visualMocks.listPersonaVisualPacks.mock.calls.length).toBeGreaterThanOrEqual(2)
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+        "src",
+        expect.stringContaining("/assets/idle.png")
+      )
+    })
+  })
+
+  it("falls back and reports diagnostics for unsupported active renderer packs", async () => {
+    const basePack = buildVisualPack("persona-1")
+    const visualPack = {
+      ...basePack,
+      renderer_type: "live2d" as const,
+      manifest: {
+        ...basePack.manifest,
+        renderer_type: "live2d" as const
+      }
+    }
+    visualMocks.listPersonaVisualPacks.mockResolvedValue({
+      packs: [visualPack],
+      active_pack: visualPack
+    })
+
+    renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1")
+      },
+      root: "sidepanel"
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId("persona-buddy-visual-diagnostic")).toHaveTextContent(
+        "Visual renderer is not supported here"
+      )
+    })
+    expect(screen.getByTestId("persona-buddy-visual-diagnostic")).toHaveTextContent(
+      "The Buddy runtime cannot render live2d packs yet."
+    )
+    expect(screen.queryByTestId("persona-visual-frame")).not.toBeInTheDocument()
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveTextContent("Persona persona-1")
+  })
+
+  it("falls back when sprite-frame packs have assets but no resolvable frame asset", async () => {
+    const visualPack = buildVisualPack("persona-1")
+    const malformedPack = {
+      ...visualPack,
+      assets_by_id: {
+        "other-asset": {
+          id: "other-asset",
+          url: "/assets/other.png",
+          mime_type: "image/png",
+          asset_role: "frame" as const,
+          width: 24,
+          height: 24
+        }
+      }
+    }
+    visualMocks.listPersonaVisualPacks.mockResolvedValue({
+      packs: [malformedPack],
+      active_pack: malformedPack
+    })
+
+    renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1")
+      },
+      root: "sidepanel"
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId("persona-buddy-visual-diagnostic")).toHaveTextContent(
+        "Visual asset is missing"
+      )
+    })
+    expect(screen.getByTestId("persona-buddy-visual-diagnostic")).toHaveTextContent(
+      "idle-asset"
+    )
+    expect(screen.queryByTestId("persona-visual-frame")).not.toBeInTheDocument()
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveTextContent("Persona persona-1")
+  })
+
+  it("clears published visual diagnostics when the host unmounts", async () => {
+    const visualPack = buildVisualPack("persona-1")
+    visualMocks.listPersonaVisualPacks.mockResolvedValue({
+      packs: [visualPack],
+      active_pack: visualPack
+    })
+
+    const view = renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        live_voice_state: "idle"
+      },
+      root: "sidepanel"
+    })
+
+    await waitFor(() => {
+      expect(
+        usePersonaVisualRuntimeStore.getState().runtimeDiagnostics
+      ).toEqual(
+        expect.objectContaining({
+          personaId: "persona-1",
+          packId: "pack-1",
+          packLoadStatus: "loaded",
+          visualState: "idle"
+        })
+      )
+    })
+
+    view.unmount()
+
+    expect(usePersonaVisualRuntimeStore.getState().runtimeDiagnostics).toBeNull()
+  })
+
   it("links the active buddy popover to the persona Visuals workflow", () => {
     renderHost({
       context: {
@@ -582,6 +763,85 @@ describe("BuddyShellHost", () => {
     expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
       "src",
       expect.stringContaining("/assets/tool.png")
+    )
+  })
+
+  it("renders custom visual states from exact active tool names", async () => {
+    const basePack = buildVisualPack("persona-1")
+    const customState = asPersonaVisualCustomStateId("tool.notes_search")
+    const visualPack = {
+      ...basePack,
+      manifest: {
+        ...basePack.manifest,
+        state_catalog: {
+          [customState]: {
+            label: "Searching notes",
+            kind: "tool_variant"
+          }
+        },
+        states: {
+          ...basePack.manifest.states,
+          [customState]: { animation_id: "tool-notes-search" }
+        },
+        animations: {
+          ...basePack.manifest.animations,
+          "tool-notes-search": {
+            frames: [{ asset_id: "tool-notes-search-asset", duration_ms: 100 }]
+          }
+        },
+        authored_triggers: [
+          {
+            id: "notes-search",
+            source: "tool_name",
+            match: "notes.search",
+            state: customState,
+            duration_ms: 500,
+            priority: 90
+          }
+        ]
+      },
+      assets_by_id: {
+        ...basePack.assets_by_id,
+        "tool-notes-search-asset": {
+          id: "tool-notes-search-asset",
+          url: "/assets/tool-notes-search.png",
+          mime_type: "image/png",
+          asset_role: "frame",
+          width: 24,
+          height: 24
+        }
+      }
+    }
+    visualMocks.listPersonaVisualPacks.mockResolvedValue({
+      packs: [visualPack],
+      active_pack: visualPack
+    })
+    const context = {
+      surface_id: "persona-garden",
+      surface_active: true,
+      active_persona_id: "persona-1",
+      position_bucket: "sidepanel-desktop",
+      persona_source: "route-local",
+      buddy_summary: buildBuddySummary("persona-1"),
+      live_voice_state: "thinking",
+      active_tool_name: "notes.search",
+      active_tool_status: "Searching notes"
+    } as PersonaBuddyRenderContext
+
+    renderHost({
+      context,
+      root: "sidepanel"
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+        "data-visual-state",
+        "tool.notes_search"
+      )
+    })
+    expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+      "src",
+      expect.stringContaining("/assets/tool-notes-search.png")
     )
   })
 

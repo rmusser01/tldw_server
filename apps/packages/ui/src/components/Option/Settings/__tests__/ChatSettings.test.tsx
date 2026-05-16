@@ -175,9 +175,9 @@ describe("ChatSettings background image controls", () => {
               id: "guide-1",
               title: "Guide 1",
               question: "Where do I start?",
-              answer: "Start in workspace playground.",
-              route: "/workspace-playground",
-              routeLabel: "Workspace Playground",
+              answer: "Start in Research Studio.",
+              route: "/research-studio",
+              routeLabel: "Research Studio",
               tags: ["workflow"]
             }
           ],

@@ -1,7 +1,10 @@
 """Tests for MCP orchestration fields on AgentRegistryEntry (Phase B)."""
 from __future__ import annotations
 
+import types
+
 import pytest
+from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.schemas.agent_client_protocol import (
     ACPAgentRegisterRequest,
@@ -92,4 +95,66 @@ def test_agent_update_request_preserves_mcp_fields():
         "mcp_llm_model": "gpt-4o-mini",
         "mcp_max_iterations": 8,
         "mcp_refresh_tools": True,
+    }
+
+
+def test_agent_register_request_exposes_entrypoint_strategy_fields():
+    request = ACPAgentRegisterRequest(
+        agent_type="native",
+        name="Native",
+        entrypoint_strategy="native_acp",
+        acp_command="native-agent",
+        acp_args=["acp"],
+    )
+
+    assert request.entrypoint_strategy == "native_acp"
+    assert request.acp_command == "native-agent"
+    assert request.acp_args == ["acp"]
+
+
+def test_agent_register_request_rejects_invalid_entrypoint_strategy():
+    with pytest.raises(ValidationError):
+        ACPAgentRegisterRequest(
+            agent_type="bad",
+            name="Bad",
+            entrypoint_strategy="maybe_acp",
+        )
+
+
+def test_agent_update_request_rejects_explicit_null_for_required_scalar():
+    with pytest.raises(ValidationError):
+        ACPAgentUpdateRequest(name=None)
+
+
+async def test_update_endpoint_preserves_explicit_nullable_fields(monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+    import tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry as registry_mod
+
+    captured_updates: dict[str, object] = {}
+
+    class _Registry:
+        def update_agent(self, agent_type: str, **kwargs):
+            captured_updates.update(kwargs)
+            return types.SimpleNamespace(type=agent_type, name="Updated")
+
+    monkeypatch.setattr(registry_mod, "get_agent_registry", lambda: _Registry())
+
+    request = ACPAgentUpdateRequest(
+        name="Updated",
+        adapter_source=None,
+        adapter_docs_url=None,
+        certification_blocker=None,
+        acp_args=None,
+    )
+    user = types.SimpleNamespace(id=1, is_admin=True)
+
+    response = await acp_endpoints.acp_update_agent("adapter_agent", request, user)
+
+    assert response.status == "updated"
+    assert captured_updates == {
+        "name": "Updated",
+        "acp_args": None,
+        "adapter_source": None,
+        "adapter_docs_url": None,
+        "certification_blocker": None,
     }

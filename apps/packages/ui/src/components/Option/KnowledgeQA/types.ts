@@ -96,6 +96,7 @@ export type SearchRuntimeDetails = {
   rerankingEnabled: boolean
   rerankingStrategy: string
   averageRelevance: number | null
+  sourceStatus: Record<string, KnowledgeSourceStatus>
   webFallbackEnabled: boolean
   webFallbackTriggered: boolean
   webFallbackEngine: string | null
@@ -129,6 +130,55 @@ export type SearchRuntimeDetails = {
     score: number | null
     reason: string | null
   }>
+}
+
+export type KnowledgeSourceStatus = {
+  status: "searched" | "empty" | "unavailable" | "skipped" | "error" | string
+  count: number
+  reason?: string
+}
+
+export type KnowledgeSourceIndexStatus =
+  | "ready"
+  | "indexing"
+  | "stale"
+  | "empty"
+  | "unavailable"
+  | "error"
+  | "unknown"
+
+export type KnowledgeSourceEmbeddingStatus =
+  | "ready"
+  | "indexing"
+  | "missing"
+  | "unavailable"
+  | "not_applicable"
+  | "error"
+  | "unknown"
+
+export type KnowledgeSourceHealth = {
+  sourceId: RagSettings["sources"][number]
+  label: string
+  available: boolean
+  searchable: boolean
+  itemCount: number | null
+  indexedCount: number | null
+  lastUpdated: string | null
+  lastIndexed: string | null
+  indexStatus: KnowledgeSourceIndexStatus
+  embeddingStatus: KnowledgeSourceEmbeddingStatus
+  disabledReason: string | null
+  workspaceScoped: boolean
+  hiddenByDefault: boolean
+  privacyNote: string | null
+}
+
+export type KnowledgeSourceHealthState = {
+  bySource: Partial<Record<RagSettings["sources"][number], KnowledgeSourceHealth>>
+  sources: KnowledgeSourceHealth[]
+  loading: boolean
+  error: string | null
+  loadedAt: string | null
 }
 
 // Search history item
@@ -205,6 +255,7 @@ export type KnowledgeQAState = {
   queryStage: QueryStage
   lastSearchScope: ScopeSnapshot | null
   pinnedSourceFilters: PinnedSourceFilters
+  sourceHealth: KnowledgeSourceHealthState
 }
 
 // Actions for KnowledgeQA
@@ -244,6 +295,7 @@ export type KnowledgeQAActions = {
   setEvidenceRailTab: (tab: "sources" | "details") => void
   setQueryStage: (stage: QueryStage) => void
   setPinnedSourceFilters: (filters: PinnedSourceFilters) => void
+  refreshSourceHealth: () => Promise<void>
 
   // Citation actions
   persistRagContext: (messageId: string, context: RagContextData) => Promise<boolean>
