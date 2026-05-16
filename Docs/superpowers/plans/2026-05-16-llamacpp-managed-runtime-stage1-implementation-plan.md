@@ -465,7 +465,7 @@ git commit -m "feat: add llama.cpp supervisor"
 - Test: `tldw_Server_API/tests/LLM_Local/test_llamacpp_management_api.py`
 - Test: `tldw_Server_API/tests/LLM_Local/test_llamacpp_provider_and_logs_api.py`
 
-- [ ] **Step 1: Write failing API tests**
+- [x] **Step 1: Write failing API tests**
 
 Cover:
 
@@ -486,7 +486,7 @@ def test_v1_start_by_model_targets_default_profile_only():
     assert supervisor.started_profile_ids == ["default"]
 ```
 
-- [ ] **Step 2: Run API tests to verify failure**
+- [x] **Step 2: Run API tests to verify failure**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
@@ -495,7 +495,7 @@ def test_v1_start_by_model_targets_default_profile_only():
 
 Expected: FAIL because endpoints do not exist.
 
-- [ ] **Step 3: Add supervisor resolver**
+- [x] **Step 3: Add supervisor resolver**
 
 In `llamacpp.py`, add:
 
@@ -507,7 +507,7 @@ def _resolve_llamacpp_supervisor(llm_manager: LLMInferenceManager) -> LlamaCppSu
     return supervisor
 ```
 
-- [ ] **Step 4: Add profile/runtime endpoints**
+- [x] **Step 4: Add profile/runtime endpoints**
 
 Add endpoints from the spec:
 
@@ -528,7 +528,7 @@ Map invalid user input to `400`, missing profile to `404`, resource conflicts
 to `409`, unavailable llama.cpp manager to `503`, and unexpected failures to
 sanitized `500`.
 
-- [ ] **Step 5: Route V1 wrappers through default profile**
+- [x] **Step 5: Route V1 wrappers through default profile**
 
 Change these to prefer supervisor when present:
 
@@ -540,7 +540,7 @@ Change these to prefer supervisor when present:
 
 Keep manager/handler fallback for tests and compatibility.
 
-- [ ] **Step 6: Run API and compatibility tests**
+- [x] **Step 6: Run API and compatibility tests**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \

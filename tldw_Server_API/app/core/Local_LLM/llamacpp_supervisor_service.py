@@ -233,6 +233,13 @@ class LlamaCppSupervisor:
             return LlamaCppRuntime(profile_id=profile_id, state=LlamaCppRuntimeState.DEFINED)
         raise LlamaCppProfileNotFoundError(f"Llama.cpp profile '{profile_id}' was not found.")
 
+    def tail_logs(self, profile_id: str, lines: int) -> dict[str, object]:
+        self._require_profile(profile_id)
+        runner = self._runners.get(profile_id)
+        if runner is None:
+            return {"lines": [], "truncated": False, "warnings": ["No active managed llama.cpp log file is available."]}
+        return runner.tail_logs(lines)
+
     async def shutdown(self) -> None:
         for profile_id in list(self._runners):
             async with self._lock_for(profile_id):

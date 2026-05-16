@@ -4,7 +4,7 @@ title: Implement llama.cpp managed runtime stage 1
 status: In Progress
 assignee: []
 created_date: '2026-05-16 01:43'
-updated_date: '2026-05-16 03:25'
+updated_date: '2026-05-16 03:36'
 labels:
   - llamacpp
   - local-llm
@@ -31,7 +31,7 @@ Implement the approved Stage 1 llama.cpp managed runtime plan: backend profile p
 - [x] #1 Runtime models and JSON profile store support default profile bootstrap and duplicate enabled explicit host/port conflict validation.
 - [x] #2 Single-instance process runner can start, stop, report status, and tail owned logs without per-instance atexit or signal handlers.
 - [x] #3 Supervisor can manage multiple profiles with per-profile locking, explicit lifecycle actions, and synchronous cleanup integration.
-- [ ] #4 Admin profile/runtime APIs are admin-only and V1 llama.cpp endpoints remain compatible through the default profile.
+- [x] #4 Admin profile/runtime APIs are admin-only and V1 llama.cpp endpoints remain compatible through the default profile.
 - [ ] #5 Minimal WebUI client/types/runtime panel can display multiple instances and lifecycle actions while degrading on unsupported servers.
 - [ ] #6 Focused backend/frontend tests, diff checks, and Bandit for touched Python code are run or documented with clear blockers.
 <!-- AC:END -->
@@ -54,6 +54,8 @@ Task 3: added LlamaCppSupervisor with profile CRUD, per-profile lifecycle locks,
 Task 3 review fixes: made profile create/update/delete and default profile ensure asynchronous under the per-profile lock, held the default lock across default-profile update plus restart, added a supervisor-wide start lock for autoselect port selection, preserved legacy LlamaCppHandler cleanup while supervisor cleanup is enabled, and removed the core supervisor dependency on API request schemas. Verification: focused supervisor pytest reported 10 passed; touched llama.cpp regression slice reported 65 passed; py_compile passed; Bandit on supervisor/manager had no findings; git diff --check passed.
 
 Task 3 second quality review fixes: validated profile update payloads through LlamaCppProfile before persistence, added supervisor-wide store write serialization, and changed profile deletion to await runner.stop before removing runner/profile ownership. Verification: focused supervisor pytest reported 12 passed; touched llama.cpp regression slice reported 67 passed; py_compile passed; Bandit on supervisor/manager had no findings; git diff --check passed.
+
+Task 4: added admin llama.cpp profile and instance APIs, per-profile lifecycle actions, instance log tailing, supervisor resolver/error mapping, and V1 default-profile routing for start-by-model, stop/status, logs, and use-in-chat while preserving handler/manager fallback compatibility. Verification: runtime API pytest reported 4 passed; Task 4 compatibility set reported 38 passed; broader llama.cpp backend slice reported 84 passed; py_compile passed; Bandit on endpoint/supervisor had no findings; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
