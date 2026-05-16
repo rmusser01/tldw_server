@@ -101,26 +101,18 @@ export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
   const handleRegisterPath = async () => {
     const trimmed = assetPath.trim()
     if (!trimmed) return
-    try {
-      const registered = await onRegisterPath(trimmed)
-      if (registered) {
-        setAssetPath("")
-      }
-    } catch {
-      // Parent owns the error display; keep input available for correction.
+    const registered = await onRegisterPath(trimmed)
+    if (registered) {
+      setAssetPath("")
     }
   }
 
   const handleImportFolder = async () => {
     const trimmed = folderPath.trim()
     if (!trimmed) return
-    try {
-      const imported = await onImportFolder(trimmed)
-      if (imported) {
-        setFolderPath("")
-      }
-    } catch {
-      // Parent owns the error display; keep input available for correction.
+    const imported = await onImportFolder(trimmed)
+    if (imported) {
+      setFolderPath("")
     }
   }
 
@@ -196,6 +188,7 @@ export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
                 <List
                   size="small"
                   bordered
+                  rowKey="asset_id"
                   dataSource={group.items}
                   renderItem={(asset) => {
                     const size = formatBytes(asset.size_bytes)

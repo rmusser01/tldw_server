@@ -154,6 +154,7 @@ def test_inventory_recursively_scans_gguf_and_skips_mmproj(monkeypatch, tmp_path
     model = nested / "Llama-3-8B-Q4_K_M.gguf"
     model.write_text("fake model")
     (nested / "mmproj-model-f16.gguf").write_text("projector")
+    (nested / "projector-Llama-3-f16.gguf").write_text("projector")
 
     monkeypatch.setattr(
         llamacpp_inventory_service,
@@ -293,6 +294,82 @@ def test_import_folder_persists_allowlisted_folder_and_returns_folder_asset(monk
 
 
 @pytest.mark.unit
+def test_asset_endpoints_offload_blocking_inventory_work_to_threadpool(monkeypatch):
+    calls: list[tuple[Any, tuple[Any, ...], dict[str, Any]]] = []
+    config_state = {
+        "saved_config": {
+            "models_dir": None,
+            "allowed_paths": [],
+            "registered_model_paths": [],
+            "imported_asset_folders": [],
+        },
+        "active_config": {"handler_configured": True},
+        "restart_required": False,
+        "restart_reasons": [],
+        "env_overrides": {},
+        "warnings": [],
+    }
+    asset_payload = {
+        "asset_id": "folder:fake",
+        "kind": "folder",
+        "identity_basis": "resolved_path",
+        "path": "/models",
+        "resolved_path": "/models",
+        "display_name": "models",
+        "source": "imported_folder",
+        "size_bytes": None,
+        "modified_at": None,
+        "metadata": {},
+        "capabilities": ["asset_folder"],
+        "mmproj_asset_ids": [],
+        "base_model_asset_ids": [],
+        "warnings": [],
+    }
+
+    def fake_get_config_state(llm_manager: Any) -> dict[str, Any]:
+        assert isinstance(llm_manager, _Manager)
+        return config_state
+
+    def fake_scan_assets(received_config_state: dict[str, Any]) -> dict[str, Any]:
+        assert received_config_state is config_state
+        return {"assets": [], "warnings": [], "scan_limited": False}
+
+    def fake_register_asset_path(path: Path) -> dict[str, Any]:
+        assert path == Path("/models/base.gguf")
+        return asset_payload
+
+    def fake_import_asset_folder(path: Path) -> dict[str, Any]:
+        assert path == Path("/models")
+        return asset_payload
+
+    async def fake_run_in_threadpool(func: Any, *args: Any, **kwargs: Any) -> Any:
+        calls.append((func, args, kwargs))
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(lp, "run_in_threadpool", fake_run_in_threadpool)
+    monkeypatch.setattr(lp.llamacpp_config_service, "get_config_state", fake_get_config_state)
+    monkeypatch.setattr(lp.llamacpp_inventory_service, "scan_assets", fake_scan_assets)
+    monkeypatch.setattr(lp.llamacpp_inventory_service, "register_asset_path", fake_register_asset_path)
+    monkeypatch.setattr(lp.llamacpp_inventory_service, "import_asset_folder", fake_import_asset_folder)
+    app = _make_app_with_manager(_Manager())
+
+    with TestClient(app) as client:
+        list_response = client.get("/api/v1/llamacpp/assets")
+        register_response = client.post("/api/v1/llamacpp/assets/register-path", json={"path": "/models/base.gguf"})
+        import_response = client.post("/api/v1/llamacpp/assets/import-folder", json={"path": "/models"})
+
+    assert list_response.status_code == 200, list_response.text
+    assert register_response.status_code == 200, register_response.text
+    assert import_response.status_code == 200, import_response.text
+    assert [call[0] for call in calls] == [
+        fake_get_config_state,
+        fake_scan_assets,
+        fake_register_asset_path,
+        fake_import_asset_folder,
+    ]
+
+
+@pytest.mark.unit
 def test_legacy_inventory_excludes_mmproj_assets_after_asset_v2(monkeypatch, tmp_path: Path):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
 
@@ -309,6 +386,34 @@ def test_legacy_inventory_excludes_mmproj_assets_after_asset_v2(monkeypatch, tmp
     inventory = llamacpp_inventory_service.scan_inventory(limit=500)
 
     assert [item.basename for item in inventory.models] == ["chat.gguf"]
+
+
+@pytest.mark.unit
+def test_legacy_inventory_excludes_registered_mmproj_and_projector_paths(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+    from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ModelNotFoundError
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    base = models_dir / "chat.gguf"
+    mmproj = models_dir / "mmproj-chat.gguf"
+    projector = models_dir / "projector-chat.gguf"
+    base.write_text("base")
+    mmproj.write_text("projector")
+    projector.write_text("projector")
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(models_dir, registered_model_paths=f"{base}, {mmproj}, {projector}"),
+    )
+
+    inventory = llamacpp_inventory_service.scan_inventory(limit=500)
+
+    assert [item.basename for item in inventory.models] == ["chat.gguf"]
+    with pytest.raises(ModelNotFoundError):
+        llamacpp_inventory_service.resolve_model_id(llamacpp_inventory_service.model_id_for_path(mmproj))
+    with pytest.raises(ModelNotFoundError):
+        llamacpp_inventory_service.resolve_model_id(llamacpp_inventory_service.model_id_for_path(projector))
 
 
 @pytest.mark.unit

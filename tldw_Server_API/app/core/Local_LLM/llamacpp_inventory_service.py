@@ -138,6 +138,8 @@ def scan_inventory(config_state: dict[str, Any] | None = None, limit: int = 500)
 
     allowed_bases = _allowed_bases_for_config(saved_config)
     for path in registered_paths:
+        if _is_projector_asset_path(path):
+            continue
         item = _item_for_path(path, source="registered_path", allowed_bases=allowed_bases, warnings=warnings)
         if item is None:
             continue
@@ -323,7 +325,7 @@ def resolve_model_id(model_id: str) -> Path:
     for item in inventory.models:
         if item.model_id == wanted:
             path = _canonical_path(Path(item.path), "Model")
-            if path.suffix.lower() != ".gguf" or not path.is_file():
+            if path.suffix.lower() != ".gguf" or _asset_kind_for_path(path) != "gguf" or not path.is_file():
                 raise ModelNotFoundError(f"Model ID {wanted} does not reference an available GGUF file.")
             if not allowed_bases or not handler_utils.is_path_allowed(path, allowed_bases):
                 raise ServerError("Model path is outside allowed llama.cpp paths.")
@@ -352,7 +354,7 @@ def _iter_gguf_models(models_dir: Path, warnings: list[str], limit: int):
             lowered = filename.lower()
             if not lowered.endswith(".gguf"):
                 continue
-            if lowered.startswith("mmproj"):
+            if _asset_kind_for_path(Path(filename)) != "gguf":
                 continue
             yield Path(root) / filename
 
@@ -364,7 +366,7 @@ def _has_scannable_gguf(models_dir: Path, warnings: list[str]) -> bool:
     for _root, _dirs, files in os.walk(models_dir, topdown=True, onerror=_on_error):
         for filename in files:
             lowered = filename.lower()
-            if lowered.endswith(".gguf") and not lowered.startswith("mmproj"):
+            if lowered.endswith(".gguf") and _asset_kind_for_path(Path(filename)) == "gguf":
                 return True
     return False
 
@@ -492,6 +494,14 @@ def _asset_kind_for_path(path: Path) -> str:
     if "mmproj" in stem or "projector" in stem:
         return "mmproj"
     return "gguf"
+
+
+def _is_projector_asset_path(path: Path) -> bool:
+    try:
+        candidate = _canonical_path(path, "Model")
+    except ServerError:
+        candidate = path
+    return _asset_kind_for_path(candidate) == "mmproj"
 
 
 def _capabilities_for_asset(kind: str) -> list[str]:

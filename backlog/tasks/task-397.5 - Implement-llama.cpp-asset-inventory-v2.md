@@ -4,7 +4,7 @@ title: Implement llama.cpp asset inventory v2
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-16 07:10'
+updated_date: '2026-05-16 14:40'
 labels:
   - llamacpp
   - backend
@@ -49,16 +49,20 @@ Implementation commits:
 - 1334a5062 Wire llama.cpp assets into admin page
 
 Known verification skip: bunx tsc --noEmit --pretty false could not run because Bun could not write to its tempdir inside the sandbox; the required escalated rerun was rejected by the approval reviewer. Frontend behavior was validated through focused Vitest coverage instead.
+
+Review-fix pass for PR #1764: verified live review comments and fixed only still-valid findings. Fixed: asset endpoint blocking I/O by offloading asset/config scans and mutations to the threadpool, registered mmproj/projector leakage in legacy inventory/resolve paths, missing Ant List rowKey on grouped assets, and silent frontend catch handling. Skipped as already satisfied in current code: Gemini backend symbol/import warnings for datetime/UTC, _QUANT_RE, _canonical_path, and _unresolved_path_key. Skipped as incompatible with the installed Ant Design version: changing Space orientation to direction; the local Vitest run warned direction is deprecated and orientation is the current compatible prop.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented llama.cpp Asset Inventory V2 across backend and WebUI. The backend now exposes asset schemas, imported folder config parsing, GGUF/mmproj/folder/unknown scanning, inferred mmproj candidate metadata, asset register/import endpoints, and legacy inventory/start-by-model compatibility. The WebUI now has shared asset types/client methods plus an Admin assets panel with register/import actions, grouped assets, warnings, and inferred candidate labels.
+Implemented llama.cpp Asset Inventory V2 across backend and WebUI. The backend now exposes asset schemas, imported folder config parsing, GGUF/mmproj/folder/unknown scanning, inferred mmproj candidate metadata, asset register/import endpoints, and legacy inventory/start-by-model compatibility. The WebUI now has shared asset types/client methods plus an Admin assets panel with register/import actions, grouped assets, warnings, row keys, and inferred candidate labels.
+
+Review fixes for PR #1764 added threadpool offloading for blocking asset endpoint work, stricter exclusion of registered mmproj/projector assets from legacy GGUF inventory and model-id resolution, and frontend callback handling that leaves retry inputs intact without swallowing errors.
 
 Verification recorded:
-- Backend: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/LLM_Local/test_llamacpp_asset_inventory_service.py tldw_Server_API/tests/LLM_Local/test_llamacpp_inventory_api.py tldw_Server_API/tests/LLM_Local/test_llamacpp_runtime_api.py -v -> 32 passed, 5 warnings.
-- Frontend: ./node_modules/.bin/vitest run src/components/Option/Admin/__tests__/LlamacppAssetsPanel.test.tsx src/components/Option/Admin/__tests__/LlamacppInventoryPanel.test.tsx src/components/Option/Admin/__tests__/LlamacppAdminPage.test.tsx from apps/packages/ui -> 3 files passed, 20 tests passed.
+- Backend: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/LLM_Local/test_llamacpp_asset_inventory_service.py tldw_Server_API/tests/LLM_Local/test_llamacpp_inventory_api.py tldw_Server_API/tests/LLM_Local/test_llamacpp_runtime_api.py -v -> 34 passed, 5 warnings.
+- Frontend: ./node_modules/.bin/vitest run src/components/Option/Admin/__tests__/LlamacppAssetsPanel.test.tsx src/components/Option/Admin/__tests__/LlamacppInventoryPanel.test.tsx src/components/Option/Admin/__tests__/LlamacppAdminPage.test.tsx from apps/packages/ui -> 3 files passed, 21 tests passed.
 - Bandit: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r touched llama.cpp Python files -f json -o /tmp/bandit_llamacpp_asset_inventory_v2.json -> 0 results.
 - Whitespace: git diff --check -> clean.
 

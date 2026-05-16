@@ -125,4 +125,40 @@ describe("LlamacppAssetsPanel", () => {
     })
     expect(folderInput.value).toBe("")
   })
+
+  it("keeps inputs available when actions report failure", async () => {
+    const onRegisterPath = vi.fn().mockResolvedValue(false)
+    const onImportFolder = vi.fn().mockResolvedValue(false)
+
+    render(
+      <LlamacppAssetsPanel
+        assets={{ assets: [], warnings: [], scan_limited: false }}
+        loading={false}
+        registeringPath={false}
+        importingFolder={false}
+        error={null}
+        onRegisterPath={onRegisterPath}
+        onImportFolder={onImportFolder}
+        onReload={vi.fn()}
+      />
+    )
+
+    const assetInput = screen.getByLabelText("Register local asset path") as HTMLInputElement
+    fireEvent.change(assetInput, { target: { value: "/external/model.gguf" } })
+    fireEvent.click(screen.getByRole("button", { name: "Register asset" }))
+
+    await waitFor(() => {
+      expect(onRegisterPath).toHaveBeenCalledWith("/external/model.gguf")
+    })
+    expect(assetInput.value).toBe("/external/model.gguf")
+
+    const folderInput = screen.getByLabelText("Import local asset folder") as HTMLInputElement
+    fireEvent.change(folderInput, { target: { value: "/external/models" } })
+    fireEvent.click(screen.getByRole("button", { name: "Import folder" }))
+
+    await waitFor(() => {
+      expect(onImportFolder).toHaveBeenCalledWith("/external/models")
+    })
+    expect(folderInput.value).toBe("/external/models")
+  })
 })

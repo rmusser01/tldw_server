@@ -384,8 +384,8 @@ async def validate_llamacpp_binary_endpoint(
 async def get_llamacpp_assets_endpoint(
     llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
 ) -> LlamaCppAssetsResponse:
-    config_state = llamacpp_config_service.get_config_state(llm_manager)
-    return llamacpp_inventory_service.scan_assets(config_state)
+    config_state = await run_in_threadpool(llamacpp_config_service.get_config_state, llm_manager)
+    return await run_in_threadpool(llamacpp_inventory_service.scan_assets, config_state)
 
 
 @router.post(
@@ -400,7 +400,7 @@ async def register_llamacpp_asset_path_endpoint(
 ) -> LlamaCppAsset:
     _ = llm_manager
     try:
-        return llamacpp_inventory_service.register_asset_path(Path(payload.path))
+        return await run_in_threadpool(llamacpp_inventory_service.register_asset_path, Path(payload.path))
     except ServerError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -417,7 +417,7 @@ async def import_llamacpp_asset_folder_endpoint(
 ) -> LlamaCppAsset:
     _ = llm_manager
     try:
-        return llamacpp_inventory_service.import_asset_folder(Path(payload.path))
+        return await run_in_threadpool(llamacpp_inventory_service.import_asset_folder, Path(payload.path))
     except ServerError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
