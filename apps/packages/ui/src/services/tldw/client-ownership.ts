@@ -22,6 +22,9 @@ export const TRANSITIONAL_DOMAIN_OVERLAPS = {
     "getEmbeddingModelsList",
     "getEmbeddingProvidersConfig",
     "getImageBackends",
+    "getLlamacppConfig",
+    "getLlamacppHardware",
+    "getLlamacppInventory",
     "getLlamacppStatus",
     "getLlmProviders",
     "getMediaIngestionBudgetDiagnostics",
@@ -35,11 +38,17 @@ export const TRANSITIONAL_DOMAIN_OVERLAPS = {
     "getTtsJobArtifacts",
     "listLlamacppModels",
     "loadMlxModel",
+    "registerLlamacppModelPath",
+    "startLlamacppModel",
     "startLlamacppServer",
     "stopLlamacppServer",
     "synthesizeSpeech",
+    "tailLlamacppLogs",
     "transcribeAudio",
-    "unloadMlxModel"
+    "unloadMlxModel",
+    "updateLlamacppConfig",
+    "useLlamacppInChat",
+    "validateLlamacpp"
   ],
   characters: [
     "createCharacter",

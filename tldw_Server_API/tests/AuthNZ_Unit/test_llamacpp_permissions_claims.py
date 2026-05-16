@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -35,6 +35,22 @@ def _make_principal(
 
 
 class _StubModelsHandler:
+    config = type("Config", (), {"log_output_file": None})()
+    _active_server_process = type("Process", (), {"pid": 1234, "returncode": None})()
+    _active_server_host = "127.0.0.1"
+    _active_server_port = 8080
+    _active_server_model = "toy.gguf"
+
+    async def get_server_status(self, **kwargs) -> dict[str, object]:  # noqa: ANN003
+        _ = kwargs
+        return {
+            "status": "running",
+            "host": self._active_server_host,
+            "port": self._active_server_port,
+            "model": self._active_server_model,
+            "pid": self._active_server_process.pid,
+        }
+
     async def list_models(self) -> list[str]:
         return ["toy.gguf"]
 
@@ -117,18 +133,44 @@ def _build_app_with_overrides(
     return app
 
 
+def _patch_provider_config_writes(monkeypatch) -> None:  # noqa: ANN001
+    class FakeLock:
+        def __enter__(self) -> "FakeLock":
+            return self
+
+        def __exit__(self, *exc: Any) -> None:
+            return None
+
+    monkeypatch.setattr(
+        llamacpp_mod.llamacpp_provider_service.setup_manager,
+        "update_config",
+        lambda updates: None,
+    )
+    monkeypatch.setattr(llamacpp_mod.llamacpp_provider_service, "refresh_config_cache", lambda: None)
+    monkeypatch.setattr(llamacpp_mod.llamacpp_provider_service, "llamacpp_config_write_lock", lambda: FakeLock())
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "method,path,payload",
     [
         ("post", "/api/v1/llamacpp/start_server", {"model_filename": "toy.gguf", "server_args": {}}),
         ("post", "/api/v1/llamacpp/stop_server", {}),
+        ("post", "/api/v1/llamacpp/use-in-chat", {}),
         ("get", "/api/v1/llamacpp/status", None),
         ("get", "/api/v1/llamacpp/models", None),
         ("get", "/api/v1/llamacpp/metrics", None),
+        ("get", "/api/v1/llamacpp/logs/tail", None),
+        ("get", "/api/v1/llamacpp/hardware", None),
     ],
 )
-def test_llamacpp_lifecycle_401_when_principal_unavailable(method: str, path: str, payload: dict | None):
+def test_llamacpp_lifecycle_401_when_principal_unavailable(
+    monkeypatch,
+    method: str,
+    path: str,
+    payload: dict | None,
+):
+    _patch_provider_config_writes(monkeypatch)
     app = _build_app_with_overrides(principal=None, fail_with_401=True)
 
     with TestClient(app) as client:
@@ -147,12 +189,21 @@ def test_llamacpp_lifecycle_401_when_principal_unavailable(method: str, path: st
     [
         ("post", "/api/v1/llamacpp/start_server", {"model_filename": "toy.gguf", "server_args": {}}),
         ("post", "/api/v1/llamacpp/stop_server", {}),
+        ("post", "/api/v1/llamacpp/use-in-chat", {}),
         ("get", "/api/v1/llamacpp/status", None),
         ("get", "/api/v1/llamacpp/models", None),
         ("get", "/api/v1/llamacpp/metrics", None),
+        ("get", "/api/v1/llamacpp/logs/tail", None),
+        ("get", "/api/v1/llamacpp/hardware", None),
     ],
 )
-def test_llamacpp_lifecycle_403_when_missing_admin_role(method: str, path: str, payload: dict | None):
+def test_llamacpp_lifecycle_403_when_missing_admin_role(
+    monkeypatch,
+    method: str,
+    path: str,
+    payload: dict | None,
+):
+    _patch_provider_config_writes(monkeypatch)
     principal = _make_principal(
         is_admin=False,
         roles=["user"],
@@ -175,12 +226,21 @@ def test_llamacpp_lifecycle_403_when_missing_admin_role(method: str, path: str, 
     [
         ("post", "/api/v1/llamacpp/start_server", {"model_filename": "toy.gguf", "server_args": {}}),
         ("post", "/api/v1/llamacpp/stop_server", {}),
+        ("post", "/api/v1/llamacpp/use-in-chat", {}),
         ("get", "/api/v1/llamacpp/status", None),
         ("get", "/api/v1/llamacpp/models", None),
         ("get", "/api/v1/llamacpp/metrics", None),
+        ("get", "/api/v1/llamacpp/logs/tail", None),
+        ("get", "/api/v1/llamacpp/hardware", None),
     ],
 )
-def test_llamacpp_lifecycle_200_for_admin_principal(method: str, path: str, payload: dict | None):
+def test_llamacpp_lifecycle_200_for_admin_principal(
+    monkeypatch,
+    method: str,
+    path: str,
+    payload: dict | None,
+):
+    _patch_provider_config_writes(monkeypatch)
     principal = _make_principal(
         is_admin=True,
         roles=["admin"],

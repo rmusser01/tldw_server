@@ -1,5 +1,16 @@
 import type { ChatScope } from "@/types/chat-scope"
 import { toChatScopeParams } from "@/types/chat-scope"
+import type {
+  LlamacppConfigResponse,
+  LlamacppConfigUpdateRequest,
+  LlamacppHardwareSnapshotResponse,
+  LlamacppInventoryItem,
+  LlamacppInventoryResponse,
+  LlamacppLogTailResponse,
+  LlamacppUseInChatResponse,
+  LlamacppValidationRequest,
+  LlamacppValidationResponse
+} from "@/types/llamacpp-admin"
 import { Storage } from "@plasmohq/storage"
 import { createSafeStorage, safeStorageSerde } from "@/utils/safe-storage"
 import { bgRequest, bgStream, bgUpload } from "@/services/background-proxy"
@@ -2148,6 +2159,51 @@ export class TldwApiClientBase {
     })
   }
 
+  async getLlamacppConfig(): Promise<LlamacppConfigResponse> {
+    return await bgRequest<LlamacppConfigResponse>({
+      path: "/api/v1/llamacpp/config",
+      method: "GET"
+    })
+  }
+
+  async updateLlamacppConfig(
+    payload: LlamacppConfigUpdateRequest
+  ): Promise<LlamacppConfigResponse> {
+    return await bgRequest<LlamacppConfigResponse>({
+      path: "/api/v1/llamacpp/config",
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async validateLlamacpp(
+    payload: LlamacppValidationRequest
+  ): Promise<LlamacppValidationResponse> {
+    return await bgRequest<LlamacppValidationResponse>({
+      path: "/api/v1/llamacpp/validate",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async getLlamacppInventory(): Promise<LlamacppInventoryResponse> {
+    return await bgRequest<LlamacppInventoryResponse>({
+      path: "/api/v1/llamacpp/inventory",
+      method: "GET"
+    })
+  }
+
+  async registerLlamacppModelPath(path: string): Promise<LlamacppInventoryItem> {
+    return await bgRequest<LlamacppInventoryItem>({
+      path: "/api/v1/llamacpp/models/register-path",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { path }
+    })
+  }
+
   async startLlamacppServer(
     modelFilename: string,
     serverArgs?: Record<string, any>
@@ -2163,12 +2219,51 @@ export class TldwApiClientBase {
     })
   }
 
+  async startLlamacppModel(
+    modelId: string,
+    serverArgs?: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    return await bgRequest<Record<string, unknown>>({
+      path: "/api/v1/llamacpp/start-by-model",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {
+        model_id: modelId,
+        server_args: serverArgs || {}
+      }
+    })
+  }
+
   async stopLlamacppServer(): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/llamacpp/stop_server",
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: {}
+    })
+  }
+
+  async useLlamacppInChat(): Promise<LlamacppUseInChatResponse> {
+    return await bgRequest<LlamacppUseInChatResponse>({
+      path: "/api/v1/llamacpp/use-in-chat",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  }
+
+  async tailLlamacppLogs(lines?: number): Promise<LlamacppLogTailResponse> {
+    const query = this.buildQuery(lines === undefined ? {} : { lines })
+    return await bgRequest<LlamacppLogTailResponse>({
+      path: `/api/v1/llamacpp/logs/tail${query}`,
+      method: "GET"
+    })
+  }
+
+  async getLlamacppHardware(): Promise<LlamacppHardwareSnapshotResponse> {
+    return await bgRequest<LlamacppHardwareSnapshotResponse>({
+      path: "/api/v1/llamacpp/hardware",
+      method: "GET"
     })
   }
 
