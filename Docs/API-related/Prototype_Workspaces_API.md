@@ -181,6 +181,13 @@ Response highlights:
 - `session_token`
 - `runtime_policy_profile`
 
+Expected failure states:
+
+- Invalid, expired, exhausted, archived, or mismatched links: non-enumerating 404 or 403 `PrototypeErrorResponse`.
+- Missing required FastAPI request fields: 422 `HTTPValidationError`.
+- Domain-invalid request shape, such as a missing first-use `display_name`: 422 `PrototypeErrorResponse`.
+- Public exchange rate-limit exhaustion: 429.
+
 ## Prototype Shared Actor Model
 
 External stakeholders do not become first-class AuthNZ users.
@@ -208,7 +215,98 @@ The short version:
 - preview grants are short-lived broker-issued grants behind opaque handles
 - promotion submission must bind the token, active shared actor, branch session, candidate snapshot, and workspace before creating a request
 
-Frontend/backend state names, HTTP status expectations, retryability, and Risk Gate 4 open questions live in `Docs/API-related/Prototype_Workspaces_Contract_Matrix.md`.
+Frontend/backend state names, HTTP status expectations, retryability, and frozen Risk Gate 4 decisions live in `Docs/API-related/Prototype_Workspaces_Contract_Matrix.md`.
+
+## Risk Gate 4 Error Contract
+
+Prototype-specific endpoint failures use the normal FastAPI `detail` envelope with a stable structured payload:
+
+```json
+{
+  "detail": {
+    "category": "inactive_session",
+    "message": "Prototype session token is no longer active",
+    "frontend_state": "session_inactive",
+    "retryable": false
+  }
+}
+```
+
+Contract rules:
+
+- `category` is the machine-readable backend error category.
+- `frontend_state` is the machine-readable UI state bucket.
+- `retryable` is the only field frontend retry affordances should branch on.
+- `message` is safe fallback copy, but clients should not parse it.
+- Invalid, expired, revoked, exhausted, missing, and owner-mismatched public links remain non-enumerating as `invalid_or_unavailable_link`.
+- Active collaborator session-token paths use `inactive_session` when the signed token maps to a revoked or expired shared actor/session.
+- Preview renewal returns `preview_unavailable` with 404 for missing/revoked handles and 409 for renewal conflicts.
+
+The generated OpenAPI contract references `PrototypeErrorResponse` for prototype route 403, 404, and 409 responses where those statuses are expected. Prototype 422 entries allow either `PrototypeErrorResponse` or FastAPI's `HTTPValidationError` because malformed request bodies are rejected before endpoint code can wrap them in the domain error envelope.
+
+## Lifecycle Examples
+
+### Owner creates a workspace and branch session
+
+1. `POST /api/v1/prototype-workspaces` with title, source, prompt, and policy objects.
+2. The service creates the workspace and seed canonical snapshot in one transaction.
+3. `POST /api/v1/prototype-workspaces/{prototype_workspace_id}/sessions` creates or reuses an owner branch session.
+4. The response returns a `branch_session_bootstrap` job id and the branch session id.
+5. Runtime bootstrap completion updates branch-session runtime fields and preview state through the Jobs-backed runtime path.
+
+Expected failure states:
+
+- Missing workspace: 404 `missing`, `frontend_state = "missing"`, not retryable.
+- Non-owner caller: 403 `unauthorized`, not retryable.
+- Missing canonical snapshot or stale bootstrap precondition: 409 `conflict`, not retryable.
+- Runtime bootstrap failure: 409 `bootstrap_failed`; retry only when `retryable = true`.
+
+### Owner creates a private link and collaborator enters
+
+1. Owner creates a share token with `resource_type = "prototype_workspace"`.
+2. Collaborator opens `/share/:token` and submits `POST /api/v1/sharing/public/{token}/prototype-session`.
+3. Password-protected links require `password` unless a valid same-browser resume cookie exists.
+4. First-time sessions require `display_name`.
+5. The exchange returns a scoped `shared_actor_id`, `session_token`, and runtime policy profile.
+6. The browser stores only the signed resume cookie; passwords and tokens should not be persisted in durable route state.
+
+Expected failure states:
+
+- Invalid, expired, revoked, exhausted, missing, or owner-mismatched public link: 404 `invalid_or_unavailable_link`.
+- Missing password: 403 `password_required`, retryable.
+- Bad password: 403 `invalid_password`, retryable.
+- Archived workspace: 403 `workspace_unavailable`, not retryable.
+
+### Collaborator creates a branch and submits promotion
+
+1. Collaborator calls `POST /api/v1/prototype-sessions` with the exchange `session_token`.
+2. The service rechecks that the token maps to an active shared actor and share-link id.
+3. Collaborator work saves a candidate snapshot tied to the branch session.
+4. Collaborator calls `POST /api/v1/prototype-promotions` with workspace, session, candidate snapshot, and session token.
+5. The backend verifies workspace, session, snapshot lineage, share-link id, and shared actor ownership before creating the request.
+
+Expected failure states:
+
+- Expired or revoked actor/session: 403 `inactive_session`, not retryable.
+- Token/workspace/session/snapshot mismatch: 403 `unauthorized` or 422 `invalid_request` depending on whether the caller is unauthorized or the request shape is inconsistent.
+- Missing session or snapshot: 404 `missing`, not retryable.
+
+### Owner reviews promotion and renews preview
+
+1. Owner or designated promoter calls `POST /api/v1/prototype-promotions/{promotion_request_id}/review`.
+2. Rejection records reviewer notes without changing canonical pointers.
+3. Approval validates the candidate against the requested baseline and current canonical state.
+4. Successful promotion advances canonical and last-known-good pointers and may return a preview handle.
+5. Owner calls `POST /api/v1/prototype-previews/{preview_handle}/renew` to rotate the short-lived preview grant token.
+
+Expected states:
+
+- Unauthorized reviewer: 403 `unauthorized`, not retryable.
+- Missing promotion request/workspace: 404 `missing`, not retryable.
+- Stale candidate: 200 response with `status = "stale"` and `failure_code = "stale_candidate"`.
+- Validation failure: 200 response with `status = "failed"` and `failure_code = "publish_validation_failed"`.
+- Missing/revoked preview handle: 404 `preview_unavailable`, not retryable.
+- Preview renewal conflict: 409 `preview_unavailable`, retryable.
 
 ## Risk Gate 2 Persistence Contract
 
@@ -284,6 +382,34 @@ Cancellation and timeout boundary:
 - worker shutdown uses `WorkerSDK.stop()` via the injected stop event and does not acquire new prototype jobs after shutdown starts
 - lease expiry and retry are owned by the shared Jobs manager; retry-safe service operations are the prototype-specific protection against duplicate effects after worker restart or completion-ack failure
 - runtime host process termination, long-running sandbox teardown, and operator-facing timeout controls remain later runtime-hosting work; this gate documents that boundary rather than introducing a parallel timeout system
+
+## Configuration Requirements
+
+Prototype collaboration requires stable secrets and runtime policy configuration:
+
+- `PrototypeAccessService` requires a stable signing secret from `JWT_SECRET_KEY` or `SINGLE_USER_API_KEY`; startup/test paths fail closed when neither is configured.
+- `PrototypePreviewBroker` requires a stable preview signing secret from explicit configuration or the same stable server secret fallback.
+- `share_policy.allow_browser_session_resume` controls same-browser resume behavior for public prototype links.
+- `runtime_policy.owner_profile` and `runtime_policy.external_collaborator_profile` choose server-side runtime profiles; clients cannot request arbitrary runtime targets.
+- Prototype runtime jobs use Jobs domain `prototype_workspaces` on queue `default`; deployments enabling collaboration must run the shared Jobs worker infrastructure for async bootstrap, preview boot, snapshot save, and publish validation work.
+- Operators should set quotas for share-token use counts, session expiry, preview grant TTLs, and cleanup retention before exposing public links outside trusted testers.
+
+## Migration And Rollback Notes
+
+Migration requirements:
+
+- Apply AuthNZ migration 086 for prototype workspace tables and migration 087 for the `prototype_workspace` share-token resource type before enabling the route set.
+- Confirm foreign-key enforcement and transaction behavior on the configured AuthNZ database backend before creating public links.
+- Deploy backend contract changes before Risk Gate 5/6 frontend consumption so clients can rely on `PrototypeErrorResponse` and the version 2 contract fixture.
+- Existing Risk Gate 1 draft fixture consumers must tolerate the structured `detail` object before switching routes to production data.
+
+Rollback guidance:
+
+- Disable or hide frontend entry points for `/prototype-workspaces` and `/share/:token` prototype links before rolling back backend route behavior.
+- Revoke active prototype share tokens when rolling back public collaborator access.
+- Let existing prototype sessions expire or explicitly revoke them; do not delete workspace rows unless the rollback is destructive by operator intent.
+- Keep migration 086/087 tables in place during rollback. Removing tables should be reserved for a later planned data-migration task because share-token and audit history may reference prototype resources.
+- If Jobs workers are rolled back first, pause new collaborator entry and owner branch-session creation so bootstrap jobs are not queued without handlers.
 
 ## Preview Broker Guarantees
 

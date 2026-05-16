@@ -1,9 +1,12 @@
 """Integration tests for public prototype private-link exchange."""
+
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -26,6 +29,35 @@ from tldw_Server_API.app.core.Prototype_Workspaces.access import PROTOTYPE_SHARE
 from tldw_Server_API.app.core.Sharing.share_token_service import ShareTokenService
 
 pytestmark = pytest.mark.integration
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_CONTRACT_STATES_FIXTURE = _REPO_ROOT / "apps/tldw-frontend/e2e/fixtures/prototype-workspaces/contract-states.json"
+
+
+def _assert_prototype_error(
+    response,
+    *,
+    category: str,
+    frontend_state: str,
+    retryable: bool,
+) -> None:
+    detail = response.json()["detail"]
+    assert detail["category"] == category
+    assert detail["frontend_state"] == frontend_state
+    assert detail["retryable"] is retryable
+    assert isinstance(detail["message"], str)
+    assert detail["message"]
+
+
+def _assert_openapi_error_response(openapi: dict, path: str, method: str, status_code: str) -> None:
+    schema = openapi["paths"][path][method]["responses"][status_code]["content"]["application/json"]["schema"]
+    assert schema["$ref"].endswith("/PrototypeErrorResponse")
+
+
+def _assert_openapi_error_or_validation_response(openapi: dict, path: str, method: str, status_code: str) -> None:
+    schema = openapi["paths"][path][method]["responses"][status_code]["content"]["application/json"]["schema"]
+    refs = {entry["$ref"].rsplit("/", maxsplit=1)[-1] for entry in schema["anyOf"]}
+    assert {"PrototypeErrorResponse", "HTTPValidationError"} <= refs
 
 
 class _FakePool:
@@ -67,12 +99,8 @@ def exchange_db():
     migration_077_create_sharing_tables(conn)
     migration_087_expand_share_tokens_resource_type_for_prototypes(conn)
     migration_086_create_prototype_workspace_tables(conn)
-    conn.execute(
-        "INSERT INTO users (id, username, email, password_hash) VALUES (1, 'owner', 'owner@test.com', 'hash')"
-    )
-    conn.execute(
-        "INSERT INTO users (id, username, email, password_hash) VALUES (2, 'other', 'other@test.com', 'hash')"
-    )
+    conn.execute("INSERT INTO users (id, username, email, password_hash) VALUES (1, 'owner', 'owner@test.com', 'hash')")
+    conn.execute("INSERT INTO users (id, username, email, password_hash) VALUES (2, 'other', 'other@test.com', 'hash')")
     conn.commit()
     yield conn
     conn.close()
@@ -333,6 +361,43 @@ def test_access_service_requires_configured_stable_signing_secret(
         access.PrototypeAccessService(prototype_repo)
 
 
+def test_public_prototype_exchange_openapi_declares_error_contract(test_app):
+    openapi = test_app.openapi()
+
+    _assert_openapi_error_response(
+        openapi,
+        "/api/v1/sharing/public/{token}/prototype-session",
+        "post",
+        "403",
+    )
+    _assert_openapi_error_response(
+        openapi,
+        "/api/v1/sharing/public/{token}/prototype-session",
+        "post",
+        "404",
+    )
+    _assert_openapi_error_or_validation_response(
+        openapi,
+        "/api/v1/sharing/public/{token}/prototype-session",
+        "post",
+        "422",
+    )
+    assert "429" in openapi["paths"]["/api/v1/sharing/public/{token}/prototype-session"]["post"]["responses"]
+
+
+def test_contract_states_fixture_uses_structured_error_details():
+    fixture = json.loads(_CONTRACT_STATES_FIXTURE.read_text(encoding="utf-8"))
+
+    assert fixture["riskGate"] == "Risk Gate 4 frozen"
+    for state in fixture["states"]:
+        detail = state["mockResponse"]["detail"]
+        assert detail["category"] == state["stableErrorCategory"]
+        assert isinstance(detail["message"], str)
+        assert detail["message"]
+        assert isinstance(detail["frontend_state"], str)
+        assert detail["retryable"] == state["retryable"]
+
+
 def test_public_prototype_exchange_creates_shared_actor(client, prototype_share_token):
     resp = client.post(
         f"/api/v1/sharing/public/{prototype_share_token}/prototype-session",
@@ -353,6 +418,12 @@ def test_public_prototype_exchange_revoked_link_returns_404(client, revoked_prot
     )
 
     assert resp.status_code == 404
+    _assert_prototype_error(
+        resp,
+        category="invalid_or_unavailable_link",
+        frontend_state="link_unavailable",
+        retryable=False,
+    )
 
 
 def test_public_prototype_exchange_bad_password_returns_403(client, prototype_share_token):
@@ -362,6 +433,12 @@ def test_public_prototype_exchange_bad_password_returns_403(client, prototype_sh
     )
 
     assert resp.status_code == 403
+    _assert_prototype_error(
+        resp,
+        category="invalid_password",
+        frontend_state="password_rejected",
+        retryable=True,
+    )
 
 
 def test_public_prototype_exchange_missing_password_returns_403(client, prototype_share_token):
@@ -371,6 +448,12 @@ def test_public_prototype_exchange_missing_password_returns_403(client, prototyp
     )
 
     assert resp.status_code == 403
+    _assert_prototype_error(
+        resp,
+        category="password_required",
+        frontend_state="password_required",
+        retryable=True,
+    )
 
 
 def test_public_prototype_exchange_missing_display_name_returns_422(
@@ -708,6 +791,12 @@ def test_public_prototype_exchange_archived_workspace_returns_403(
     )
 
     assert resp.status_code == 403
+    _assert_prototype_error(
+        resp,
+        category="workspace_unavailable",
+        frontend_state="workspace_unavailable",
+        retryable=False,
+    )
 
 
 def test_public_prototype_exchange_missing_workspace_returns_404(
@@ -720,6 +809,12 @@ def test_public_prototype_exchange_missing_workspace_returns_404(
     )
 
     assert resp.status_code == 404
+    _assert_prototype_error(
+        resp,
+        category="invalid_or_unavailable_link",
+        frontend_state="link_unavailable",
+        retryable=False,
+    )
 
 
 def test_public_prototype_exchange_rejects_token_owner_mismatch(
@@ -732,3 +827,9 @@ def test_public_prototype_exchange_rejects_token_owner_mismatch(
     )
 
     assert resp.status_code == 404
+    _assert_prototype_error(
+        resp,
+        category="invalid_or_unavailable_link",
+        frontend_state="link_unavailable",
+        retryable=False,
+    )

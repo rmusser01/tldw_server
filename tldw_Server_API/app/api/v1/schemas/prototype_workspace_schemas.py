@@ -6,6 +6,72 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+PrototypeErrorCategory = Literal[
+    "invalid_or_unavailable_link",
+    "password_required",
+    "invalid_password",
+    "workspace_unavailable",
+    "inactive_session",
+    "bootstrap_failed",
+    "preview_unavailable",
+    "stale_promotion",
+    "promotion_conflict",
+    "promotion_validation_failed",
+    "unauthorized",
+    "missing",
+    "conflict",
+    "invalid_request",
+]
+
+PrototypeFrontendState = Literal[
+    "link_unavailable",
+    "password_required",
+    "password_rejected",
+    "workspace_unavailable",
+    "session_inactive",
+    "setup_failed",
+    "preview_unavailable",
+    "promotion_stale",
+    "promotion_conflict",
+    "promotion_failed",
+    "unauthorized",
+    "missing",
+    "conflict",
+    "invalid_request",
+]
+
+
+class PrototypeErrorDetail(BaseModel):
+    """Machine-readable prototype workspace error detail used in HTTP responses."""
+
+    category: PrototypeErrorCategory
+    message: str = Field(..., min_length=1)
+    frontend_state: PrototypeFrontendState
+    retryable: bool = False
+
+
+class PrototypeErrorResponse(BaseModel):
+    """FastAPI error envelope for prototype workspace contract errors."""
+
+    detail: PrototypeErrorDetail
+
+
+def prototype_error_detail(
+    *,
+    category: PrototypeErrorCategory,
+    message: str,
+    frontend_state: PrototypeFrontendState,
+    retryable: bool = False,
+) -> dict[str, Any]:
+    """Build the stable prototype error detail payload used by HTTPException."""
+    return PrototypeErrorDetail(
+        category=category,
+        message=message,
+        frontend_state=frontend_state,
+        retryable=retryable,
+    ).model_dump()
+
+
 class PrototypeWorkspaceCreateRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     creation_source: str = Field(..., min_length=1, max_length=64)
