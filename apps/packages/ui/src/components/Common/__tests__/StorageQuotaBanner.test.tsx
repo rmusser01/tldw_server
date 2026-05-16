@@ -17,6 +17,22 @@ vi.mock("@/hooks/useStorageQuota", () => ({
   useStorageQuota: () => mockQuota
 }))
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (
+      key: string,
+      options?: string | { defaultValue?: string; [key: string]: unknown }
+    ) => {
+      if (typeof options === "string") return options
+      const template = options?.defaultValue ?? key
+
+      return template.replace(/\{\{(\w+)\}\}/g, (_match, token) =>
+        String(options?.[token] ?? "")
+      )
+    }
+  })
+}))
+
 import { StorageQuotaBanner } from "../StorageQuotaBanner"
 
 describe("StorageQuotaBanner", () => {

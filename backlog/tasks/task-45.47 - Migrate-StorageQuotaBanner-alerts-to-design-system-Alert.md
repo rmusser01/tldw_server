@@ -47,12 +47,14 @@ Focused coverage asserts warning and exceeded banners render the design-system A
 Removed the two StorageQuotaBanner AntD Alert exceptions from apps/packages/ui/scripts/design-system-product-state-baseline.json.
 
 PR opened against dev: https://github.com/rmusser01/tldw_server/pull/1728.
+
+Review pass: localized StorageQuotaBanner warning/exceeded titles, descriptions, and dismiss label through common namespace keys while preserving English fallback copy. Verified the shared design-system Alert primitive already renders variant icons by default, so no icon-parity code change was needed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated StorageQuotaBanner warning and exceeded quota banners from AntD Alert to the shared design-system Alert primitive, added focused assertions that both states render the design-system primitive, and removed the StorageQuotaBanner AntD Alert baseline exceptions. Verification recorded: red test failed on missing design-system Alert marker, focused StorageQuotaBanner tests passed after implementation, combined StorageQuotaBanner/product-state guard suite passed, design-system verifier passed with 477 remaining AntD product-state baseline exceptions, baseline JSON parse passed, git diff --check passed, and package TypeScript still has existing unrelated diagnostics with no touched-file matches. Bandit is not applicable because this slice touched TypeScript, test, and JSON frontend files only.
+Migrated StorageQuotaBanner warning and exceeded quota banners from AntD Alert to the shared design-system Alert primitive, added focused assertions that both states render the design-system primitive, removed the StorageQuotaBanner AntD Alert baseline exceptions, and addressed PR review by routing the banner titles, descriptions, and dismiss label through i18n keys with English fallbacks. Verification recorded: red test failed on missing design-system Alert marker, focused StorageQuotaBanner tests passed after implementation and review fix, combined StorageQuotaBanner/product-state guard suite passed, design-system verifier passed with 477 remaining AntD product-state baseline exceptions, locale JSON parse passed, git diff --check passed, and the repo-wide frontend tsc pass was stopped after running long with no output. Bandit is not applicable because this slice touched TypeScript, test, and JSON frontend files only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
