@@ -38,11 +38,16 @@ Do not generate final Buddy images in this slice. Do not change runtime renderin
   - Owns service-level starter fixture validation.
   - Reject recipe `animation_outputs` that are static/source asset groups before
     invalid fixture metadata reaches API response construction.
+  - Reject recipe `animation_outputs` that are not declared as expected asset
+    groups for the same starter, so a fixture cannot advertise a production
+    output that the catalog does not claim to collect.
 
 - Modify: `tldw_Server_API/app/api/v1/schemas/persona.py`
   - Owns API response validation for starter production recipes.
   - Reuse the shared taxonomy to validate that recipe `animation_outputs` use
     supported timed-output IDs and do not include static asset groups.
+  - Reuse the shared taxonomy to validate starter `expected_asset_groups` at the
+    API response boundary as a backstop against catalog drift.
 
 - Modify: `tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py`
   - Owns focused starter catalog fixture/service validation.
@@ -57,11 +62,23 @@ Do not generate final Buddy images in this slice. Do not change runtime renderin
   - Owns generated-candidate job and provenance coverage.
   - Update any invalid recipe-output fixtures that use static sheet outputs.
 
+- Modify: `tldw_Server_API/tests/Persona/test_persona_visual_candidate_provenance.py`
+  - Owns generated-candidate provenance sanitization coverage.
+  - Keep `static_sheet` as guidance metadata, but do not use static sheet labels
+    as recipe output IDs.
+
+- Modify: `tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py`
+  - Owns DB-level candidate provenance persistence coverage.
+  - Keep historical/static-sheet text sanitization coverage while using a valid
+    timed recipe output ID.
+
 - Modify: `Docs/Code_Documentation/Persona_Visual_Packs.md`
   - Owns durable technical documentation for Persona/Buddy visual packs.
   - Clarify that static talking/reaction sheets are expected asset groups and source material, not timed animation outputs.
 
-- Modify: `backlog/tasks/task-410 - Design-Persona-Buddy-default-catalog-and-manifest-v2-visual-states.md`
+- Modify: implementation Backlog task for this slice.
+  - Use `TASK-411` if present: `backlog/tasks/task-411 - Separate-Buddy-static-source-sheets-from-animation-outputs.md`.
+  - Fall back to `TASK-410` only if `TASK-411` does not exist in the worktree.
   - Record the plan path, touched files, verification, and known Bandit/doc-only details.
 
 ## Task 1: Add Pipeline Taxonomy Tests
@@ -100,6 +117,7 @@ def test_default_starter_production_recipes_use_pipeline_taxonomy(
         assert expected_groups <= BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS
         assert animation_outputs <= BUDDY_VISUAL_ANIMATION_OUTPUT_IDS
         assert not (animation_outputs & BUDDY_VISUAL_STATIC_SOURCE_ASSET_GROUP_IDS)
+        assert animation_outputs <= expected_groups
 ```
 
 Add this test to prove intermediate/intricate starters still ask for static source material, but not as animation outputs:
@@ -243,6 +261,8 @@ animation_outputs=(
 ```
 
 Do not remove `static_talking_reaction_sheet` from `_INTERMEDIATE_EXPECTED_ASSET_GROUPS` or `_INTRICATE_EXPECTED_ASSET_GROUPS`.
+Add `required_state_loops` to `_INTRICATE_EXPECTED_ASSET_GROUPS` so every
+recipe `animation_outputs` value is also declared as an expected asset group.
 
 - [ ] **Step 2: Update existing catalog expectations**
 
@@ -329,6 +349,32 @@ def test_list_starter_packs_rejects_static_source_animation_outputs(
     assert exc_info.value.details["field_name"] == "production_recipe.animation_outputs"
 ```
 
+Add a sibling service-level test proving a timed output is still rejected when
+the starter does not declare the corresponding expected asset group:
+
+```python
+def test_list_starter_packs_rejects_recipe_outputs_missing_expected_groups(
+    db_instance: CharactersRAGDB,
+) -> None:
+    malformed = replace(
+        DEFAULT_PERSONA_VISUAL_STARTER_PACKS[0],
+        production_recipe=PersonaVisualStarterProductionRecipe(
+            identity_brief="Identity",
+            neutral_anchor="Neutral anchor",
+            static_sheet="Static sheet",
+            animation_outputs=("custom_state_variants",),
+        ),
+    )
+    service = PersonaVisualStarterCatalogService(db_instance, starter_packs=(malformed,))
+
+    with pytest.raises(PersonaVisualStarterCatalogError) as exc_info:
+        service.list_starter_packs()
+
+    assert exc_info.value.code == "invalid_starter_fixture"
+    assert exc_info.value.details["field_name"] == "production_recipe.animation_outputs"
+    assert exc_info.value.details["invalid_outputs"] == ["custom_state_variants"]
+```
+
 Add a test near `test_production_recipe_response_enforces_catalog_bounds`:
 
 ```python
@@ -352,6 +398,24 @@ def test_production_recipe_response_rejects_non_animation_outputs(
         PersonaVisualStarterProductionRecipeResponse.model_validate(payload)
 ```
 
+Also import `PersonaVisualStarterPackResponse` and add a response-boundary test
+for unknown expected asset groups:
+
+```python
+def test_starter_pack_response_rejects_unknown_expected_asset_groups() -> None:
+    payload = {
+        "id": "starter-with-bad-group",
+        "title": "Starter With Bad Group",
+        "description": "Invalid starter metadata.",
+        "renderer_type": "sprite_frames",
+        "expected_asset_groups": ["neutral_anchor", "unknown_group"],
+        "production_recipe": _valid_recipe_payload(),
+    }
+
+    with pytest.raises(ValidationError):
+        PersonaVisualStarterPackResponse.model_validate(payload)
+```
+
 - [ ] **Step 2: Run tests and verify they fail**
 
 Run:
@@ -360,6 +424,8 @@ Run:
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
   tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py::test_list_starter_packs_rejects_static_source_animation_outputs \
   tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py::test_production_recipe_response_rejects_non_animation_outputs \
+  tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py::test_list_starter_packs_rejects_recipe_outputs_missing_expected_groups \
+  tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py::test_starter_pack_response_rejects_unknown_expected_asset_groups \
   -v
 ```
 
@@ -373,10 +439,33 @@ In `tldw_Server_API/app/core/Persona/visual_starter_catalog.py`, import:
 ```python
 from tldw_Server_API.app.core.Persona.visual_starter_recipe_taxonomy import (
     BUDDY_VISUAL_ANIMATION_OUTPUT_IDS,
+    BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS,
 )
 ```
 
-After `animation_outputs` is normalized in `_starter_production_recipe()`, add:
+In `_validate_starter_fixture()`, after `expected_asset_groups` is normalized,
+reject unknown expected asset groups:
+
+```python
+        invalid_expected_groups = sorted(
+            group
+            for group in expected_asset_groups
+            if group not in BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS
+        )
+        if invalid_expected_groups:
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter expected_asset_groups must use supported pipeline group ids.",
+                details={
+                    "starter_pack_id": starter.id,
+                    "field_name": "expected_asset_groups",
+                    "invalid_groups": invalid_expected_groups,
+                },
+            )
+```
+
+After `animation_outputs` is normalized in `_starter_production_recipe()`, reject
+unknown or static/source outputs:
 
 ```python
         invalid_outputs = sorted(
@@ -396,6 +485,34 @@ After `animation_outputs` is normalized in `_starter_production_recipe()`, add:
             )
 ```
 
+Then, back in `_validate_starter_fixture()`, after normalizing the production
+recipe, reject timed outputs that are not also declared in `expected_asset_groups`:
+
+```python
+        production_recipe = PersonaVisualStarterCatalogService._starter_production_recipe(
+            starter.production_recipe,
+            starter_id=starter.id,
+        )
+        missing_expected_outputs = sorted(
+            output
+            for output in production_recipe["animation_outputs"]
+            if output not in expected_asset_groups
+        )
+        if missing_expected_outputs:
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter production recipe outputs must be declared expected asset groups.",
+                details={
+                    "starter_pack_id": starter.id,
+                    "field_name": "production_recipe.animation_outputs",
+                    "invalid_outputs": missing_expected_outputs,
+                },
+            )
+```
+
+Avoid calling `_starter_production_recipe()` twice in the same validation path;
+reuse the normalized value for the consistency check.
+
 - [ ] **Step 4: Add schema validator using the shared taxonomy**
 
 In `tldw_Server_API/app/api/v1/schemas/persona.py`, import:
@@ -403,6 +520,7 @@ In `tldw_Server_API/app/api/v1/schemas/persona.py`, import:
 ```python
 from tldw_Server_API.app.core.Persona.visual_starter_recipe_taxonomy import (
     BUDDY_VISUAL_ANIMATION_OUTPUT_IDS,
+    BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS,
 )
 ```
 
@@ -419,6 +537,20 @@ Add a validator to `PersonaVisualStarterProductionRecipeResponse`:
             raise ValueError(
                 "animation_outputs must contain timed animation output ids only"
             )
+        return value
+```
+
+Add a validator to `PersonaVisualStarterPackResponse`:
+
+```python
+    @field_validator("expected_asset_groups")
+    @classmethod
+    def validate_expected_asset_groups(cls, value: list[str]) -> list[str]:
+        invalid = sorted(
+            group for group in value if group not in BUDDY_VISUAL_EXPECTED_ASSET_GROUP_IDS
+        )
+        if invalid:
+            raise ValueError("expected_asset_groups must contain supported pipeline group ids")
         return value
 ```
 
@@ -449,11 +581,13 @@ git add tldw_Server_API/app/core/Persona/visual_starter_recipe_taxonomy.py \
 git commit -m "fix: bound buddy starter recipe animation outputs"
 ```
 
-## Task 4: Update API And Job Tests For Valid Recipe Outputs
+## Task 4: Update API, Job, And Provenance Tests For Valid Recipe Outputs
 
 **Files:**
 - Modify: `tldw_Server_API/tests/Persona/test_persona_visuals_api.py`
 - Modify: `tldw_Server_API/tests/Persona/test_persona_visual_jobs.py`
+- Modify: `tldw_Server_API/tests/Persona/test_persona_visual_candidate_provenance.py`
+- Modify: `tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py`
 
 - [ ] **Step 1: Find stale static recipe-output assumptions**
 
@@ -462,7 +596,9 @@ Run:
 ```bash
 rg -n '"static_sheet"|"static_talking_reaction_sheet"|recipe_output' \
   tldw_Server_API/tests/Persona/test_persona_visuals_api.py \
-  tldw_Server_API/tests/Persona/test_persona_visual_jobs.py
+  tldw_Server_API/tests/Persona/test_persona_visual_jobs.py \
+  tldw_Server_API/tests/Persona/test_persona_visual_candidate_provenance.py \
+  tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py
 ```
 
 Expected: identify any test fixtures that use `recipe_output: "static_sheet"` or expect `static_talking_reaction_sheet` as an animation output.
@@ -489,6 +625,8 @@ Run:
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
   tldw_Server_API/tests/Persona/test_persona_visuals_api.py \
   tldw_Server_API/tests/Persona/test_persona_visual_jobs.py \
+  tldw_Server_API/tests/Persona/test_persona_visual_candidate_provenance.py \
+  tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py \
   -v
 ```
 
@@ -500,7 +638,9 @@ Run:
 
 ```bash
 git add tldw_Server_API/tests/Persona/test_persona_visuals_api.py \
-  tldw_Server_API/tests/Persona/test_persona_visual_jobs.py
+  tldw_Server_API/tests/Persona/test_persona_visual_jobs.py \
+  tldw_Server_API/tests/Persona/test_persona_visual_candidate_provenance.py \
+  tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py
 git commit -m "test: align buddy recipe output consumers"
 ```
 
@@ -508,7 +648,8 @@ git commit -m "test: align buddy recipe output consumers"
 
 **Files:**
 - Modify: `Docs/Code_Documentation/Persona_Visual_Packs.md`
-- Modify: `backlog/tasks/task-410 - Design-Persona-Buddy-default-catalog-and-manifest-v2-visual-states.md`
+- Modify: implementation Backlog task for this slice (`TASK-411` when present,
+  otherwise `TASK-410`)
 
 - [ ] **Step 1: Patch Persona Visual Packs documentation**
 
@@ -532,7 +673,7 @@ If there is no existing docs test for this exact file, do not add a new broad do
 
 - [ ] **Step 3: Update Backlog task metadata**
 
-Use the Backlog MCP task edit tool to add:
+Use the Backlog MCP task edit tool to add to the implementation task:
 
 - plan path: `Docs/superpowers/plans/2026-05-16-buddy-animation-pipeline-catalog-metadata-plan.md`
 - touched files from this implementation slice,
@@ -545,9 +686,12 @@ Run:
 
 ```bash
 git add Docs/Code_Documentation/Persona_Visual_Packs.md \
-  "backlog/tasks/task-410 - Design-Persona-Buddy-default-catalog-and-manifest-v2-visual-states.md"
+  "backlog/tasks/task-411 - Separate-Buddy-static-source-sheets-from-animation-outputs.md"
 git commit -m "docs: clarify buddy static sheet recipe semantics"
 ```
+
+If `TASK-411` is not present in the worktree, use the `TASK-410` design task
+path instead and note the fallback in the task update.
 
 ## Task 6: Final Verification
 
@@ -563,6 +707,8 @@ Run:
   tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py \
   tldw_Server_API/tests/Persona/test_persona_visuals_api.py \
   tldw_Server_API/tests/Persona/test_persona_visual_jobs.py \
+  tldw_Server_API/tests/Persona/test_persona_visual_candidate_provenance.py \
+  tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py \
   -v
 ```
 
@@ -632,9 +778,12 @@ Comment on GitHub issue #1787 with:
 If the Backlog task changed during final verification, commit it:
 
 ```bash
-git add "backlog/tasks/task-410 - Design-Persona-Buddy-default-catalog-and-manifest-v2-visual-states.md"
+git add "backlog/tasks/task-411 - Separate-Buddy-static-source-sheets-from-animation-outputs.md"
 git commit -m "chore: record buddy catalog metadata verification"
 ```
+
+If `TASK-411` is not present in the worktree, use the `TASK-410` design task
+path instead and note the fallback in the commit summary.
 
 ## Completion Criteria
 
@@ -645,7 +794,7 @@ This slice is complete when:
   groups in `animation_outputs`.
 - starter catalog/API/job tests pass.
 - docs explain the distinction clearly.
-- issue #1787 and the Backlog task record the verification.
+- issue #1787 and the implementation Backlog task record the verification.
 
 ## Out Of Scope For This Plan
 
