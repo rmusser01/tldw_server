@@ -386,7 +386,7 @@ git add "backlog/tasks/task-397.8 - Implement-llama.cpp-Admin-saved-profile-edit
 git commit -m "docs: close out llama.cpp profile editor task"
 ```
 
-- [ ] **Step 7: Prepare PR**
+- [x] **Step 7: Prepare PR**
 
 Check status and diff:
 
