@@ -3949,17 +3949,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/PersonaGarden/AssistantVoiceCard.tsx:Alert",
-    "path": "src/components/PersonaGarden/AssistantVoiceCard.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/PersonaGarden/AssistantVoiceCard.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Quiz/tabs/CreateTab.tsx:Alert#antd-alert-createtab-type-info-line-1003-u954tt",
     "path": "src/components/Quiz/tabs/CreateTab.tsx",
     "rule": "antd-product-state-import",
