@@ -6,15 +6,22 @@ from pathlib import Path
 import pytest
 
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
-from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import LlamaCppProfile, LlamaCppProfileMode
+from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_capabilities import (
+    profile_capability_metadata,
+    resolve_profile_launch,
+)
+from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
+    LlamaCppProfile,
+    LlamaCppProfileMode,
+)
 
 
-def _llamacpp_parser(models_dir: Path, **overrides: str) -> ConfigParser:
+def _llamacpp_parser(default_models_dir: Path, **overrides: str) -> ConfigParser:
     parser = ConfigParser()
     parser.add_section("LlamaCpp")
     values = {
         "enabled": "true",
-        "models_dir": str(models_dir),
+        "models_dir": str(default_models_dir),
         "allowed_paths": "",
         "registered_model_paths": "",
         "imported_asset_folders": "",
@@ -37,7 +44,6 @@ def _configure_assets(monkeypatch: pytest.MonkeyPatch, models_dir: Path) -> None
 @pytest.mark.unit
 def test_chat_profile_resolves_base_model_without_mmproj(monkeypatch, tmp_path: Path):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
-    from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_capabilities import resolve_profile_launch
 
     models_dir = tmp_path / "models"
     models_dir.mkdir()
@@ -63,7 +69,6 @@ def test_chat_profile_resolves_base_model_without_mmproj(monkeypatch, tmp_path: 
 @pytest.mark.unit
 def test_vision_profile_requires_mmproj_asset(monkeypatch, tmp_path: Path):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
-    from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_capabilities import resolve_profile_launch
 
     models_dir = tmp_path / "models"
     models_dir.mkdir()
@@ -84,7 +89,6 @@ def test_vision_profile_requires_mmproj_asset(monkeypatch, tmp_path: Path):
 @pytest.mark.unit
 def test_vision_profile_injects_resolved_mmproj(monkeypatch, tmp_path: Path):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
-    from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_capabilities import resolve_profile_launch
 
     models_dir = tmp_path / "models"
     models_dir.mkdir()
@@ -116,7 +120,6 @@ def test_vision_profile_injects_resolved_mmproj(monkeypatch, tmp_path: Path):
 @pytest.mark.unit
 def test_vision_profile_rejects_conflicting_manual_mmproj(monkeypatch, tmp_path: Path):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
-    from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_capabilities import resolve_profile_launch
 
     models_dir = tmp_path / "models"
     models_dir.mkdir()
@@ -143,7 +146,6 @@ def test_vision_profile_rejects_conflicting_manual_mmproj(monkeypatch, tmp_path:
 @pytest.mark.unit
 def test_embedding_profile_derives_text_vector_capability(monkeypatch, tmp_path: Path):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
-    from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_capabilities import resolve_profile_launch
 
     models_dir = tmp_path / "models"
     models_dir.mkdir()
@@ -167,7 +169,6 @@ def test_embedding_profile_derives_text_vector_capability(monkeypatch, tmp_path:
 @pytest.mark.unit
 def test_rerank_profile_derives_text_score_capability(monkeypatch, tmp_path: Path):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
-    from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_capabilities import resolve_profile_launch
 
     models_dir = tmp_path / "models"
     models_dir.mkdir()
@@ -191,7 +192,6 @@ def test_rerank_profile_derives_text_score_capability(monkeypatch, tmp_path: Pat
 @pytest.mark.unit
 def test_server_generic_profile_makes_no_specialized_capability_claim(monkeypatch, tmp_path: Path):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
-    from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_capabilities import resolve_profile_launch
 
     models_dir = tmp_path / "models"
     models_dir.mkdir()
@@ -217,7 +217,6 @@ def test_server_generic_profile_makes_no_specialized_capability_claim(monkeypatc
 @pytest.mark.unit
 def test_profile_capability_metadata_is_bounded(monkeypatch, tmp_path: Path):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
-    from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_capabilities import profile_capability_metadata
 
     models_dir = tmp_path / "models"
     models_dir.mkdir()
@@ -236,3 +235,29 @@ def test_profile_capability_metadata_is_bounded(monkeypatch, tmp_path: Path):
     assert metadata["capabilities"]["chat"] is True
     assert metadata["modalities"] == {"input": ["text"], "output": ["text"]}
     assert str(base.resolve()) not in repr(metadata)
+
+
+@pytest.mark.unit
+def test_manual_profile_path_fails_closed_without_allowed_paths(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+
+    base = tmp_path / "manual.gguf"
+    base.write_text("base")
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(
+            Path(""),
+            models_dir="",
+            allowed_paths="",
+        ),
+    )
+    profile = LlamaCppProfile(
+        profile_id="manual",
+        name="Manual",
+        mode=LlamaCppProfileMode.CHAT,
+        model_path=str(base),
+    )
+
+    with pytest.raises(ServerError, match="outside allowed"):
+        resolve_profile_launch(profile)

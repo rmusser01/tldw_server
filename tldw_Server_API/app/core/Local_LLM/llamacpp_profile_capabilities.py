@@ -7,9 +7,15 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import LlamaCppAsset
-from tldw_Server_API.app.core.Local_LLM import handler_utils, llamacpp_inventory_service
-from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ModelNotFoundError, ServerError
-from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import LlamaCppProfile, LlamaCppProfileMode
+from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import (
+    ModelNotFoundError,
+    ServerError,
+)
+from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
+    LlamaCppProfile,
+    LlamaCppProfileMode,
+)
 
 
 class LlamaCppResolvedProfileLaunch(BaseModel):
@@ -69,14 +75,28 @@ def profile_capability_metadata(
     }
 
 
-def _resolve_base_model_path(profile: LlamaCppProfile, assets: list[LlamaCppAsset] | None) -> Path:
+def _resolve_base_model_path(
+    profile: LlamaCppProfile,
+    assets: list[LlamaCppAsset] | None,
+) -> Path:
     if profile.model_id:
-        asset = llamacpp_inventory_service.resolve_asset_id(profile.model_id, expected_kind="gguf", assets=assets)
+        asset = llamacpp_inventory_service.resolve_asset_id(
+            profile.model_id,
+            expected_kind="gguf",
+            assets=assets,
+        )
         if not asset.resolved_path:
-            raise ModelNotFoundError(f"Model asset {profile.model_id} does not reference an available local asset.")
-        return _resolve_manual_asset_path(asset.resolved_path, expected_kind="gguf", label="Model")
+            raise ModelNotFoundError(
+                f"Model asset {profile.model_id} does not reference an "
+                "available local asset."
+            )
+        return Path(asset.resolved_path)
     if profile.model_path:
-        return _resolve_manual_asset_path(profile.model_path, expected_kind="gguf", label="Model")
+        return llamacpp_inventory_service.resolve_asset_path(
+            profile.model_path,
+            expected_kind="gguf",
+            label="Model",
+        )
     raise ModelNotFoundError("Llama.cpp profile requires a model_id or model_path.")
 
 
@@ -93,36 +113,24 @@ def _resolve_mmproj_path(
             assets=assets,
         )
         if not asset.resolved_path:
-            raise ModelNotFoundError(f"mmproj asset {profile.mmproj_model_id} does not reference an available local asset.")
-        asset_path = _resolve_manual_asset_path(asset.resolved_path, expected_kind="mmproj", label="mmproj")
+            raise ModelNotFoundError(
+                f"mmproj asset {profile.mmproj_model_id} does not reference an "
+                "available local asset."
+            )
+        asset_path = Path(asset.resolved_path)
 
     manual_value = server_args.get("mmproj")
     if manual_value in (None, ""):
         return asset_path
 
-    manual_path = _resolve_manual_asset_path(str(manual_value), expected_kind="mmproj", label="mmproj")
+    manual_path = llamacpp_inventory_service.resolve_asset_path(
+        str(manual_value),
+        expected_kind="mmproj",
+        label="mmproj",
+    )
     if asset_path is not None and manual_path != asset_path:
         raise ServerError("Profile mmproj_model_id conflicts with server_args['mmproj'].")
     return asset_path or manual_path
-
-
-def _resolve_manual_asset_path(raw_path: str, *, expected_kind: str, label: str) -> Path:
-    path = _canonical_path(Path(raw_path), label)
-    if not path.is_file():
-        raise ModelNotFoundError(f"{label} path does not reference an available local file.")
-    if llamacpp_inventory_service._asset_kind_for_path(path) != expected_kind:
-        raise ModelNotFoundError(f"{label} path does not reference a {expected_kind} asset.")
-    allowed_bases = llamacpp_inventory_service._allowed_bases_for_config(llamacpp_inventory_service._read_saved_config())
-    if allowed_bases and not handler_utils.is_path_allowed(path, allowed_bases):
-        raise ServerError(f"{label} path is outside allowed llama.cpp paths.")
-    return path
-
-
-def _canonical_path(path: Path, label: str) -> Path:
-    try:
-        return path.expanduser().resolve()
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise ServerError(f"{label} path could not be resolved.") from exc
 
 
 def _capabilities_for_mode(

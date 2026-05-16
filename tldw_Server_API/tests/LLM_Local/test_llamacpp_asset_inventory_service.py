@@ -6,12 +6,12 @@ from pathlib import Path
 import pytest
 
 
-def _llamacpp_parser(models_dir: Path, **overrides: str) -> ConfigParser:
+def _llamacpp_parser(default_models_dir: Path, **overrides: str) -> ConfigParser:
     parser = ConfigParser()
     parser.add_section("LlamaCpp")
     values = {
         "enabled": "true",
-        "models_dir": str(models_dir),
+        "models_dir": str(default_models_dir),
         "allowed_paths": "",
         "registered_model_paths": "",
         "imported_asset_folders": "",
@@ -55,7 +55,11 @@ def test_scan_assets_discovers_gguf_mmproj_and_folder(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(
         llamacpp_inventory_service,
         "load_comprehensive_config",
-        lambda: _llamacpp_parser(models_dir, allowed_paths=str(imported), imported_asset_folders=str(imported)),
+        lambda: _llamacpp_parser(
+            models_dir,
+            allowed_paths=str(imported),
+            imported_asset_folders=str(imported),
+        ),
     )
 
     result = llamacpp_inventory_service.scan_assets(limit=500)
@@ -226,3 +230,27 @@ def test_resolve_asset_id_accepts_folder_expected_kind(monkeypatch, tmp_path: Pa
 
     assert resolved.kind == "folder"
     assert resolved.resolved_path == str(imported.resolve())
+
+
+@pytest.mark.unit
+def test_resolve_asset_id_fails_closed_without_allowed_paths(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+    from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
+
+    base = tmp_path / "chat.gguf"
+    base.write_text("base")
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(
+            Path(""),
+            models_dir="",
+            registered_model_paths=str(base),
+        ),
+    )
+
+    with pytest.raises(ServerError, match="outside allowed"):
+        llamacpp_inventory_service.resolve_asset_id(
+            llamacpp_inventory_service.asset_id_for_path(base, "gguf"),
+            expected_kind="gguf",
+        )
