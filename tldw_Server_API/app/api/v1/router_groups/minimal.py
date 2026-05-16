@@ -182,6 +182,16 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             skip_context="in minimal test app",
         ),
     )
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.vllm_management",
+            log_name="vllm_management",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("llm",),
+            skip_context="in minimal test app",
+        ),
+    )
 
     for llm_spec in (
         ImportedRouterSpec(

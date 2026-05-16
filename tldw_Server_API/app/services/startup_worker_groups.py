@@ -26,6 +26,10 @@ class StartupWorkerGroupHandles:
     data_tables_jobs_task: Any | None = None
     prompt_studio_jobs_stop_event: Any | None = None
     prompt_studio_jobs_task: Any | None = None
+    vllm_management_stop_event: Any | None = None
+    vllm_management_task: Any | None = None
+    vllm_management_reconciler_stop_event: Any | None = None
+    vllm_management_reconciler_task: Any | None = None
     study_pack_jobs_stop_event: Any | None = None
     study_pack_jobs_task: Any | None = None
     study_suggestions_jobs_stop_event: Any | None = None
@@ -159,6 +163,12 @@ async def start_worker_groups(
         data_tables_jobs_task=primary_jobs_poller_handles.data_tables_jobs_task,
         prompt_studio_jobs_stop_event=primary_jobs_poller_handles.prompt_studio_jobs_stop_event,
         prompt_studio_jobs_task=primary_jobs_poller_handles.prompt_studio_jobs_task,
+        vllm_management_stop_event=primary_jobs_poller_handles.vllm_management_stop_event,
+        vllm_management_task=primary_jobs_poller_handles.vllm_management_task,
+        vllm_management_reconciler_stop_event=(
+            primary_jobs_poller_handles.vllm_management_reconciler_stop_event
+        ),
+        vllm_management_reconciler_task=primary_jobs_poller_handles.vllm_management_reconciler_task,
         study_pack_jobs_stop_event=study_privilege_jobs_poller_handles.study_pack_jobs_stop_event,
         study_pack_jobs_task=study_privilege_jobs_poller_handles.study_pack_jobs_task,
         study_suggestions_jobs_stop_event=(study_privilege_jobs_poller_handles.study_suggestions_jobs_stop_event),

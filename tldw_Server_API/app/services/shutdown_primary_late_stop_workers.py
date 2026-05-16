@@ -22,6 +22,8 @@ class PrimaryLateStopWorkerHandles:
     data_tables_jobs_stop_event: Any | None = None
     prompt_studio_jobs_task: Any | None = None
     prompt_studio_jobs_stop_event: Any | None = None
+    vllm_management_task: Any | None = None
+    vllm_management_stop_event: Any | None = None
     privilege_snapshot_task: Any | None = None
     privilege_snapshot_stop_event: Any | None = None
     audio_jobs_task: Any | None = None
@@ -40,6 +42,8 @@ async def shutdown_primary_late_stop_workers(
     data_tables_jobs_stop_event: Any | None,
     prompt_studio_jobs_task: Any | None,
     prompt_studio_jobs_stop_event: Any | None,
+    vllm_management_task: Any | None,
+    vllm_management_stop_event: Any | None,
     privilege_snapshot_task: Any | None,
     privilege_snapshot_stop_event: Any | None,
     audio_jobs_task: Any | None,
@@ -74,6 +78,12 @@ async def shutdown_primary_late_stop_workers(
         should_run_late_stop=should_run_late_stop,
         guard_exceptions=guard_exceptions,
     )
+    vllm_management_shutdown_handles = await _shutdown_vllm_management_worker(
+        vllm_management_task=vllm_management_task,
+        vllm_management_stop_event=vllm_management_stop_event,
+        should_run_late_stop=should_run_late_stop,
+        guard_exceptions=guard_exceptions,
+    )
     privilege_snapshot_shutdown_handles = await _shutdown_privilege_snapshot_worker(
         privilege_snapshot_task=privilege_snapshot_task,
         privilege_snapshot_stop_event=privilege_snapshot_stop_event,
@@ -101,6 +111,8 @@ async def shutdown_primary_late_stop_workers(
         data_tables_jobs_stop_event=data_tables_jobs_shutdown_handles.data_tables_jobs_stop_event,
         prompt_studio_jobs_task=prompt_studio_jobs_shutdown_handles.prompt_studio_jobs_task,
         prompt_studio_jobs_stop_event=prompt_studio_jobs_shutdown_handles.prompt_studio_jobs_stop_event,
+        vllm_management_task=vllm_management_shutdown_handles.vllm_management_task,
+        vllm_management_stop_event=vllm_management_shutdown_handles.vllm_management_stop_event,
         privilege_snapshot_task=privilege_snapshot_shutdown_handles.privilege_snapshot_task,
         privilege_snapshot_stop_event=privilege_snapshot_shutdown_handles.privilege_snapshot_stop_event,
         audio_jobs_task=audio_jobs_shutdown_handles.audio_jobs_task,
@@ -122,6 +134,8 @@ async def run_shutdown_primary_late_stop_workers(
     data_tables_jobs_stop_event: Any | None,
     prompt_studio_jobs_task: Any | None,
     prompt_studio_jobs_stop_event: Any | None,
+    vllm_management_task: Any | None,
+    vllm_management_stop_event: Any | None,
     privilege_snapshot_task: Any | None,
     privilege_snapshot_stop_event: Any | None,
     audio_jobs_task: Any | None,
@@ -142,6 +156,8 @@ async def run_shutdown_primary_late_stop_workers(
             data_tables_jobs_stop_event=data_tables_jobs_stop_event,
             prompt_studio_jobs_task=prompt_studio_jobs_task,
             prompt_studio_jobs_stop_event=prompt_studio_jobs_stop_event,
+            vllm_management_task=vllm_management_task,
+            vllm_management_stop_event=vllm_management_stop_event,
             privilege_snapshot_task=privilege_snapshot_task,
             privilege_snapshot_stop_event=privilege_snapshot_stop_event,
             audio_jobs_task=audio_jobs_task,
@@ -162,6 +178,8 @@ async def run_shutdown_primary_late_stop_workers(
             data_tables_jobs_stop_event=data_tables_jobs_stop_event,
             prompt_studio_jobs_task=prompt_studio_jobs_task,
             prompt_studio_jobs_stop_event=prompt_studio_jobs_stop_event,
+            vllm_management_task=vllm_management_task,
+            vllm_management_stop_event=vllm_management_stop_event,
             privilege_snapshot_task=privilege_snapshot_task,
             privilege_snapshot_stop_event=privilege_snapshot_stop_event,
             audio_jobs_task=audio_jobs_task,
@@ -197,6 +215,14 @@ async def _shutdown_prompt_studio_jobs_worker(**kwargs):
     )
 
     return await shutdown_prompt_studio_jobs_worker(**kwargs)
+
+
+async def _shutdown_vllm_management_worker(**kwargs):
+    from tldw_Server_API.app.services.shutdown_vllm_management_worker import (
+        shutdown_vllm_management_worker,
+    )
+
+    return await shutdown_vllm_management_worker(**kwargs)
 
 
 async def _shutdown_privilege_snapshot_worker(**kwargs):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -2545,3 +2546,40 @@ def test_lifespan_exposes_openapi_after_startup(client_user_only) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert "paths" in payload
+
+
+@pytest.mark.integration
+def test_lifespan_starts_and_stops_managed_vllm_reconciler_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    import tldw_Server_API.app.main as app_main
+    import tldw_Server_API.app.core.VLLM_Management.reconciler as reconciler_mod
+
+    started = threading.Event()
+    stopped = threading.Event()
+    observed: dict[str, object] = {}
+
+    class _StubReconciler:
+        def __init__(self) -> None:
+            observed["constructed"] = int(observed.get("constructed", 0)) + 1
+
+        async def run_loop(self, stop_event) -> None:  # noqa: ANN001
+            observed["run_loop_calls"] = int(observed.get("run_loop_calls", 0)) + 1
+            observed["stop_event"] = stop_event
+            started.set()
+            await stop_event.wait()
+            stopped.set()
+
+        async def run_startup_probe(self) -> None:
+            raise AssertionError("main.py should schedule the reconciler loop, not a one-shot startup probe")
+
+    monkeypatch.setenv("VLLM_MANAGEMENT_WORKER_ENABLED", "0")
+    monkeypatch.setenv("VLLM_MANAGEMENT_STARTUP_RECONCILE_ENABLED", "1")
+    monkeypatch.setattr(reconciler_mod, "VLLMReconciler", _StubReconciler)
+
+    with TestClient(app_main.app):
+        assert started.wait(timeout=1.0) is True
+        assert observed["constructed"] == 1
+        assert observed["run_loop_calls"] == 1
+        assert observed["stop_event"].is_set() is False
+
+    assert stopped.wait(timeout=1.0) is True
+    assert observed["stop_event"].is_set() is True

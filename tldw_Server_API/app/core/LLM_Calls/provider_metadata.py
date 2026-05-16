@@ -247,3 +247,111 @@ PROVIDER_CAPABILITIES.update(
 
 def list_registered_providers() -> list[str]:
     return get_registry().list_providers()
+
+
+def get_managed_vllm_provider_metadata(repository: Any | None = None) -> dict[str, Any]:
+    """Summarize managed vLLM instances for provider listings."""
+
+    try:
+        from tldw_Server_API.app.core.VLLM_Management import (
+            derive_effective_capabilities,
+            get_default_vllm_instance_repository,
+            resolve_vllm_instance_for_request,
+        )
+    except Exception:
+        return {
+            "count": 0,
+            "default_instance_id": None,
+            "default_model": None,
+            "default_base_url": None,
+            "models": [],
+            "capabilities": {},
+            "instances": [],
+        }
+
+    repo = repository or get_default_vllm_instance_repository()
+    records = list(repo.list_instances())
+    default_instance_id = repo.get_default_instance_id()
+    default_route = None
+    if default_instance_id:
+        try:
+            default_route = resolve_vllm_instance_for_request(
+                provider="vllm",
+                provider_instance_id=default_instance_id,
+                required_capability=None,
+                repository=repo,
+            )
+        except Exception:
+            default_route = None
+
+    aggregate_capabilities = {
+        "chat": False,
+        "embeddings": False,
+        "vision": False,
+        "audio": False,
+        "multimodal": False,
+    }
+    models: list[str] = []
+    instances: list[dict[str, Any]] = []
+
+    ordered_records = sorted(
+        records,
+        key=lambda record: (
+            0 if record.instance_id == default_instance_id else 1,
+            str(record.name or "").lower(),
+            record.instance_id,
+        ),
+    )
+    for record in ordered_records:
+        effective_capabilities = record.effective_capabilities or derive_effective_capabilities(
+            declared_capabilities=record.declared_capabilities,
+            probed_capabilities=record.probed_capabilities,
+        )
+        for capability in aggregate_capabilities:
+            aggregate_capabilities[capability] = bool(
+                aggregate_capabilities[capability] or effective_capabilities.get(capability, False)
+            )
+        model_name = record.launch_spec.get("served_model_name") or record.launch_spec.get("model")
+        if model_name:
+            normalized_model = str(model_name).strip()
+            if normalized_model and normalized_model not in models:
+                models.append(normalized_model)
+        instances.append(
+            {
+                "instance_id": record.instance_id,
+                "name": record.name,
+                "execution_mode": record.execution_mode,
+                "desired_state": record.desired_state,
+                "observed_state": record.observed_state,
+                "model": str(model_name).strip() if model_name else None,
+                "last_known_base_url": record.last_known_base_url,
+                "effective_capabilities": effective_capabilities,
+            }
+        )
+
+    default_model = None
+    default_base_url = None
+    if default_route is not None:
+        default_model = default_route.model
+        default_base_url = default_route.base_url
+    elif default_instance_id:
+        default_record = next(
+            (record for record in ordered_records if record.instance_id == default_instance_id),
+            None,
+        )
+        if default_record is not None:
+            default_model = (
+                default_record.launch_spec.get("served_model_name")
+                or default_record.launch_spec.get("model")
+            )
+            default_base_url = default_record.last_known_base_url
+
+    return {
+        "count": len(records),
+        "default_instance_id": default_instance_id,
+        "default_model": str(default_model).strip() if default_model else None,
+        "default_base_url": str(default_base_url).strip() if default_base_url else None,
+        "models": models,
+        "capabilities": aggregate_capabilities,
+        "instances": instances,
+    }

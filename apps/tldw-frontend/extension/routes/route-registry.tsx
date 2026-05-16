@@ -180,6 +180,7 @@ const OptionAdminServer = lazy(() => import("./option-admin-server"))
 const OptionAdminLlamacpp = lazy(() => import("./option-admin-llamacpp"))
 const OptionAdminMlx = lazy(() => import("./option-admin-mlx"))
 const OptionAdminMonitoring = lazy(() => import("./option-admin-monitoring"))
+const OptionAdminVllm = lazy(() => import("./option-admin-vllm"))
 const OptionChatSettings = createSettingsRoute(
   () => import("~/components/Option/Settings/ChatSettings"),
   "ChatSettings"
@@ -816,6 +817,18 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
       labelToken: "option:header.adminMonitoring",
       icon: ActivityIcon,
       order: 9
+    }
+  },
+  {
+    kind: "options",
+    path: "/admin/vllm",
+    element: <OptionAdminVllm />,
+    targets: ALL_TARGETS,
+    nav: {
+      group: "server",
+      labelToken: "option:header.adminVllm",
+      icon: Layers,
+      order: 10
     }
   },
   {

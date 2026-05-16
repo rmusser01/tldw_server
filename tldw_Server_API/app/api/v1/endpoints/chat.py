@@ -129,7 +129,7 @@ from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_selector i
 from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_telemetry import (
     compute_persona_exemplar_telemetry,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError, ChatBadRequestError
 from tldw_Server_API.app.core.Chat.chat_exceptions import (
     ChatDatabaseError,
     ChatErrorCode,
@@ -150,16 +150,15 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     execute_non_stream_call,
     execute_streaming_call,
     inject_research_context_into_prompt,
+    is_model_known_for_provider,
     moderate_input_messages,
     perform_chat_api_call,
     perform_chat_api_call_async,
-    prepare_structured_response_request,
     queue_is_active,
     resolve_input_moderation_chat_type,
     resolve_moderation_chat_type,
     resolve_provider_and_model,
     resolve_provider_api_key,
-    is_model_known_for_provider,
     write_mandatory_moderation_audit,
 )
 from tldw_Server_API.app.core.Moderation.review_service import (
@@ -171,6 +170,19 @@ from tldw_Server_API.app.core.Moderation.review_service import (
 from tldw_Server_API.app.core.Chat.prompt_template_manager import (  # noqa: F401
     apply_template_to_string,
     load_template,
+)
+from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
+from tldw_Server_API.app.core.Chat.rate_limiter import get_rate_limiter
+from tldw_Server_API.app.core.Chat.request_queue import RequestPriority, get_request_queue
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    CharactersRAGDBError,
+    ConflictError,
+    InputError,
+)
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.transaction_utils import (
+    db_transaction,
 )
 from tldw_Server_API.app.core.LLM_Calls.routing import (
     InMemoryRoutingDecisionStore,
@@ -185,19 +197,6 @@ from tldw_Server_API.app.core.LLM_Calls.routing import (
 )
 from tldw_Server_API.app.core.LLM_Calls.routing.candidate_pool import (
     build_candidate_pool,
-)
-from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
-from tldw_Server_API.app.core.Chat.rate_limiter import get_rate_limiter
-from tldw_Server_API.app.core.Chat.request_queue import RequestPriority, get_request_queue
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
-    CharactersRAGDB,
-    CharactersRAGDBError,
-    ConflictError,
-    InputError,
-)
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.DB_Management.transaction_utils import (
-    db_transaction,
 )
 from tldw_Server_API.app.core.Moderation.supervised_policy import (
     bootstrap_guardian_moderation_runtime,
@@ -237,8 +236,8 @@ from tldw_Server_API.app.api.v1.API_Deps.billing_deps import (
     require_within_limit,
 )
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory, enforcement_enabled, get_billing_enforcer
-from tldw_Server_API.app.core.AuthNZ.llm_budget_guard import enforce_llm_budget
 from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
+from tldw_Server_API.app.core.AuthNZ.llm_budget_guard import enforce_llm_budget
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
 from tldw_Server_API.app.core.AuthNZ.rbac import user_has_permission
 from tldw_Server_API.app.core.Chat import command_router
@@ -3674,6 +3673,7 @@ async def create_chat_completion(
                 app_config=app_config_override,
                 grammar_record=llamacpp_grammar_record,
                 resolved_model=model,
+                principal=getattr(getattr(request.state, "auth", None), "principal", None),
             )
             cleaned_args["request"] = request
             cleaned_args["model"] = cleaned_args.get("model") or model
@@ -3709,6 +3709,7 @@ async def create_chat_completion(
                     final_system_message=llm_final_system_message,
                     app_config=refreshed_resolution.app_config,
                     grammar_record=_resolve_llamacpp_grammar_record(target_provider),
+                    principal=getattr(getattr(request.state, "auth", None), "principal", None),
                 )
                 refreshed_args["request"] = request
                 refreshed_model = refreshed_args.get("model")

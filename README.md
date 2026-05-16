@@ -1119,6 +1119,7 @@ Run locally
 - `Docs/Documentation.md` - documentation index and developer guide links
 - `Docs/About.md` - project background and philosophy
 - Module deep dives: `Docs/Code_Documentation/AuthNZ-Developer-Guide.md`, `Docs/Code_Documentation/RAG-Developer-Guide.md`, `Docs/MCP/Unified/Developer_Guide.md`
+- Managed `vLLM` instances: `Docs/User_Guides/Integrations_Experiments/Managed_vLLM.md`
 - Packaging and releases: `Docs/Development/PyPI_Publishing.md`
 - Distribution strategy (API + WebUI): `Docs/Development/Packaging_and_Distribution_Strategy.md`
 - API references: `Docs/API-related/RAG-API-Guide.md`, `Docs/API-related/OCR_API_Documentation.md`, `Docs/API-related/Prompt_Studio_API.md`

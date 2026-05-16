@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import ipaddress
@@ -883,10 +884,8 @@ def _runtime_probe_exact_resolution(
         )
     finally:
         if original_timeout is not None:
-            try:
+            with contextlib.suppress(Exception):
                 setattr(encoding, "timeout_seconds", original_timeout)
-            except Exception:
-                pass
 
     return resolution
 
@@ -1151,24 +1150,43 @@ def resolve_provider_native_tokenizer(
             error=f"Provider-native tokenizer config unavailable: {exc}",
         )
 
-    if not parser.has_section(section) or not parser.has_option(section, endpoint_field):
-        return _unavailable_resolution(
-            strict_mode_effective=strict_flag,
-            error="Provider-native tokenizer endpoint is not configured",
-        )
-
-    endpoint = parser.get(section, endpoint_field, fallback="").strip()
-    if not endpoint or endpoint.startswith("<"):
-        return _unavailable_resolution(
-            strict_mode_effective=strict_flag,
-            error="Provider-native tokenizer endpoint is not configured",
-        )
-
     api_key = None
+    endpoint = ""
+    resolved_model = str(model or "").strip() or None
+
+    if parser.has_section(section) and parser.has_option(section, endpoint_field):
+        endpoint = parser.get(section, endpoint_field, fallback="").strip()
     if api_key_field and parser.has_option(section, api_key_field):
         raw_api_key = parser.get(section, api_key_field, fallback="").strip()
         if raw_api_key and not raw_api_key.startswith("<"):
             api_key = raw_api_key
+
+    if not endpoint or endpoint.startswith("<"):
+        if provider_key != "vllm":
+            return _unavailable_resolution(
+                strict_mode_effective=strict_flag,
+                error="Provider-native tokenizer endpoint is not configured",
+            )
+        try:
+            from tldw_Server_API.app.core.VLLM_Management.resolver import (
+                resolve_vllm_instance_for_request,
+            )
+
+            managed_route = resolve_vllm_instance_for_request(
+                provider="vllm",
+                provider_instance_id=None,
+                required_capability=None,
+            )
+        except Exception:
+            managed_route = None
+        if managed_route is None:
+            return _unavailable_resolution(
+                strict_mode_effective=strict_flag,
+                error="Provider-native tokenizer endpoint is not configured",
+            )
+        endpoint = managed_route.base_url
+        api_key = managed_route.api_key or api_key
+        resolved_model = managed_route.model or resolved_model
 
     base_url = normalize_native_tokenizer_base_url(endpoint)
     if not base_url:
@@ -1185,7 +1203,7 @@ def resolve_provider_native_tokenizer(
 
     adapter = adapter_cls(
         base_url=base_url,
-        model=str(model or "").strip() or None,
+        model=resolved_model,
         api_key=api_key,
     )
 

@@ -13,6 +13,7 @@
 ---
 
 ### Task 1: Create the Persistent vLLM Instance Repository
+**Status:** Complete
 
 **Files:**
 - Create: `tldw_Server_API/app/core/VLLM_Management/__init__.py`
@@ -117,6 +118,7 @@ git commit -m "feat: add persistent vllm instance repository"
 ```
 
 ### Task 2: Add the Request-Scoped Instance Resolver
+**Status:** Complete
 
 **Files:**
 - Create: `tldw_Server_API/app/core/VLLM_Management/resolver.py`
@@ -210,6 +212,7 @@ git commit -m "feat: add request scoped vllm instance routing"
 ```
 
 ### Task 3: Build the Structured Command Builder and Capability Model
+**Status:** Complete
 
 **Files:**
 - Create: `tldw_Server_API/app/core/VLLM_Management/command_builder.py`
@@ -292,6 +295,7 @@ git commit -m "feat: add vllm command builder and capability model"
 ```
 
 ### Task 4: Implement the Local and SSH Executors
+**Status:** Complete
 
 **Files:**
 - Create: `tldw_Server_API/app/core/VLLM_Management/executors/__init__.py`
@@ -381,10 +385,14 @@ git commit -m "feat: add vllm local and ssh executors"
 ```
 
 ### Task 5: Add the Admin API for Instance CRUD and Default Routing
+**Status:** Complete
 
 **Files:**
 - Create: `tldw_Server_API/app/api/v1/schemas/vllm_management.py`
 - Create: `tldw_Server_API/app/api/v1/endpoints/vllm_management.py`
+- Modify: `tldw_Server_API/app/core/VLLM_Management/models.py`
+- Modify: `tldw_Server_API/app/core/VLLM_Management/repository.py`
+- Modify: `tldw_Server_API/app/core/VLLM_Management/sqlite_repo.py`
 - Modify: `tldw_Server_API/app/main.py`
 - Create: `tldw_Server_API/tests/LLM_Local/test_vllm_management_api.py`
 - Create: `tldw_Server_API/tests/AuthNZ_Unit/test_vllm_permissions_claims.py`
@@ -431,7 +439,13 @@ async def create_vllm_instance(payload: VLLMInstanceCreateRequest, ...):
     return {"backend": "vllm", "instance": record}
 ```
 
-Add CRUD endpoints, list/detail responses, and default-route mutation. Reuse the `check_rate_limit` and `require_roles("admin")` dependency pattern used by `mlx` and `llama.cpp`.
+Add CRUD endpoints, list/detail responses, and default-route mutation. Expand the repository contract so the admin API can support:
+
+- instance spec updates (`update_instance`)
+- instance deletion with safety checks (`delete_instance`)
+- persisted runtime metadata reads needed by list/detail responses
+
+The repo/model layer should now carry the mutable fields the lifecycle task will need next, including `probed_capabilities`, `effective_capabilities`, `last_known_base_url`, `last_error`, and executor handle metadata. Reuse the `check_rate_limit` and `require_roles("admin")` dependency pattern used by `mlx` and `llama.cpp`.
 
 **Step 4: Run test to verify it passes**
 
@@ -451,6 +465,9 @@ Expected: PASS for admin-only CRUD/default-route behavior.
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/vllm_management.py \
         tldw_Server_API/app/api/v1/endpoints/vllm_management.py \
+        tldw_Server_API/app/core/VLLM_Management/models.py \
+        tldw_Server_API/app/core/VLLM_Management/repository.py \
+        tldw_Server_API/app/core/VLLM_Management/sqlite_repo.py \
         tldw_Server_API/app/main.py \
         tldw_Server_API/tests/LLM_Local/test_vllm_management_api.py \
         tldw_Server_API/tests/AuthNZ_Unit/test_vllm_permissions_claims.py
@@ -458,8 +475,12 @@ git commit -m "feat: add vllm instance management api"
 ```
 
 ### Task 6: Add Jobs-Backed Start, Stop, Restart, Probe, and Reconciliation
+**Status:** Complete
 
 **Files:**
+- Modify: `tldw_Server_API/app/core/VLLM_Management/models.py`
+- Modify: `tldw_Server_API/app/core/VLLM_Management/repository.py`
+- Modify: `tldw_Server_API/app/core/VLLM_Management/sqlite_repo.py`
 - Create: `tldw_Server_API/app/core/VLLM_Management/service.py`
 - Create: `tldw_Server_API/app/core/VLLM_Management/job_handlers.py`
 - Create: `tldw_Server_API/app/core/VLLM_Management/reconciler.py`
@@ -511,7 +532,15 @@ class VLLMManagementService:
         )
 ```
 
-Wire the job handlers to call the repository, resolver, command builder, and executor stack. Use the existing shared `get_job_manager` dependency from `tldw_Server_API/app/api/v1/API_Deps/jobs_deps.py` rather than importing it from a media endpoint module. Add a dedicated `WorkerSDK`-based `vllm_management_worker.py` entrypoint for the `vllm_management` domain and register reconciler startup in `app/main.py` so persisted records are probed on boot.
+Wire the job handlers to call the repository, resolver, command builder, and executor stack. This task must extend repository persistence so workers can atomically record lifecycle state transitions and runtime metadata, for example:
+
+- desired and observed state changes
+- probe results and effective capabilities
+- last known base URL
+- last error
+- executor handle / pid / remote pid metadata
+
+Use the existing shared `get_job_manager` dependency from `tldw_Server_API/app/api/v1/API_Deps/jobs_deps.py` rather than importing it from a media endpoint module. Add a dedicated `WorkerSDK`-based `vllm_management_worker.py` entrypoint for the `vllm_management` domain and register reconciler startup in `app/main.py` so persisted records are probed on boot.
 
 **Step 4: Run test to verify it passes**
 
@@ -531,6 +560,9 @@ Expected: PASS, with lifecycle endpoints returning Jobs metadata and reconciler 
 
 ```bash
 git add tldw_Server_API/app/core/VLLM_Management/service.py \
+        tldw_Server_API/app/core/VLLM_Management/models.py \
+        tldw_Server_API/app/core/VLLM_Management/repository.py \
+        tldw_Server_API/app/core/VLLM_Management/sqlite_repo.py \
         tldw_Server_API/app/core/VLLM_Management/job_handlers.py \
         tldw_Server_API/app/core/VLLM_Management/reconciler.py \
         tldw_Server_API/app/services/vllm_management_worker.py \
@@ -543,6 +575,7 @@ git commit -m "feat: add job backed vllm lifecycle orchestration"
 ```
 
 ### Task 7: Expose Managed vLLM Metadata in Provider Listings and Embeddings
+**Status:** Complete
 
 **Files:**
 - Modify: `tldw_Server_API/app/api/v1/endpoints/llm_providers.py`
@@ -614,6 +647,7 @@ git commit -m "feat: expose managed vllm metadata and embeddings routing"
 ```
 
 ### Task 8: Build the Admin UI and Client Wiring
+**Status:** Complete
 
 **Files:**
 - Create: `apps/packages/ui/src/components/Option/Admin/VllmAdminPage.tsx`
@@ -698,6 +732,7 @@ git commit -m "feat: add managed vllm admin ui"
 ```
 
 ### Task 9: Verify, Secure, and Document the Final Slice
+**Status:** Complete
 
 **Files:**
 - Modify: `README.md`

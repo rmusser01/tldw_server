@@ -500,6 +500,13 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         labelDefault: "Monitoring"
       },
       {
+        id: "admin-vllm",
+        to: "/admin/vllm",
+        icon: Layers,
+        labelKey: "option:header.adminVllm",
+        labelDefault: "vLLM Admin"
+      },
+      {
         id: "settings",
         to: "/settings",
         icon: CogIcon,

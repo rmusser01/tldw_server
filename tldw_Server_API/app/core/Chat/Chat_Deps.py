@@ -22,6 +22,11 @@ class ChatBadRequestError(ChatAPIError):
     def __init__(self, message="Invalid request sent to the chat provider.", provider=None):
         super().__init__(message, status_code=400, provider=provider) # Default to 400
 
+class ChatAuthorizationError(ChatAPIError):
+    """Exception for forbidden chat operations blocked by server policy."""
+    def __init__(self, message="Forbidden.", provider=None):
+        super().__init__(message, status_code=403, provider=provider)
+
 class ChatRateLimitError(ChatAPIError):
     """Exception for rate limit errors from the chat provider."""
     def __init__(self, message="Rate limit exceeded with the chat provider.", provider=None):

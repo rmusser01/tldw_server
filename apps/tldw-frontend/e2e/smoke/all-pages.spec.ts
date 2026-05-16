@@ -65,6 +65,7 @@ const NON_CORE_ROUTE_BOUNDARY_TARGETS = [
     routeLabel: 'Llama.cpp Admin',
   },
   { name: 'MLX Admin', path: '/admin/mlx', routeId: 'admin-mlx', routeLabel: 'MLX Admin' },
+  { name: 'vLLM Admin', path: '/admin/vllm', routeId: 'admin-vllm', routeLabel: 'vLLM Admin' },
   {
     name: 'Content Review',
     path: '/content-review',

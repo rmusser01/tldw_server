@@ -1198,6 +1198,76 @@ export interface MlxUnloadRequest {
   reason?: string
 }
 
+export type VllmExecutionMode = "local" | "ssh" | "agent"
+
+export interface VllmInstanceRecord {
+  instance_id: string
+  name: string
+  execution_mode: VllmExecutionMode | string
+  transport_config: Record<string, any>
+  launch_spec: Record<string, any>
+  routing_policy: Record<string, any>
+  declared_capabilities: Record<string, boolean>
+  desired_state: string
+  observed_state: string
+  created_at: string
+  updated_at: string
+  probed_capabilities: Record<string, boolean>
+  effective_capabilities: Record<string, boolean>
+  last_known_base_url?: string | null
+  last_error?: string | null
+  executor_handle: Record<string, any>
+}
+
+export interface VllmInstanceCreateRequest {
+  name: string
+  execution_mode: VllmExecutionMode
+  transport_config?: Record<string, any>
+  launch_spec?: Record<string, any>
+  routing_policy?: Record<string, any>
+  declared_capabilities?: Record<string, boolean>
+}
+
+export interface VllmInstanceUpdateRequest {
+  name?: string
+  execution_mode?: VllmExecutionMode
+  transport_config?: Record<string, any>
+  launch_spec?: Record<string, any>
+  routing_policy?: Record<string, any>
+  declared_capabilities?: Record<string, boolean>
+}
+
+export interface VllmInstanceEnvelope {
+  backend: string
+  instance: VllmInstanceRecord
+}
+
+export interface VllmInstanceListResponse {
+  backend: string
+  default_instance_id?: string | null
+  instances: VllmInstanceRecord[]
+}
+
+export interface VllmDefaultRouteResponse {
+  backend: string
+  default_instance_id?: string | null
+}
+
+export interface VllmDeleteResponse {
+  backend: string
+  deleted: boolean
+  instance_id: string
+}
+
+export interface VllmInstanceJobResponse {
+  backend: string
+  instance_id: string
+  requested_action: string
+  job_id: number
+  job_uuid?: string | null
+  status: string
+}
+
 export interface MediaIngestionBudgetDiagnostics {
   status: string
   entity?: string | null
@@ -2445,6 +2515,145 @@ export class TldwApiClientBase {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload || {}
+    })
+  }
+
+  async listVllmInstances(): Promise<VllmInstanceListResponse> {
+    return await bgRequest<VllmInstanceListResponse>({
+      path: "/api/v1/llm/providers/vllm/instances",
+      method: "GET"
+    })
+  }
+
+  async getVllmInstance(instanceId: string): Promise<VllmInstanceEnvelope> {
+    return await bgRequest<VllmInstanceEnvelope>({
+      path: `/api/v1/llm/providers/vllm/instances/${instanceId}`,
+      method: "GET"
+    })
+  }
+
+  async createVllmInstance(payload: VllmInstanceCreateRequest): Promise<VllmInstanceEnvelope> {
+    return await bgRequest<VllmInstanceEnvelope>({
+      path: "/api/v1/llm/providers/vllm/instances",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async updateVllmInstance(
+    instanceId: string,
+    payload: VllmInstanceUpdateRequest
+  ): Promise<VllmInstanceEnvelope> {
+    return await bgRequest<VllmInstanceEnvelope>({
+      path: `/api/v1/llm/providers/vllm/instances/${instanceId}`,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async deleteVllmInstance(instanceId: string): Promise<VllmDeleteResponse> {
+    return await bgRequest<VllmDeleteResponse>({
+      path: `/api/v1/llm/providers/vllm/instances/${instanceId}`,
+      method: "DELETE"
+    })
+  }
+
+  async setDefaultVllmInstance(instanceId: string | null): Promise<VllmDefaultRouteResponse> {
+    return await bgRequest<VllmDefaultRouteResponse>({
+      path: "/api/v1/llm/providers/vllm/default",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { instance_id: instanceId }
+    })
+  }
+
+  async startVllmInstance(instanceId: string): Promise<VllmInstanceJobResponse> {
+    return await bgRequest<VllmInstanceJobResponse>({
+      path: `/api/v1/llm/providers/vllm/instances/${instanceId}/start`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  }
+
+  async stopVllmInstance(instanceId: string): Promise<VllmInstanceJobResponse> {
+    return await bgRequest<VllmInstanceJobResponse>({
+      path: `/api/v1/llm/providers/vllm/instances/${instanceId}/stop`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  }
+
+  async restartVllmInstance(instanceId: string): Promise<VllmInstanceJobResponse> {
+    return await bgRequest<VllmInstanceJobResponse>({
+      path: `/api/v1/llm/providers/vllm/instances/${instanceId}/restart`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  }
+
+  async probeVllmInstance(instanceId: string): Promise<VllmInstanceJobResponse> {
+    return await bgRequest<VllmInstanceJobResponse>({
+      path: `/api/v1/llm/providers/vllm/instances/${instanceId}/probe`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  }
+
+  async listAdminUsers(params?: {
+    page?: number
+    limit?: number
+    role?: string
+    is_active?: boolean
+    search?: string
+  }): Promise<AdminUserListResponse> {
+    const query = this.buildQuery(params as Record<string, any>)
+    return await bgRequest<AdminUserListResponse>({
+      path: `/api/v1/admin/users${query}`,
+      method: "GET"
+    })
+  }
+
+  async updateAdminUser(
+    userId: number,
+    payload: AdminUserUpdateRequest
+  ): Promise<{ message: string }> {
+    return await bgRequest<{ message: string }>({
+      path: `/api/v1/admin/users/${userId}`,
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async listAdminRoles(): Promise<AdminRole[]> {
+    return await bgRequest<AdminRole[]>({
+      path: "/api/v1/admin/roles",
+      method: "GET"
+    })
+  }
+
+  async createAdminRole(
+    name: string,
+    description?: string
+  ): Promise<AdminRole> {
+    return await bgRequest<AdminRole>({
+      path: "/api/v1/admin/roles",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { name, description }
+    })
+  }
+
+  async deleteAdminRole(roleId: number): Promise<{ message: string }> {
+    return await bgRequest<{ message: string }>({
+      path: `/api/v1/admin/roles/${roleId}`,
+      method: "DELETE"
     })
   }
 

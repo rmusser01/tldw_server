@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.http_client import fetch as _http_fetch
 from tldw_Server_API.app.core.Image_Generation.listing import list_image_models_for_catalog
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
     PROVIDER_CAPABILITIES,
+    get_managed_vllm_provider_metadata,
     provider_requires_api_key,
 )
 from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
@@ -1572,6 +1573,7 @@ def get_configured_providers(
         except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
             health_report = {}
         registry_capability_envelopes = _llm_registry_capability_envelopes()
+        managed_vllm_metadata = get_managed_vllm_provider_metadata()
 
         # Process each provider
         for provider_name, provider_info in provider_mappings.items():
@@ -1628,6 +1630,19 @@ def get_configured_providers(
                 env_model = os.getenv("MLX_MODEL_PATH", "")
                 if env_model:
                     models = parse_model_string(env_model)
+                    is_configured = True
+            legacy_default_model = models[0] if provider_name == "vllm" and models else None
+            if provider_name == "vllm":
+                managed_models = [
+                    str(model_name).strip()
+                    for model_name in managed_vllm_metadata.get("models", [])
+                    if str(model_name).strip()
+                ]
+                if managed_models:
+                    models = _dedupe_preserve_order(managed_models + models)
+                if managed_vllm_metadata.get("default_base_url"):
+                    endpoint_url = str(managed_vllm_metadata["default_base_url"])
+                if managed_vllm_metadata.get("count"):
                     is_configured = True
             if provider_name == "mlx" and models and not is_configured:
                 is_configured = True
@@ -1732,6 +1747,12 @@ def get_configured_providers(
             }
 
             endpoint_only = provider_info['type'] == 'local' and is_configured and not models
+            provider_default_model = models[0] if models else None
+            if provider_name == "vllm":
+                provider_default_model = (
+                    managed_vllm_metadata.get("default_model")
+                    or legacy_default_model
+                )
 
             provider_data = {
                 'name': provider_name,
@@ -1740,7 +1761,7 @@ def get_configured_providers(
                 # New: detailed metadata per model
                 'models_info': models_info,
                 'type': provider_info['type'],
-                'default_model': models[0] if models else None,
+                'default_model': provider_default_model,
                 'is_configured': is_configured,  # Add configuration status
                 'endpoint_only': endpoint_only,
                 'extra_body_compat': _safe_provider_extra_body_compat(provider_name, runtime_context),
@@ -1748,6 +1769,8 @@ def get_configured_providers(
             }
             if llama_cpp_controls is not None:
                 provider_data['llama_cpp_controls'] = llama_cpp_controls
+            if provider_name == "vllm":
+                provider_data["managed_instances"] = managed_vllm_metadata
 
             # Add endpoint for local providers
             if provider_info['type'] == 'local':

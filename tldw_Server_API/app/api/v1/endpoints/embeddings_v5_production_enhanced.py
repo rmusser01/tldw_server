@@ -75,11 +75,6 @@ from tldw_Server_API.app.core.config import settings
 
 # Audit logging: unify later via unified audit DI; legacy import removed (unused here)
 from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
-
-# Circuit Breaker
-from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreaker
-from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreakerOpenError as CircuitBreakerError
-from tldw_Server_API.app.core.Infrastructure.circuit_breaker import registry as circuit_breaker_registry
 from tldw_Server_API.app.core.Embeddings.dlq_crypto import decrypt_payload_if_present
 from tldw_Server_API.app.core.Embeddings.messages import validate_schema
 from tldw_Server_API.app.core.Embeddings.request_batching import (
@@ -98,6 +93,11 @@ from tldw_Server_API.app.core.http_client import (
 from tldw_Server_API.app.core.http_client import (
     create_async_client as _create_async_client,
 )
+
+# Circuit Breaker
+from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreaker
+from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreakerOpenError as CircuitBreakerError
+from tldw_Server_API.app.core.Infrastructure.circuit_breaker import registry as circuit_breaker_registry
 from tldw_Server_API.app.core.Infrastructure.redis_factory import (
     create_async_redis_client,
     ensure_async_client_closed,
@@ -112,6 +112,8 @@ from tldw_Server_API.app.core.Usage.usage_tracker import (
     backfill_legacy_tokens_to_ledger,
     log_llm_usage,
 )
+from tldw_Server_API.app.core.VLLM_Management.authz import can_select_managed_vllm_instance
+from tldw_Server_API.app.core.VLLM_Management.resolver import resolve_vllm_instance_for_request
 
 # Exception buckets to replace broad Exception catches while preserving behavior.
 try:
@@ -755,6 +757,42 @@ def _resolve_model_and_provider(model: str | None, provider: str | None) -> tupl
         return stripped_model, prefix_provider
     resolved_provider = guess_provider_for_model(stripped_model, None)
     return stripped_model, resolved_provider
+
+
+def _resolve_managed_vllm_embeddings_route(
+    *,
+    provider: str | None,
+    explicit_provider: str | None = None,
+    provider_instance_id: str | None,
+    model: str | None,
+    principal: AuthPrincipal | None = None,
+) -> tuple[object | None, str, str | None]:
+    resolved_provider = (provider or "").strip().lower()
+    explicit_provider_key = (explicit_provider or "").strip().lower()
+    target_provider = resolved_provider
+    if provider_instance_id:
+        if not can_select_managed_vllm_instance(principal):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="provider_instance_id requires an admin or single-user principal",
+            )
+        if explicit_provider_key and explicit_provider_key != "vllm":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="provider_instance_id is only supported with provider='vllm'",
+            )
+        target_provider = "vllm"
+    try:
+        managed_route = resolve_vllm_instance_for_request(
+            provider=target_provider,
+            provider_instance_id=provider_instance_id,
+            required_capability="embeddings",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if managed_route is None:
+        return None, resolved_provider, model
+    return managed_route, "openai", managed_route.model or model
 
 
 def _get_allowed_models() -> list[str] | None:
@@ -1786,6 +1824,8 @@ def build_provider_config(
             "model_name_or_path": model,
             "api_key": api_key or settings.get("OPENAI_API_KEY"),
         }
+        if api_url:
+            config["api_url"] = api_url
         if dimensions is not None:
             config["dimensions"] = dimensions
         return config
@@ -1870,6 +1910,7 @@ async def create_embeddings_with_circuit_breaker(
                 model_cfg = OpenAIModelCfg(
                     provider="openai",
                     model_name_or_path=config.get("model_name_or_path", model_id),
+                    api_url=config.get("api_url"),
                     dimensions=dim_override,
                 )
             elif provider == "onnx":
@@ -2249,7 +2290,7 @@ async def create_embedding_endpoint(
         if exc is not None:
             raise exc
         # Validate provider (defer policy checks until after input validation)
-        provider = x_provider or "openai"
+        provider = embedding_request.provider or x_provider or "openai"
         model = embedding_request.model
         if not model:
             raise HTTPException(
@@ -2290,6 +2331,16 @@ async def create_embedding_endpoint(
                         break
 
         provider = (provider or "").lower()
+        managed_vllm_route, provider, model = _resolve_managed_vllm_embeddings_route(
+            provider=provider,
+            explicit_provider=embedding_request.provider,
+            provider_instance_id=embedding_request.provider_instance_id,
+            model=model,
+            principal=_resolve_auth_principal_from_request(request),
+        )
+        response_provider = "vllm" if managed_vllm_route is not None else provider
+        managed_vllm_api_url = managed_vllm_route.base_url if managed_vllm_route is not None else None
+        managed_vllm_api_key = managed_vllm_route.api_key if managed_vllm_route is not None else None
 
         try:
             EmbeddingProvider(provider)
@@ -2378,9 +2429,12 @@ async def create_embedding_endpoint(
         # Enforce allowlists based on config/env; admin may bypass unless STRICT is set
         enforce_policy = _should_enforce_policy_for_request(request, current_user)
         allowed_providers = _get_allowed_providers()
-        if enforce_policy and allowed_providers is not None and provider.lower() not in allowed_providers:
-            embedding_policy_denied_total.labels(provider=provider, model=model, policy_type="provider").inc()
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Provider '{provider}' is not allowed")
+        if enforce_policy and allowed_providers is not None and response_provider.lower() not in allowed_providers:
+            embedding_policy_denied_total.labels(provider=response_provider, model=model, policy_type="provider").inc()
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Provider '{response_provider}' is not allowed",
+            )
 
         allowed_models = _get_allowed_models()
         if enforce_policy and allowed_models is not None:
@@ -2524,9 +2578,9 @@ async def create_embedding_endpoint(
         embeddings: list[list[float]] = []
         embeddings_from_adapter = False
 
-        original_provider = provider
+        original_provider = response_provider
         original_model = model
-        requested_provider = provider
+        requested_provider = response_provider
 
         # Optional adapter-backed path (Stage 4 wiring): allow routing to
         # Embeddings adapters when explicitly enabled via env flag. Adapters take
@@ -2543,17 +2597,27 @@ async def create_embedding_endpoint(
                 registry = get_embeddings_registry()
                 adapter = registry.get_adapter(provider)
                 # Prepare adapter request (provider-specific key if available)
-                byok_resolution = await _resolve_provider_credentials(provider)
-                if provider in EMBEDDINGS_PROVIDERS_REQUIRE_KEY and not byok_resolution.api_key:
-                    if not _should_skip_missing_key(provider, byok_resolution):
-                        _raise_missing_embeddings_key(provider)
-                _api_key: str | None = byok_resolution.api_key
+                if managed_vllm_route is not None:
+                    _api_key = managed_vllm_api_key
+                else:
+                    byok_resolution = await _resolve_provider_credentials(provider)
+                    if provider in EMBEDDINGS_PROVIDERS_REQUIRE_KEY and not byok_resolution.api_key:
+                        if not _should_skip_missing_key(provider, byok_resolution):
+                            _raise_missing_embeddings_key(provider)
+                    _api_key = byok_resolution.api_key
 
                 adapter_request: dict[str, Any] = {
                     "input": texts_to_embed if len(texts_to_embed) > 1 else texts_to_embed[0],
                     "model": model,
                     "api_key": _api_key,
                 }
+                if managed_vllm_api_url:
+                    adapter_request["app_config"] = {
+                        "openai_api": {
+                            "api_base_url": managed_vllm_api_url,
+                            "api_key": _api_key,
+                        }
+                    }
                 if (
                     embedding_request.dimensions is not None
                     and provider.lower() == "openai"
@@ -2619,6 +2683,8 @@ async def create_embedding_endpoint(
             except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
                 allow_hdr = False
             fallback_disabled = (x_provider is not None and not allow_hdr)
+            if managed_vllm_route is not None:
+                fallback_disabled = True
             chain = [provider] if fallback_disabled else resolve_fallback_chain(provider)
             if enforce_policy and allowed_providers is not None:
                 chain = [p for p in chain if p.lower() in allowed_providers or p == provider]
@@ -2630,57 +2696,71 @@ async def create_embedding_endpoint(
                         fallback_from = provider
                     # Map model id to destination provider if needed
                     target_model_id = map_model_for_provider(original_provider, p, original_model)
-                    credentials = await _resolve_provider_credentials(p)
-                    if p in EMBEDDINGS_PROVIDERS_REQUIRE_KEY and not credentials.api_key:
-                        if _should_skip_missing_key(p, credentials):
-                            pass
-                        elif p == requested_provider:
-                            _raise_missing_embeddings_key(p)
-                        else:
-                            continue
-                    try:
-                        embeddings = await create_embeddings_batch_async(
-                            texts=texts_to_embed,
-                            provider=p,
-                            model_id=target_model_id,
-                            dimensions=embedding_request.dimensions,
-                            api_key=credentials.api_key,
-                            metadata=user_metadata,
-                        )
-                    except HTTPException as auth_exc:
-                        if not (
-                            p == "openai"
-                            and getattr(credentials, "auth_source", None) == "oauth"
-                            and _is_http_401_error(auth_exc)
-                        ):
-                            raise
-                        try:
-                            refreshed_credentials = await _resolve_provider_credentials(
-                                p,
-                                force_oauth_refresh=True,
-                            )
-                        except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as refresh_exc:
-                            _record_oauth_401_retry(p, "refresh_failed")
-                            raise auth_exc from refresh_exc
-                        if not refreshed_credentials.api_key:
-                            _record_oauth_401_retry(p, "refresh_missing_api_key")
-                            raise auth_exc
+                    if managed_vllm_route is not None and p == provider:
                         try:
                             embeddings = await create_embeddings_batch_async(
                                 texts=texts_to_embed,
                                 provider=p,
                                 model_id=target_model_id,
                                 dimensions=embedding_request.dimensions,
-                                api_key=refreshed_credentials.api_key,
+                                api_key=managed_vllm_api_key,
+                                api_url=managed_vllm_api_url,
                                 metadata=user_metadata,
                             )
-                        except HTTPException as retry_exc:
-                            if _is_http_401_error(retry_exc):
-                                _record_oauth_401_retry(p, "retry_auth_failed")
-                                raise auth_exc from retry_exc
-                            _record_oauth_401_retry(p, "retry_failed")
+                        except HTTPException:
                             raise
-                        _record_oauth_401_retry(p, "success")
+                    else:
+                        credentials = await _resolve_provider_credentials(p)
+                        if p in EMBEDDINGS_PROVIDERS_REQUIRE_KEY and not credentials.api_key:
+                            if _should_skip_missing_key(p, credentials):
+                                pass
+                            elif p == requested_provider:
+                                _raise_missing_embeddings_key(p)
+                            else:
+                                continue
+                        try:
+                            embeddings = await create_embeddings_batch_async(
+                                texts=texts_to_embed,
+                                provider=p,
+                                model_id=target_model_id,
+                                dimensions=embedding_request.dimensions,
+                                api_key=credentials.api_key,
+                                metadata=user_metadata,
+                            )
+                        except HTTPException as auth_exc:
+                            if not (
+                                p == "openai"
+                                and getattr(credentials, "auth_source", None) == "oauth"
+                                and _is_http_401_error(auth_exc)
+                            ):
+                                raise
+                            try:
+                                refreshed_credentials = await _resolve_provider_credentials(
+                                    p,
+                                    force_oauth_refresh=True,
+                                )
+                            except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as refresh_exc:
+                                _record_oauth_401_retry(p, "refresh_failed")
+                                raise auth_exc from refresh_exc
+                            if not refreshed_credentials.api_key:
+                                _record_oauth_401_retry(p, "refresh_missing_api_key")
+                                raise auth_exc
+                            try:
+                                embeddings = await create_embeddings_batch_async(
+                                    texts=texts_to_embed,
+                                    provider=p,
+                                    model_id=target_model_id,
+                                    dimensions=embedding_request.dimensions,
+                                    api_key=refreshed_credentials.api_key,
+                                    metadata=user_metadata,
+                                )
+                            except HTTPException as retry_exc:
+                                if _is_http_401_error(retry_exc):
+                                    _record_oauth_401_retry(p, "retry_auth_failed")
+                                    raise auth_exc from retry_exc
+                                _record_oauth_401_retry(p, "retry_failed")
+                                raise
+                            _record_oauth_401_retry(p, "success")
                     provider = p
                     if target_model_id:
                         model = target_model_id
@@ -2790,12 +2870,12 @@ async def create_embedding_endpoint(
         # Track metrics
         duration = time.time() - start_time
         embedding_request_duration.labels(
-            provider=provider,
+            provider=response_provider,
             model=model
         ).observe(duration)
 
         embedding_requests_total.labels(
-            provider=provider,
+            provider=response_provider,
             model=model,
             status="success"
         ).inc()
@@ -2804,10 +2884,10 @@ async def create_embedding_endpoint(
             f"Created {len(output_data)} embeddings",
             extra={
                 "user_id": current_user.id,
-                "provider": provider,
+                "provider": response_provider,
                 "model": model,
                 "duration": duration,
-                "fallback_from": original_provider if original_provider != provider else None,
+                "fallback_from": original_provider if original_provider != response_provider else None,
                 "dimensions_policy": dims_policy_used,
             }
         )
@@ -2827,7 +2907,7 @@ async def create_embedding_endpoint(
                 request=request,
                 endpoint=f"{request.method}:{request.url.path}",
                 operation="embeddings",
-                provider=provider,
+                provider=response_provider,
                 model=model,
                 status=200,
                 latency_ms=int((duration) * 1000),
@@ -2850,7 +2930,7 @@ async def create_embedding_endpoint(
 
         return CreateEmbeddingResponse(
             data=output_data,
-            model=f"{provider}:{model}" if provider != "openai" else model,
+            model=f"{response_provider}:{model}" if response_provider != "openai" else model,
             usage=EmbeddingUsage(
                 prompt_tokens=num_tokens,
                 total_tokens=num_tokens
@@ -2875,6 +2955,7 @@ class EmbeddingsBatchRequest(BaseModel):
     texts: list[str] = Field(..., min_length=1, description="Texts to embed")
     model: str | None = Field(None, description="Embedding model identifier")
     provider: str | None = Field(None, description="Embedding provider override")
+    provider_instance_id: str | None = Field(None, description="Managed provider instance identifier")
     dimensions: int | None = Field(None, description="Requested output dimensions if supported")
     batch_size: int | None = Field(None, description="Hint for provider batch sizing")
 
@@ -2917,17 +2998,28 @@ async def create_embeddings_batch_endpoint(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="texts cannot contain empty strings")
 
     model, provider = _resolve_model_and_provider(payload.model, payload.provider)
+    managed_vllm_route, provider, model = _resolve_managed_vllm_embeddings_route(
+        provider=provider,
+        explicit_provider=payload.provider,
+        provider_instance_id=payload.provider_instance_id,
+        model=model,
+        principal=_resolve_auth_principal_from_request(request),
+    )
+    response_provider = "vllm" if managed_vllm_route is not None else provider
 
     _validate_dimensions_request(provider, model, payload.dimensions)
 
     enforce_policy = _should_enforce_policy_for_request(request, current_user)
     allowed_providers = _get_allowed_providers()
-    if enforce_policy and allowed_providers is not None and provider.lower() not in allowed_providers:
-        embedding_policy_denied_total.labels(provider=provider, model=model, policy_type="provider").inc()
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Provider '{provider}' is not allowed")
+    if enforce_policy and allowed_providers is not None and response_provider.lower() not in allowed_providers:
+        embedding_policy_denied_total.labels(provider=response_provider, model=model, policy_type="provider").inc()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Provider '{response_provider}' is not allowed",
+        )
 
-    if enforce_policy and not is_model_allowed(provider, model):
-        embedding_policy_denied_total.labels(provider=provider, model=model, policy_type="model").inc()
+    if enforce_policy and not is_model_allowed(response_provider, model):
+        embedding_policy_denied_total.labels(provider=response_provider, model=model, policy_type="model").inc()
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Model '{model}' is not allowed")
 
     max_tokens = _get_model_max_tokens(provider, model)
@@ -2960,40 +3052,22 @@ async def create_embeddings_batch_endpoint(
 
     user_metadata = _build_user_metadata(current_user)
 
-    credentials = await _resolve_embeddings_byok(provider, current_user, request)
-    if provider in EMBEDDINGS_PROVIDERS_REQUIRE_KEY and not credentials.api_key:
-        if not _should_skip_missing_key(provider, credentials):
-            _raise_missing_embeddings_key(provider)
-    active_credentials = credentials
-    try:
+    if managed_vllm_route is not None:
         embeddings = await create_embeddings_batch_async(
             texts=texts,
             provider=provider,
             model_id=model,
             dimensions=payload.dimensions,
-            api_key=active_credentials.api_key,
+            api_key=managed_vllm_route.api_key,
+            api_url=managed_vllm_route.base_url,
             metadata=user_metadata,
         )
-    except HTTPException as auth_exc:
-        if not (
-            provider == "openai"
-            and getattr(active_credentials, "auth_source", None) == "oauth"
-            and _is_http_401_error(auth_exc)
-        ):
-            raise
-        try:
-            active_credentials = await _resolve_embeddings_byok(
-                provider,
-                current_user,
-                request,
-                force_oauth_refresh=True,
-            )
-        except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as refresh_exc:
-            _record_oauth_401_retry(provider, "refresh_failed")
-            raise auth_exc from refresh_exc
-        if not active_credentials.api_key:
-            _record_oauth_401_retry(provider, "refresh_missing_api_key")
-            raise auth_exc
+    else:
+        credentials = await _resolve_embeddings_byok(provider, current_user, request)
+        if provider in EMBEDDINGS_PROVIDERS_REQUIRE_KEY and not credentials.api_key:
+            if not _should_skip_missing_key(provider, credentials):
+                _raise_missing_embeddings_key(provider)
+        active_credentials = credentials
         try:
             embeddings = await create_embeddings_batch_async(
                 texts=texts,
@@ -3003,14 +3077,43 @@ async def create_embeddings_batch_endpoint(
                 api_key=active_credentials.api_key,
                 metadata=user_metadata,
             )
-        except HTTPException as retry_exc:
-            if _is_http_401_error(retry_exc):
-                _record_oauth_401_retry(provider, "retry_auth_failed")
-                raise auth_exc from retry_exc
-            _record_oauth_401_retry(provider, "retry_failed")
-            raise
-        _record_oauth_401_retry(provider, "success")
-    await active_credentials.touch_last_used()
+        except HTTPException as auth_exc:
+            if not (
+                provider == "openai"
+                and getattr(active_credentials, "auth_source", None) == "oauth"
+                and _is_http_401_error(auth_exc)
+            ):
+                raise
+            try:
+                active_credentials = await _resolve_embeddings_byok(
+                    provider,
+                    current_user,
+                    request,
+                    force_oauth_refresh=True,
+                )
+            except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as refresh_exc:
+                _record_oauth_401_retry(provider, "refresh_failed")
+                raise auth_exc from refresh_exc
+            if not active_credentials.api_key:
+                _record_oauth_401_retry(provider, "refresh_missing_api_key")
+                raise auth_exc
+            try:
+                embeddings = await create_embeddings_batch_async(
+                    texts=texts,
+                    provider=provider,
+                    model_id=model,
+                    dimensions=payload.dimensions,
+                    api_key=active_credentials.api_key,
+                    metadata=user_metadata,
+                )
+            except HTTPException as retry_exc:
+                if _is_http_401_error(retry_exc):
+                    _record_oauth_401_retry(provider, "retry_auth_failed")
+                    raise auth_exc from retry_exc
+                _record_oauth_401_retry(provider, "retry_failed")
+                raise
+            _record_oauth_401_retry(provider, "success")
+        await active_credentials.touch_last_used()
 
     if payload.dimensions is not None:
         embeddings = adjust_dimensions(embeddings, payload.dimensions, provider, model)
@@ -3027,7 +3130,7 @@ async def create_embeddings_batch_endpoint(
     return EmbeddingsBatchResponse(
         embeddings=embeddings,
         model=model,
-        provider=provider,
+        provider=response_provider,
         count=len(embeddings)
     )
 

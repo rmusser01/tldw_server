@@ -110,6 +110,13 @@ Each instance record stores:
 
 The registry is the source of truth for instance configuration. In-memory executor/session state is only a cache of current observation.
 
+The repository contract behind the registry must support more than create/get/list:
+
+- update instance specs for admin PATCH flows
+- delete stopped instances safely
+- persist lifecycle metadata changes such as desired state, observed state, last known base URL, last error, capability probes, and executor handles
+- support concurrency-safe state transitions so Jobs workers and admin reads do not race on partially updated state
+
 Transport/auth material must be stored by reference where possible. Secret-bearing fields should resolve through existing secret/config mechanisms and must not be echoed back verbatim in operator APIs or logs.
 
 ### 6.2 Request-Scoped Routing

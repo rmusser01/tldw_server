@@ -38,6 +38,14 @@ class CreateEmbeddingRequest(BaseModel):
         description="ID of the model to use. You can use the [List models](/docs/api-reference/models/list) API to see all of your available models, or see our [Model overview](/docs/models) for descriptions of them.",
         examples=["text-embedding-ada-002"]
     )
+    provider: Optional[str] = Field(
+        default=None,
+        description="Optional provider override for provider-aware embeddings routing.",
+    )
+    provider_instance_id: Optional[str] = Field(
+        default=None,
+        description="Optional managed provider instance identifier for request-scoped routing.",
+    )
     encoding_format: Optional[Literal["float", "base64"]] = Field(
         default="float",
         description="The format to return the embeddings in. Can be either `float` or `base64`."

@@ -84,6 +84,7 @@ export const PAGES: PageEntry[] = [
   { path: "/admin/server", name: "Server Admin", category: "admin" },
   { path: "/admin/llamacpp", name: "LlamaCpp Admin", category: "admin" },
   { path: "/admin/mlx", name: "MLX Admin", category: "admin" },
+  { path: "/admin/vllm", name: "vLLM Admin", category: "admin" },
   { path: "/admin/orgs", name: "Orgs Admin", category: "admin" },
   { path: "/admin/data-ops", name: "Data Ops Admin", category: "admin" },
   { path: "/admin/watchlists-items", name: "Watchlists Items", category: "admin" },

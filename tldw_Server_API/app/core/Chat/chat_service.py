@@ -34,6 +34,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventType,
     MandatoryAuditWriteError,
 )
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import replace_placeholders
 from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
     map_sender_to_role,
@@ -41,6 +42,7 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
+    ChatAuthorizationError,
     ChatBadRequestError,
     ChatConfigurationError,
     ChatProviderError,
@@ -52,6 +54,7 @@ from tldw_Server_API.app.core.Chat.chat_helpers import (
     get_or_create_character_context,
     get_or_create_conversation,
 )
+from tldw_Server_API.app.core.Chat.chat_loop_engine import is_chat_loop_mode_enabled
 from tldw_Server_API.app.core.Chat.message_utils import should_persist_message_role
 from tldw_Server_API.app.core.Chat.prompt_template_manager import (
     DEFAULT_RAW_PASSTHROUGH_TEMPLATE,
@@ -68,6 +71,10 @@ from tldw_Server_API.app.core.Chat.request_queue import (
     RequestPriority,
     get_request_queue,
 )
+from tldw_Server_API.app.core.Chat.run_first_presentation import (
+    present_chat_tools,
+    tool_names_from_definitions,
+)
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     CHAT_STREAM_INCLUDE_METADATA,
     create_streaming_response_with_timeout,
@@ -78,16 +85,11 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     STREAMING_IDLE_TIMEOUT as CHAT_IDLE_TIMEOUT,
 )
-from tldw_Server_API.app.core.Chat.chat_loop_engine import is_chat_loop_mode_enabled
-from tldw_Server_API.app.core.Chat.run_first_presentation import (
-    present_chat_tools,
-    tool_names_from_definitions,
-)
 from tldw_Server_API.app.core.Chat.tool_auto_exec import execute_assistant_tool_calls
-from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.config import (
-    resolve_chat_run_first_provider_allowlist,
+    load_comprehensive_config,
     resolve_chat_run_first_presentation_variant,
+    resolve_chat_run_first_provider_allowlist,
     resolve_chat_run_first_rollout_mode,
     resolve_run_first_cohort_label,
 )
@@ -97,14 +99,17 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     iter_custom_openai_provider_numbers,
 )
 from tldw_Server_API.app.core.LLM_Calls import adapter_registry as _adapter_registry
-from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
-    clear_openrouter_model_cache as _clear_openrouter_model_cache_shared,
-    discover_openrouter_models as _discover_openrouter_models_shared,
-)
 from tldw_Server_API.app.core.LLM_Calls.llamacpp_request_extensions import (
     resolve_llamacpp_request_extensions,
     resolve_llamacpp_runtime_caps,
 )
+from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
+    clear_openrouter_model_cache as _clear_openrouter_model_cache_shared,
+)
+from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
+    discover_openrouter_models as _discover_openrouter_models_shared,
+)
+from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     StructuredGenerationCapabilityError,
@@ -115,7 +120,6 @@ from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     negotiate_structured_response_mode,
     parse_and_validate_structured_output,
 )
-from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
 from tldw_Server_API.app.core.Moderation.review_service import (
     capture_moderation_review_item,
@@ -124,6 +128,8 @@ from tldw_Server_API.app.core.Moderation.review_service import (
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
 from tldw_Server_API.app.core.testing import (
     is_test_mode as _shared_is_test_mode,
+)
+from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
 from tldw_Server_API.app.core.Usage.pricing_catalog import (
@@ -133,6 +139,9 @@ from tldw_Server_API.app.core.Usage.pricing_catalog import (
 from tldw_Server_API.app.core.Usage.llm_usage_normalizer import normalize_llm_usage
 from tldw_Server_API.app.core.Usage.usage_tracker import log_llm_usage
 from tldw_Server_API.app.core.Utils.cpu_bound_handler import process_large_json_async
+from tldw_Server_API.app.core.VLLM_Management import infer_chat_request_capabilities
+from tldw_Server_API.app.core.VLLM_Management.authz import can_select_managed_vllm_instance
+from tldw_Server_API.app.core.VLLM_Management.resolver import resolve_vllm_instance_for_request
 
 _CHAT_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ChatAPIError,
@@ -1701,6 +1710,13 @@ def _resolve_base_url_override(provider: str, chat_args: dict[str, Any]) -> str 
         base_url = chat_args.get("api_base_url")
     if base_url is None:
         return None
+    if chat_args.get("server_resolved_base_url_override"):
+        from tldw_Server_API.app.core.AuthNZ.byok_helpers import validate_base_url_override
+
+        try:
+            return validate_base_url_override(base_url)
+        except ValueError as exc:
+            raise ChatBadRequestError(provider=(provider or "").strip().lower() or None, message=str(exc)) from exc
     provider_key = (provider or "").strip().lower()
     from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
         is_trusted_base_url_request,
@@ -1808,6 +1824,7 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
         "caller_request",
         "principal",
         "auth_user",
+        "server_resolved_base_url_override",
         "trusted_base_url_override",
         "_structured_requested_response_format",
         "stream",
@@ -1815,6 +1832,7 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
         "history_message_limit",
         "history_message_order",
         "slash_command_injection_mode",
+        "provider_instance_id",
     }
     for key, value in chat_args.items():
         if key in skip_keys or key.startswith("_chat_") or value is None:
@@ -1933,6 +1951,7 @@ def build_call_params_from_request(
     app_config: dict[str, Any] | None = None,
     grammar_record: Mapping[str, Any] | None = None,
     resolved_model: str | None = None,
+    principal: AuthPrincipal | None = None,
 ) -> dict[str, Any]:
     """Construct the cleaned argument dictionary for chat_api_call.
 
@@ -1946,6 +1965,7 @@ def build_call_params_from_request(
         exclude_none=True,
         exclude={
             "api_provider",
+            "provider_instance_id",
             "messages",
             "character_id",
             "conversation_id",
@@ -2061,6 +2081,31 @@ def build_call_params_from_request(
     )
     if app_config is not None:
         call_params["app_config"] = app_config
+
+    provider_instance_id = getattr(request_data, "provider_instance_id", None)
+    if provider_instance_id and not can_select_managed_vllm_instance(principal):
+        raise ChatAuthorizationError(
+            provider=target_api_provider,
+            message="provider_instance_id requires an admin or single-user principal",
+        )
+    if provider_instance_id or target_api_provider == "vllm":
+        required_capabilities = infer_chat_request_capabilities(getattr(request_data, "messages", None))
+        try:
+            managed_route = resolve_vllm_instance_for_request(
+                provider=target_api_provider,
+                provider_instance_id=provider_instance_id,
+                required_capability=required_capabilities,
+            )
+        except ValueError as exc:
+            raise ChatBadRequestError(provider=target_api_provider, message=str(exc)) from exc
+        if managed_route is not None:
+            call_params["base_url"] = managed_route.base_url
+            call_params["server_resolved_base_url_override"] = True
+            call_params["trusted_base_url_override"] = True
+            if managed_route.model:
+                call_params["model"] = managed_route.model
+            if not call_params.get("api_key") and managed_route.api_key:
+                call_params["api_key"] = managed_route.api_key
 
     # Filter Nones; keep explicit None for system_message only if provided
     cleaned_args = {k: v for k, v in call_params.items() if v is not None}

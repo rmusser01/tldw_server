@@ -122,6 +122,8 @@ async def run_lifespan_shutdown_sequence(
         data_tables_jobs_stop_event=worker_runtime.data_tables_jobs_stop_event,
         prompt_studio_jobs_task=worker_runtime.prompt_studio_jobs_task,
         prompt_studio_jobs_stop_event=worker_runtime.prompt_studio_jobs_stop_event,
+        vllm_management_task=worker_runtime.vllm_management_task,
+        vllm_management_stop_event=worker_runtime.vllm_management_stop_event,
         privilege_snapshot_task=worker_runtime.privilege_snapshot_task,
         privilege_snapshot_stop_event=worker_runtime.privilege_snapshot_stop_event,
         audio_jobs_task=worker_runtime.audio_jobs_task,

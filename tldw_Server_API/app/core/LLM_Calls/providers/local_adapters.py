@@ -2038,7 +2038,7 @@ class VLLMAdapter(_LocalAdapterBase):
             "user_identifier": request.get("user"),
             "tools": request.get("tools"),
             "tool_choice": request.get("tool_choice"),
-            "vllm_api_url": request.get("api_url"),
+            "vllm_api_url": request.get("api_url") or request.get("base_url"),
             "app_config": request.get("app_config"),
             "extra_headers": request.get("extra_headers"),
             "extra_body": request.get("extra_body"),
