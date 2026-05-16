@@ -115,7 +115,7 @@ Only create these helpers if the implementation would otherwise duplicate logic 
 - Read: `apps/extension/tests/e2e/quick-ingest-ux-audit.spec.ts`
 - Read: `apps/extension/tests/e2e/quick-ingest-cancel.spec.ts`
 
-- [x] **Step 1: Generate launcher and import evidence**
+- [ ] **Step 1: Generate launcher and import evidence**
 
 Run:
 
@@ -125,7 +125,7 @@ rg -n "QuickIngestWizardModal|QuickIngestModal|tldw:open-quick-ingest|open-quick
 
 Expected: output shows current wizard imports and any stale legacy/test references.
 
-- [x] **Step 2: Write the active-path map artifact**
+- [ ] **Step 2: Write the active-path map artifact**
 
 Create `Docs/superpowers/plans/2026-05-16-quick-ingest-active-path-map.md` with these sections:
 
@@ -155,7 +155,7 @@ Backlog: TASK-393
 
 Use exact file paths and short evidence snippets.
 
-- [x] **Step 3: Verify the map names every active surface**
+- [ ] **Step 3: Verify the map names every active surface**
 
 Run:
 
@@ -165,7 +165,7 @@ rg -n "Active Launch Paths|Legacy Reachability Decision|Test Classification" Doc
 
 Expected: all three headings are present.
 
-- [x] **Step 4: Commit the evidence artifact**
+- [ ] **Step 4: Commit the evidence artifact**
 
 Run:
 
@@ -187,7 +187,7 @@ Expected: commit contains only the active-path map.
 - Test: `apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx`
 - Test: `apps/tldw-frontend/e2e/workflows/media-ingest.spec.ts`
 
-- [x] **Step 1: Write failing shared wizard test for first-open purpose copy**
+- [ ] **Step 1: Write failing shared wizard test for first-open purpose copy**
 
 Add a test to `QuickIngestWizardModal.integration.test.tsx` that renders the Add step and expects:
 
@@ -199,7 +199,7 @@ expect(screen.getByText(/Knowledge/i)).toBeInTheDocument()
 
 Use the existing test harness in that file rather than creating a new harness.
 
-- [x] **Step 2: Run the failing test**
+- [ ] **Step 2: Run the failing test**
 
 Run:
 
@@ -209,7 +209,7 @@ bunx vitest run apps/packages/ui/src/components/Common/QuickIngest/__tests__/Qui
 
 Expected: the new assertion fails because the purpose/destination copy is not present yet.
 
-- [x] **Step 3: Add concise first-time copy to Add step**
+- [ ] **Step 3: Add concise first-time copy to Add step**
 
 Modify `AddContentStep.tsx` near the file/URL input area. Keep the copy short and specific:
 
@@ -224,7 +224,7 @@ Modify `AddContentStep.tsx` near the file/URL input area. Keep the copy short an
 
 Keep it outside Advanced options and below the main input heading/drop zone area.
 
-- [x] **Step 4: Align launcher terminology without removing power-user speed**
+- [ ] **Step 4: Align launcher terminology without removing power-user speed**
 
 In `QuickIngestButton.tsx`, align visible text, title, and aria label around one concept. Prefer:
 
@@ -234,7 +234,7 @@ In `QuickIngestButton.tsx`, align visible text, title, and aria label around one
 
 Do not remove the existing queued badge or `Process queued items` CTA.
 
-- [x] **Step 5: Fix the double-tilde review estimate if still present**
+- [ ] **Step 5: Fix the double-tilde review estimate if still present**
 
 In `ReviewStep.tsx`, make only one layer own approximate formatting. If `estimatedTimeLabel` already includes `~`, remove the leading `~` from the translation default:
 
@@ -242,7 +242,7 @@ In `ReviewStep.tsx`, make only one layer own approximate formatting. If `estimat
 "{{count}} items | {{preset}} preset | {{time}} estimated"
 ```
 
-- [x] **Step 6: Run focused tests**
+- [ ] **Step 6: Run focused tests**
 
 Run:
 
@@ -252,7 +252,7 @@ bunx vitest run apps/packages/ui/src/components/Common/QuickIngest/__tests__/Qui
 
 Expected: quick-ingest integration tests pass. If the layout test glob does not exist, record the missing path and run the exact Quick Ingest test file only.
 
-- [x] **Step 7: Browser-check WebUI Add step**
+- [ ] **Step 7: Browser-check WebUI Add step**
 
 Run the WebUI using the repo's normal command, or reuse an existing local server:
 
@@ -267,7 +267,7 @@ Open `/media`, launch Quick Ingest, and verify:
 - invalid URL and valid URL behavior still match the old flow
 - "Use defaults & process" remains visible after a valid item
 
-- [x] **Step 8: Commit the clarity change**
+- [ ] **Step 8: Commit the clarity change**
 
 Run:
 
@@ -291,7 +291,7 @@ Expected: commit includes only the clarity/test files touched in this task.
 - Test: `apps/tldw-frontend/e2e/workflows/media-ingest.spec.ts`
 - Test helper: `apps/tldw-frontend/e2e/utils/journey-helpers.ts`
 
-- [x] **Step 1: Write failing tests for result actions**
+- [ ] **Step 1: Write failing tests for result actions**
 
 Extend `WizardResultsStep.navigation.test.tsx` with tests that prove:
 
@@ -313,7 +313,7 @@ it("does not render Remove for errors when no remove callback exists", () => {
 
 Adjust to the existing harness types and helpers.
 
-- [x] **Step 2: Run the failing results tests**
+- [ ] **Step 2: Run the failing results tests**
 
 Run:
 
@@ -323,7 +323,7 @@ bunx vitest run apps/packages/ui/src/components/Common/QuickIngest/__tests__/Wiz
 
 Expected: new result-action tests fail before implementation.
 
-- [x] **Step 3: Add or refactor result action mapping**
+- [ ] **Step 3: Add or refactor result action mapping**
 
 If `WizardResultsStep.tsx` becomes difficult to reason about, create `result-actions.ts` with pure helpers:
 
@@ -336,7 +336,7 @@ export const canOpenMedia = (item: WizardResultItem): boolean =>
 
 Keep helpers pure and unit-testable. Do not add routing side effects to the helper.
 
-- [x] **Step 4: Wire primary Media handoff from the modal**
+- [ ] **Step 4: Wire primary Media handoff from the modal**
 
 In `QuickIngestWizardModal.tsx`, pass an `onOpenMedia` callback into `WizardResultsStep`. The callback should:
 
@@ -346,7 +346,7 @@ In `QuickIngestWizardModal.tsx`, pass an `onOpenMedia` callback into `WizardResu
 
 If no stable direct-media route exists, use the existing Media page destination and preserve the item label in visible result text. Record the limitation in task notes.
 
-- [x] **Step 5: Remove or implement error Remove**
+- [ ] **Step 5: Remove or implement error Remove**
 
 In `WizardResultsStep.tsx`, remove the unconditional no-op remove path. Acceptable outcomes:
 
@@ -355,7 +355,7 @@ In `WizardResultsStep.tsx`, remove the unconditional no-op remove path. Acceptab
 
 Do not leave a visible action wired to a no-op.
 
-- [x] **Step 6: Clarify duplicate and skipped copy**
+- [ ] **Step 6: Clarify duplicate and skipped copy**
 
 Update skipped/duplicate copy so it distinguishes:
 
@@ -365,7 +365,7 @@ Update skipped/duplicate copy so it distinguishes:
 
 Keep this copy in existing i18n/default-string patterns.
 
-- [x] **Step 7: Run focused results tests**
+- [ ] **Step 7: Run focused results tests**
 
 Run:
 
@@ -375,7 +375,7 @@ bunx vitest run apps/packages/ui/src/components/Common/QuickIngest/__tests__/Wiz
 
 Expected: result-action tests pass and session lifecycle tests still pass.
 
-- [x] **Step 8: Run focused WebUI e2e for result handoff**
+- [ ] **Step 8: Run focused WebUI e2e for result handoff**
 
 Run:
 
@@ -385,7 +385,7 @@ npx playwright test apps/tldw-frontend/e2e/workflows/media-ingest.spec.ts --grep
 
 Expected: the deterministic quick-ingest URL completion test passes and observes the updated handoff behavior.
 
-- [x] **Step 9: Commit the results/recovery change**
+- [ ] **Step 9: Commit the results/recovery change**
 
 Run:
 
@@ -403,16 +403,14 @@ If a listed file was not touched or does not exist, omit it from `git add`.
 **Files:**
 - Modify: `apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx`
 - Modify: `apps/packages/ui/src/components/Common/QuickIngest/AddContentStep.tsx`
-- Modify: `apps/packages/ui/src/components/Common/QuickIngest/ReviewStep.tsx`
 - Modify: `apps/packages/ui/src/components/Common/QuickIngest/ProcessingStep.tsx`
 - Modify: `apps/packages/ui/src/components/Common/QuickIngest/FloatingProgressWidget.tsx`
 - Modify if needed: `apps/packages/ui/src/store/connection.tsx`
 - Test: `apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx`
 - Test: `apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx`
-- Test: `apps/packages/ui/src/components/Common/QuickIngest/__tests__/FloatingProgressWidget.test.tsx`
 - Test: `apps/tldw-frontend/e2e/workflows/media-ingest.spec.ts`
 
-- [x] **Step 1: Write failing test for disconnected processing guard**
+- [ ] **Step 1: Write failing test for disconnected processing guard**
 
 In `QuickIngestWizardModal.integration.test.tsx`, mock the connection store or the direct hook chosen during implementation so the Add step receives disconnected state. Assert:
 
@@ -424,7 +422,7 @@ expect(screen.getByText(/retry|diagnostics|settings/i)).toBeInTheDocument()
 
 Use the exact wording chosen in implementation, but keep the behavior: users can see why processing is blocked.
 
-- [x] **Step 2: Write failing tests for minimized terminal states**
+- [ ] **Step 2: Write failing tests for minimized terminal states**
 
 Add or extend a FloatingProgressWidget-focused test. If no test file exists, add widget assertions to `QuickIngestWizardModal.session.test.tsx` or create:
 
@@ -437,7 +435,7 @@ Cover:
 - status `cancelled` shows Cancelled
 - status `interrupted` or equivalent lifecycle shows Interrupted if represented in state
 
-- [x] **Step 3: Run failing tests**
+- [ ] **Step 3: Run failing tests**
 
 Run:
 
@@ -447,7 +445,7 @@ bunx vitest run apps/packages/ui/src/components/Common/QuickIngest/__tests__/Qui
 
 Expected: new disconnected/widget assertions fail before implementation.
 
-- [x] **Step 4: Pass connection state into AddContentStep**
+- [ ] **Step 4: Pass connection state into AddContentStep**
 
 In `QuickIngestWizardModal.tsx`, read the central connection state from `useConnectionStore` or the existing quick-ingest connection abstraction if Task 1 identified one. Pass a boolean into:
 
@@ -460,7 +458,7 @@ In `QuickIngestWizardModal.tsx`, read the central connection state from `useConn
 
 Do not block users from editing queued input while offline unless the existing `FileDropZone` behavior requires it. Block only processing actions or clearly route them to setup/retry.
 
-- [x] **Step 5: Add visible disconnected recovery in Add step**
+- [ ] **Step 5: Add visible disconnected recovery in Add step**
 
 In `AddContentStep.tsx`, when `isOnlineForIngest` is false:
 
@@ -471,7 +469,7 @@ In `AddContentStep.tsx`, when `isOnlineForIngest` is false:
 
 Avoid a new global notification system.
 
-- [x] **Step 6: Make progress copy neutral or item-aware**
+- [ ] **Step 6: Make progress copy neutral or item-aware**
 
 In `ProcessingStep.tsx`, replace type-specific wrong copy such as "Transcribing and indexing content" with neutral copy for mixed batches:
 
@@ -481,7 +479,7 @@ In `ProcessingStep.tsx`, replace type-specific wrong copy such as "Transcribing 
 
 If item-type-aware labels are easy from existing per-item metadata, use them in row-level stages, not in the global banner.
 
-- [x] **Step 7: Split minimized widget terminal states**
+- [ ] **Step 7: Split minimized widget terminal states**
 
 In `FloatingProgressWidget.tsx`, replace the `allDone` single label with terminal-state rendering:
 
@@ -492,7 +490,7 @@ In `FloatingProgressWidget.tsx`, replace the `allDone` single label with termina
 
 Use non-success colors for failed/cancelled.
 
-- [x] **Step 8: Run focused tests**
+- [ ] **Step 8: Run focused tests**
 
 Run:
 
@@ -502,7 +500,7 @@ bunx vitest run apps/packages/ui/src/components/Common/QuickIngest/__tests__/Qui
 
 Expected: disconnected, cancel, stale completion, and widget terminal-state tests pass.
 
-- [x] **Step 9: Run focused e2e for dismiss/resume**
+- [ ] **Step 9: Run focused e2e for dismiss/resume**
 
 Run:
 
@@ -512,7 +510,7 @@ npx playwright test apps/tldw-frontend/e2e/workflows/media-ingest.spec.ts --grep
 
 Expected: dismiss/minimize/reopen flow still passes.
 
-- [x] **Step 10: Commit status/recovery changes**
+- [ ] **Step 10: Commit status/recovery changes**
 
 Run:
 
@@ -522,13 +520,6 @@ git commit -m "fix: clarify quick ingest recovery states"
 ```
 
 Expected: commit contains only status/recovery changes and related tests.
-
-Task 4 completion notes:
-- Functional commit: `9958abdc8 fix: clarify quick ingest recovery states`
-- Focused Vitest passed: `QuickIngestWizardModal.integration.test.tsx`, `QuickIngestWizardModal.session.test.tsx`, and `FloatingProgressWidget.test.tsx` (48 tests)
-- Focused Playwright passed: `media-ingest.spec.ts --grep "quick ingest can be dismissed during processing"` (1 test, 46.2s)
-- `git diff --check` passed
-- Bandit skipped because Task 4 touched frontend TypeScript/TSX only and no Python code.
 
 ---
 
@@ -546,7 +537,7 @@ Task 4 completion notes:
 
 **Large-file decision for this implementation pass:** use the **Truthful limit fix**. Lower the displayed and enforced Quick Ingest client-buffered upload limit to a conservative value and document that preserving 500 MB requires a separate transport fix. Do not attempt the large-file transport redesign inside this remediation pass unless the human owner explicitly changes this decision.
 
-- [x] **Step 1: Write failing tests for normalized URL dedupe**
+- [ ] **Step 1: Write failing tests for normalized URL dedupe**
 
 In `AddContentStep.url-detection.test.ts` or a new `queue-validation.test.ts`, cover:
 
@@ -559,7 +550,7 @@ expect(normalizeUrlForDedupe("https://youtu.be/abc123?t=30"))
 
 If `normalizeUrlForDedupe` already has tests elsewhere, write the failing wizard queue test instead: adding two normalized-equivalent URLs should show a duplicate warning before processing.
 
-- [x] **Step 2: Write failing tests for mixed URL paste counts**
+- [ ] **Step 2: Write failing tests for mixed URL paste counts**
 
 In `QuickIngestWizardModal.integration.test.tsx`, paste one valid and one invalid URL. Assert the UI communicates both counts and does not make users infer validity item-by-item only.
 
@@ -570,7 +561,7 @@ expect(screen.getByText(/1 valid/i)).toBeInTheDocument()
 expect(screen.getByText(/1 invalid/i)).toBeInTheDocument()
 ```
 
-- [x] **Step 3: Run failing input tests**
+- [ ] **Step 3: Run failing input tests**
 
 Run:
 
@@ -580,13 +571,13 @@ bunx vitest run apps/packages/ui/src/components/Common/QuickIngest/__tests__/Add
 
 Expected: new dedupe/count assertions fail before implementation.
 
-- [x] **Step 4: Reuse URL normalization in wizard queue validation**
+- [ ] **Step 4: Reuse URL normalization in wizard queue validation**
 
 In `AddContentStep.tsx` or `queue-validation.ts`, import or call the existing `normalizeUrlForDedupe` from `apps/packages/ui/src/entries/shared/ingest-payloads.ts`.
 
 Use normalized keys only for validation/dedupe. Preserve the original URL for display and submission unless the existing ingest path already normalizes submission URLs.
 
-- [x] **Step 5: Add mixed paste summary**
+- [ ] **Step 5: Add mixed paste summary**
 
 Add a compact queue summary near the queued-items header when both valid and invalid items exist:
 
@@ -600,7 +591,7 @@ Add a compact queue summary near the queued-items header when both valid and inv
 
 Use i18n default-string patterns and avoid adding a noisy alert for every normal paste.
 
-- [x] **Step 6: Reconcile file support copy and accept string**
+- [ ] **Step 6: Reconcile file support copy and accept string**
 
 Compare `detectTypeFromExtension`, `QUICK_INGEST_ACCEPT_STRING`, and backend-supported ingest types. Choose one of:
 
@@ -609,7 +600,7 @@ Compare `detectTypeFromExtension`, `QUICK_INGEST_ACCEPT_STRING`, and backend-sup
 
 Do not advertise images, HTML, JSON, CSV, XML, or other types unless the quick-ingest upload path can process them end-to-end.
 
-- [x] **Step 7: Apply truthful large-file limit**
+- [ ] **Step 7: Apply truthful large-file limit**
 
 In `constants.ts`, introduce an explicitly named limit for the current buffered-client implementation:
 
@@ -620,11 +611,11 @@ export const QUICK_INGEST_TRANSPORT_REDESIGN_FILE_SIZE = 500 * 1024 * 1024 // fu
 
 Use only one displayed current limit. Update copy from "500 MB" to the chosen current limit. If the owner rejects `50 MB`, choose another explicit value before coding and keep tests aligned.
 
-- [x] **Step 8: Add a preflight warning for larger files**
+- [ ] **Step 8: Add a preflight warning for larger files**
 
 For files over the current limit, show an error that explains the current quick-ingest limit and points users to the intended large-file path if one exists. Do not silently imply the file can be processed.
 
-- [x] **Step 9: Run input tests**
+- [ ] **Step 9: Run input tests**
 
 Run:
 
@@ -634,7 +625,7 @@ bunx vitest run apps/packages/ui/src/components/Common/QuickIngest/__tests__/Add
 
 Expected: queue validation and quick-ingest batch tests pass.
 
-- [x] **Step 10: Run constrained viewport e2e**
+- [ ] **Step 10: Run constrained viewport e2e**
 
 Run:
 
@@ -644,7 +635,7 @@ npx playwright test apps/tldw-frontend/e2e/workflows/media-ingest.spec.ts --grep
 
 Expected: constrained viewport test passes with updated copy and file limit.
 
-- [x] **Step 11: Commit input hardening changes**
+- [ ] **Step 11: Commit input hardening changes**
 
 Run:
 
@@ -654,17 +645,6 @@ git commit -m "fix: harden quick ingest input validation"
 ```
 
 Omit untouched files from `git add`.
-
-**Completion notes:**
-- Commit: `87dfd455a fix: harden quick ingest input validation`.
-- URL queue validation now uses normalized dedupe keys while preserving original URLs for display/submission.
-- Mixed valid/invalid paste results show a compact queue summary.
-- File support copy, picker accept string, and local detection now align on PDF, EPUB, DOC/DOCX/TXT/Markdown/HTML/XML/JSON, audio, and video; image/CSV/MOBI/AZW3 are no longer treated as supported quick-ingest uploads.
-- Current browser-buffered quick-ingest file limit is explicitly `50 MB`; the future `500 MB` transport target remains named separately.
-- Verification: `./node_modules/.bin/vitest run src/components/Common/QuickIngest/__tests__/AddContentStep.url-detection.test.ts src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx src/services/__tests__/quick-ingest-batch.test.ts --maxWorkers=1 --no-file-parallelism` passed with 3 files / 59 tests.
-- Verification: `git diff --check` passed.
-- Verification: `TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://127.0.0.1:18001 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/media-ingest.spec.ts --grep "quick ingest configure options stay reachable" --project=chromium --reporter=line` passed outside the macOS sandbox after the first sandboxed Chromium launch failed with `bootstrap_check_in ... Permission denied`.
-- Bandit: skipped for this task because the touched implementation/test files are frontend TypeScript/TSX/JSON only.
 
 ---
 
@@ -678,7 +658,7 @@ Omit untouched files from `git add`.
 - Modify if needed: `apps/tldw-frontend/__tests__/e2e-harness-readiness.guard.test.ts`
 - Update Backlog task notes for any deferred verification.
 
-- [x] **Step 1: Replace stale helper selectors with current wizard selectors**
+- [ ] **Step 1: Replace stale helper selectors with current wizard selectors**
 
 In `journey-helpers.ts`, prefer current labels and roles:
 
@@ -691,7 +671,7 @@ In `journey-helpers.ts`, prefer current labels and roles:
 
 Do not depend on `quick-ingest-run`, `quick-ingest-cancel`, or tabbed result ids unless Task 1 proves the legacy modal remains active.
 
-- [x] **Step 2: Update WebUI e2e expectations for current behavior**
+- [ ] **Step 2: Update WebUI e2e expectations for current behavior**
 
 In `media-ingest.spec.ts`, ensure coverage exists for:
 
@@ -706,7 +686,7 @@ In `media-ingest.spec.ts`, ensure coverage exists for:
 
 Add small assertions for any behavior changed in Tasks 2 through 5.
 
-- [x] **Step 3: Classify extension e2e specs**
+- [ ] **Step 3: Classify extension e2e specs**
 
 Using the Task 1 map, update `apps/extension/tests/e2e/quick-ingest-ux-audit.spec.ts` and `apps/extension/tests/e2e/quick-ingest-cancel.spec.ts`:
 
@@ -714,7 +694,7 @@ Using the Task 1 map, update `apps/extension/tests/e2e/quick-ingest-ux-audit.spe
 - if they cover legacy modal only and legacy is unreachable, retire or skip with a clear comment and replace coverage in `media-ingest.spec.ts`
 - if extension packaging needs separate coverage, keep extension-specific assertions focused on sidepanel/runtime constraints
 
-- [x] **Step 4: Run focused unit coverage**
+- [ ] **Step 4: Run focused unit coverage**
 
 Run:
 
@@ -724,7 +704,7 @@ bunx vitest run apps/packages/ui/src/components/Common/QuickIngest/__tests__ app
 
 Expected: shared quick-ingest unit and integration tests pass.
 
-- [x] **Step 5: Run focused WebUI e2e coverage**
+- [ ] **Step 5: Run focused WebUI e2e coverage**
 
 Run:
 
@@ -734,7 +714,7 @@ npx playwright test apps/tldw-frontend/e2e/workflows/media-ingest.spec.ts --grep
 
 Expected: WebUI quick-ingest e2e coverage passes or only skips known server-unavailable live-ingest cases with explicit skip messages.
 
-- [x] **Step 6: Run focused extension e2e coverage if the extension harness is available**
+- [ ] **Step 6: Run focused extension e2e coverage if the extension harness is available**
 
 Run:
 
@@ -744,7 +724,7 @@ npx playwright test apps/extension/tests/e2e/quick-ingest-ux-audit.spec.ts apps/
 
 Expected: extension quick-ingest tests pass. If the local extension harness is unavailable, record the exact failure and keep this as a known verification gap in Backlog.
 
-- [x] **Step 7: Run final static checks for touched frontend paths**
+- [ ] **Step 7: Run final static checks for touched frontend paths**
 
 Run:
 
@@ -756,7 +736,7 @@ Expected: no whitespace errors.
 
 If the repo has a focused TypeScript check for touched frontend files, run it here and record the command/output in Backlog. Do not run a broad slow suite unless required by the PR owner.
 
-- [x] **Step 8: Commit verification updates**
+- [ ] **Step 8: Commit verification updates**
 
 Run:
 
@@ -767,18 +747,6 @@ git commit -m "test: update quick ingest wizard coverage"
 
 Omit untouched files from `git add`.
 
-**Completion notes:**
-- Commit: `be1984cee test: update quick ingest wizard coverage`.
-- WebUI journey helpers now target the active wizard dialog, URL input aria/placeholder, `Use defaults & process`, `Configure N items`, and `Start Processing` paths instead of legacy `quick-ingest-run`/old results-panel fallbacks.
-- WebUI e2e now asserts first-open purpose/50 MB copy and mixed valid/invalid URL paste validation before processing.
-- Extension `quick-ingest-ux-audit` and `quick-ingest-cancel` are classified as active-wizard specs and now use current wizard roles, current supported-format copy, `wizard-results-step`, completed/error regions, `Use defaults & process`, and `Cancel All`.
-- Verification: `./node_modules/.bin/vitest run src/components/Common/QuickIngest/__tests__ src/services/__tests__/quick-ingest-batch.test.ts src/services/__tests__/quick-ingest-session-reattach.test.ts --maxWorkers=1 --no-file-parallelism` passed with 15 files / 178 tests.
-- Verification: `TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://127.0.0.1:18001 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/media-ingest.spec.ts --grep "Quick Ingest" --project=chromium --reporter=line` passed outside the macOS sandbox with 11 tests.
-- Verification gap: `bunx playwright test tests/e2e/quick-ingest-ux-audit.spec.ts tests/e2e/quick-ingest-cancel.spec.ts --reporter=line` did not reach test execution. Extension global setup first tried `npm run build:chrome:prod` and failed with `/bin/sh: npm: command not found`; the fallback `bun run build:chrome:prod` entered `wxt build`, emitted duplicate-import warnings, then stayed silent/hung for several minutes until the test/build processes were terminated. The run ended with `error: script "build:chrome:prod" exited with code 1`.
-- Static verification: `git diff --check` passed.
-- Additional targeted check: `bunx tsc --noEmit --pretty false --skipLibCheck --target ESNext --module ESNext --moduleResolution Bundler --jsx react-jsx --types node,chrome --allowSyntheticDefaultImports --esModuleInterop tests/e2e/quick-ingest-ux-audit.spec.ts tests/e2e/quick-ingest-cancel.spec.ts` failed only in imported extension harness helpers: `tests/e2e/utils/extension-build.ts` missing `browser`/argument-count errors and `tests/e2e/utils/extension-id.ts` Page/Worker concat typing.
-- Bandit: skipped for this task because the touched files are frontend Playwright TypeScript only.
-
 ---
 
 ## Task 7: Final Review, Backlog, And PR-Ready Summary
@@ -787,7 +755,7 @@ Omit untouched files from `git add`.
 - Modify: relevant Backlog task files for implementation tasks.
 - Read: all touched files from Tasks 1 through 6.
 
-- [x] **Step 1: Review all commits and touched files**
+- [ ] **Step 1: Review all commits and touched files**
 
 Run:
 
@@ -798,7 +766,7 @@ git diff --stat dev...HEAD
 
 Expected: only quick-ingest/shared test/planning files are touched.
 
-- [x] **Step 2: Run final verification command set**
+- [ ] **Step 2: Run final verification command set**
 
 Run the final focused commands from previous tasks:
 
@@ -810,7 +778,7 @@ git diff --check
 
 Expected: all pass or known skips are documented with exact reason.
 
-- [x] **Step 3: Run Bandit only if backend Python code was touched**
+- [ ] **Step 3: Run Bandit only if backend Python code was touched**
 
 This plan should not require backend Python changes. If implementation expands
 into backend Python anyway, first record why in Backlog, then run Bandit on the
@@ -825,7 +793,7 @@ Expected: no new findings in touched backend code.
 
 If no Python/backend files were touched, document: "Bandit not applicable; frontend/docs/tests only."
 
-- [x] **Step 4: Update Backlog implementation task notes**
+- [ ] **Step 4: Update Backlog implementation task notes**
 
 Record:
 
@@ -835,7 +803,7 @@ Record:
 - remaining verification gaps, if any
 - whether the large-file strategy used Truthful limit fix or was changed by the human owner
 
-- [x] **Step 5: Prepare PR summary with human-owned Change summary section**
+- [ ] **Step 5: Prepare PR summary with human-owned Change summary section**
 
 Draft PR notes with:
 
@@ -855,7 +823,7 @@ Human requester to write: what changed and why these implementation choices were
 
 Do not fabricate the human-owned Change summary.
 
-- [x] **Step 6: Commit Backlog closeout if needed**
+- [ ] **Step 6: Commit Backlog closeout if needed**
 
 Run:
 
@@ -869,33 +837,6 @@ git commit -m "docs: record quick ingest remediation verification"
 ```
 
 Expected: commit contains only Backlog/task closeout files.
-
-**Completion notes:**
-- Branch scope review: `git diff --stat dev...HEAD` shows Quick Ingest shared UI/components/tests, WebUI/extension Quick Ingest e2e specs/helpers, planning docs, and Backlog task records only.
-- Final verification: `./node_modules/.bin/vitest run src/components/Common/QuickIngest/__tests__ src/services/__tests__/quick-ingest-batch.test.ts src/services/__tests__/quick-ingest-session-reattach.test.ts --maxWorkers=1 --no-file-parallelism` passed with 15 files / 178 tests.
-- Final verification: `TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://127.0.0.1:18001 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/media-ingest.spec.ts --grep "Quick Ingest" --project=chromium --reporter=line` passed outside the macOS sandbox with 11 tests.
-- Final verification: `git diff --check` passed.
-- Extension verification gap remains documented in `TASK-394.6` and `TASK-394.7`: extension Playwright global setup did not reach test execution because the Chrome extension build path failed/hung before the specs ran.
-- Bandit: not applicable; touched implementation/test files are frontend TypeScript/TSX/JSON/docs/Backlog only.
-
-**PR-ready notes:**
-
-```markdown
-## Summary
-- Clarified Quick Ingest entry, first-open purpose copy, and destination expectations.
-- Improved result handoff, retry/remove affordances, and post-ingest navigation actions.
-- Corrected offline, cancel, progress, and minimized status semantics.
-- Hardened URL/file validation, truthful browser-buffered upload limits, and current wizard coverage.
-
-## Tests
-- `./node_modules/.bin/vitest run src/components/Common/QuickIngest/__tests__ src/services/__tests__/quick-ingest-batch.test.ts src/services/__tests__/quick-ingest-session-reattach.test.ts --maxWorkers=1 --no-file-parallelism` - passed, 15 files / 178 tests.
-- `TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://127.0.0.1:18001 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/media-ingest.spec.ts --grep "Quick Ingest" --project=chromium --reporter=line` - passed, 11 tests.
-- `git diff --check` - passed.
-- Extension Playwright focused run did not reach test execution because the extension build/globalSetup path failed/hung before running specs; details recorded in Backlog.
-
-## Change summary
-Human requester to write: what changed and why these implementation choices were made.
-```
 
 ---
 
