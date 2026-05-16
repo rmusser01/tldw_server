@@ -20,6 +20,7 @@ export interface AlertProps {
     onClick: () => void
     loading?: boolean
     disabled?: boolean
+    variant?: React.ComponentProps<typeof Button>["variant"]
   }
   /** Secondary action (text link style) */
   secondaryAction?: {
@@ -144,6 +145,7 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
               {action && (
                 <Button
                   size="sm"
+                  variant={action.variant}
                   onClick={action.onClick}
                   loading={action.loading}
                   disabled={action.disabled}

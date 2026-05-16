@@ -3,7 +3,6 @@ import {
   Segmented,
   Space,
   Input,
-  Alert,
   Form,
   Modal,
   Button,
@@ -13,6 +12,7 @@ import type { FormInstance } from "antd"
 import React from "react"
 import type { TFunction } from "i18next"
 import { isFirefoxTarget } from "@/config/platform"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import {
   getCoreStatusLabel,
   getRagStatusLabel,
@@ -177,13 +177,15 @@ export const TldwConnectionSettings = ({
 
       {authMode === 'multi-user' && !isLoggedIn && (
         <>
-          <Alert
+          <DesignSystemAlert
             title={t('settings:tldw.loginRequired.title', 'Login Required')}
-            description={t('settings:tldw.loginRequired.description', 'Please login with your tldw_server credentials')}
-            type="info"
-            showIcon
+            variant="info"
+            role="status"
+            aria-live="polite"
             className="mb-4"
-          />
+          >
+            {t('settings:tldw.loginRequired.description', 'Please login with your tldw_server credentials')}
+          </DesignSystemAlert>
           <Form.Item
             label={t('settings:tldw.loginMethod.label', 'Login Method')}
           >
@@ -265,18 +267,22 @@ export const TldwConnectionSettings = ({
       )}
 
       {authMode === 'multi-user' && isLoggedIn && (
-        <Alert
+        <DesignSystemAlert
           title={t('settings:tldw.loggedIn.title', 'Logged In')}
-          description={t('settings:tldw.loggedIn.description', 'You are currently logged in to tldw_server')}
-          type="success"
-          showIcon
+          variant="success"
+          role="status"
+          aria-live="polite"
           action={
-            <Button size="small" danger onClick={onLogout}>
-              {t('settings:tldw.buttons.logout', 'Logout')}
-            </Button>
+            {
+              label: t('settings:tldw.buttons.logout', 'Logout'),
+              onClick: onLogout,
+              variant: "danger",
+            }
           }
           className="mb-4"
-        />
+        >
+          {t('settings:tldw.loggedIn.description', 'You are currently logged in to tldw_server')}
+        </DesignSystemAlert>
       )}
 
       <Space className="w-full justify-between">

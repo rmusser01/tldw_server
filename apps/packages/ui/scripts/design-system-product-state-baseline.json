@@ -2981,28 +2981,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Settings/TldwConnectionSettings.tsx:Alert#antd-alert-tldwconnectionsettings-type-info-line-180-u7hkt9",
-    "path": "src/components/Option/Settings/TldwConnectionSettings.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Settings/TldwConnectionSettings.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Settings/TldwConnectionSettings.tsx:Alert#antd-alert-tldwconnectionsettings-type-success-line-268-gzdflb",
-    "path": "src/components/Option/Settings/TldwConnectionSettings.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Settings/TldwConnectionSettings.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Settings/TTSModeSettings.tsx:Alert#antd-alert-ttsmodesettings-type-error-line-814-lmd0y2",
     "path": "src/components/Option/Settings/TTSModeSettings.tsx",
     "rule": "antd-product-state-import",
