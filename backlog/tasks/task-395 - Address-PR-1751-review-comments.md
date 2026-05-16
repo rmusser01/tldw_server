@@ -1,7 +1,7 @@
 ---
 id: TASK-395
 title: Address PR 1751 review comments
-status: In Progress
+status: Done
 labels:
 - pr-review
 - quick-ingest
@@ -31,7 +31,7 @@ Address live PR #1751 review feedback and recheck review threads, checks, and me
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Addressed PR #1751's actionable Gemini review thread by replacing host-specific Backlog.md plan commands with portable `--cwd .` examples and a repository-relative live-backlog warning. Merged current `origin/dev` into the PR branch to clear the dirty merge state, resolving duplicated non-Quick-Ingest docs/backlog conflicts to the current dev versions while preserving the review fix. Verification: `git diff --check`, focused Quick Ingest Vitest suite (15 files / 178 tests), and focused WebUI Quick Ingest Playwright suite (11 tests) passed. Bandit skipped because the review fix touched documentation and Backlog task metadata only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
