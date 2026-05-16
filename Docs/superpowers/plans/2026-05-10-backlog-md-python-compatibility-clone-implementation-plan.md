@@ -736,10 +736,10 @@ Run:
 ```bash
 source .venv/bin/activate
 git status --short -- backlog > /tmp/backlog_status_before.txt
-backlog-py --cwd /Users/macbook-dev/Documents/GitHub/tldw_server2 task list --plain
-backlog-py --cwd /Users/macbook-dev/Documents/GitHub/tldw_server2 task TASK-1 --plain
-backlog-py --cwd /Users/macbook-dev/Documents/GitHub/tldw_server2 search "Backlog.md" --plain
-backlog-py --cwd /Users/macbook-dev/Documents/GitHub/tldw_server2 config list
+backlog-py --cwd . task list --plain
+backlog-py --cwd . task TASK-1 --plain
+backlog-py --cwd . search "Backlog.md" --plain
+backlog-py --cwd . config list
 git status --short -- backlog > /tmp/backlog_status_after.txt
 diff -u /tmp/backlog_status_before.txt /tmp/backlog_status_after.txt
 ```
@@ -1166,10 +1166,10 @@ Do not symlink or alias `backlog` to the Python implementation until all of thes
 source .venv/bin/activate
 python -m pytest tools/backlog-py/tests -v
 python -m bandit -r tools/backlog-py/src -f json -o /tmp/bandit_backlog_py.json
-backlog-py --cwd /Users/macbook-dev/Documents/GitHub/tldw_server2 task list --plain
-backlog-py --cwd /Users/macbook-dev/Documents/GitHub/tldw_server2 task TASK-1 --plain
-backlog-py --cwd /Users/macbook-dev/Documents/GitHub/tldw_server2 search "Backlog.md" --plain
-backlog-py --cwd /Users/macbook-dev/Documents/GitHub/tldw_server2 config list
+backlog-py --cwd . task list --plain
+backlog-py --cwd . task TASK-1 --plain
+backlog-py --cwd . search "Backlog.md" --plain
+backlog-py --cwd . config list
 git diff --check
 ```
 
@@ -1184,7 +1184,7 @@ Expected:
 ## Execution Notes
 
 - Keep `backlog-py` as the console command until the user explicitly approves PATH cutover.
-- Never run mutation commands against `/Users/macbook-dev/Documents/GitHub/tldw_server2/backlog` until copied-fixture mutation tests pass and the user approves a live smoke.
+- Never run mutation commands against this repository's live `backlog/` directory until copied-fixture mutation tests pass and the user approves a live smoke.
 - If network is needed to install an MCP/browser/search dependency, stop and request approval before adding the dependency.
 - If upstream behavior disagrees with the design, update the inventory and ask whether to preserve upstream behavior or keep the Python security constraint.
 - Commit after each task. Include the relevant Backlog task update in each commit.
