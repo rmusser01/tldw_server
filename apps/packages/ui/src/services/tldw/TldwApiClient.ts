@@ -1,6 +1,8 @@
 import type { ChatScope } from "@/types/chat-scope"
 import { toChatScopeParams } from "@/types/chat-scope"
 import type {
+  LlamacppAsset,
+  LlamacppAssetsResponse,
   LlamacppConfigResponse,
   LlamacppConfigUpdateRequest,
   LlamacppHardwareSnapshotResponse,
@@ -2201,9 +2203,34 @@ export class TldwApiClientBase {
     })
   }
 
+  async getLlamacppAssets(): Promise<LlamacppAssetsResponse> {
+    return await bgRequest<LlamacppAssetsResponse>({
+      path: "/api/v1/llamacpp/assets",
+      method: "GET"
+    })
+  }
+
   async registerLlamacppModelPath(path: string): Promise<LlamacppInventoryItem> {
     return await bgRequest<LlamacppInventoryItem>({
       path: "/api/v1/llamacpp/models/register-path",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { path }
+    })
+  }
+
+  async registerLlamacppAssetPath(path: string): Promise<LlamacppAsset> {
+    return await bgRequest<LlamacppAsset>({
+      path: "/api/v1/llamacpp/assets/register-path",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { path }
+    })
+  }
+
+  async importLlamacppAssetFolder(path: string): Promise<LlamacppAsset> {
+    return await bgRequest<LlamacppAsset>({
+      path: "/api/v1/llamacpp/assets/import-folder",
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: { path }

@@ -13,6 +13,7 @@ export interface LlamacppSavedConfig {
   port_probe_max?: number | null
   allowed_paths: string[]
   registered_model_paths: string[]
+  imported_asset_folders: string[]
   log_output_file?: string | null
 }
 
@@ -91,6 +92,42 @@ export interface LlamacppInventoryItem {
 
 export interface LlamacppInventoryResponse {
   models: LlamacppInventoryItem[]
+  warnings: string[]
+  scan_limited: boolean
+}
+
+export type LlamacppAssetKind = "gguf" | "mmproj" | "folder" | "unknown"
+export type LlamacppAssetSource =
+  | "models_dir"
+  | "registered_path"
+  | "imported_folder"
+
+export interface LlamacppAssetMetadata {
+  quantization?: string | null
+  parameter_hint?: string | null
+  context_hint?: number | null
+  family_hint?: string | null
+}
+
+export interface LlamacppAsset {
+  asset_id: string
+  kind: LlamacppAssetKind
+  identity_basis: "resolved_path" | "manual"
+  path: string
+  resolved_path?: string | null
+  display_name: string
+  source: LlamacppAssetSource
+  size_bytes?: number | null
+  modified_at?: string | null
+  metadata: LlamacppAssetMetadata
+  capabilities: string[]
+  mmproj_asset_ids: string[]
+  base_model_asset_ids: string[]
+  warnings: string[]
+}
+
+export interface LlamacppAssetsResponse {
+  assets: LlamacppAsset[]
   warnings: string[]
   scan_limited: boolean
 }

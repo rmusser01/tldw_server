@@ -686,7 +686,7 @@ git commit -m "Preserve llama.cpp legacy inventory compatibility"
 - Modify: `apps/packages/ui/src/services/tldw/domains/models-audio.ts`
 - Modify: `apps/packages/ui/src/services/tldw/TldwApiClient.ts`
 
-- [ ] **Step 1: Write failing type/client tests if a client test harness exists**
+- [x] **Step 1: Write failing type/client tests if a client test harness exists**
 
 Search first:
 
@@ -702,7 +702,9 @@ If an existing service test harness covers `models-audio`, add tests for:
 
 If no matching harness exists, document the skip in the commit body and rely on component/Admin page tests in Tasks 7 and 8.
 
-- [ ] **Step 2: Add TypeScript asset types**
+Implementation note: no dedicated `models-audio` service test harness exists; coverage for the new methods is deferred to the component/Admin tests in Tasks 7 and 8.
+
+- [x] **Step 2: Add TypeScript asset types**
 
 Add:
 
@@ -741,7 +743,7 @@ export interface LlamacppAssetsResponse {
 }
 ```
 
-- [ ] **Step 3: Add API methods**
+- [x] **Step 3: Add API methods**
 
 Add methods to the domain client and mirrored client:
 
@@ -759,7 +761,9 @@ bunx tsc --noEmit --pretty false
 
 Expected: PASS or known repo-wide baseline failures unrelated to touched files. If repo-wide failures occur, run the narrow touched-path TypeScript check used in this repo's design-system slices and document the baseline separately.
 
-- [ ] **Step 5: Commit**
+Implementation note: `bunx tsc --noEmit --pretty false` was attempted, but Bun could not write to its temp directory inside the sandbox. The required escalated rerun was rejected by the approval reviewer, and retrying with `TMPDIR=/private/tmp` failed with the same tempdir access error. Frontend behavioral validation continues through Vitest in Tasks 7 and 8.
+
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/packages/ui/src/types/llamacpp-admin.ts \
