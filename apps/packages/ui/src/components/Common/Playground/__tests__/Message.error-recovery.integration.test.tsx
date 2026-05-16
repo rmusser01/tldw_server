@@ -363,6 +363,47 @@ describe("PlaygroundMessage error recovery integration", () => {
     expect(onContinue).toHaveBeenCalledTimes(1)
   })
 
+  it("renders recovery for completed assistant turns with no visible text", async () => {
+    const user = userEvent.setup()
+    const onRegenerate = vi.fn()
+    const settingsEventSpy = vi.fn()
+    window.addEventListener(
+      "tldw:open-model-settings",
+      settingsEventSpy as EventListener
+    )
+
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        message=""
+        onRegenerate={onRegenerate}
+      />
+    )
+
+    const status = screen.getByRole("status", {
+      name: "Empty assistant response"
+    })
+    expect(status).toHaveTextContent("No response text was returned.")
+    expect(status).toHaveTextContent(
+      "The request completed, but the assistant did not return visible content."
+    )
+
+    await user.click(screen.getByRole("button", { name: "Retry same model" }))
+    expect(onRegenerate).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByRole("button", { name: "Switch model" }))
+    expect(settingsEventSpy).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByRole("button", { name: "Try provider fallback" }))
+    expect(updateChatModelSettingMock).toHaveBeenCalledWith("apiProvider", undefined)
+    expect(onRegenerate).toHaveBeenCalledTimes(2)
+
+    window.removeEventListener(
+      "tldw:open-model-settings",
+      settingsEventSpy as EventListener
+    )
+  })
+
   it("renders a compact partial-save marker when stream transport drops after partial output", () => {
     render(
       <PlaygroundMessage

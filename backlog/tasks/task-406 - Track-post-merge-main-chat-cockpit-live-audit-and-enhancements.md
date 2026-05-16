@@ -52,7 +52,7 @@ Scoped findings for main `/chat` only:
 
 Quick wins:
 
-- Add empty assistant response messaging and retry affordance.
+- Add empty assistant response messaging and retry affordance. Implemented in this branch: blank assistant turns now render explicit message-card recovery actions and a runtime sidechannel warning with regenerate available for both `role: "assistant"` and real-server `isBot: true` message shapes.
 - Add tooltips to sidechannel collapse/restore controls.
 - Show compact composition summary while rails are collapsed.
 - De-duplicate prompt empty-state copy in the Context rail.
@@ -62,6 +62,12 @@ Larger design opportunities:
 - Define explicit cockpit density modes for first-use, active conversation, and power-user workbench states.
 - Rework center empty-state mode cards so they do not compete with the composer after the user has a clear chat intent.
 - Audit mobile cockpit parity after desktop rail collapse lands, especially tab/restore behavior and focus order.
+
+Verification for implemented empty-response quick win:
+
+- `bunx vitest run src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx --config vitest.config.ts` passed with 32 tests.
+- `TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://127.0.0.1:18002 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line --grep "uses the running server"` passed against the real local server and branch WebUI.
+- Updated screenshot: `apps/tldw-frontend/test-results/workflows-chat-cockpit.rea-eebf0-kpit-focus-controls-working-chromium/chat-cockpit-desktop-conversation.png` shows the message-card recovery and runtime sidechannel warning.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

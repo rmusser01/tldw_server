@@ -501,13 +501,28 @@ const assertChatCompletionRenderedOrRecoverable = async (
 ) => {
   const chatLog = page.getByRole('log', { name: /chat messages/i });
   if (!response || response.status() < 400) {
-    await expect(
-      page
-        .locator(
-          "article[aria-label*='Assistant message'], [data-role='assistant'], [data-message-role='assistant'], .assistant-message"
-        )
-        .last()
-    ).toBeVisible({ timeout: 60_000 });
+    const assistantMessage = page
+      .locator(
+        "article[aria-label*='Assistant message'], [data-role='assistant'], [data-message-role='assistant'], .assistant-message"
+      )
+      .last();
+    await expect(assistantMessage).toBeVisible({ timeout: 60_000 });
+
+    const emptyResponseNotice = assistantMessage.getByRole('status', {
+      name: 'Empty assistant response',
+    });
+    if ((await emptyResponseNotice.count()) > 0) {
+      await expect(emptyResponseNotice).toContainText('No response text was returned.');
+      const runtimeInspector = getDesktopRuntimeInspector(page);
+      await expect(
+        runtimeInspector.getByRole('status', {
+          name: 'Empty assistant response',
+        })
+      ).toContainText('No response text returned.');
+      await expect(
+        runtimeInspector.getByRole('button', { name: 'Regenerate last response' })
+      ).toBeEnabled();
+    }
     return;
   }
 

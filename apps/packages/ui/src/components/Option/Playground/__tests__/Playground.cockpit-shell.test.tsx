@@ -21,6 +21,7 @@ const messageOptionState = vi.hoisted(() => ({
     setHistoryId: vi.fn(),
     setHistory: vi.fn(),
     setMessages: vi.fn(),
+    regenerateLastMessage: vi.fn(),
     setSelectedSystemPrompt: vi.fn(),
     setSelectedModel: vi.fn(),
     setServerChatId: vi.fn(),
@@ -210,6 +211,7 @@ describe("Playground cockpit shell", () => {
     messageOptionState.value.serverChatId = null;
     messageOptionState.value.streaming = false;
     messageOptionState.value.selectedModel = "openai:gpt-4.1-mini";
+    messageOptionState.value.regenerateLastMessage = vi.fn();
     sessionPersistenceState.value.sessionScopeReady = true;
   });
 
@@ -403,6 +405,48 @@ describe("Playground cockpit shell", () => {
     });
     expect(storageState.values.get("playgroundChatRuntimeRailVisible")).toBe(
       true,
+    );
+  });
+
+  it("surfaces empty assistant response recovery in the runtime sidechannel", async () => {
+    messageOptionState.value.messages = [
+      {
+        id: "user-1",
+        role: "user",
+        isBot: false,
+        name: "You",
+        message: "Say something",
+      },
+      {
+        id: "assistant-1",
+        isBot: true,
+        name: "openai:gpt-4.1-mini",
+        message: "",
+      },
+    ];
+
+    render(<Playground />);
+
+    const runtimeRail = await screen.findByTestId(
+      "playground-cockpit-right-rail",
+    );
+    const runControls = within(runtimeRail).getByRole("region", {
+      name: "Run controls",
+    });
+    expect(
+      within(runControls).getByRole("status", {
+        name: "Empty assistant response",
+      }),
+    ).toHaveTextContent("No response text returned.");
+
+    fireEvent.click(
+      within(runControls).getByRole("button", {
+        name: "Regenerate last response",
+      }),
+    );
+
+    expect(messageOptionState.value.regenerateLastMessage).toHaveBeenCalledTimes(
+      1,
     );
   });
 });

@@ -402,6 +402,33 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     expect(screen.getByText("No turn is running.")).toBeInTheDocument();
   });
 
+  it("surfaces empty assistant responses beside the regenerate control", () => {
+    const props = renderInspector({
+      streaming: false,
+      runtimeStatus: "ready",
+      canStopStreaming: false,
+      canRegenerate: true,
+      emptyAssistantResponse: true,
+    });
+
+    const runControls = screen.getByRole("region", { name: "Run controls" });
+    const status = within(runControls).getByRole("status", {
+      name: "Empty assistant response",
+    });
+    expect(status).toHaveTextContent("No response text returned.");
+    expect(status).toHaveTextContent(
+      "Regenerate this turn or switch model settings before trying again.",
+    );
+
+    fireEvent.click(
+      within(runControls).getByRole("button", {
+        name: "Regenerate last response",
+      }),
+    );
+
+    expect(props.onRegenerate).toHaveBeenCalledTimes(1);
+  });
+
   it("explains unavailable run controls when shared handlers are unavailable", () => {
     renderInspector({
       canStopStreaming: false,

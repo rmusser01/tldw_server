@@ -111,6 +111,7 @@ import {
 } from "./mobile-composer-layout";
 import { buildPersonaGardenRoute } from "@/utils/persona-garden-route";
 import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return";
+import { IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE } from "@/utils/image-generation-chat";
 
 const toText = (value: unknown): string =>
   typeof value === "string" ? value : String(value);
@@ -246,6 +247,7 @@ export const Playground = () => {
     setContextFiles,
     createChatBranch,
     streaming,
+    isProcessing,
     selectedCharacter,
     setSelectedCharacter,
     compareMode,
@@ -1718,8 +1720,38 @@ export const Playground = () => {
     },
   });
   const canRegenerateLastResponse = messages.some(
-    (message) => message.role === "assistant",
+    (message) => message.role === "assistant" || message?.isBot,
   );
+  const latestAssistantMessage = React.useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message?.role === "assistant" || message?.isBot) {
+        return message;
+      }
+    }
+    return null;
+  }, [messages]);
+  const emptyAssistantResponse = React.useMemo(() => {
+    if (!latestAssistantMessage || streaming || isProcessing) return false;
+    const messageText =
+      typeof latestAssistantMessage.message === "string"
+        ? latestAssistantMessage.message.trim()
+        : "";
+    if (messageText.length > 0) return false;
+    const messageType =
+      latestAssistantMessage.messageType ?? latestAssistantMessage.message_type;
+    if (messageType === IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE) return false;
+    const images = Array.isArray(latestAssistantMessage.images)
+      ? latestAssistantMessage.images
+      : [];
+    if (images.some((image) => typeof image === "string" && image.length > 0)) {
+      return false;
+    }
+    const toolCalls = Array.isArray(latestAssistantMessage.toolCalls)
+      ? latestAssistantMessage.toolCalls
+      : [];
+    return toolCalls.length === 0;
+  }, [isProcessing, latestAssistantMessage, streaming]);
   const runtimeStatusDetail =
     serverReadinessState === "blocked"
       ? toText(
@@ -2275,6 +2307,7 @@ export const Playground = () => {
       onStopStreaming={() => stopStreamingRequest()}
       canRegenerate={canRegenerateLastResponse}
       onRegenerate={() => regenerateLastMessage()}
+      emptyAssistantResponse={emptyAssistantResponse}
       settingSummaries={runtimeSettingSummaries}
       toolChoice={toolChoice as RuntimeToolChoice}
       onToolChoiceChange={(nextChoice) => setToolChoice(nextChoice)}
