@@ -4,7 +4,7 @@ title: Implement llama.cpp managed runtime stage 1
 status: In Progress
 assignee: []
 created_date: '2026-05-16 01:43'
-updated_date: '2026-05-16 02:38'
+updated_date: '2026-05-16 03:00'
 labels:
   - llamacpp
   - local-llm
@@ -30,7 +30,7 @@ Implement the approved Stage 1 llama.cpp managed runtime plan: backend profile p
 <!-- AC:BEGIN -->
 - [x] #1 Runtime models and JSON profile store support default profile bootstrap and duplicate enabled explicit host/port conflict validation.
 - [x] #2 Single-instance process runner can start, stop, report status, and tail owned logs without per-instance atexit or signal handlers.
-- [ ] #3 Supervisor can manage multiple profiles with per-profile locking, explicit lifecycle actions, and synchronous cleanup integration.
+- [x] #3 Supervisor can manage multiple profiles with per-profile locking, explicit lifecycle actions, and synchronous cleanup integration.
 - [ ] #4 Admin profile/runtime APIs are admin-only and V1 llama.cpp endpoints remain compatible through the default profile.
 - [ ] #5 Minimal WebUI client/types/runtime panel can display multiple instances and lifecycle actions while degrading on unsupported servers.
 - [ ] #6 Focused backend/frontend tests, diff checks, and Bandit for touched Python code are run or documented with clear blockers.
@@ -48,6 +48,8 @@ Task 2: added LlamaCppProcessRunner with independent process lifecycle, profile 
 Task 2 review fixes: retained failed-start runtime details with FAILED status and redacted resolved args, expanded runtime response contract fields, rejected occupied explicit ports before spawn, drained stdout/stderr pipes when no log file is configured, validated model_draft/lora_scaled paths, and restored existing LlamaCppHandler server-arg aliases. Verification: py_compile passed; process runner/profile store/management/inventory pytest reported 54 passed; Bandit on runner/runtime/schema had no findings; git diff --check passed.
 
 Task 2 second review fixes: changed default pipe drainers from readline to bounded read(1024) so long/no-newline output cannot stop draining, and filtered None/empty profile server_args before command construction to match existing LlamaCppHandler behavior. Verification: focused regressions passed; py_compile passed; process runner/profile store/management/inventory pytest reported 55 passed; Bandit on runner/runtime/schema had no findings; git diff --check passed.
+
+Task 3: added LlamaCppSupervisor with profile CRUD, per-profile lifecycle locks, independent start/stop/pause/resume/shutdown/cleanup behavior, runtime listing, default-profile bridge helpers, and LLMInferenceManager cleanup integration. Verification: supervisor pytest passed; process runner/profile store/management/inventory regression suite reported 61 passed; py_compile passed; Bandit on supervisor/manager had no findings; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

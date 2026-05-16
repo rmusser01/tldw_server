@@ -358,7 +358,7 @@ git commit -m "feat: add llama.cpp process runner"
 - Modify: `tldw_Server_API/app/core/Local_LLM/LLM_Inference_Manager.py`
 - Test: `tldw_Server_API/tests/LLM_Local/test_llamacpp_supervisor_service.py`
 
-- [ ] **Step 1: Write failing supervisor tests**
+- [x] **Step 1: Write failing supervisor tests**
 
 Cover:
 
@@ -378,7 +378,7 @@ async def test_supervisor_serializes_same_profile_start(...):
     assert runner_factory.calls["one"] == 1
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
@@ -387,7 +387,7 @@ async def test_supervisor_serializes_same_profile_start(...):
 
 Expected: FAIL because supervisor does not exist.
 
-- [ ] **Step 3: Implement supervisor**
+- [x] **Step 3: Implement supervisor**
 
 Implement:
 
@@ -408,7 +408,7 @@ class LlamaCppSupervisor:
 Use `dict[str, asyncio.Lock]` for per-profile locks. Validate explicit
 host/port conflicts before start and before saving enabled profiles.
 
-- [ ] **Step 4: Add default profile bridge**
+- [x] **Step 4: Add default profile bridge**
 
 Add methods:
 
@@ -421,7 +421,7 @@ def default_status_compat() -> dict[str, object]: ...
 
 Use `llamacpp_inventory_service.resolve_model_id()` for model path resolution.
 
-- [ ] **Step 5: Attach to manager**
+- [x] **Step 5: Attach to manager**
 
 In `LLM_Inference_Manager.__init__`, after `self.llamacpp` is created, attach:
 
@@ -436,7 +436,7 @@ handler cleanup when supervisor exists. Because `cleanup_on_exit` is
 synchronous, the supervisor needs a `cleanup_sync()` method for this path even
 if it also has async shutdown for future lifespan integration.
 
-- [ ] **Step 6: Run supervisor tests**
+- [x] **Step 6: Run supervisor tests**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \

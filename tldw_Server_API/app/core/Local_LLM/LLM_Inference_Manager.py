@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.Local_LLM.Llamafile_Handler import LlamafileHandle
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import InferenceError
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LLMManagerConfig
 from tldw_Server_API.app.core.Local_LLM.Ollama_Handler import OllamaHandler
+from tldw_Server_API.app.core.Local_LLM.llamacpp_supervisor_service import LlamaCppSupervisor
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.Local_LLM.Huggingface_Handler import HuggingFaceHandler
@@ -68,6 +69,7 @@ class LLMInferenceManager:
             self.logger.info(f"Llamafile handler initialized. Executable dir: {lf_exe_dir}, Models dir: {lf_models_dir}")
 
         self.llamacpp: LlamaCppHandler | None = None
+        self.llamacpp_supervisor: LlamaCppSupervisor | None = None
         if self.config.llamacpp and self.config.llamacpp.enabled:
             lc_cfg = self.config.llamacpp
             # Use local variable to avoid mutating config
@@ -80,6 +82,7 @@ class LLMInferenceManager:
                     "Handler will proceed but model loading may fail."
                 )
             self.llamacpp = LlamaCppHandler(lc_cfg, self.config.app_config)
+            self.llamacpp_supervisor = LlamaCppSupervisor.from_manager(self)
             self.logger.info(
                 f"Llama.cpp handler initialized. Executable: {lc_cfg.executable_path}, Models dir: {lc_models_dir}"
             )
@@ -236,7 +239,9 @@ class LLMInferenceManager:
         if self.llamafile:
             # Use the synchronous cleanup helper defined on the handler
             self.llamafile._cleanup_all_managed_servers_sync()
-        if self.llamacpp:
+        if self.llamacpp_supervisor:
+            self.llamacpp_supervisor.cleanup_sync()
+        elif self.llamacpp:
             # Clean up llama.cpp server processes
             self.llamacpp._cleanup_managed_server_sync()
         self.logger.info("LLMInferenceManager cleanup_on_exit complete.")
