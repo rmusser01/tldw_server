@@ -198,6 +198,7 @@ export const Playground = () => {
     React.useState<ServerReadinessState>(null);
   const [composerDockMetrics, setComposerDockMetrics] =
     React.useState<ComposerDockLayoutMetrics | null>(null);
+  const [composerHasDraft, setComposerHasDraft] = React.useState(false);
   const { t } = useTranslation(["playground", "common"]);
   const navigate = useNavigate();
   const [chatBackgroundImage] = useSetting(CHAT_BACKGROUND_IMAGE_SETTING);
@@ -351,6 +352,12 @@ export const Playground = () => {
     },
     [],
   );
+  const handleComposerDraftPresenceChange = React.useCallback(
+    (hasDraft: boolean) => {
+      setComposerHasDraft(hasDraft);
+    },
+    [],
+  );
   const { containerRef, isAutoScrollToBottom, autoScrollToBottom } =
     useSmartScroll(messages, streaming, 120, {
       bottomOffsetPx: composerBottomOffsetPx,
@@ -379,6 +386,12 @@ export const Playground = () => {
   const initializePlaygroundRef = React.useRef(false);
   const previousThreadRef = React.useRef<string | null>(null);
   const stableHistoryId = historyId && historyId !== "temp" ? historyId : null;
+  const showStarterDeck =
+    messages.length === 0 &&
+    history.length === 0 &&
+    !stableHistoryId &&
+    !serverChatId &&
+    !composerHasDraft;
   const setRouteContext = useChatSurfaceCoordinatorStore(
     (state) => state.setRouteContext,
   );
@@ -2730,6 +2743,7 @@ export const Playground = () => {
             <div className="mx-auto w-full max-w-[64rem] pb-6">
               <ChatErrorBoundary>
                 <PlaygroundChat
+                  showStarterDeck={showStarterDeck}
                   searchQuery={threadSearchQuery.trim()}
                   matchedMessageIndices={threadSearchMatchSet}
                   activeSearchMessageIndex={threadSearchActiveMessageIndex}
@@ -2821,6 +2835,7 @@ export const Playground = () => {
               onSelectAttachedResearchContextHistory={
                 handleSelectAttachedResearchContextHistory
               }
+              onDraftPresenceChange={handleComposerDraftPresenceChange}
             />
           </div>
           </div>

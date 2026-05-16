@@ -81,6 +81,7 @@ const LazyChatGreetingPicker = React.lazy(() =>
 )
 
 type PlaygroundChatProps = {
+  showStarterDeck?: boolean
   searchQuery?: string
   matchedMessageIndices?: Set<number>
   activeSearchMessageIndex?: number | null
@@ -133,6 +134,7 @@ const buildBlocks = (messages: TimelineMessageShape[]): TimelineBlock[] => {
 }
 
 export const PlaygroundChat = ({
+  showStarterDeck = true,
   searchQuery,
   matchedMessageIndices,
   activeSearchMessageIndex = null,
@@ -423,6 +425,16 @@ export const PlaygroundChat = ({
       "playground:selectedServerChatLoadFailure",
       "Failed to load the selected conversation."
     ) as string)
+  const showNoProvidersNotice = isConnected && noProvidersConfigured
+  const showNoModelsNotice =
+    isConnected &&
+    !noProvidersConfigured &&
+    chatModelsFetched &&
+    chatModels.length === 0
+  const showEmptyStarterRegion =
+    messages.length === 0 &&
+    serverChatLoadState !== "loading" &&
+    (showStarterDeck || showNoProvidersNotice || showNoModelsNotice)
   const normalizedSearchQuery =
     typeof searchQuery === "string" ? searchQuery.trim() : ""
   const resolveSearchMatch = React.useCallback(
@@ -1030,9 +1042,9 @@ export const PlaygroundChat = ({
               {selectedServerChatLoadFailureMessage}
             </div>
           </div>
-        ) : messages.length === 0 && serverChatLoadState !== "loading" && (
+        ) : showEmptyStarterRegion && (
           <div className="mt-4 w-full">
-            {isConnected && noProvidersConfigured && (
+            {showNoProvidersNotice && (
               <NoProviderBanner
                 className="mb-4"
                 onRefresh={() => {
@@ -1042,7 +1054,7 @@ export const PlaygroundChat = ({
                 }}
               />
             )}
-            {isConnected && !noProvidersConfigured && chatModelsFetched && chatModels.length === 0 && (
+            {showNoModelsNotice && (
               <div className="mx-auto mb-4 max-w-xl rounded-xl border border-amber-500/30 bg-amber-500/5 px-5 py-4 text-center text-sm text-text">
                 <p className="font-medium">
                   {characterChatNoModelCopy
@@ -1074,7 +1086,7 @@ export const PlaygroundChat = ({
                 </p>
               </div>
             )}
-            <PlaygroundEmpty />
+            {showStarterDeck && <PlaygroundEmpty />}
           </div>
         )}
         <React.Suspense fallback={null}>
