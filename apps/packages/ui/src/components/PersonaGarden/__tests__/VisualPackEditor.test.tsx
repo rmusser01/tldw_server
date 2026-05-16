@@ -283,6 +283,52 @@ describe("VisualPackEditor", () => {
     expect(screen.queryByTestId("visual-buddy-setup-choice-card")).not.toBeInTheDocument()
   })
 
+  it("hides the setup choice card when active_pack is returned outside packs", async () => {
+    const activePack = makeVisualPack({ id: "active-pack", status: "active" })
+    const draftPack = makeVisualPack({ id: "draft-pack", status: "draft" })
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse({ packs: [draftPack], active_pack: activePack })
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    expect(await screen.findByTestId("persona-visual-pack-status")).toHaveTextContent(
+      "active"
+    )
+    expect(screen.queryByTestId("visual-buddy-setup-choice-card")).not.toBeInTheDocument()
+  })
+
   it("does not show setup choices before active pack state is known", async () => {
     const activePack = makeVisualPack({ status: "active" })
     const packsDeferred = deferredResponse<any>()

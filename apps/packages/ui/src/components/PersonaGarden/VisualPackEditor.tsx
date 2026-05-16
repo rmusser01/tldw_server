@@ -1040,13 +1040,14 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       try {
         const response = await listPersonaVisualPacks(targetPersonaId)
         if (!isLatestRequest()) return false
-        const nextPacks = options.fallbackPack
+        const listedPacks = options.fallbackPack
           ? mergePack(response.packs || [], options.fallbackPack)
           : response.packs || []
         const activePack =
           response.active_pack ??
-          nextPacks.find((pack) => pack.status === "active") ??
+          listedPacks.find((pack) => pack.status === "active") ??
           null
+        const nextPacks = activePack ? mergePack(listedPacks, activePack) : listedPacks
         setActivePackId(activePack?.id || "")
         setPacks(nextPacks)
         const preferred =
