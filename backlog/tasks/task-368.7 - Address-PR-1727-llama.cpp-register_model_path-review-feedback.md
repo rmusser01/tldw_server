@@ -4,7 +4,7 @@ title: Address PR 1727 llama.cpp register_model_path review feedback
 status: Done
 assignee: []
 created_date: '2026-05-15 19:15'
-updated_date: '2026-05-15 20:35'
+updated_date: '2026-05-15 21:25'
 labels:
   - llamacpp
   - pr-review
@@ -30,6 +30,7 @@ Fix the unresolved PR #1727 review findings on the llama.cpp management API, inc
 - [x] #4 Blocking validation/log paths do not perform slow filesystem or subprocess work directly on the event loop
 - [x] #5 Config writes reject multiline or delimiter-corrupting values before persistence
 - [x] #6 New llama.cpp response surfaces have response models/return annotations and schema docstrings
+- [x] #7 Log-tail managed-server-not-running state maps to HTTP 409 with the original detail
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -42,6 +43,7 @@ Fix the unresolved PR #1727 review findings on the llama.cpp management API, inc
 5. Add a start-by-model response model, endpoint return annotations for the new llama.cpp surfaces, and concise docstrings for public admin schema classes.
 6. Add focused regression tests for each review finding: no-write delimiter/newline rejection, binary empty-output probe success, threadpool-offloaded endpoint behavior where practical, and response shape preservation.
 7. Run focused backend tests and Bandit on touched Python source, push the fixes, reply to each remaining Qodo thread with the commit evidence, and resolve the threads.
+8. Verify the tail-log status mapping finding against the current endpoint and existing tests. Add a focused failing test for ManagedServerNotRunningError on /llamacpp/logs/tail, change only that except block from 503 to 409 while preserving detail and exception chaining, then rerun the focused llama.cpp provider/log tests plus diff/Bandit checks.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -58,6 +60,10 @@ After pushing, Qodo posted a second review pass with unresolved threads covering
 Second-pass fixes implemented: /llamacpp/validate now offloads validation through run_in_threadpool; managed log tail file reads run in a threadpool helper; setup_manager rejects multiline/NUL config values before comment-preserving writes; llama.cpp config updates reject multiline and delimiter-corrupting list values; register_model_path rejects config-control and delimiter characters; validate_binary treats empty successful probe output as valid; start-by-model has a response model; new admin schemas and endpoints have docstrings/return annotations. Verification: focused affected tests passed (48 passed, 5 warnings), broader llama.cpp backend slice passed (131 passed, 6 warnings), git diff --check passed, and Bandit on touched Python sources reported zero findings. Pytest still emits the pre-existing post-success Loguru closed-stream cleanup warnings.
 
 Rebased the PR branch onto current origin/dev while keeping the diff scoped to the llama.cpp management work. Fresh post-rebase verification passed: broader llama.cpp backend slice (131 passed, 6 warnings), package-local UI Vitest slice (16 passed), git diff --check, and Bandit on touched Python sources with zero findings. The initial repo-root Vitest invocation failed because it bypassed the package vitest config for jsdom and @ aliases; rerunning from apps/packages/ui with the package config passed.
+
+Follow-up review finding verified as still valid: /api/v1/llamacpp/logs/tail currently maps ManagedServerNotRunningError to HTTP 503, while the sibling /llamacpp/use-in-chat state-conflict path already maps the same service condition to 409. Proceeding with a focused test-first status-code change only for the log-tail endpoint.
+
+Implemented the minimal follow-up: changed only the log-tail ManagedServerNotRunningError HTTP mapping from 503 to 409 while preserving detail=str(e) and exception chaining. Added a focused regression test for a missing managed handler. Red/green evidence: the new test first failed with 503, then passed after the endpoint change. Validation passed: provider/logs test file (11 passed, 5 warnings), git diff --check, and Bandit on tldw_Server_API/app/api/v1/endpoints/llamacpp.py with zero findings.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
@@ -73,5 +79,5 @@ Rebased the PR branch onto current origin/dev while keeping the diff scoped to t
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Addressed the PR #1727 review findings by validating registered llama.cpp model paths before persistence, rejecting config-control and delimiter-corrupting values before config writes, offloading validation/log-tail blocking work from async request handlers, preserving successful empty-output binary probes, and adding response/docstring/type coverage for the new admin surfaces. All live review threads were replied to and resolved, and the branch was rebased onto current origin/dev to clear the dirty merge base while keeping the PR scoped to llama.cpp management changes.
+Addressed the PR #1727 review findings by validating registered llama.cpp model paths before persistence, rejecting config-control and delimiter-corrupting values before config writes, offloading validation/log-tail blocking work from async request handlers, preserving successful empty-output binary probes, and adding response/docstring/type coverage for the new admin surfaces. Follow-up review disposition: the requested log-tail ManagedServerNotRunningError status-code finding was still valid and is now fixed with a 409 response, preserved error detail, exception chaining, and focused regression coverage. All live review threads were replied to and resolved, and the branch was rebased onto current origin/dev to clear the dirty merge base while keeping the PR scoped to llama.cpp management changes.
 <!-- SECTION:FINAL_SUMMARY:END -->

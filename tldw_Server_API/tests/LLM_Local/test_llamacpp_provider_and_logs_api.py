@@ -241,6 +241,17 @@ def test_log_tail_reads_only_configured_log_file_and_redacts(tmp_path: Path):
 
 
 @pytest.mark.unit
+def test_log_tail_missing_managed_handler_maps_to_conflict():
+    app = _make_app(_Manager(None))  # type: ignore[arg-type]
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/llamacpp/logs/tail?lines=2")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Managed llama.cpp handler is not configured."
+
+
+@pytest.mark.unit
 def test_log_tail_offloads_file_read_to_threadpool(monkeypatch, tmp_path: Path):
     configured_log = tmp_path / "configured.log"
     configured_log.write_text("first\nsecond", encoding="utf-8")

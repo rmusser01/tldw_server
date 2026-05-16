@@ -357,7 +357,7 @@ async def tail_llamacpp_logs_endpoint(
     try:
         return await llamacpp_provider_service.tail_managed_log(llm_manager, requested_lines=lines)
     except llamacpp_provider_service.ManagedServerNotRunningError as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except Exception as e:
         _log_sanitized_manager_error(llm_manager, "Unexpected error tailing Llama.cpp logs")
         raise HTTPException(status_code=500, detail="An unexpected error occurred.") from e
