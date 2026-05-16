@@ -22,6 +22,7 @@ import {
   useCreatePromotionRequest,
   useCreatePrototypeWorkspace
 } from "@/hooks/usePrototypeWorkspaces"
+import { getPrototypeContractState } from "@/test-utils/prototype-contract-fixtures"
 
 const buildWrapper = () => {
   const queryClient = new QueryClient({
@@ -266,18 +267,12 @@ describe("usePrototypeWorkspaces", () => {
   })
 
   it("preserves structured collaborator session errors for setup-failed UI states", async () => {
+    const bootstrapFailed = getPrototypeContractState("bootstrap_failed")
     fetchWithTldwAuthMock.mockResolvedValue(
       new Response(
-        JSON.stringify({
-          detail: {
-            category: "bootstrap_failed",
-            frontend_state: "setup_failed",
-            message: "Prototype branch session could not be created",
-            retryable: true
-          }
-        }),
+        JSON.stringify(bootstrapFailed.mockResponse),
         {
-          status: 503,
+          status: bootstrapFailed.httpStatus,
           headers: { "Content-Type": "application/json" }
         }
       )
@@ -292,14 +287,9 @@ describe("usePrototypeWorkspaces", () => {
         session_token: "session-token-1"
       })
     ).rejects.toMatchObject({
-      status: 503,
-      detail: {
-        category: "bootstrap_failed",
-        frontend_state: "setup_failed",
-        retryable: true,
-        message: "Prototype branch session could not be created"
-      },
-      message: "Prototype branch session could not be created"
+      status: bootstrapFailed.httpStatus,
+      detail: bootstrapFailed.mockResponse.detail,
+      message: bootstrapFailed.mockResponse.detail.message
     })
   })
 

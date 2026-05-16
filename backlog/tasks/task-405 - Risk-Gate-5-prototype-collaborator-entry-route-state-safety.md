@@ -4,19 +4,29 @@ title: Risk Gate 5 prototype collaborator entry route-state safety
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-05-16 06:47'
+updated_date: 2026-05-16 06:47
 labels:
-  - prototype-workspaces
-  - risk-gate
-  - frontend
-  - product
+- prototype-workspaces
+- risk-gate
+- frontend
+- product
 dependencies:
-  - TASK-324
-  - TASK-399
+- TASK-324
+- TASK-399
 references:
-  - 'https://github.com/rmusser01/tldw_server/issues/1457'
-  - 'https://github.com/rmusser01/tldw_server/issues/1440'
+- https://github.com/rmusser01/tldw_server/issues/1457
+- https://github.com/rmusser01/tldw_server/issues/1440
 priority: high
+modified_files:
+- Docs/superpowers/plans/2026-05-16-prototype-risk-gate-5-collaborator-entry-plan.md
+- apps/packages/ui/src/components/Option/PrototypeWorkspace/PrototypeWorkspaceSessionView.tsx
+- apps/packages/ui/src/components/Option/PrototypeWorkspace/__tests__/PrototypeWorkspaceSessionView.test.tsx
+- apps/packages/ui/src/hooks/useSharing.ts
+- apps/packages/ui/src/hooks/__tests__/useSharing.auth.test.tsx
+- apps/packages/ui/src/hooks/__tests__/usePrototypeWorkspaces.test.tsx
+- apps/packages/ui/src/services/tldw/api-error.ts
+- apps/packages/ui/src/services/tldw/domains/prototype-workspaces.ts
+- apps/packages/ui/src/test-utils/prototype-contract-fixtures.ts
 ---
 
 ## Description
@@ -41,7 +51,6 @@ Docs/superpowers/plans/2026-05-16-prototype-risk-gate-5-collaborator-entry-plan.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-05-16: Created isolated worktree .worktrees/prototype-risk-gate-5-collaborator-entry on branch codex/prototype-risk-gate-5-collaborator-entry from origin/dev a304f5f58 after Risk Gate 4 PR #1739 merged.
 
@@ -56,10 +65,11 @@ Docs/superpowers/plans/2026-05-16-prototype-risk-gate-5-collaborator-entry-plan.
 2026-05-16: Focused verification passed: bunx vitest run src/components/Option/__tests__/PublicShare.test.tsx src/components/Option/PrototypeWorkspace/__tests__/PrototypeWorkspacePage.test.tsx src/components/Option/PrototypeWorkspace/__tests__/PrototypeWorkspaceSessionView.test.tsx src/hooks/__tests__/usePrototypeWorkspaces.test.tsx src/hooks/__tests__/useSharing.auth.test.tsx --maxWorkers=1 --no-file-parallelism reported 5 files and 23 tests passed. git diff --check passed.
 
 2026-05-16: Package typecheck command ./node_modules/.bin/tsc --noEmit -p tsconfig.json was attempted and failed on existing unrelated repo-wide TypeScript baseline errors outside this touched slice, including audio/composer/flashcards/playground/study-suggestions tests and existing domain exports. Bandit was not run because this slice touched frontend TypeScript/TSX and documentation only.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 2026-05-16: Rebased codex/prototype-risk-gate-5-collaborator-entry onto latest origin/dev 41c27e6af. Post-rebase focused verification passed with 5 files and 23 tests; git diff --check HEAD~1..HEAD passed.
-<!-- SECTION:NOTES:END -->
+
+2026-05-16: Addressed PR #1761 review comments. Tests now load frozen Risk Gate 4 prototype contract states from apps/tldw-frontend/e2e/fixtures/prototype-workspaces/contract-states.json via a shared test helper instead of duplicating structured error payloads. PrototypeWorkspaceSessionView now scopes stored collaborator state, mutation data, and mutation errors to the current share/session route token and resets mismatched route-scoped store values on token changes. Focused verification passed: bunx vitest run src/components/Option/__tests__/PublicShare.test.tsx src/components/Option/PrototypeWorkspace/__tests__/PrototypeWorkspacePage.test.tsx src/components/Option/PrototypeWorkspace/__tests__/PrototypeWorkspaceSessionView.test.tsx src/hooks/__tests__/usePrototypeWorkspaces.test.tsx src/hooks/__tests__/useSharing.auth.test.tsx --maxWorkers=1 --no-file-parallelism reported 5 files and 25 tests passed. git diff --check passed.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

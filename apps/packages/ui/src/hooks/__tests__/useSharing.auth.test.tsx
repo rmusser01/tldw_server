@@ -19,6 +19,7 @@ import {
   usePrototypePrivateLinkExchange,
   useSharedWithMe
 } from "@/hooks/useSharing"
+import { getPrototypeContractState } from "@/test-utils/prototype-contract-fixtures"
 
 const buildWrapper = () => {
   const queryClient = new QueryClient({
@@ -136,18 +137,12 @@ describe("useSharing auth wiring", () => {
   })
 
   it("preserves structured prototype link exchange error details for route-state mapping", async () => {
+    const invalidLink = getPrototypeContractState("invalid_link")
     fetchWithTldwAuthMock.mockResolvedValue(
       new Response(
-        JSON.stringify({
-          detail: {
-            category: "invalid_or_unavailable_link",
-            frontend_state: "link_unavailable",
-            message: "Prototype link is unavailable",
-            retryable: false
-          }
-        }),
+        JSON.stringify(invalidLink.mockResponse),
         {
-          status: 404,
+          status: invalidLink.httpStatus,
           headers: { "Content-Type": "application/json" }
         }
       )
@@ -163,14 +158,9 @@ describe("useSharing auth wiring", () => {
         display_name: "Acme PM"
       })
     ).rejects.toMatchObject({
-      status: 404,
-      detail: {
-        category: "invalid_or_unavailable_link",
-        frontend_state: "link_unavailable",
-        retryable: false,
-        message: "Prototype link is unavailable"
-      },
-      message: "Prototype link is unavailable"
+      status: invalidLink.httpStatus,
+      detail: invalidLink.mockResponse.detail,
+      message: invalidLink.mockResponse.detail.message
     })
   })
 })

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { usePrototypePrivateLinkExchange } from "@/hooks/useSharing"
 import {
@@ -123,9 +123,11 @@ export const PrototypeWorkspaceSessionView = ({
   const createPromotion = useCreatePromotionRequest()
 
   const isRouteTokenEntry = Boolean(sessionToken || shareToken)
+  const routeTokenMatchesStoredState =
+    (!shareToken || collaboratorShareToken === shareToken) &&
+    (!sessionToken || collaboratorSessionToken === sessionToken)
   const canUseStoredCollaboratorState =
-    !isRouteTokenEntry ||
-    (Boolean(shareToken) && collaboratorShareToken === shareToken)
+    !isRouteTokenEntry || routeTokenMatchesStoredState
   const routeScopedSessionToken = canUseStoredCollaboratorState
     ? collaboratorSessionToken
     : null
@@ -133,20 +135,55 @@ export const PrototypeWorkspaceSessionView = ({
     ? collaboratorSessionId
     : null
   const effectiveSessionToken = sessionToken ?? routeScopedSessionToken
+  const createSessionMatchesCurrentToken =
+    Boolean(effectiveSessionToken) &&
+    createSession.variables?.session_token === effectiveSessionToken
+  const routeScopedCreatedWorkspaceId = createSessionMatchesCurrentToken
+    ? createSession.data?.prototype_workspace_id
+    : null
+  const routeScopedCreatedSessionId = createSessionMatchesCurrentToken
+    ? createSession.data?.prototype_session_id
+    : null
   const resolvedWorkspaceId =
     prototypeWorkspaceId ??
-    createSession.data?.prototype_workspace_id ??
+    routeScopedCreatedWorkspaceId ??
     (!isRouteTokenEntry ? activeWorkspaceId : null) ??
     null
   const resolvedSessionId =
-    routeScopedSessionId ?? createSession.data?.prototype_session_id ?? null
+    routeScopedSessionId ?? routeScopedCreatedSessionId ?? null
   const workspaceQuery = usePrototypeWorkspace(
     workspace ? null : resolvedWorkspaceId
   )
   const resolvedWorkspace = workspace ?? workspaceQuery.data ?? null
+  const exchangeLinkMatchesCurrentShareToken =
+    Boolean(shareToken) && exchangeLink.variables?.token === shareToken
+  const routeScopedExchangeError =
+    !shareToken || exchangeLinkMatchesCurrentShareToken ? exchangeLink.error : null
+  const routeScopedCreateSessionError =
+    !isRouteTokenEntry || createSessionMatchesCurrentToken
+      ? createSession.error
+      : null
   const entryErrorState = getPrototypeEntryErrorState(
-    exchangeLink.error ?? createSession.error
+    routeScopedExchangeError ?? routeScopedCreateSessionError
   )
+
+  useEffect(() => {
+    if (!isRouteTokenEntry || canUseStoredCollaboratorState) {
+      return
+    }
+    setCollaboratorEntry({
+      collaboratorSessionId: null,
+      collaboratorSessionToken: sessionToken ?? null,
+      collaboratorShareToken: shareToken ?? null,
+      sharedActorId: null
+    })
+  }, [
+    canUseStoredCollaboratorState,
+    isRouteTokenEntry,
+    sessionToken,
+    setCollaboratorEntry,
+    shareToken
+  ])
 
   const handleExchangeLink = async () => {
     if (!shareToken) {

@@ -3,6 +3,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { usePrototypeWorkspaceStore } from "@/store/prototype-workspace"
+import {
+  getPrototypeContractErrorDetail,
+  getPrototypeContractState,
+  type PrototypeContractErrorDetail
+} from "@/test-utils/prototype-contract-fixtures"
 import { PrototypeWorkspaceSessionView } from "../PrototypeWorkspaceSessionView"
 
 const hookState = vi.hoisted(() => ({
@@ -41,12 +46,7 @@ vi.mock("@/hooks/usePrototypeWorkspaces", () => ({
 }))
 
 const prototypeError = (
-  detail: {
-    category: string
-    frontend_state: string
-    retryable: boolean
-    message?: string
-  }
+  detail: PrototypeContractErrorDetail
 ) => {
   const error = new Error(detail.message ?? detail.category)
   return Object.assign(error, {
@@ -69,6 +69,7 @@ describe("PrototypeWorkspaceSessionView", () => {
       data: null,
       isPending: false,
       error: null,
+      variables: undefined,
       mutateAsync: vi.fn()
     })
     hookState.useCreatePromotionRequest.mockReturnValue({
@@ -113,6 +114,7 @@ describe("PrototypeWorkspaceSessionView", () => {
       data: null,
       isPending: false,
       error: null,
+      variables: undefined,
       mutateAsync: createSession
     })
 
@@ -138,39 +140,91 @@ describe("PrototypeWorkspaceSessionView", () => {
     )
   })
 
+  it("does not reuse mutation data from a previous route token", () => {
+    const store = usePrototypeWorkspaceStore.getState()
+    store.setCollaboratorEntry({
+      collaboratorSessionId: "pss_stale_store",
+      collaboratorSessionToken: "old-session-token",
+      collaboratorShareToken: "same-share-token",
+      sharedActorId: "psa_stale"
+    })
+    hookState.useCreateCollaboratorBranchSession.mockReturnValue({
+      data: {
+        job_id: "job-old",
+        job_type: "branch_session_bootstrap",
+        status: "queued",
+        message: "queued",
+        prototype_workspace_id: "pw_previous",
+        prototype_session_id: "pss_previous",
+        actor_type: "external_collaborator",
+        shared_actor_id: "psa_previous"
+      },
+      isPending: false,
+      error: null,
+      variables: { session_token: "old-session-token" },
+      mutateAsync: vi.fn()
+    })
+
+    render(
+      <PrototypeWorkspaceSessionView
+        shareToken="same-share-token"
+        sessionToken="new-session-token"
+      />
+    )
+
+    expect(hookState.usePrototypeWorkspace).toHaveBeenCalledWith(null)
+    expect(screen.queryByText("Workspace: pw_previous")).not.toBeInTheDocument()
+    expect(screen.queryByText("Session: pss_previous")).not.toBeInTheDocument()
+    expect(
+      screen.queryByText("Session: pss_stale_store")
+    ).not.toBeInTheDocument()
+  })
+
+  it("does not show stale mutation errors from a previous route token", () => {
+    hookState.useCreateCollaboratorBranchSession.mockReturnValue({
+      data: null,
+      isPending: false,
+      error: prototypeError(getPrototypeContractErrorDetail("bootstrap_failed")),
+      variables: { session_token: "old-session-token" },
+      mutateAsync: vi.fn()
+    })
+
+    render(<PrototypeWorkspaceSessionView sessionToken="new-session-token" />)
+
+    expect(
+      screen.queryByTestId("prototype-entry-error-state")
+    ).not.toBeInTheDocument()
+  })
+
   it("maps frozen link exchange errors into collaborator entry route states", () => {
+    const invalidLink = getPrototypeContractState("invalid_link")
+    const invalidLinkDetail = invalidLink.mockResponse.detail
     hookState.usePrototypePrivateLinkExchange.mockReturnValue({
       isPending: false,
-      error: prototypeError({
-        category: "invalid_or_unavailable_link",
-        frontend_state: "link_unavailable",
-        retryable: false,
-        message: "Prototype link is unavailable"
-      }),
+      error: prototypeError(invalidLinkDetail),
+      variables: { token: "share-token-1" },
       mutateAsync: vi.fn()
     })
 
     render(<PrototypeWorkspaceSessionView shareToken="share-token-1" />)
 
     expect(screen.getByTestId("prototype-entry-error-state")).toHaveTextContent(
-      "Link unavailable"
+      invalidLink.frontendStateBucket
     )
     expect(screen.getByTestId("prototype-entry-error-state")).toHaveTextContent(
-      "Prototype link is unavailable"
+      invalidLinkDetail.message
     )
     expect(screen.queryByText("Retry is available")).not.toBeInTheDocument()
   })
 
   it("uses retryability from structured session errors for setup failures", () => {
+    const bootstrapFailedDetail =
+      getPrototypeContractErrorDetail("bootstrap_failed")
     hookState.useCreateCollaboratorBranchSession.mockReturnValue({
       data: null,
       isPending: false,
-      error: prototypeError({
-        category: "bootstrap_failed",
-        frontend_state: "setup_failed",
-        retryable: true,
-        message: "Prototype branch session could not be created"
-      }),
+      error: prototypeError(bootstrapFailedDetail),
+      variables: { session_token: "session-token-1" },
       mutateAsync: vi.fn()
     })
 
