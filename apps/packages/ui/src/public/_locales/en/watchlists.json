@@ -242,6 +242,12 @@
   "sources_disabled": {
     "message": "Feed disabled"
   },
+  "sources_toggleActiveAria": {
+    "message": "Toggle active for {{name}}"
+  },
+  "sources_selectSourceAria": {
+    "message": "Select {{name}}"
+  },
   "sources_deleteConfirm": {
     "message": "Delete this feed?"
   },
@@ -301,6 +307,21 @@
   },
   "sources_seenInfo": {
     "message": "Source Health & Dedup Stats"
+  },
+  "sources_checkNowForSourceAria": {
+    "message": "Check now for {{name}}"
+  },
+  "sources_seenInfoForSourceAria": {
+    "message": "Source Health & Dedup Stats for {{name}}"
+  },
+  "sources_editSourceAria": {
+    "message": "Edit {{name}}"
+  },
+  "sources_deleteSourceAria": {
+    "message": "Delete {{name}}"
+  },
+  "sources_groupCount": {
+    "message": "{{count}} {{label}}"
   },
   "sources_columns_name": {
     "message": "Name"
@@ -455,6 +476,9 @@
   "jobs_disabled": {
     "message": "Monitor disabled"
   },
+  "jobs_toggleActiveAria": {
+    "message": "Toggle active for {{name}}"
+  },
   "jobs_runTriggered": {
     "message": "Run triggered"
   },
@@ -478,6 +502,21 @@
   },
   "jobs_compactSummary": {
     "message": "{{scope}} • {{filters}} filters"
+  },
+  "jobs_audioEnabledChip": {
+    "message": "Audio on"
+  },
+  "jobs_previewForMonitorAria": {
+    "message": "Preview {{name}}"
+  },
+  "jobs_editMonitorAria": {
+    "message": "Edit {{name}}"
+  },
+  "jobs_deleteMonitorAria": {
+    "message": "Delete {{name}}"
+  },
+  "jobs_noFilters": {
+    "message": "No filters"
   },
   "jobs_never": {
     "message": "Never"

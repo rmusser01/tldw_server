@@ -227,7 +227,7 @@ git commit -m "feat: add watchlist constrained navigation"
 - Test: `apps/packages/ui/src/components/Option/Watchlists/SourcesTab/__tests__/SourcesTab.extension-management.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/Watchlists/JobsTab/__tests__/JobsTab.extension-management.test.tsx`
 
-- [ ] **Step 1: Write failing source constrained-management tests**
+- [x] **Step 1: Write failing source constrained-management tests**
 
 At `420px` width, assert:
 
@@ -246,7 +246,7 @@ bunx vitest run src/components/Option/Watchlists/SourcesTab/__tests__/SourcesTab
 
 Expected before implementation: fail.
 
-- [ ] **Step 2: Implement source list/detail pattern**
+- [x] **Step 2: Implement source list/detail pattern**
 
 Add constrained rendering inside `SourcesTab.tsx` using the Stage 6A viewport helper. Keep desktop table behavior. Use cards/list rows with stable dimensions, visible labels, and icon buttons with accessible names.
 
@@ -261,7 +261,7 @@ Source constrained row must include:
 - Delete.
 - Selection checkbox for bulk actions.
 
-- [ ] **Step 3: Write failing monitor constrained-management tests**
+- [x] **Step 3: Write failing monitor constrained-management tests**
 
 At `420px` width, assert:
 
@@ -279,11 +279,11 @@ bunx vitest run src/components/Option/Watchlists/JobsTab/__tests__/JobsTab.exten
 
 Expected before implementation: fail.
 
-- [ ] **Step 4: Implement monitor list/detail pattern**
+- [x] **Step 4: Implement monitor list/detail pattern**
 
 Add constrained rendering inside `JobsTab.tsx`. Keep desktop table behavior. Use the existing summary helpers from `job-summaries.ts`; do not duplicate scope/filter summary logic.
 
-- [ ] **Step 5: Run focused regression tests**
+- [x] **Step 5: Run focused regression tests**
 
 Run:
 
@@ -300,7 +300,9 @@ bunx vitest run \
 
 Expected: all selected tests pass.
 
-- [ ] **Step 6: Commit Stage 6B**
+Recorded on Stage 6B closeout: the focused Feeds/Monitors constrained management suite passed with 6 files and 21 tests. The Watchlists static guard passed with 1 file and 3 tests. Locale JSON parsing passed for the web and extension locale files, and `git diff --check` passed. Bandit was not applicable because Stage 6B changed only frontend, locale, documentation, and Backlog files.
+
+- [x] **Step 6: Commit Stage 6B**
 
 ```bash
 git add \
