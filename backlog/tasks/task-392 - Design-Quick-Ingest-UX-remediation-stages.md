@@ -1,10 +1,10 @@
 ---
 id: TASK-392
 title: Design Quick Ingest UX remediation stages
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-16 00:18'
-updated_date: '2026-05-16 00:23'
+updated_date: '2026-05-16 00:27'
 labels:
   - design
   - quick-ingest
@@ -42,12 +42,18 @@ Verification run for this docs-only spec: rg confirmed no TODO/TBD/Open Question
 User review remains the next workflow gate before implementation planning proceeds.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Created and committed the Quick Ingest UX Remediation Stages design spec at Docs/superpowers/specs/2026-05-16-quick-ingest-ux-remediation-stages-design.md. The spec review loop approved the artifact with no blocking issues; advisory review feedback was folded into the committed spec. Verification was docs-only: rg found no TODO/TBD/question leftovers and git diff --check passed. Bandit was not applicable because no code changed. User reviewed and approved the spec for implementation planning.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
