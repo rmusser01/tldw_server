@@ -267,7 +267,7 @@ export const PlaygroundRuntimeInspector = ({
 
       <section
         className={railSectionClass}
-        aria-label={t("cockpit.modelAndChatSettings", "Model & Chat settings")}
+        aria-label={t("cockpit.modelChat", "Model & Chat")}
       >
         <h2 className={railHeadingClass}>
           {t("cockpit.modelChat", "Model & Chat")}
@@ -287,10 +287,131 @@ export const PlaygroundRuntimeInspector = ({
             {t("cockpit.modelChatSettings", "Model & Chat settings")}
           </button>
         </div>
+        <div className="mt-3">
+          <p className="text-[10px] font-semibold uppercase text-text-muted">
+            {t("cockpit.scopedSettings", "Scoped settings")}
+          </p>
+          {settingSummaries.length > 0 ? (
+            <dl className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-1 text-xs">
+              {settingSummaries.map((setting) => (
+                <React.Fragment key={setting.label}>
+                  <dt className="truncate text-text-muted">{setting.label}</dt>
+                  <dd className="flex items-center justify-end gap-1.5 font-medium text-text">
+                    <span>{setting.value}</span>
+                    {setting.source ? (
+                      <span
+                        className={
+                          setting.source === "override"
+                            ? "rounded border border-focus/40 bg-focus/10 px-1.5 py-0.5 text-[10px] font-semibold text-focus"
+                            : "rounded border border-border bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-text-muted"
+                        }
+                      >
+                        {setting.source === "override"
+                          ? t("cockpit.settingOverride", "Override")
+                          : t("cockpit.settingInherited", "Inherited")}
+                      </span>
+                    ) : null}
+                  </dd>
+                </React.Fragment>
+              ))}
+            </dl>
+          ) : (
+            <p className={railMutedClass}>
+              {t(
+                "cockpit.settingsDefault",
+                "Using default settings for this provider:model.",
+              )}
+            </p>
+          )}
+        </div>
       </section>
 
-      <section className={railSectionClass} aria-label={mcpToolsLabel}>
-        <h2 className={railHeadingClass}>{mcpToolsLabel}</h2>
+      <section
+        className={railSectionClass}
+        aria-label={t("cockpit.assistant", "Assistant")}
+      >
+        <h2 className={railHeadingClass}>
+          {t("cockpit.assistant", "Assistant")}
+        </h2>
+        <div className="mt-1 flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className={railValueClass}>{assistantLabel}</p>
+            <p className={railMutedClass}>
+              {effectiveAssistantSummary.detail || assistantModeLabel}
+            </p>
+          </div>
+          <span className="shrink-0 rounded-full border border-border bg-surface2 px-2 py-0.5 text-[10px] font-semibold text-text-muted">
+            {assistantModeLabel}
+          </span>
+        </div>
+        <div className="mt-2 flex flex-col gap-2">
+          {openAssistant ? (
+            <button
+              type="button"
+              onClick={openAssistant}
+              data-cockpit-assistant-select-trigger
+              className={`${railActionClass} justify-start gap-1.5`}
+              aria-label={t(
+                "cockpit.selectCharacterPersona",
+                "Select character or persona",
+              )}
+            >
+              <UserRound className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("cockpit.selectAssistant", "Select assistant")}
+            </button>
+          ) : null}
+          {effectiveAssistantSummary.mode !== "none" && onInspectAssistant ? (
+            <button
+              type="button"
+              onClick={onInspectAssistant}
+              className={`${railActionClass} justify-start gap-1.5`}
+              aria-label={t("cockpit.manageAssistant", "Manage assistant")}
+            >
+              <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("cockpit.manageAssistant", "Manage assistant")}
+            </button>
+          ) : null}
+          {effectiveAssistantSummary.mode !== "none" && onClearAssistant ? (
+            <button
+              type="button"
+              onClick={onClearAssistant}
+              className={`${railActionClass} justify-start gap-1.5`}
+              aria-label={t("cockpit.clearAssistant", "Clear assistant")}
+            >
+              <UserRound className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("cockpit.clearAssistant", "Clear assistant")}
+            </button>
+          ) : null}
+          {effectiveAssistantSummary.mode === "character" && openSceneDirector ? (
+            <button
+              type="button"
+              onClick={openSceneDirector}
+              className={`${railActionClass} justify-start gap-1.5`}
+              aria-label={t(
+                "cockpit.openSceneDirector",
+                "Open Scene Director",
+              )}
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("cockpit.sceneDirector", "Scene Director")}
+            </button>
+          ) : null}
+        </div>
+        {effectiveAssistantSummary.mode === "persona" ? (
+          <p className={railMutedClass}>
+            {t(
+              "cockpit.personaActorUnavailable",
+              "Scene Director is available for character-backed chats.",
+            )}
+          </p>
+        ) : null}
+      </section>
+
+      <section
+        className={railSectionClass}
+        aria-label={t("cockpit.tools", "Tools")}
+      >
+        <h2 className={railHeadingClass}>{t("cockpit.tools", "Tools")}</h2>
         {toolSummary ? (
           <div className="mt-2 rounded-md border border-border bg-bg px-2.5 py-2">
             <div className="flex items-start gap-2">
@@ -386,128 +507,6 @@ export const PlaygroundRuntimeInspector = ({
 
       <section
         className={railSectionClass}
-        aria-label={t("cockpit.characterPersona", "Character / Persona")}
-      >
-        <h2 className={railHeadingClass}>
-          {t("cockpit.characterPersona", "Character / Persona")}
-        </h2>
-        <div className="mt-1 flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <p className={railValueClass}>{assistantLabel}</p>
-            <p className={railMutedClass}>
-              {effectiveAssistantSummary.detail || assistantModeLabel}
-            </p>
-          </div>
-          <span className="shrink-0 rounded-full border border-border bg-surface2 px-2 py-0.5 text-[10px] font-semibold text-text-muted">
-            {assistantModeLabel}
-          </span>
-        </div>
-        <div className="mt-2 flex flex-col gap-2">
-          {openAssistant ? (
-            <button
-              type="button"
-              onClick={openAssistant}
-              data-cockpit-assistant-select-trigger
-              className={`${railActionClass} justify-start gap-1.5`}
-              aria-label={t(
-                "cockpit.selectCharacterPersona",
-                "Select character or persona",
-              )}
-            >
-              <UserRound className="h-3.5 w-3.5" aria-hidden="true" />
-              {t("cockpit.selectAssistant", "Select assistant")}
-            </button>
-          ) : null}
-          {effectiveAssistantSummary.mode !== "none" && onInspectAssistant ? (
-            <button
-              type="button"
-              onClick={onInspectAssistant}
-              className={`${railActionClass} justify-start gap-1.5`}
-              aria-label={t("cockpit.manageAssistant", "Manage assistant")}
-            >
-              <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
-              {t("cockpit.manageAssistant", "Manage assistant")}
-            </button>
-          ) : null}
-          {effectiveAssistantSummary.mode !== "none" && onClearAssistant ? (
-            <button
-              type="button"
-              onClick={onClearAssistant}
-              className={`${railActionClass} justify-start gap-1.5`}
-              aria-label={t("cockpit.clearAssistant", "Clear assistant")}
-            >
-              <UserRound className="h-3.5 w-3.5" aria-hidden="true" />
-              {t("cockpit.clearAssistant", "Clear assistant")}
-            </button>
-          ) : null}
-          {effectiveAssistantSummary.mode === "character" && openSceneDirector ? (
-            <button
-              type="button"
-              onClick={openSceneDirector}
-              className={`${railActionClass} justify-start gap-1.5`}
-              aria-label={t(
-                "cockpit.openSceneDirector",
-                "Open Scene Director",
-              )}
-            >
-              <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
-              {t("cockpit.sceneDirector", "Scene Director")}
-            </button>
-          ) : null}
-        </div>
-        {effectiveAssistantSummary.mode === "persona" ? (
-          <p className={railMutedClass}>
-            {t(
-              "cockpit.personaActorUnavailable",
-              "Scene Director is available for character-backed chats.",
-            )}
-          </p>
-        ) : null}
-      </section>
-
-      <section
-        className={railSectionClass}
-        aria-label={t("cockpit.scopedSettings", "Scoped settings")}
-      >
-        <h2 className={railHeadingClass}>
-          {t("cockpit.scopedSettings", "Scoped settings")}
-        </h2>
-        {settingSummaries.length > 0 ? (
-          <dl className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-1 text-xs">
-            {settingSummaries.map((setting) => (
-              <React.Fragment key={setting.label}>
-                <dt className="truncate text-text-muted">{setting.label}</dt>
-                <dd className="flex items-center justify-end gap-1.5 font-medium text-text">
-                  <span>{setting.value}</span>
-                  {setting.source ? (
-                    <span
-                      className={
-                        setting.source === "override"
-                          ? "rounded border border-focus/40 bg-focus/10 px-1.5 py-0.5 text-[10px] font-semibold text-focus"
-                          : "rounded border border-border bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-text-muted"
-                      }
-                    >
-                      {setting.source === "override"
-                        ? t("cockpit.settingOverride", "Override")
-                        : t("cockpit.settingInherited", "Inherited")}
-                    </span>
-                  ) : null}
-                </dd>
-              </React.Fragment>
-            ))}
-          </dl>
-        ) : (
-          <p className={railMutedClass}>
-            {t(
-              "cockpit.settingsDefault",
-              "Using default settings for this provider:model.",
-            )}
-          </p>
-        )}
-      </section>
-
-      <section
-        className={railSectionClass}
         aria-label={t("cockpit.runControls", "Run controls")}
       >
         <h2 className={railHeadingClass}>
@@ -556,19 +555,17 @@ export const PlaygroundRuntimeInspector = ({
             ) : null}
           </div>
         </div>
-      </section>
-
-      <section
-        className={railSectionClass}
-        aria-label={t("cockpit.conversationVolume", "Conversation volume")}
-      >
-        <h2 className={railHeadingClass}>{t("cockpit.timeline", "Timeline")}</h2>
-        <p className={railValueClass}>{messageLabel}</p>
-        <p className={railMutedClass}>
-          {threadSearchOpen
-            ? t("cockpit.searchOpen", "Search open")
-            : t("cockpit.searchClosed", "Search closed")}
-        </p>
+        <div className="mt-3 border-t border-border pt-2">
+          <p className="text-[10px] font-semibold uppercase text-text-muted">
+            {t("cockpit.timeline", "Timeline")}
+          </p>
+          <p className={railValueClass}>{messageLabel}</p>
+          <p className={railMutedClass}>
+            {threadSearchOpen
+              ? t("cockpit.searchOpen", "Search open")
+              : t("cockpit.searchClosed", "Search closed")}
+          </p>
+        </div>
       </section>
     </div>
   );

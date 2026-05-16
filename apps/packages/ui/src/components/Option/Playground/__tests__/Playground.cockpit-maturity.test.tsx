@@ -161,7 +161,8 @@ describe("Playground mature cockpit surfaces", () => {
     expect(screen.getByText("Scoped settings")).toBeInTheDocument()
     expect(screen.getByText("Temperature")).toBeInTheDocument()
     expect(screen.getByText("0.7")).toBeInTheDocument()
-    expect(screen.getByText("MCP tools")).toBeInTheDocument()
+    expect(screen.getByText("Tools")).toBeInTheDocument()
+    expect(screen.getByText("Chat tool access")).toBeInTheDocument()
     expect(screen.getByText("3 chat tools available")).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: "Open MCP tools" }))

@@ -280,9 +280,11 @@ export const PlaygroundContextRail = ({
 
       <section
         className={railSectionClass}
-        aria-label={t("cockpit.conversationContext", "Conversation context")}
+        aria-label={t("cockpit.contextStack", "Context stack")}
       >
-        <h2 className={railHeadingClass}>{t("cockpit.context", "Context")}</h2>
+        <h2 className={railHeadingClass}>
+          {t("cockpit.contextStack", "Context stack")}
+        </h2>
         <div className="mt-1 flex items-start justify-between gap-2">
           <div className="min-w-0">
             <p className={railValueClass}>
@@ -309,7 +311,7 @@ export const PlaygroundContextRail = ({
               : t("cockpit.idle", "Idle")}
           </span>
         </div>
-        {contextSummary.length > 0 || countLabels.length > 0 ? (
+        {contextSummary.length > 0 ? (
           <ul
             className="mt-2 flex flex-wrap gap-1.5 text-xs text-text-muted"
             aria-label={t("cockpit.contextSummary", "Context summary")}
@@ -320,25 +322,6 @@ export const PlaygroundContextRail = ({
                 className="rounded border border-border bg-surface2 px-2 py-0.5"
               >
                 {item}
-              </li>
-            ))}
-            {countLabels.map((item, index) => (
-              <li
-                key={`count-${index}-${item.label}`}
-                className="flex items-center gap-1 rounded border border-border bg-surface2 px-2 py-0.5"
-              >
-                <span className="min-w-0 truncate">{item.label}</span>
-                {item.onClear ? (
-                  <button
-                    type="button"
-                    className={clearActionClass}
-                    aria-label={item.clearLabel}
-                    title={item.clearLabel}
-                    onClick={item.onClear}
-                  >
-                    {t("cockpit.clear", "Clear")}
-                  </button>
-                ) : null}
               </li>
             ))}
           </ul>
@@ -433,34 +416,13 @@ export const PlaygroundContextRail = ({
             )}
           </div>
         )}
-        <div className="mt-3 grid grid-cols-1 gap-2">
-          <button
-            type="button"
-            onClick={onToggleWebSearch}
-            className={railActionClass}
-            aria-label={t("cockpit.webSearch", "Web search")}
-            aria-pressed={webSearch}
-          >
-            {webSearch
-              ? t("cockpit.webSearchOn", "Web search on")
-              : t("cockpit.webSearchOff", "Web search off")}
-          </button>
-          <button
-            type="button"
-            onClick={onOpenSearchContext}
-            className={railActionClass}
-            aria-label={t("cockpit.openSearchContext", "Open Search & Context")}
-          >
-            {t("cockpit.searchContext", "Search & Context")}
-          </button>
-        </div>
       </section>
 
       <section
         className={railSectionClass}
-        aria-label={t("cockpit.promptContext", "Prompt context")}
+        aria-label={t("cockpit.promptManagement", "Prompt management")}
       >
-        <h2 className={railHeadingClass}>{t("cockpit.prompts", "Prompts")}</h2>
+        <h2 className={railHeadingClass}>{t("cockpit.prompt", "Prompt")}</h2>
         <div className="mt-1 flex items-start justify-between gap-2">
           <div className="min-w-0">
             <p className={railValueClass}>{effectivePromptSummary.label}</p>
@@ -490,6 +452,75 @@ export const PlaygroundContextRail = ({
               {t("cockpit.clearPrompt", "Clear prompt")}
             </button>
           ) : null}
+        </div>
+      </section>
+
+      <section
+        className={railSectionClass}
+        aria-label={t("cockpit.searchAndSources", "Search & sources")}
+      >
+        <h2 className={railHeadingClass}>
+          {t("cockpit.searchAndSources", "Search & sources")}
+        </h2>
+        <p className={railMutedClass}>
+          {t(
+            "cockpit.searchSourcesDetail",
+            "Add or clear web search, files, knowledge, media, and research sources.",
+          )}
+        </p>
+        {countLabels.length > 0 ? (
+          <ul
+            className="mt-2 flex flex-wrap gap-1.5 text-xs text-text-muted"
+            aria-label={t("cockpit.sourceSummary", "Source summary")}
+          >
+            {countLabels.map((item, index) => (
+              <li
+                key={`count-${index}-${item.label}`}
+                className="flex items-center gap-1 rounded border border-border bg-surface2 px-2 py-0.5"
+              >
+                <span className="min-w-0 truncate">{item.label}</span>
+                {item.onClear ? (
+                  <button
+                    type="button"
+                    className={clearActionClass}
+                    aria-label={item.clearLabel}
+                    title={item.clearLabel}
+                    onClick={item.onClear}
+                  >
+                    {t("cockpit.clear", "Clear")}
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className={railMutedClass}>
+            {t(
+              "cockpit.noSearchSources",
+              "No files, knowledge, media, or research sources attached.",
+            )}
+          </p>
+        )}
+        <div className="mt-3 grid grid-cols-1 gap-2">
+          <button
+            type="button"
+            onClick={onToggleWebSearch}
+            className={railActionClass}
+            aria-label={t("cockpit.webSearch", "Web search")}
+            aria-pressed={webSearch}
+          >
+            {webSearch
+              ? t("cockpit.webSearchOn", "Web search on")
+              : t("cockpit.webSearchOff", "Web search off")}
+          </button>
+          <button
+            type="button"
+            onClick={onOpenSearchContext}
+            className={railActionClass}
+            aria-label={t("cockpit.openSearchContext", "Open Search & Context")}
+          >
+            {t("cockpit.searchContext", "Search & Context")}
+          </button>
         </div>
       </section>
 

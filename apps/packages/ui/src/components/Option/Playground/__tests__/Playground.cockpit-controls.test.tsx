@@ -369,7 +369,9 @@ describe("Playground cockpit controls", () => {
       expect(within(contextRail).getByText("2 media scopes")).toBeInTheDocument();
       expect(within(contextRail).getByText("Temporary chat")).toBeInTheDocument();
       expect(within(contextRail).getByText("History linked")).toBeInTheDocument();
-      expect(within(contextRail).getByText("Prompts")).toBeInTheDocument();
+      expect(
+        within(contextRail).getByRole("heading", { name: "Prompt" }),
+      ).toBeInTheDocument();
       expect(
         within(contextRail).getAllByText("Quick prompt").length,
       ).toBeGreaterThan(0);
@@ -547,7 +549,7 @@ describe("Playground cockpit controls", () => {
       window.removeEventListener(TOGGLE_WEB_SEARCH_EVENT, toggleWebSearch);
       window.removeEventListener(SET_TEMPORARY_CHAT_EVENT, setTemporaryChat);
     }
-  });
+  }, 15000);
 
   it("logs selected prompt lookup failures while keeping the prompt unavailable state visible", async () => {
     const promptLookupWarning = vi

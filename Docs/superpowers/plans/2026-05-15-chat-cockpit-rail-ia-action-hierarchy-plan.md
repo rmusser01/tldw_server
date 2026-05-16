@@ -93,7 +93,7 @@ Create only if duplication becomes noisy:
 
 - Modify: `apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundContextRail.first-slice.test.tsx`
 
-- [ ] **Step 1: Add a test for the ordered left-rail regions**
+- [x] **Step 1: Add a test for the ordered left-rail regions**
 
 Test that a populated rail exposes regions/headings in this order:
 
@@ -105,7 +105,7 @@ Test that a populated rail exposes regions/headings in this order:
 
 Use Testing Library queries against visible headings/regions rather than snapshots.
 
-- [ ] **Step 2: Add a test for first-time empty-state comprehension**
+- [x] **Step 2: Add a test for first-time empty-state comprehension**
 
 Render no prompt, no assistant context, no files, no knowledge, no media, no research, and no web search. Assert the rail still exposes:
 
@@ -115,11 +115,11 @@ Render no prompt, no assistant context, no files, no knowledge, no media, no res
 - Web search toggle
 - Session persistence control
 
-- [ ] **Step 3: Add a test for existing control preservation**
+- [x] **Step 3: Add a test for existing control preservation**
 
 With prompt, files, knowledge, media, research, and web search present, assert the existing clear/open/toggle callbacks still fire exactly once.
 
-- [ ] **Step 4: Run the left-rail tests to verify RED**
+- [x] **Step 4: Run the left-rail tests to verify RED**
 
 ```bash
 cd apps/packages/ui
@@ -137,7 +137,7 @@ Expected: FAIL because the current rail does not expose the new IA labels/order.
 - Modify: `apps/packages/ui/src/components/Option/Playground/PlaygroundContextRail.tsx`
 - Modify if needed: `apps/packages/ui/src/components/Option/Playground/playground-rail-sections.ts`
 
-- [ ] **Step 1: Introduce explicit left-rail group sections**
+- [x] **Step 1: Introduce explicit left-rail group sections**
 
 Keep `PlaygroundCompositionPreview` first when `compositionPreviewSummary` is supplied. Then render:
 
@@ -146,7 +146,7 @@ Keep `PlaygroundCompositionPreview` first when `compositionPreviewSummary` is su
 - `Search & sources`: Search & Context action, web search, files/knowledge/media/research counts and clear actions.
 - `Session`: saved/temporary state, session status, history linkage.
 
-- [ ] **Step 2: Preserve existing controls and accessible names**
+- [x] **Step 2: Preserve existing controls and accessible names**
 
 Keep these existing interactive names working:
 
@@ -161,11 +161,11 @@ Keep these existing interactive names working:
 - `Use temporary chat`
 - `Save to history`
 
-- [ ] **Step 3: Keep density restrained**
+- [x] **Step 3: Keep density restrained**
 
 Use existing rail classes and compact text. Avoid adding nested card structures inside already framed rail sections.
 
-- [ ] **Step 4: Run left-rail tests to verify GREEN**
+- [x] **Step 4: Run left-rail tests to verify GREEN**
 
 ```bash
 cd apps/packages/ui
@@ -182,7 +182,7 @@ Expected: PASS.
 
 - Modify: `apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundRuntimeInspector.first-slice.test.tsx`
 
-- [ ] **Step 1: Add a test for the ordered right-rail regions**
+- [x] **Step 1: Add a test for the ordered right-rail regions**
 
 Test that a populated runtime rail exposes headings/regions in this order:
 
@@ -192,15 +192,15 @@ Test that a populated runtime rail exposes headings/regions in this order:
 4. `Tools`
 5. `Run controls`
 
-- [ ] **Step 2: Add a test for first-time empty-state comprehension**
+- [x] **Step 2: Add a test for first-time empty-state comprehension**
 
 Render no model, no assistant, unavailable tools, idle runtime, and no regenerable response. Assert the rail still makes model settings, assistant selection, tool policy, stop reason, and regenerate reason discoverable.
 
-- [ ] **Step 3: Add a test for existing control preservation**
+- [x] **Step 3: Add a test for existing control preservation**
 
 Assert model settings, assistant select, clear assistant, inspect/manage assistant, scene director, MCP settings, tool choice, stop, and regenerate callbacks still use shared props and disabled reasons.
 
-- [ ] **Step 4: Run the right-rail tests to verify RED**
+- [x] **Step 4: Run the right-rail tests to verify RED**
 
 ```bash
 cd apps/packages/ui
@@ -218,27 +218,27 @@ Expected: FAIL because the current rail does not expose the new IA labels/order 
 - Modify: `apps/packages/ui/src/components/Option/Playground/PlaygroundRuntimeInspector.tsx`
 - Modify if needed: `apps/packages/ui/src/components/Option/Playground/playground-rail-sections.ts`
 
-- [ ] **Step 1: Keep runtime status first**
+- [x] **Step 1: Keep runtime status first**
 
 Preserve provider/model display and provider route summary in the `Runtime` section.
 
-- [ ] **Step 2: Keep model configuration together**
+- [x] **Step 2: Keep model configuration together**
 
 Keep `Model & Chat` settings and scoped setting summaries together. Preserve provider:model route and setting scope visibility.
 
-- [ ] **Step 3: Keep assistant controls together**
+- [x] **Step 3: Keep assistant controls together**
 
 Group assistant/persona/character state, select/change, clear, inspect/manage, and character-only Scene Director behavior in `Assistant`.
 
-- [ ] **Step 4: Keep tool policy together**
+- [x] **Step 4: Keep tool policy together**
 
 Group MCP summary, tool choice segmented buttons, and MCP settings in `Tools`. Keep unavailable/disabled/degraded copy distinct.
 
-- [ ] **Step 5: Keep recovery/run controls together**
+- [x] **Step 5: Keep recovery/run controls together**
 
 Move stop/regenerate/timeline recovery affordances into `Run controls` while preserving disabled reason descriptions and callback behavior.
 
-- [ ] **Step 6: Run right-rail tests to verify GREEN**
+- [x] **Step 6: Run right-rail tests to verify GREEN**
 
 ```bash
 cd apps/packages/ui
@@ -258,15 +258,15 @@ Expected: PASS.
 - Modify: `apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts`
 - Modify: `backlog/tasks/task-393 - Implement-main-chat-rail-information-architecture-and-action-hierarchy.md`
 
-- [ ] **Step 1: Add integrated `Playground` assertions**
+- [x] **Step 1: Add integrated `Playground` assertions**
 
 Assert the rendered main cockpit exposes the new left/right rail groups while still reflecting selected prompt, assistant/persona/character, provider:model, scoped settings, and MCP state.
 
-- [ ] **Step 2: Add focus-mode regression assertion**
+- [x] **Step 2: Add focus-mode regression assertion**
 
 Assert focus mode hides the reorganized rails and returning to cockpit restores the rail groups.
 
-- [ ] **Step 3: Add real-server Playwright assertions**
+- [x] **Step 3: Add real-server Playwright assertions**
 
 In `chat-cockpit.real-server.spec.ts`, assert:
 
@@ -277,7 +277,7 @@ In `chat-cockpit.real-server.spec.ts`, assert:
 - Mobile context/runtime tabs expose the same group labels.
 - No `page.route` backend mocking is introduced.
 
-- [ ] **Step 4: Run focused unit/component verification**
+- [x] **Step 4: Run focused unit/component verification**
 
 ```bash
 cd apps/packages/ui
@@ -286,7 +286,7 @@ bunx vitest run src/components/Option/Playground/__tests__/PlaygroundContextRail
 
 Expected: PASS.
 
-- [ ] **Step 5: Run real-server Playwright verification**
+- [x] **Step 5: Run real-server Playwright verification**
 
 Use the already-running real backend. Do not start a duplicate backend if port 8000 is already occupied.
 
@@ -298,7 +298,7 @@ TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY="$KEY" bunx playwrigh
 
 Expected: PASS.
 
-- [ ] **Step 6: Run design-system and whitespace verification**
+- [x] **Step 6: Run design-system and whitespace verification**
 
 ```bash
 cd apps/packages/ui
@@ -309,19 +309,19 @@ git diff --check
 
 Expected: PASS. Existing design-system baseline exceptions are acceptable if unchanged.
 
-- [ ] **Step 7: Record verification and complete `TASK-393`**
+- [x] **Step 7: Record verification and complete `TASK-393`**
 
 Update the Backlog task with implementation notes, checked acceptance criteria, checked DoD items, and final summary.
 
 ## Definition of Done
 
-- [ ] Main `/chat` left rail uses the PR 2 group hierarchy.
-- [ ] Main `/chat` right rail uses the PR 2 group hierarchy.
-- [ ] Existing controls and shared handlers still work.
-- [ ] Keyboard-accessible names and focus behavior are preserved.
-- [ ] Focus mode remains chat-first and hides rails.
-- [ ] Mobile rail tabs expose the same organization without composer occlusion.
-- [ ] Focused Vitest coverage passes.
-- [ ] Real-server Playwright coverage passes against the running server.
-- [ ] No sidepanel/sidebar files are touched.
-- [ ] Bandit is run if Python files are touched; otherwise the skip is recorded.
+- [x] Main `/chat` left rail uses the PR 2 group hierarchy.
+- [x] Main `/chat` right rail uses the PR 2 group hierarchy.
+- [x] Existing controls and shared handlers still work.
+- [x] Keyboard-accessible names and focus behavior are preserved.
+- [x] Focus mode remains chat-first and hides rails.
+- [x] Mobile rail tabs expose the same organization without composer occlusion.
+- [x] Focused Vitest coverage passes.
+- [x] Real-server Playwright coverage passes against the running server.
+- [x] No sidepanel/sidebar files are touched.
+- [x] Bandit is run if Python files are touched; otherwise the skip is recorded.
