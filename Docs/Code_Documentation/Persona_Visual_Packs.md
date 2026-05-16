@@ -350,6 +350,14 @@ local generation: provider asset handles are intake placeholders until the
 server validates metadata, copies bytes through approved storage paths, and
 assigns real asset ids.
 
+The provider archive handoff helper,
+`build_provider_archive_import_preview_handoff()`, validates a normalized
+portable archive envelope into an MCP resource retrieval descriptor. It is still
+pre-persistence: it does not download MCP resources, create preview rows,
+enqueue import-preview Jobs, write archives, commit imports, or activate packs.
+The existing import-preview job contract remains local-archive-path based after
+a future retrieval adapter materializes the archive.
+
 Provider provenance is metadata only. It must not override user ownership,
 persona scope, activation state, or personal-library source references. The
 server must sanitize provenance before storage and reject secrets, API keys,

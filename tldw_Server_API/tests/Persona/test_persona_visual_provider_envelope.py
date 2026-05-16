@@ -8,6 +8,7 @@ import pytest
 
 from tldw_Server_API.app.core.Persona.visual_portability.provider_envelope import (
     CANONICAL_PERSONA_VISUAL_ARCHIVE_MEDIA_TYPE,
+    build_provider_archive_import_preview_handoff,
     normalize_provider_result_envelope,
 )
 
@@ -340,3 +341,71 @@ def test_normalize_provider_result_envelope_rejects_remote_or_embedded_resource_
     assert normalized["commit_eligible"] is False
     assert "unsafe_provider_metadata" in _blocker_codes(normalized)
     assert resource_uri not in str(normalized)
+
+
+def test_build_provider_archive_import_preview_handoff_accepts_valid_portable_archive() -> None:
+    """Build a review-only MCP resource handoff for a portable archive result."""
+    handoff = build_provider_archive_import_preview_handoff(
+        _valid_portable_archive_envelope(),
+        user_id="user-1",
+        request_id="request-1",
+        preview_id="preview-1",
+        target_persona_id="persona-1",
+    )
+
+    assert handoff["ready"] is True
+    assert handoff["operation"] == "import_preview"
+    assert handoff["job_type"] == "persona_visual_pack_import_preview"
+    assert handoff["request"] == {
+        "user_id": "user-1",
+        "preview_id": "preview-1",
+        "request_id": "request-1",
+        "target_persona_id": "persona-1",
+    }
+    assert handoff["archive"] == {
+        "source_type": "mcp_resource",
+        "mcp_resource_uri": (
+            "mcp://local-sprite-pose-maker/resources/"
+            "expr-pack-2026-05-13.tldw-persona-vpack"
+        ),
+        "sha256": "2f3a6c2c4b0b0c7f9f7ad3e2c0f9f95543e3013d6a45b69822ad0f01f54415be",
+        "media_type": CANONICAL_PERSONA_VISUAL_ARCHIVE_MEDIA_TYPE,
+    }
+    assert handoff["diagnostics"]["blockers"] == []
+    assert "archive_path" not in str(handoff)
+    assert "activation_allowed" not in str(handoff["archive"])
+
+
+@pytest.mark.parametrize(
+    ("mutator", "expected_code"),
+    [
+        (lambda raw: raw.update({"result_type": "generated_candidate"}), "unsupported_archive_handoff_result_type"),
+        (lambda raw: raw.update({"activation_allowed": True}), "activation_not_allowed"),
+        (
+            lambda raw: raw["payload"]["archive"].pop("mcp_resource_uri"),  # type: ignore[index]
+            "archive_resource_uri_missing",
+        ),
+        (
+            lambda raw: raw["payload"]["archive"].update({"sha256": "not-a-sha"}),  # type: ignore[index]
+            "archive_sha256_invalid",
+        ),
+    ],
+)
+def test_build_provider_archive_import_preview_handoff_fails_closed_for_invalid_inputs(
+    mutator: object,
+    expected_code: str,
+) -> None:
+    """Return deterministic blockers without enqueueing or materializing provider output."""
+    raw = _valid_portable_archive_envelope()
+    mutator(raw)  # type: ignore[operator]
+
+    handoff = build_provider_archive_import_preview_handoff(
+        raw,
+        user_id="user-1",
+        request_id="request-1",
+        preview_id="preview-1",
+    )
+
+    assert handoff["ready"] is False
+    assert expected_code in _blocker_codes(handoff)
+    assert handoff["archive"] is None
