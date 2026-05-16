@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Tag, Card, Space, Typography, Button, Alert, Tooltip, InputNumber, Spin } from 'antd'
+import { Tag, Card, Space, Typography, Button, Tooltip, InputNumber } from 'antd'
 import { browser } from 'wxt/browser'
 import { Link, useNavigate } from 'react-router-dom'
 import { tldwClient } from '@/services/tldw/TldwApiClient'
@@ -15,6 +15,8 @@ import {
   SetupRequiredPanel,
   StatePanel
 } from "@/components/ui/state"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
+import { LoadingState } from "@/components/ui/feedback"
 import {
   useConnectionState,
   useConnectionUxState
@@ -565,23 +567,19 @@ export default function HealthStatus() {
       )}
 
       {!serverUrl && (
-        <Alert
-          type="info"
-          showIcon
+        <DesignSystemAlert
+          variant="info"
           className="mt-2"
           title={t(
             'healthPage.noServerBannerTitle',
             'Don’t have a server yet?'
           )}
-          description={
-            <span className="text-sm">
-              {t(
-                'healthPage.noServerBannerBody',
-                'You can explore the UI first, then connect a tldw server later to enable chat history, media ingest, and Knowledge search.'
-              )}
-            </span>
-          }
-        />
+        >
+          {t(
+            'healthPage.noServerBannerBody',
+            'You can explore the UI first, then connect a tldw server later to enable chat history, media ingest, and Knowledge search.'
+          )}
+        </DesignSystemAlert>
       )}
 
       {!serverUrl || coreStatus === 'failed' ? (
@@ -606,7 +604,10 @@ export default function HealthStatus() {
           />
         )
       ) : (
-        <Alert type="success" showIcon title={t('healthPage.connectedTo', 'Connected to {{host}}', { host: serverUrl })} />
+        <DesignSystemAlert
+          variant="success"
+          title={t('healthPage.connectedTo', 'Connected to {{host}}', { host: serverUrl })}
+        />
       )}
 
       {(!serverUrl || coreStatus === 'failed') && (
@@ -614,20 +615,20 @@ export default function HealthStatus() {
       )}
 
       {autoRefresh && showIntervalWarning && (
-        <Alert
-          type="warning"
-          showIcon
+        <DesignSystemAlert
+          variant="warning"
           title={t(
             'healthPage.autoRefreshWarningTitle',
             'Auto-refresh is enabled with a short interval'
           )}
-          description={t(
+          className="mb-4"
+        >
+          {t(
             'healthPage.intervalWarning',
             'Short intervals can put load on your server. Consider using at least {{seconds}}s.',
             { seconds: SAFE_FLOOR_SEC }
           )}
-          className="mb-4"
-        />
+        </DesignSystemAlert>
       )}
 
       <div className="flex items-center gap-4">
@@ -724,7 +725,11 @@ export default function HealthStatus() {
                 extra={
                   isCheckRunning ? (
                     <Space size="small">
-                      <Spin size="small" />
+                      <LoadingState
+                        mode="inline"
+                        size="sm"
+                        data-testid={`health-check-${c.key}-loading`}
+                      />
                       <span className="text-text-subtle">{t('healthPage.checking', 'Checking…')}</span>
                     </Space>
                   ) : (
@@ -865,15 +870,15 @@ export default function HealthStatus() {
               </Button>
             </div>
             {queueError && (
-              <Alert
-                type="warning"
-                showIcon
+              <DesignSystemAlert
+                variant="warning"
                 title={t(
                   "healthPage.queueError",
                   "Queue diagnostics unavailable"
                 )}
-                description={queueError}
-              />
+              >
+                {queueError}
+              </DesignSystemAlert>
             )}
             {queueStatus && (
               <Card

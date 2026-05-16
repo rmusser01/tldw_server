@@ -27,4 +27,16 @@ describe("LoadingState style", () => {
     expect(loadingState).toBeInTheDocument()
     expect(loadingState).not.toHaveStyle({ height: "240px" })
   })
+
+  it("renders inline mode without the standard padded block wrapper", () => {
+    const { getByTestId } = render(
+      <LoadingState mode="inline" size="lg" data-testid="inline-loader" />
+    )
+
+    const loadingState = getByTestId("inline-loader")
+    expect(loadingState).toHaveAttribute("data-ds-component", "LoadingState")
+    expect(loadingState).toHaveClass("inline-flex", "items-center")
+    expect(loadingState).not.toHaveClass("flex-col", "px-2", "py-4")
+    expect(loadingState.querySelector("svg")).toHaveClass("size-6")
+  })
 })
