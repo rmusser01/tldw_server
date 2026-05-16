@@ -57,6 +57,7 @@ a stable asset and profile model.
 - No hard failure solely because an advisory VRAM estimate predicts a poor fit.
 - No support for arbitrary shell commands; all runtime execution remains scoped
   to configured llama.cpp binaries and validated launch arguments.
+- No non-admin user-facing launch controls in the first roadmap stages.
 
 ## Existing Context
 
@@ -120,6 +121,41 @@ runtime state separately from profile configuration so the UI can distinguish
 The supervisor should be conservative: it records failures, exposes logs, and
 respects retry limits instead of looping indefinitely.
 
+### Persistence Recommendation
+
+Use a dedicated backend-owned profile store rather than expanding `config.txt`
+into a multi-profile database. A small SQLite table or JSON document under the
+tldw config/data directory is acceptable for the first implementation, but the
+contract should be repository/service-shaped so it can move later without
+changing API payloads.
+
+`config.txt` should remain the bootstrap source for global llama.cpp settings:
+enabled state, executable path, default model roots, safe path allowlist, raw
+argument policy, secret policy, default host/port, and log location. Profiles
+then reference those global settings and add per-instance desired state.
+
+This avoids turning a comment-preserving config file into a concurrent runtime
+state store while preserving the existing setup path.
+
+### Access Control And Scope
+
+Managed llama.cpp profiles are host-level admin resources. In the first stages,
+all asset, profile, lifecycle, log, and supervisor endpoints should require the
+same admin permission posture as the existing lifecycle endpoints.
+
+Profiles should be deployment-global rather than per-user. Provider wiring is
+the boundary where single-user and multi-user behavior matters:
+
+- single-user mode may update the configured llama.cpp provider endpoint as V1
+  does today;
+- multi-user mode should avoid silently changing every user's provider
+  settings and should either require an admin-level global provider action or
+  expose the selected profile as an explicit local provider alias.
+
+Logs and runtime state may expose local paths, process IDs, ports, and model
+names, so they should stay admin-only unless a later design introduces a
+redacted read-only user view.
+
 ## Core Data Model
 
 ### `LlamaCppAsset`
@@ -130,7 +166,9 @@ Required fields:
 
 - `asset_id`
 - `kind`: `gguf`, `mmproj`, `folder`, `unknown`
+- `identity_basis`: `resolved_path`, `content_hash`, or `manual`
 - `path`
+- `resolved_path`
 - `display_name`
 - `source`: `models_dir`, `registered_path`, `imported_folder`
 - `size_bytes`
@@ -142,6 +180,13 @@ Required fields:
 For multimodal families, a base GGUF can include candidate
 `mmproj_asset_ids`. A projector can also point back to candidate base models.
 Pairing is explicit when a profile selects both assets.
+
+Asset IDs should be stable enough for saved profiles but honest about local
+files. A path-derived ID is acceptable initially if it uses canonical resolved
+paths after allowlist checks. If content hashing is later added, it should
+augment identity rather than breaking existing profile references. Symlinks
+must be resolved before allowlist checks so an apparent allowed path cannot
+escape its root.
 
 ### `LlamaCppInstanceProfile`
 
@@ -157,6 +202,7 @@ Required fields:
 - `mmproj_asset_id`
 - `host`
 - `port`
+- `port_policy`
 - `server_args`
 - `device_policy`
 - `resource_policy`
@@ -168,6 +214,12 @@ Required fields:
 
 `mmproj_asset_id` is nullable and is required only for profiles whose selected
 mode or asset metadata requires a projector.
+
+`port_policy` should distinguish stable explicit ports from autoselected ports.
+Stable explicit ports are the default because self-hosted users often want
+fixed endpoints for other tools. Autoselection can be supported, but the
+runtime should report the assigned port clearly and must not let two enabled
+profiles silently fight over the same explicit port.
 
 ### `LlamaCppInstanceRuntime`
 
@@ -183,6 +235,7 @@ Required fields:
 - `started_at`
 - `last_health_at`
 - `restart_count`
+- `next_restart_at`
 - `exit_code`
 - `last_error`
 - `log_tail_available`
@@ -229,6 +282,28 @@ Compatibility wrappers should remain:
 This lets the WebUI migrate incrementally and avoids breaking existing API
 clients while the runtime architecture changes underneath.
 
+## Migration And Compatibility
+
+The first implementation should synthesize or create a reserved default profile
+from the existing `[LlamaCpp]` config when no profile store exists. This profile
+represents the current single managed server.
+
+Compatibility rules:
+
+- existing V1 endpoints target the reserved default profile;
+- existing config endpoints continue to edit global bootstrap/default settings;
+- starting by model through V1 updates the default profile's model and launch
+  args for that run;
+- stopping through V1 stops only the default profile;
+- V1 status should not hide other managed profiles, but it should preserve the
+  current response shape for clients that expect one active llama.cpp server;
+- the new multi-profile endpoints become the authoritative way to inspect all
+  managed profiles and runtimes.
+
+Implementation should keep the default profile visibly named in the Admin UI so
+users understand why legacy controls and new profile controls affect the same
+service.
+
 ## Lifecycle Semantics
 
 Profiles declare desired behavior. Runtime reports observed behavior.
@@ -250,6 +325,17 @@ Health checks should layer from cheap to expensive:
 Failed starts and failed health checks must remain visible with bounded logs,
 exit codes, retry counts, and the resolved command after secret redaction.
 
+Lifecycle operations need per-profile locking. Concurrent start, stop, pause,
+resume, and profile update requests for the same profile should serialize so
+the supervisor cannot race itself into duplicate processes or stale runtime
+state. Cross-profile operations may proceed concurrently only when they do not
+share explicit ports or mutable global resources.
+
+On tldw shutdown, the supervisor should gracefully stop processes it owns. On
+startup, it should not blindly assume old PIDs still belong to it. If later
+orphan adoption is added, it must verify command line, endpoint, and profile
+identity before taking ownership.
+
 ## Safety Policy
 
 The runtime continues V1's safety posture.
@@ -261,16 +347,18 @@ Hard failures:
 - missing executable or missing model file
 - duplicate profile IDs
 - invalid host or port
+- duplicate enabled explicit host/port combinations
 - unsafe raw arguments when unvalidated args are disabled
 - CLI secrets when CLI secrets are disabled
 - mmproj path outside allowed roots
+- profile mode and structured launch arguments that conflict with each other
 
 Warnings:
 
 - likely VRAM/RAM pressure
 - unknown asset capability
 - inferred rather than proven mmproj pairing
-- port conflicts that can be recovered by policy
+- recoverable port conflicts when `port_policy` allows autoselection
 - unsupported or unknown llama-server arguments
 - stale imported path
 - provider alias conflict
@@ -280,6 +368,11 @@ Hardware and GPU scheduling should start advisory. Device policies may express
 intent, but the first runtime stages should not claim perfect packing across
 platforms. Users should be able to launch experimental configurations after
 seeing warnings.
+
+Mode-specific structured settings should own the flags that make a server
+behave like chat, vision, embedding, or rerank. Raw custom args must not be able
+to override reserved structured flags unless the backend explicitly allows it
+and surfaces the override in warnings.
 
 ## Model Import And Asset Workflow
 
@@ -291,6 +384,10 @@ The first acquisition workflow is local only:
 - show stale path warnings
 - show path and capability warnings
 - pair/unpair projector candidates
+
+In this first workflow, "import folder" means register and scan an existing
+local folder under an allowlisted root. It does not mean upload, copy, move, or
+download model files.
 
 Remote downloads are deferred. This avoids mixing long-running network jobs,
 credential policy, partial-file cleanup, disk quota handling, and model trust
@@ -480,6 +577,9 @@ E2E tests:
 - verify both appear in runtime state
 - stop one profile without affecting the other
 - verify warnings are shown rather than hard-blocking advisory resource risks
+- verify a duplicate explicit port is rejected or forced through a documented
+  autoselect policy
+- verify legacy V1 status/start/stop still targets only the default profile
 
 Verification should also include `git diff --check` and Bandit for touched
 backend code when implementation begins. This design-only task does not require
@@ -487,8 +587,6 @@ Bandit beyond documenting that no Python code was changed.
 
 ## Open Questions For Implementation Planning
 
-- Where should profile persistence live: existing config file, a new local DB
-  table, or a small dedicated JSON document under the tldw config directory?
 - Should supervision run in the existing API process only, or should it become a
   service abstraction that can later move to a worker?
 - How much of the previous single-server handler can be reused as an
