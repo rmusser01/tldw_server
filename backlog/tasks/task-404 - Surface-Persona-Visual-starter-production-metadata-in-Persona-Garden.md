@@ -10,6 +10,7 @@ priority: medium
 references:
 - https://github.com/rmusser01/tldw_server/issues/1752
 - https://github.com/rmusser01/tldw_server/pull/1754
+- https://github.com/rmusser01/tldw_server/pull/1755
 documentation:
 - Docs/Code_Documentation/Persona_Visual_Packs.md
 modified_files:
@@ -44,7 +45,7 @@ Implemented Persona Garden starter production metadata display for the recommend
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Persona Garden now surfaces starter scaffold readiness context from the backend starter catalog so users can see scaffold status, complexity tier, neutral-anchor requirements, expected authored asset groups, and coverage notes before copying a bundled starter as an inactive draft.
+Persona Garden now surfaces starter scaffold readiness context from the backend starter catalog so users can see scaffold status, complexity tier, neutral-anchor requirements, expected authored asset groups, and coverage notes before copying a bundled starter as an inactive draft. PR #1755 now rebases cleanly over the merged #1754 implementation and adds the remaining service normalization plus localization review fixes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

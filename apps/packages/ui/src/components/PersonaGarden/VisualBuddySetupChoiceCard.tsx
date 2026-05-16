@@ -7,6 +7,11 @@ import type { PersonaVisualStarterPackSummary } from "@/types/persona-visuals"
 
 const { Text } = Typography
 
+type StarterReadinessTranslate = (
+  key: string,
+  options: { defaultValue: string }
+) => string
+
 export const formatStarterMetadataToken = (value: string | null | undefined): string =>
   String(value || "")
     .split(/[_\s-]+/)
@@ -20,6 +25,28 @@ export const formatStarterExpectedAssetGroups = (
   (expectedAssetGroups || [])
     .map(formatStarterMetadataToken)
     .join(", ")
+
+export const getStarterProductionStatusLabel = (
+  value: string | null | undefined,
+  t: StarterReadinessTranslate
+): string => {
+  const fallback = formatStarterMetadataToken(value)
+  if (!fallback) return ""
+  return t(`sidepanel:personaGarden.visuals.metadata.productionStatus.${value}`, {
+    defaultValue: fallback
+  })
+}
+
+export const getStarterComplexityTierLabel = (
+  value: string | null | undefined,
+  t: StarterReadinessTranslate
+): string => {
+  const fallback = formatStarterMetadataToken(value)
+  if (!fallback) return ""
+  return t(`sidepanel:personaGarden.visuals.metadata.complexityTier.${value}`, {
+    defaultValue: fallback
+  })
+}
 
 export type VisualBuddySetupChoiceCardProps = {
   selectedPersonaId: string
@@ -106,8 +133,11 @@ const renderStarterReadinessTags = (
   t: (key: string, options: { defaultValue: string }) => string
 ): React.ReactNode => {
   if (!starter) return null
-  const productionStatus = formatStarterMetadataToken(starter.production_status)
-  const complexityTier = formatStarterMetadataToken(starter.complexity_tier)
+  const productionStatus = getStarterProductionStatusLabel(
+    starter.production_status,
+    t
+  )
+  const complexityTier = getStarterComplexityTierLabel(starter.complexity_tier, t)
   return (
     <div className="mt-1 flex flex-wrap gap-1">
       {productionStatus ? (

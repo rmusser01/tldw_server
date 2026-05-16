@@ -129,7 +129,16 @@ describe("persona visuals service", () => {
     })
 
     await expect(listPersonaVisualStarterPacks()).resolves.toEqual({
-      starter_packs: [expect.objectContaining({ id: "starter-1" })]
+      starter_packs: [
+        expect.objectContaining({
+          id: "starter-1",
+          complexity_tier: "basic",
+          production_status: "scaffold",
+          neutral_anchor_required: true,
+          expected_asset_groups: [],
+          animation_coverage_notes: []
+        })
+      ]
     })
   })
 
