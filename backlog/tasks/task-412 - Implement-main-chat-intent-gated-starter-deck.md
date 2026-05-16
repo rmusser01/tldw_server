@@ -11,6 +11,8 @@ labels:
 priority: medium
 documentation:
 - Docs/superpowers/plans/2026-05-16-chat-cockpit-intent-gated-starter-deck.md
+related:
+- https://github.com/rmusser01/tldw_server/pull/1795
 ---
 
 ## Description
