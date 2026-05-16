@@ -176,7 +176,7 @@ export const ReviewStep: React.FC = () => {
           {qi("review.title", "Ready to Process")}
         </h2>
         <p className="mt-1 text-sm text-text-muted">
-          {qi("review.summary", "{{count}} items | {{preset}} preset | ~{{time}} estimated", {
+          {qi("review.summary", "{{count}} items | {{preset}} preset | {{time}} estimated", {
             count: queueItems.length,
             preset: presetLabel,
             time: estimatedTimeLabel,

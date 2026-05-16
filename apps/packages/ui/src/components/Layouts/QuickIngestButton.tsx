@@ -330,7 +330,7 @@ export function QuickIngestButton({ className }: QuickIngestButtonProps) {
           aria-disabled={false}
         >
           <UploadCloud className="h-3 w-3" aria-hidden="true" />
-          <span>{t("option:header.addContent", "Add Content")}</span>
+          <span>{t("option:header.quickIngest", "Quick Ingest")}</span>
           {hasQueuedQuickIngest && (
             <span className="absolute -top-1 -right-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-semibold text-white">
               {visibleBadgeCount > 9 ? "9+" : visibleBadgeCount}

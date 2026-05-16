@@ -293,6 +293,12 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
             "Supported: PDF, EPUB, DOCX, TXT, Markdown, audio, video. Max file size: 500 MB."
           )}
         </Typography.Text>
+        <Typography.Text className="block text-xs text-text-muted">
+          {qi(
+            "wizard.addPurpose",
+            "Add URLs or files. Stored items appear in Media; analyzed and chunked items become searchable in Knowledge."
+          )}
+        </Typography.Text>
 
         {hasLargeFiles && (
           <Alert

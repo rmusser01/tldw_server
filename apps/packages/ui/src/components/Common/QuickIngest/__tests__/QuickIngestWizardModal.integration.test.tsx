@@ -405,6 +405,14 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
   // -------------------------------------------------------------------------
   // Step 1: Add Content
   // -------------------------------------------------------------------------
+  it("Step 1 — explains what first-time users can add and where it appears", () => {
+    render(<WizardTestHarness onClose={onClose} />)
+
+    expect(screen.getByText(/Add URLs or files/i)).toBeInTheDocument()
+    expect(screen.getByText(/Media/i)).toBeInTheDocument()
+    expect(screen.getByText(/Knowledge/i)).toBeInTheDocument()
+  })
+
   it("Step 1 — renders at step 1 and allows adding a URL", async () => {
     const user = userEvent.setup()
     render(<WizardTestHarness onClose={onClose} />)
