@@ -612,6 +612,18 @@ async def fetch_llm_usage_summary(
         "SUM(CASE WHEN estimate_source = 'local_diagnostic' THEN 1 ELSE 0 END) AS local_diagnostic_count, "
         "SUM(CASE WHEN estimated THEN 1 ELSE 0 END) AS estimated_usage_count, "
     )
+    pg_cache_summary_fallback = (
+        "0 AS cached_input_tokens, "
+        "0 AS cache_write_input_tokens, "
+        "0 AS cache_read_input_tokens, "
+        "SUM(COALESCE(prompt_tokens,0)) AS billable_input_tokens, "
+        "0 AS provider_usage_count, "
+        "0 AS stream_estimate_count, "
+        "0 AS disconnect_estimate_count, "
+        "0 AS missing_usage_count, "
+        "0 AS local_diagnostic_count, "
+        "SUM(CASE WHEN estimated THEN 1 ELSE 0 END) AS estimated_usage_count, "
+    )
     sqlite_cache_summary = (
         "SUM(IFNULL(cached_input_tokens,0)) as cached_input_tokens, "
         "SUM(IFNULL(cache_write_input_tokens,0)) as cache_write_input_tokens, "
@@ -638,12 +650,14 @@ async def fetch_llm_usage_summary(
             )
             rows = await db.fetch(sql, *params)
         except _ADMIN_USAGE_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"llm_usage_summary: falling back without cache accounting columns (pg): {exc}")
+            logger.debug(f"llm_usage_summary: falling back with default cache accounting columns (pg): {exc}")
             sql = (
                 f"SELECT {', '.join(key_select_parts)}, "  # nosec B608
                 "COUNT(*) AS requests, SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors, "
                 "SUM(COALESCE(prompt_tokens,0)) AS input_tokens, SUM(COALESCE(completion_tokens,0)) AS output_tokens, "
-                "SUM(COALESCE(total_tokens,0)) AS total_tokens, SUM(COALESCE(total_cost_usd,0)) AS total_cost_usd, AVG(latency_ms)::float AS latency_avg_ms "
+                "SUM(COALESCE(total_tokens,0)) AS total_tokens, SUM(COALESCE(total_cost_usd,0)) AS total_cost_usd, "
+                f"{pg_cache_summary_fallback}"
+                "AVG(latency_ms)::float AS latency_avg_ms "
                 f"FROM llm_usage_log{join_clause}{where_clause} GROUP BY {key_group_by} ORDER BY requests DESC, {key_order_by}"
             )
             rows = await db.fetch(sql, *params)
