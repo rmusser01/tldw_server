@@ -100,7 +100,7 @@ export const isTldwServerRunning = async () => {
   try {
     const config = await tldwClient.getConfig()
     if (!config) return false
-    
+
     const health = await tldwClient.healthCheck()
     return health
   } catch (e) {

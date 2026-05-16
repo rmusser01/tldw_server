@@ -236,7 +236,7 @@ export class ChatTldw {
     messages: BaseMessage[]
   ): Promise<{ text: string; message: AIMessage }> {
     const tldwMessages = this.convertToTldwMessages(messages)
-    
+
     const response = await tldwChat.sendMessage(tldwMessages, {
       model: this.model,
       temperature: this.temperature,
