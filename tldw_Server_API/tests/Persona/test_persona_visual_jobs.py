@@ -163,7 +163,8 @@ def test_create_persona_visual_generation_job_carries_recipe_intent_and_request_
         recipe_intent={**recipe_intent, "correlation_id": "recipe-request-2"},
     )
 
-    assert first["idempotency_key"] != second["idempotency_key"]
+    assert first["idempotency_key"] == second["idempotency_key"]
+    assert manager.created[0]["request_id"] == "recipe-request-1"
     assert manager.created[0]["payload"] == {
         "user_id": "user-1",
         "persona_id": "persona-1",
@@ -174,6 +175,20 @@ def test_create_persona_visual_generation_job_carries_recipe_intent_and_request_
         "request_id": "recipe-request-1",
         "recipe_intent": recipe_intent,
     }
+    assert (
+        manager.created[0]["idempotency_key"]
+        != create_generate_candidate_job(
+            manager,
+            user_id="user-1",
+            persona_id="persona-1",
+            pack_id="pack-1",
+            prompt="different effective recipe prompt",
+            target_state="speaking",
+            backend="fake",
+            request_id="recipe-request-1",
+            recipe_intent=recipe_intent,
+        )["idempotency_key"]
+    )
 
 
 def test_create_persona_visual_pack_export_job_includes_options_digest() -> None:

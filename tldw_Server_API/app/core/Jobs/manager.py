@@ -1554,8 +1554,8 @@ class JobManager:
                                     INSERT OR IGNORE INTO jobs (
                                       uuid, domain, queue, job_type, owner_user_id, project_id, batch_group,
                                       idempotency_key, payload, result, status, priority, max_retries,
-                                      retry_count, available_at, created_at, updated_at
-                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, 0, ?, ?, ?)
+                                      retry_count, available_at, created_at, updated_at, request_id, trace_id
+                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, 0, ?, ?, ?, ?, ?)
                                     """,
                                     (
                                         uuid_val,
@@ -1576,6 +1576,8 @@ class JobManager:
                                         ),
                                         now,
                                         now,
+                                        request_id,
+                                        trace_id,
                                     ),
                                 )
                                 inserted = bool(getattr(conn, "total_changes", 0))

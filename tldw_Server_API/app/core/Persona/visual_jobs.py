@@ -228,18 +228,13 @@ def visual_generate_candidate_idempotency_key(
     recipe_intent: dict[str, Any] | None = None,
 ) -> str:
     normalized_target_state = str(target_state).strip() if target_state else None
-    normalized_recipe_intent = dict(recipe_intent) if recipe_intent else None
+    normalized_recipe_intent = _recipe_intent_for_idempotency(recipe_intent)
     generation_digest = hashlib.sha256(
         json.dumps(
             {
                 "backend": str(backend).strip() if backend else None,
                 "prompt": str(prompt or "").strip(),
                 "recipe_intent": normalized_recipe_intent,
-                "request_id": (
-                    str(request_id).strip()
-                    if normalized_recipe_intent is not None and request_id
-                    else None
-                ),
                 "target_state": normalized_target_state,
             },
             sort_keys=True,
@@ -296,8 +291,19 @@ def create_generate_candidate_job(
             request_id=normalized_request_id,
             recipe_intent=normalized_recipe_intent,
         ),
+        request_id=normalized_request_id,
         max_retries=1,
     )
+
+
+def _recipe_intent_for_idempotency(
+    recipe_intent: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not recipe_intent:
+        return None
+    normalized = dict(recipe_intent)
+    normalized.pop("correlation_id", None)
+    return normalized
 
 
 def create_visual_pack_export_job(

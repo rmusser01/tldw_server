@@ -36,6 +36,14 @@ class PersonaVisualRecipeGenerationIntent:
     recipe_intent: dict[str, Any]
 
 
+class PersonaVisualRecipeGenerationError(ValueError):
+    """Raised when a Persona Visual recipe-backed generation request is invalid."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
 def normalize_persona_visual_generation_request_id(request_id: str | None) -> str:
     """Return a trace-safe request identifier or generate a bounded one."""
     if request_id is None or str(request_id).strip() == "":
@@ -43,13 +51,10 @@ def normalize_persona_visual_generation_request_id(request_id: str | None) -> st
     normalized = str(request_id).strip()
     lower = normalized.lower()
     if (
-        len(normalized) > MAX_PERSONA_VISUAL_GENERATION_REQUEST_ID_LENGTH
-        or not _REQUEST_ID_RE.match(normalized)
-        or "/" in normalized
-        or "\\" in normalized
+        not _REQUEST_ID_RE.match(normalized)
         or any(marker in lower for marker in _SECRET_MARKERS)
     ):
-        raise ValueError("invalid_request_id")
+        raise PersonaVisualRecipeGenerationError("invalid_request_id")
     return normalized
 
 
@@ -67,15 +72,15 @@ def build_persona_visual_recipe_generation_intent(
     if not starter_id and not output_id:
         return None
     if starter_id and not output_id:
-        raise ValueError("recipe_output_required_with_starter_pack_id")
+        raise PersonaVisualRecipeGenerationError("recipe_output_required_with_starter_pack_id")
     if output_id and not starter_id:
-        raise ValueError("starter_pack_id_required_with_recipe_output")
+        raise PersonaVisualRecipeGenerationError("starter_pack_id_required_with_recipe_output")
 
     starter = _starter_by_id(starter_id, starter_packs=starter_packs)
     recipe = starter.production_recipe
     animation_outputs = tuple(str(item).strip() for item in recipe.animation_outputs)
     if output_id not in animation_outputs:
-        raise ValueError("recipe_output_not_found")
+        raise PersonaVisualRecipeGenerationError("recipe_output_not_found")
 
     normalized_prompt = str(user_prompt or "").strip()
     if not normalized_prompt:
@@ -98,7 +103,7 @@ def build_persona_visual_recipe_generation_intent(
         recipe_intent=recipe_intent,
     )
     if len(effective_prompt) > MAX_PERSONA_VISUAL_GENERATION_PROMPT_LENGTH:
-        raise ValueError("recipe_prompt_too_long")
+        raise PersonaVisualRecipeGenerationError("recipe_prompt_too_long")
     return PersonaVisualRecipeGenerationIntent(
         request_id=request_id,
         effective_prompt=effective_prompt,
@@ -117,7 +122,7 @@ def _starter_by_id(
     for starter in starter_packs:
         if starter.id == starter_id:
             return starter
-    raise ValueError("starter_pack_not_found")
+    raise PersonaVisualRecipeGenerationError("starter_pack_not_found")
 
 
 def _compose_effective_prompt(
@@ -144,6 +149,7 @@ def _compose_effective_prompt(
 __all__ = [
     "MAX_PERSONA_VISUAL_GENERATION_PROMPT_LENGTH",
     "MAX_PERSONA_VISUAL_GENERATION_REQUEST_ID_LENGTH",
+    "PersonaVisualRecipeGenerationError",
     "PersonaVisualRecipeGenerationIntent",
     "build_persona_visual_recipe_generation_intent",
     "normalize_persona_visual_generation_request_id",

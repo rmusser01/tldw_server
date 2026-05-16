@@ -10,9 +10,11 @@ labels:
 modified_files:
 - tldw_Server_API/app/api/v1/endpoints/persona.py
 - tldw_Server_API/app/api/v1/schemas/persona.py
+- tldw_Server_API/app/core/Jobs/manager.py
 - tldw_Server_API/app/core/Persona/visual_generation_recipes.py
 - tldw_Server_API/app/core/Persona/visual_jobs.py
 - tldw_Server_API/app/core/Persona/visual_jobs_worker.py
+- tldw_Server_API/tests/Jobs/test_jobs_idempotency_scope_sqlite.py
 - tldw_Server_API/tests/Persona/test_persona_visual_jobs.py
 - tldw_Server_API/tests/Persona/test_persona_visuals_api.py
 - Docs/superpowers/plans/2026-05-16-persona-visual-recipe-contract-implementation-plan.md
@@ -43,20 +45,13 @@ Docs/superpowers/plans/2026-05-16-persona-visual-recipe-contract-implementation-
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-- Added `visual_generation_recipes.py` for trace-safe request ID normalization, starter/output validation against bundled Persona Visual starter fixtures, and bounded effective prompt composition.
-- Extended `PersonaVisualGenerationRequest` / `PersonaVisualGenerationJobResponse` with request/recipe fields, while prompt-only requests continue to queue the existing job type and now receive a generated request ID.
-- Extended `persona_visual_generate_candidate` job payloads/idempotency with optional `request_id` and `recipe_intent` metadata.
-- Added structured log events for recipe validation and job creation without logging raw generated assets, credentials, or unbounded prompt data.
-- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_jobs.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q` -> 64 passed, 5 warnings.
-- Verification: `py_compile` for touched Python files -> passed.
-- Verification: `git diff --check` -> passed.
-- Verification: Bandit touched Python scope -> no findings in `/tmp/bandit_persona_visual_recipe_contract_1774.json`.
+Review follow-up for PR #1778 completed. Fixed still-valid review findings by making recipe idempotency ignore request/correlation IDs, returning persisted request IDs on idempotent replays, forwarding request IDs into Jobs, preserving request/trace IDs in SQLite idempotent inserts, replacing string-matched recipe errors with typed error codes, and simplifying request ID validation. The worker long-line comment was already addressed by the prior request-ID hardening commit. Verification: focused pytest -> 71 passed, 5 warnings; py_compile touched Python files -> passed; git diff --check -> passed; Bandit touched implementation scope -> 0 findings in /tmp/bandit_persona_visual_recipe_contract_1778_review.json.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented Persona Visual recipe-backed generation contract Slice 1 for issue #1774. Generation requests now support request IDs plus optional starter_pack_id/recipe_output pairs, validate recipe intent against bundled starter production recipes, compose bounded effective prompts, queue the existing persona_visual_generate_candidate job with recipe_intent metadata, include correlation IDs in job payloads/responses, distinguish recipe-backed idempotency, and reject unsafe request IDs before queueing. Added trace-safe logging for recipe request validation, job creation, and candidate creation. Focused backend tests cover prompt-only behavior, valid recipe-backed requests, missing recipe pairs, unknown starter/output, overlong composed prompts, unsafe request IDs, correlation payloads, and idempotency.
+Implemented PR #1778 review follow-up for the Persona Visual recipe-backed generation contract. The API/job path now keeps idempotent replays aligned with the persisted job request ID, avoids treating trace-only identifiers as generation intent, persists request IDs through the Jobs layer, uses typed recipe validation errors, and retains focused regression coverage for prompt-only and recipe-backed replay behavior.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

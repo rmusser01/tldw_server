@@ -223,13 +223,19 @@ class FakeJobManager:
     def __init__(self) -> None:
         self.created: list[dict] = []
         self.jobs_by_id: dict[int, dict] = {}
+        self.jobs_by_idempotency_key: dict[str, dict] = {}
         self.cancelled: list[tuple[int, str | None]] = []
 
     def create_job(self, **kwargs):
+        idempotency_key = kwargs.get("idempotency_key")
+        if idempotency_key and idempotency_key in self.jobs_by_idempotency_key:
+            return self.jobs_by_idempotency_key[idempotency_key]
         job_id = 9001 + len(self.created)
         self.created.append(kwargs)
         job = {"id": job_id, "status": "queued", **kwargs}
         self.jobs_by_id[job_id] = job
+        if idempotency_key:
+            self.jobs_by_idempotency_key[idempotency_key] = job
         return job
 
     def get_job(self, job_id: int):
@@ -879,10 +885,43 @@ def test_create_generation_job_for_visual_pack(persona_db: CharactersRAGDB) -> N
         assert response.status_code == 200, response.text
         payload = response.json()
         assert payload["job_id"] == "9001"
-        assert payload["request_id"]
+        assert payload["request_id"] == "9001"
         assert manager.created[0]["domain"] == "persona_visuals"
-        assert manager.created[0]["payload"]["request_id"] == payload["request_id"]
+        assert "request_id" not in manager.created[0]["payload"]
         assert manager.created[0]["payload"]["target_state"] == "speaking"
+
+
+def test_create_generation_job_prompt_only_replay_returns_existing_request_id(
+    persona_db: CharactersRAGDB,
+) -> None:
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Replay Generation Persona")
+        pack = _create_visual_pack(client, persona_id)
+
+        first = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/generation-jobs",
+            json={
+                "request_id": "request-first",
+                "prompt": "make a speaking pose",
+                "target_state": "speaking",
+            },
+        )
+        second = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/generation-jobs",
+            json={
+                "request_id": "request-second",
+                "prompt": "make a speaking pose",
+                "target_state": "speaking",
+            },
+        )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json()["job_id"] == second.json()["job_id"] == "9001"
+    assert first.json()["request_id"] == second.json()["request_id"] == "request-first"
+    assert len(manager.created) == 1
 
 
 def test_create_generation_job_with_recipe_intent_builds_traceable_payload(
@@ -910,6 +949,7 @@ def test_create_generation_job_with_recipe_intent_builds_traceable_payload(
     payload = response.json()
     assert payload["job_id"] == "9001"
     assert payload["request_id"] == "recipe-request-1"
+    assert manager.created[0]["request_id"] == "recipe-request-1"
     job_payload = manager.created[0]["payload"]
     assert job_payload["request_id"] == "recipe-request-1"
     assert job_payload["target_state"] == "speaking"
@@ -923,6 +963,38 @@ def test_create_generation_job_with_recipe_intent_builds_traceable_payload(
     assert recipe_intent["identity_brief"]
     assert recipe_intent["neutral_anchor"]
     assert "neutral_identity_consistency" in recipe_intent["review_checks"]
+
+
+def test_create_generation_job_recipe_replay_returns_existing_request_id(
+    persona_db: CharactersRAGDB,
+) -> None:
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Recipe Replay Persona")
+        pack = _create_visual_pack(client, persona_id)
+        request_payload = {
+            "prompt": "make the speaking loop upbeat",
+            "target_state": "speaking",
+            "backend": "fake",
+            "starter_pack_id": DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID,
+            "recipe_output": "required_state_loops",
+        }
+
+        first = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/generation-jobs",
+            json={"request_id": "recipe-request-first", **request_payload},
+        )
+        second = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/generation-jobs",
+            json={"request_id": "recipe-request-second", **request_payload},
+        )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json()["job_id"] == second.json()["job_id"] == "9001"
+    assert first.json()["request_id"] == second.json()["request_id"] == "recipe-request-first"
+    assert len(manager.created) == 1
 
 
 @pytest.mark.parametrize(
