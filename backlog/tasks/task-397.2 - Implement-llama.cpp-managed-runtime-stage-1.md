@@ -19,10 +19,14 @@ parent_task_id: TASK-397
 priority: high
 modified_files:
 - Docs/superpowers/plans/2026-05-16-llamacpp-managed-runtime-stage1-implementation-plan.md
-- tldw_Server_API/app/api/v1/endpoints/llamacpp.py
-- tldw_Server_API/app/core/Local_LLM/llamacpp_supervisor_service.py
-- tldw_Server_API/tests/LLM_Local/test_llamacpp_runtime_api.py
-- tldw_Server_API/tests/LLM_Local/test_llamacpp_supervisor_service.py
+- apps/packages/ui/src/types/llamacpp-admin.ts
+- apps/packages/ui/src/services/tldw/domains/models-audio.ts
+- apps/packages/ui/src/services/tldw/TldwApiClient.ts
+- apps/packages/ui/src/components/Option/Admin/LlamacppRuntimePanel.tsx
+- apps/packages/ui/src/components/Option/Admin/LlamacppAdminPage.tsx
+- apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppRuntimePanel.test.tsx
+- apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppAdminPage.test.tsx
+- apps/packages/ui/src/services/__tests__/tldw-api-client.models-normalization.test.ts
 ---
 
 ## Description
@@ -77,4 +81,6 @@ Task 4: added admin llama.cpp profile and instance APIs, per-profile lifecycle a
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 4 review fixes: added profile-scoped use-in-chat, routed V1 start_server and inference through the supervisor default profile when available, made fresh default stop idempotent, and added regression coverage for split-brain and start-by-model to inference behavior. Verification: focused runtime/supervisor pytest 21 passed; broader llama.cpp backend slice 89 passed; py_compile passed; Bandit /tmp/bandit_llamacpp_runtime_api_review_fix.json had no errors/results; git diff --check passed.
+
+Task 5: added llama.cpp profile/runtime TypeScript types, client methods for profile CRUD/lifecycle/instance logs, a compact Admin runtime panel, and runtime-plane loading/actions in LlamacppAdminPage with 404/503 fallback to the legacy single-server controls. Verification: Task 5 Vitest set reported 20 passed. Package-level tsc --noEmit was attempted but remains blocked by existing repo-wide TypeScript test debt outside this slice.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

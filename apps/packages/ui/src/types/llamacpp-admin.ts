@@ -109,6 +109,94 @@ export interface LlamacppLogTailResponse {
   warnings: string[]
 }
 
+export type LlamacppProfileMode =
+  | "chat"
+  | "vision"
+  | "embedding"
+  | "rerank"
+  | "server_generic"
+
+export type LlamacppPortPolicy = "explicit" | "autoselect"
+
+export type LlamacppRuntimeState =
+  | "defined"
+  | "starting"
+  | "running"
+  | "stopped"
+  | "failed"
+  | "paused"
+
+export interface LlamacppProfile {
+  profile_id: string
+  name: string
+  enabled: boolean
+  mode: LlamacppProfileMode
+  model_id?: string | null
+  model_path?: string | null
+  mmproj_model_id?: string | null
+  host: string
+  port: number
+  port_policy: LlamacppPortPolicy
+  server_args: Record<string, unknown>
+  autostart: boolean
+  restart_policy: Record<string, unknown>
+  provider_alias?: string | null
+  tags: string[]
+}
+
+export type LlamacppProfileCreateRequest = Partial<
+  Omit<LlamacppProfile, "profile_id" | "server_args" | "restart_policy" | "tags">
+> & {
+  profile_id?: string | null
+  name: string
+  server_args?: Record<string, unknown>
+  restart_policy?: Record<string, unknown>
+  tags?: string[]
+}
+
+export type LlamacppProfileUpdateRequest = Partial<
+  Omit<LlamacppProfile, "profile_id">
+>
+
+export interface LlamacppProfileListResponse {
+  profiles: LlamacppProfile[]
+}
+
+export interface LlamacppRuntime {
+  profile_id: string
+  state: LlamacppRuntimeState
+  pid?: number | null
+  host?: string | null
+  port?: number | null
+  endpoint?: string | null
+  model_id?: string | null
+  model_path?: string | null
+  resolved_args: string[]
+  started_at?: string | null
+  stopped_at?: string | null
+  last_health_at?: string | null
+  restart_count: number
+  next_restart_at?: string | null
+  exit_code?: number | null
+  last_error?: string | null
+  log_tail_available: boolean
+  warnings: string[]
+  health: Record<string, unknown>
+  message?: string | null
+}
+
+export interface LlamacppRuntimeListResponse {
+  runtimes: LlamacppRuntime[]
+}
+
+export interface LlamacppLifecycleActionResponse {
+  profile_id: string
+  action: string
+  state: LlamacppRuntimeState
+  accepted: boolean
+  message?: string | null
+}
+
 export interface LlamacppGpuSnapshot {
   index: number
   name?: string | null

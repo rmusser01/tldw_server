@@ -249,7 +249,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add \
@@ -586,7 +586,7 @@ git commit -m "feat: expose llama.cpp runtime APIs"
 - Test: `apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppRuntimePanel.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppAdminPage.test.tsx`
 
-- [ ] **Step 1: Write failing frontend tests**
+- [x] **Step 1: Write failing frontend tests**
 
 Test that the runtime panel shows multiple instances and actions:
 
@@ -599,7 +599,7 @@ it("renders multiple llama.cpp runtimes with independent actions", async () => {
 })
 ```
 
-- [ ] **Step 2: Run frontend tests to verify failure**
+- [x] **Step 2: Run frontend tests to verify failure**
 
 ```bash
 bunx vitest run \
@@ -609,7 +609,7 @@ bunx vitest run \
 
 Expected: FAIL because panel/types do not exist.
 
-- [ ] **Step 3: Add TypeScript types and client methods**
+- [x] **Step 3: Add TypeScript types and client methods**
 
 Add:
 
@@ -632,7 +632,7 @@ Client methods:
 - `listLlamacppInstances`
 - `tailLlamacppInstanceLogs`
 
-- [ ] **Step 4: Add minimal runtime panel**
+- [x] **Step 4: Add minimal runtime panel**
 
 Keep it operational and dense:
 
@@ -647,13 +647,13 @@ Keep it operational and dense:
 - no remote download controls
 - no full profile editor yet
 
-- [ ] **Step 5: Wire panel into Admin page**
+- [x] **Step 5: Wire panel into Admin page**
 
 Load `listLlamacppInstances()` alongside status/config/inventory. Render the
 panel under the existing readiness/status band. If the new endpoint fails with
 404/503 on older servers, degrade to the existing single-server view.
 
-- [ ] **Step 6: Run frontend tests**
+- [x] **Step 6: Run frontend tests**
 
 ```bash
 bunx vitest run \
@@ -663,6 +663,13 @@ bunx vitest run \
 ```
 
 Expected: PASS.
+
+Verification: focused Task 5 Vitest set reported 20 passed across
+`LlamacppRuntimePanel`, `LlamacppAdminPage`,
+`tldw-api-client.models-normalization`, `model-settings.llamacpp-controls`,
+and `build-llamacpp-server-args`. A package-level `tsc --noEmit` run was also
+attempted, but it remains blocked by existing repo-wide TypeScript test debt
+outside this llama.cpp slice.
 
 - [ ] **Step 7: Commit**
 
