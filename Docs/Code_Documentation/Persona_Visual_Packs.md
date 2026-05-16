@@ -371,11 +371,15 @@ assigns real asset ids.
 
 The provider archive handoff helper,
 `build_provider_archive_import_preview_handoff()`, validates a normalized
-portable archive envelope into an MCP resource retrieval descriptor. It is still
-pre-persistence: it does not download MCP resources, create preview rows,
-enqueue import-preview Jobs, write archives, commit imports, or activate packs.
-The existing import-preview job contract remains local-archive-path based after
-a future retrieval adapter materializes the archive.
+portable archive envelope into an MCP resource retrieval descriptor. The
+retrieval materializer,
+`materialize_provider_archive_import_preview_handoff()`, accepts that ready
+descriptor plus an injected resource reader, writes bounded bytes to the local
+import-preview staging area, verifies the provider SHA-256 checksum, and returns
+the existing local-archive-path import-preview job payload. Both helpers remain
+pre-commit and non-activating: they do not create preview rows, enqueue Jobs,
+commit imports, activate packs, change renderer support, or expose raw provider
+payloads in diagnostics.
 
 Provider provenance is metadata only. It must not override user ownership,
 persona scope, activation state, or personal-library source references. The
