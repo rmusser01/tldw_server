@@ -4,7 +4,7 @@ title: Implement llama.cpp asset inventory v2
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-16 07:00'
+updated_date: '2026-05-16 07:10'
 labels:
   - llamacpp
   - backend
@@ -63,6 +63,8 @@ Verification recorded:
 - Whitespace: git diff --check -> clean.
 
 Deferred by design: remote downloads, model-family routing, automatic profile mutation, and automatic mmproj pairing.
+
+PR: https://github.com/rmusser01/tldw_server/pull/1764
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
