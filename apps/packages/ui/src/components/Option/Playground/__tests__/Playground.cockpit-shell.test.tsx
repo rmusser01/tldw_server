@@ -253,6 +253,23 @@ describe("Playground cockpit shell", () => {
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
   });
 
+  it("keeps cockpit tooltip ids unique across multiple shell instances", async () => {
+    render(
+      <>
+        <Playground />
+        <Playground />
+      </>,
+    );
+
+    const contextCollapseTooltips = await screen.findAllByRole("tooltip", {
+      name: "Collapse context sidechannel",
+    });
+    const tooltipIds = contextCollapseTooltips.map((tooltip) => tooltip.id);
+
+    expect(contextCollapseTooltips).toHaveLength(2);
+    expect(new Set(tooltipIds).size).toBe(tooltipIds.length);
+  });
+
   it("restores focus mode from storage while preserving chat and composer", async () => {
     storageState.values.set("playgroundChatLayoutMode", "focus");
 

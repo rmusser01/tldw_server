@@ -32,7 +32,7 @@ type CockpitTooltipButtonProps =
   React.ButtonHTMLAttributes<HTMLButtonElement> & {
     children: React.ReactNode;
     tooltip: string;
-    tooltipId: string;
+    tooltipId?: string;
     tooltipPlacement?: CockpitTooltipPlacement;
     wrapperClassName?: string;
   };
@@ -48,11 +48,13 @@ const CockpitTooltipButton = ({
   children,
   className,
   tooltip,
-  tooltipId,
+  tooltipId: tooltipIdProp,
   tooltipPlacement = "top",
   wrapperClassName,
   ...buttonProps
 }: CockpitTooltipButtonProps) => {
+  const generatedTooltipId = React.useId();
+  const tooltipId = tooltipIdProp ?? generatedTooltipId;
   const describedBy = buttonProps["aria-describedby"];
   const ariaDescribedBy =
     typeof describedBy === "string" && describedBy.trim().length > 0
@@ -401,7 +403,6 @@ export const PlaygroundCockpitShell = ({
             aria-expanded="false"
             onClick={() => onLeftRailVisibleChange?.(true)}
             tooltip={restoreContextSidechannelLabel}
-            tooltipId="playground-cockpit-left-rail-restore-tooltip"
             tooltipPlacement="right"
             wrapperClassName="absolute left-2 top-2 z-20 hidden lg:inline-flex"
             className="inline-flex min-h-[32px] items-center gap-1 rounded-md border border-border bg-surface2 px-2 py-1 text-xs font-medium text-text shadow-sm hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
@@ -420,7 +421,6 @@ export const PlaygroundCockpitShell = ({
             aria-expanded="false"
             onClick={() => onRightRailVisibleChange?.(true)}
             tooltip={restoreRuntimeSidechannelLabel}
-            tooltipId="playground-cockpit-right-rail-restore-tooltip"
             tooltipPlacement="left"
             wrapperClassName="absolute right-2 top-2 z-20 hidden lg:inline-flex"
             className="inline-flex min-h-[32px] items-center gap-1 rounded-md border border-border bg-surface2 px-2 py-1 text-xs font-medium text-text shadow-sm hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
@@ -448,7 +448,6 @@ export const PlaygroundCockpitShell = ({
                 aria-expanded="true"
                 onClick={() => onLeftRailVisibleChange?.(false)}
                 tooltip={collapseContextSidechannelLabel}
-                tooltipId="playground-cockpit-left-rail-collapse-tooltip"
                 tooltipPlacement="left"
                 className="inline-flex min-h-[28px] min-w-[28px] items-center justify-center rounded-md border border-border bg-surface2 text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
               >
@@ -488,7 +487,6 @@ export const PlaygroundCockpitShell = ({
                 aria-expanded="true"
                 onClick={() => onRightRailVisibleChange?.(false)}
                 tooltip={collapseRuntimeSidechannelLabel}
-                tooltipId="playground-cockpit-right-rail-collapse-tooltip"
                 tooltipPlacement="left"
                 className="inline-flex min-h-[28px] min-w-[28px] items-center justify-center rounded-md border border-border bg-surface2 text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
               >

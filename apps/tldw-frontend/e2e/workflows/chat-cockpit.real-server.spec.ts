@@ -393,12 +393,31 @@ const assertVisibleTooltipForControl = async (
 ) => {
   const describedBy = await control.getAttribute('aria-describedby');
   expect(describedBy).toBeTruthy();
-  const tooltipId = describedBy?.split(/\s+/).find(Boolean);
-  expect(tooltipId).toBeTruthy();
-  const tooltip = page.locator(`[id="${tooltipId}"]`);
-  await expect(tooltip).toHaveText(expectedText);
+  const describedByIds = (describedBy ?? '').split(/\s+/).filter(Boolean);
+  expect(describedByIds.length).toBeGreaterThan(0);
+
+  let tooltip: Locator | null = null;
+  for (const id of describedByIds) {
+    const candidate = page.locator(`[id=${JSON.stringify(id)}]`);
+    if ((await candidate.count()) === 0) continue;
+
+    const role = await candidate.getAttribute('role');
+    const text = (await candidate.textContent())?.trim();
+    if (role === 'tooltip' && text === expectedText) {
+      tooltip = candidate;
+      break;
+    }
+  }
+
+  expect(
+    tooltip,
+    `Expected aria-describedby (${describedByIds.join(
+      ', '
+    )}) to include tooltip text "${expectedText}"`
+  ).not.toBeNull();
   await control.hover();
-  await expect(tooltip).toHaveCSS('opacity', '1');
+  await expect(tooltip!).toHaveText(expectedText);
+  await expect(tooltip!).toHaveCSS('opacity', '1');
 };
 
 const getDesktopContextRail = (page: Page): Locator =>
@@ -722,6 +741,14 @@ test.describe('/chat cockpit real-server parity', () => {
     const collapseContextSidechannel = page
       .getByTestId('playground-cockpit-left-rail')
       .getByRole('button', { name: 'Collapse context sidechannel' });
+    await collapseContextSidechannel.evaluate((element) => {
+      const probe = document.createElement('span');
+      probe.id = 'playground-cockpit-describedby-probe';
+      probe.textContent = 'Extra sidechannel description';
+      element.insertAdjacentElement('beforebegin', probe);
+      const describedBy = element.getAttribute('aria-describedby');
+      element.setAttribute('aria-describedby', [probe.id, describedBy].filter(Boolean).join(' '));
+    });
     await assertVisibleTooltipForControl(
       page,
       collapseContextSidechannel,
