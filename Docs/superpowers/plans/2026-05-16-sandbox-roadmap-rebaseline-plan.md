@@ -39,7 +39,16 @@
 
   Run targeted `rg` checks for the updated queue headings and source-of-truth paths.
 
-  Verification: `rg -n "Immediate Queue Rebaseline|Next Pragmatic Queue|Prepared-host acceptance evidence|Current Handoff|sandbox-runtime-capability-inventory|vz-linux-host-gated-ci-acceptance-policy" ...` found the expected roadmap and README references. `ls` verified referenced source-of-truth docs and the host-gated workflow exist.
+  Verification:
+
+  ```bash
+  rg -n "Immediate Queue Rebaseline|Next Pragmatic Queue|Prepared-host acceptance evidence|Current Handoff|sandbox-runtime-capability-inventory|vz-linux-host-gated-ci-acceptance-policy" \
+    Docs/superpowers/specs/2026-05-02-sandbox-module-roadmap-design.md \
+    tldw_Server_API/app/core/Sandbox/README.md \
+    Docs/superpowers/plans/2026-05-16-sandbox-roadmap-rebaseline-plan.md
+  ```
+
+  The command found the expected roadmap and README references. `ls` verified referenced source-of-truth docs and the host-gated workflow exist.
 
 - [x] **Step 2: Run diff hygiene**
 

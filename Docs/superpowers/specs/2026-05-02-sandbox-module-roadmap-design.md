@@ -358,7 +358,7 @@ this table as the current status map before selecting new sandbox work.
    warning, repair-plan, and CI-status signals through admin/operator surfaces
    without duplicating runtime-specific logic in clients.
 
-4. **Expansion design only after evidence**
+4. **Expansion design only after evidence (Phase 6)**
 
    Resume expansion candidates such as `vz_macos` real execution, vmnet
    allowlist networking, APFS clone provisioning, Firecracker parity, or direct

@@ -45,12 +45,14 @@ Plan: Docs/superpowers/plans/2026-05-16-sandbox-roadmap-rebaseline-plan.md
 Updated the sandbox roadmap spec from a stale pending immediate queue into a rebaselined status map. Added source-of-truth links for the capability inventory, security matrix, host-gated CI acceptance policy, and public/operator docs. Added the next pragmatic queue with prepared-host acceptance evidence first, followed by remaining lifecycle drill gaps, operator/admin status consolidation, and expansion only after evidence. Updated the Sandbox README pointer to note the roadmap is now status-rebaselined.
 
 Verification: rg smoke check found updated queue headings and source-of-truth references; ls verified referenced docs/workflow exist; focused docs/workflow pytest passed with 22 tests; git diff --check passed. Bandit skipped because this slice changed only Markdown docs and Backlog task metadata.
+
+PR review follow-up: replaced the placeholder `rg ...` verification snippet with a copy/paste-safe command using explicit file targets, linked the expansion queue item to Phase 6, and clarified `vz_macos` as the exact runtime identifier rather than changing it to non-canonical mixed-case spelling. Verification rerun: exact `rg` command passed, focused docs/workflow pytest passed with 22 tests, and `git diff --check` passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Rebaselined the sandbox roadmap after the initial VZ Linux stability slices. The roadmap now distinguishes completed foundations from residual host-gated/manual boundaries, identifies prepared-host acceptance evidence as the next pragmatic work, and preserves expansion guardrails for vz_macos, vmnet, APFS clones, Firecracker parity, and Apple containerization. Verification passed for reference smoke checks, focused docs/workflow tests, and diff hygiene; Bandit was not applicable for docs-only changes.
+Rebaselined the sandbox roadmap after the initial VZ Linux stability slices. The roadmap now distinguishes completed foundations from residual host-gated/manual boundaries, identifies prepared-host acceptance evidence as the next pragmatic work, and preserves expansion guardrails for the `vz_macos` runtime, vmnet, APFS clones, Firecracker parity, and Apple containerization. Verification passed for reference smoke checks, focused docs/workflow tests, and diff hygiene; Bandit was not applicable for docs-only changes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
