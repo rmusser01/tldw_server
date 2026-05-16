@@ -1,9 +1,10 @@
 ---
 id: TASK-394.4
 title: Correct Quick Ingest offline cancel and progress states
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-16 00:43'
+updated_date: '2026-05-16 03:00'
 labels:
   - quick-ingest
   - ux
@@ -28,6 +29,12 @@ Execute implementation plan Task 4: align offline checks, cancel/close behavior,
 - [ ] #2 Cancel/close behavior distinguishes draft dismissal from in-flight processing
 - [ ] #3 Progress/background status copy does not imply unsupported background jobs or hidden completion tracking
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Started Task 4 in quick-ingest UX remediation branch. Scope: offline/disconnected processing guard, cancel/close distinction, neutral progress copy, and minimized widget terminal-state accuracy.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
