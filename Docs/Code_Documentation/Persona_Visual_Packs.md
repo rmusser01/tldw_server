@@ -244,12 +244,12 @@ declares the state; otherwise it falls back to normal live/tool state resolution
 This keeps direct MCP triggers compatible with large custom state catalogs
 without allowing arbitrary runtime state strings to become renderable states.
 
-## Bundled Starter Catalog Scaffolds
+## Bundled Starter Catalog
 
 Bundled starter catalog entries are immutable server fixtures for first-run or
-recovery flows. They are not global Persona Visual pack rows, shared library
-entries, runtime assets, final character artwork, or completed animation packs.
-Listing the catalog returns safe fixture metadata only.
+recovery flows. They are not global Persona Visual pack rows or shared library
+entries. Listing the catalog returns safe fixture metadata only, and copying a
+starter always creates a normal user-owned draft pack before activation.
 
 The current bundled catalog exposes nine starter IDs in stable order:
 
@@ -264,26 +264,34 @@ The current bundled catalog exposes nine starter IDs in stable order:
 9. `elaborate-persona-intricate`
 
 These map to the approved basic, intermediate, and intricate tiers from the
-Persona Buddy default catalog design, but this slice only adds backend catalog
-scaffolds. The included PNGs are deliberately tiny deterministic fixtures, and
-the manifest animations are metadata examples that validate state/asset copying;
-they are not the final generated/imported buddy art or expressive animation
-frames. Real default buddy assets still need to be created through the approved
-neutral-pose-to-animation pipeline and can replace these fixture assets without
-changing the catalog copy contract.
+Persona Buddy default catalog design. The first three basic-tier starters are
+bundled art-ready defaults. Each includes deterministic transparent 96x96 PNG
+assets, a neutral anchor, a preview image, and two-frame loops for `idle`,
+`listening`, `thinking`, `speaking`, and `error`.
 
-The scaffold fixtures establish stable copy-to-draft behavior, required-state
-coverage, custom-state examples, and an atlas-backed example while preserving
-the same explicit activation rule as user-created packs. The legacy
-`research-buddy-starter` id remains accepted as a compatibility alias for the
-research buddy scaffold, but it is not listed as a tenth catalog item.
+![Basic Buddy defaults review sheet](assets/persona-basic-buddy-defaults-review.png)
+
+The six intermediate and intricate starters remain catalog scaffolds until their
+own asset-production issues produce reviewed final art. Their included PNGs are
+small deterministic fixtures and their manifest animations are metadata examples
+that validate state/asset copying, custom-state examples, and atlas-backed
+support. Real intermediate and intricate default Buddy assets still need to be
+created through the approved neutral-pose-to-animation pipeline and can replace
+those fixture assets without changing the catalog copy contract.
+
+The bundled starter catalog preserves the same explicit activation rule as
+user-created packs. The legacy `research-buddy-starter` id remains accepted as a
+compatibility alias for the research buddy default, but it is not listed as a
+tenth catalog item.
 
 Starter catalog responses include production-readiness metadata so clients,
 review surfaces, and future generation workers can distinguish current
 scaffolds from final authored default assets:
 
 1. `complexity_tier` is one of `basic`, `intermediate`, or `intricate`.
-2. `production_status` is currently `scaffold` for all bundled starters.
+2. `production_status` is `art_ready` for the three basic bundled defaults and
+   `scaffold` for the six intermediate/intricate starters until their final
+   assets pass review.
 3. `neutral_anchor_required` is true when the final authored pack should begin
    from a neutral identity anchor.
 4. `expected_asset_groups` lists the authored inputs and outputs expected
@@ -300,16 +308,18 @@ scaffolds from final authored default assets:
 The neutral-anchor pipeline remains: identity brief, neutral anchor, optional
 static talking and reaction sheets, animation strips or atlas regions, review,
 then copy/import into an inactive draft with separate activation. The production
-metadata is catalog guidance for that pipeline; it does not create final art,
-run image generation, activate a pack, or change renderer support.
+metadata is catalog guidance for that pipeline. It does not run image
+generation, activate a pack, or change renderer support.
 
 Production recipes make the scaffold-to-art handoff explicit. Basic starters
 usually expect only required-state loops derived from a single neutral anchor.
 Intermediate starters add separate static talking and reaction sheets and custom-state
 variants. Intricate starters add animation strips or atlas regions on top of the
 same neutral anchor. These recipes are not prompts that the server executes and
-are not proof that finished animation assets exist; they are bounded metadata
-for reviewers, future generation jobs, and custom provider handoffs.
+are bounded metadata for reviewers, future generation jobs, and custom provider
+handoffs. For `art_ready` bundled defaults, the recipe describes the production
+path used to create the included runtime assets; for `scaffold` starters, it
+describes the remaining handoff.
 
 Static talking sheets and static reaction sheets are source material, not timed animation outputs.
 They may appear in `expected_asset_groups` and in the recipe `static_sheet`
@@ -330,6 +340,10 @@ has an active pack, that active pack stays active until the user explicitly
 activates the copied draft through the existing activation endpoint. This keeps
 bundled defaults aligned with the same review-before-activation rule used by
 imports, library reuse, and generated candidates.
+
+The nine default packs are bundled with the server by default. More/additional
+packs should be optional add-ons or user imports; they are not required baseline
+content for the Persona/Buddy system.
 
 Current starter-pack API routes:
 

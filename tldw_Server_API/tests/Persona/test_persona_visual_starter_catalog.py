@@ -41,6 +41,13 @@ from tldw_Server_API.app.core.Persona.visual_starter_recipe_taxonomy import (
 
 pytestmark = pytest.mark.unit
 
+_BASIC_STARTER_PACK_IDS = {
+    "research-buddy-basic",
+    "migu-marker-basic",
+    "minimal-helper-basic",
+}
+_REQUIRED_BUDDY_STATES = {"idle", "listening", "thinking", "speaking", "error"}
+
 
 def _png_bytes(width: int = 2, height: int = 2) -> bytes:
     buffer = BytesIO()
@@ -63,6 +70,13 @@ def _state_frame_asset_id(manifest: dict[str, Any], state: str) -> str:
     animation_id = manifest["states"][state]["animation_id"]
     frame = manifest["animations"][animation_id]["frames"][0]
     return str(frame["asset_id"])
+
+
+def _pack_fixture(starter_pack_id: str) -> PersonaVisualStarterPack:
+    for starter in DEFAULT_PERSONA_VISUAL_STARTER_PACKS:
+        if starter.id == starter_pack_id:
+            return starter
+    raise AssertionError(f"Unknown starter pack fixture: {starter_pack_id}")
 
 
 def _assert_recipe_shape(recipe: dict[str, Any], *, expected_output: str) -> None:
@@ -119,33 +133,32 @@ def visual_storage_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     return root
 
 
-def test_starter_catalog_lists_bundled_scaffold_packs(
+def test_starter_catalog_lists_bundled_packs_with_basic_tier_art_ready(
     db_instance: CharactersRAGDB,
 ) -> None:
     service = PersonaVisualStarterCatalogService(db_instance)
 
     starters = service.list_starter_packs()
 
-    assert [starter["id"] for starter in starters] == list(
-        DEFAULT_PERSONA_VISUAL_STARTER_PACK_IDS
-    )
-    assert LEGACY_PERSONA_VISUAL_STARTER_PACK_ID not in {
-        starter["id"] for starter in starters
-    }
+    assert [starter["id"] for starter in starters] == list(DEFAULT_PERSONA_VISUAL_STARTER_PACK_IDS)
+    assert LEGACY_PERSONA_VISUAL_STARTER_PACK_ID not in {starter["id"] for starter in starters}
     starter = starters[0]
     assert starter["title"] == "Research Buddy Basic"
     assert starter["renderer_type"] == "sprite_frames"
     assert starter["manifest_version"] == 1
     assert starter["asset_count"] >= 1
     assert starter["total_bytes"] > 0
-    assert {"idle", "listening", "thinking", "speaking", "error"}.issubset(
-        set(starter["states_offered"])
-    )
-    assert all("catalog:scaffold" in starter["tags"] for starter in starters)
-    assert all("scaffold" in starter["description"].lower() for starter in starters)
+    assert _REQUIRED_BUDDY_STATES.issubset(set(starter["states_offered"]))
+    basic_starters = [starter for starter in starters if starter["id"] in _BASIC_STARTER_PACK_IDS]
+    scaffold_starters = [starter for starter in starters if starter["id"] not in _BASIC_STARTER_PACK_IDS]
+    assert {starter["production_status"] for starter in basic_starters} == {"art_ready"}
+    assert all("catalog:art-ready" in starter["tags"] for starter in basic_starters)
+    assert all("scaffold" not in starter["description"].lower() for starter in basic_starters)
+    assert {starter["production_status"] for starter in scaffold_starters} == {"scaffold"}
+    assert all("catalog:scaffold" in starter["tags"] for starter in scaffold_starters)
+    assert all("scaffold" in starter["description"].lower() for starter in scaffold_starters)
     assert any("tier:intricate" in starter["tags"] for starter in starters)
     assert any("tool.notes_search" in starter["states_offered"] for starter in starters)
-    assert {starter["production_status"] for starter in starters} == {"scaffold"}
     assert {starter["complexity_tier"] for starter in starters} == {
         "basic",
         "intermediate",
@@ -174,22 +187,42 @@ def test_get_starter_pack_returns_isolated_manifest_preview(
 
 
 @pytest.mark.parametrize(
-    ("starter_pack_id", "complexity_tier", "required_group", "expected_output"),
     (
-        ("research-buddy-basic", "basic", "required_state_loops", "required_state_loops"),
+        "starter_pack_id",
+        "complexity_tier",
+        "production_status",
+        "required_group",
+        "expected_output",
+    ),
+    (
+        (
+            "research-buddy-basic",
+            "basic",
+            "art_ready",
+            "required_state_loops",
+            "required_state_loops",
+        ),
         (
             "study-desk-intermediate",
             "intermediate",
+            "scaffold",
             "static_talking_sheet",
             "required_state_loops",
         ),
-        ("lofi-study-intricate", "intricate", "animation_atlas", "animation_atlas"),
+        (
+            "lofi-study-intricate",
+            "intricate",
+            "scaffold",
+            "animation_atlas",
+            "animation_atlas",
+        ),
     ),
 )
 def test_starter_pack_reports_production_readiness_metadata(
     db_instance: CharactersRAGDB,
     starter_pack_id: str,
     complexity_tier: str,
+    production_status: str,
     required_group: str,
     expected_output: str,
 ) -> None:
@@ -197,12 +230,54 @@ def test_starter_pack_reports_production_readiness_metadata(
 
     detail = service.get_starter_pack(starter_pack_id)
 
-    assert detail["production_status"] == "scaffold"
+    assert detail["production_status"] == production_status
     assert detail["complexity_tier"] == complexity_tier
     assert detail["neutral_anchor_required"] is True
     assert required_group in detail["expected_asset_groups"]
-    assert all("scaffold" in note.lower() for note in detail["animation_coverage_notes"])
+    if production_status == "art_ready":
+        assert all("reviewed" in note.lower() for note in detail["animation_coverage_notes"])
+    else:
+        assert all("scaffold" in note.lower() for note in detail["animation_coverage_notes"])
     _assert_recipe_shape(detail["production_recipe"], expected_output=expected_output)
+
+
+@pytest.mark.parametrize("starter_pack_id", sorted(_BASIC_STARTER_PACK_IDS))
+def test_basic_starter_packs_use_reviewed_multi_frame_state_assets(
+    db_instance: CharactersRAGDB,
+    starter_pack_id: str,
+) -> None:
+    service = PersonaVisualStarterCatalogService(db_instance)
+
+    detail = service.get_starter_pack(starter_pack_id)
+    fixture = _pack_fixture(starter_pack_id)
+    asset_by_key = {asset.asset_key: asset for asset in fixture.assets}
+
+    assert detail["production_status"] == "art_ready"
+    assert detail["asset_count"] == 12
+    assert {asset["asset_role"] for asset in detail["assets"]} == {
+        "frame",
+        "preview",
+        "still_pose",
+    }
+    assert {"neutral-anchor", "preview"}.issubset(asset_by_key)
+
+    for state in _REQUIRED_BUDDY_STATES:
+        animation_id = detail["manifest"]["states"][state]["animation_id"]
+        frames = detail["manifest"]["animations"][animation_id]["frames"]
+        assert len(frames) == 2
+        assert all(str(frame["asset_id"]).startswith(f"{state}-") for frame in frames)
+
+    frame_asset_ids = _manifest_frame_asset_ids(detail["manifest"])
+    assert len(frame_asset_ids) == 10
+    assert "neutral-anchor" not in frame_asset_ids
+    assert "preview" not in frame_asset_ids
+
+    for asset in fixture.assets:
+        image = Image.open(BytesIO(asset.content))
+        assert image.mode == "RGBA"
+        assert image.size == (96, 96)
+        assert image.getpixel((0, 0))[3] == 0
+        assert image.getbbox() is not None
 
 
 def test_default_starter_production_recipes_use_pipeline_taxonomy(
@@ -210,10 +285,7 @@ def test_default_starter_production_recipes_use_pipeline_taxonomy(
 ) -> None:
     service = PersonaVisualStarterCatalogService(db_instance)
 
-    for detail in (
-        service.get_starter_pack(starter_id)
-        for starter_id in DEFAULT_PERSONA_VISUAL_STARTER_PACK_IDS
-    ):
+    for detail in (service.get_starter_pack(starter_id) for starter_id in DEFAULT_PERSONA_VISUAL_STARTER_PACK_IDS):
         expected_groups = set(detail["expected_asset_groups"])
         animation_outputs = set(detail["production_recipe"]["animation_outputs"])
 
@@ -454,10 +526,7 @@ def test_multi_custom_state_scaffolds_use_distinct_variant_assets(
     service = PersonaVisualStarterCatalogService(db_instance)
 
     detail = service.get_starter_pack(starter_pack_id)
-    state_asset_ids = {
-        _state_frame_asset_id(detail["manifest"], state)
-        for state in custom_states
-    }
+    state_asset_ids = {_state_frame_asset_id(detail["manifest"], state) for state in custom_states}
 
     assert len(state_asset_ids) == len(custom_states)
 
@@ -507,12 +576,14 @@ def test_copy_starter_pack_to_persona_creates_inactive_user_owned_draft(
         user_id=user_id,
     )
     assert copied["assets"] == copied_assets
-    assert len(copied_assets) == 1
-    assert copied_assets[0]["provenance"] == "imported"
+    assert len(copied_assets) == 12
+    assert {asset["provenance"] for asset in copied_assets} == {"imported"}
     assert (visual_storage_root / persona_id / copied["id"]).is_dir()
 
     copied_asset_ids = {str(asset["id"]) for asset in copied_assets}
-    assert collect_visual_manifest_asset_ids(copied["manifest"]) == copied_asset_ids
+    referenced_asset_ids = collect_visual_manifest_asset_ids(copied["manifest"])
+    assert referenced_asset_ids < copied_asset_ids
+    assert len(referenced_asset_ids) == 10
     assert "neutral" not in str(copied["manifest"])
 
 
@@ -522,15 +593,10 @@ def test_copy_every_default_scaffold_creates_inactive_user_owned_draft(
     starter_pack_id: str,
 ) -> None:
     user_id = "user-1"
-    persona_id = db_instance.create_persona_profile(
-        {"user_id": user_id, "name": f"Target {starter_pack_id}"}
-    )
+    persona_id = db_instance.create_persona_profile({"user_id": user_id, "name": f"Target {starter_pack_id}"})
     service = PersonaVisualStarterCatalogService(db_instance)
     starter_detail = service.get_starter_pack(starter_pack_id)
-    fixture_asset_keys = {
-        str(asset["asset_key"])
-        for asset in starter_detail["assets"]
-    }
+    fixture_asset_keys = {str(asset["asset_key"]) for asset in starter_detail["assets"]}
 
     copied = service.copy_starter_pack_to_persona(
         starter_pack_id=starter_pack_id,
@@ -541,18 +607,21 @@ def test_copy_every_default_scaffold_creates_inactive_user_owned_draft(
     assert copied["status"] == "draft"
     assert copied["active_at"] is None
     assert copied["title"] == starter_detail["title"]
-    assert {"idle", "listening", "thinking", "speaking", "error"}.issubset(
-        set(copied["manifest"]["states"])
-    )
+    assert {"idle", "listening", "thinking", "speaking", "error"}.issubset(set(copied["manifest"]["states"]))
     copied_assets = db_instance.list_persona_visual_assets(
         pack_id=copied["id"],
         persona_id=persona_id,
         user_id=user_id,
     )
     copied_asset_ids = {str(asset["id"]) for asset in copied_assets}
-    assert collect_visual_manifest_asset_ids(copied["manifest"]) == copied_asset_ids
+    referenced_asset_ids = collect_visual_manifest_asset_ids(copied["manifest"])
+    if starter_pack_id in _BASIC_STARTER_PACK_IDS:
+        assert referenced_asset_ids < copied_asset_ids
+        assert len(referenced_asset_ids) == 10
+    else:
+        assert referenced_asset_ids == copied_asset_ids
     frame_asset_ids = _manifest_frame_asset_ids(copied["manifest"])
-    assert frame_asset_ids == copied_asset_ids
+    assert frame_asset_ids == referenced_asset_ids
     assert not (fixture_asset_keys & frame_asset_ids)
 
 
@@ -560,9 +629,7 @@ def test_copy_legacy_research_buddy_alias_creates_default_draft(
     db_instance: CharactersRAGDB,
 ) -> None:
     user_id = "user-1"
-    persona_id = db_instance.create_persona_profile(
-        {"user_id": user_id, "name": "Target"}
-    )
+    persona_id = db_instance.create_persona_profile({"user_id": user_id, "name": "Target"})
     service = PersonaVisualStarterCatalogService(db_instance)
 
     copied = service.copy_starter_pack_to_persona(
