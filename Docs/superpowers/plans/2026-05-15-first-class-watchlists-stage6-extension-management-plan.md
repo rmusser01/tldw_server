@@ -133,7 +133,7 @@ Recorded on planning closeout: parent task `TASK-349.3` and child tasks `TASK-34
 - Test: `apps/packages/ui/src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.extension-navigation.test.tsx`
 - Test as needed: `apps/packages/ui/src/components/Option/Watchlists/shared/__tests__/useWatchlistsViewport.test.ts`
 
-- [ ] **Step 1: Write failing viewport hook tests**
+- [x] **Step 1: Write failing viewport hook tests**
 
 Test that the hook or pure resolver classifies:
 
@@ -151,11 +151,11 @@ bunx vitest run src/components/Option/Watchlists/shared/__tests__/useWatchlistsV
 
 Expected before implementation: fail because the helper does not exist.
 
-- [ ] **Step 2: Implement the viewport helper**
+- [x] **Step 2: Implement the viewport helper**
 
 Use `window.matchMedia` and a single breakpoint constant. Keep this helper local to Watchlists unless another page already has a shared project-wide hook that cleanly fits.
 
-- [ ] **Step 3: Write failing constrained navigation tests**
+- [x] **Step 3: Write failing constrained navigation tests**
 
 In `WatchlistsPlaygroundPage.extension-navigation.test.tsx`, render the page with `innerWidth = 420` and assert:
 
@@ -174,7 +174,7 @@ bunx vitest run src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundP
 
 Expected before implementation: fail because the navigation does not exist.
 
-- [ ] **Step 4: Implement constrained navigation**
+- [x] **Step 4: Implement constrained navigation**
 
 Replace the current mobile `Select` tab switcher in `WatchlistsPlaygroundPage.tsx` with a `WatchlistsMobileNavigation` component. The component should use a button plus drawer/list pattern so users can scan grouped destinations and not rely on a long select menu.
 
@@ -188,7 +188,7 @@ Required groups:
 
 Keep desktop `Tabs` unchanged.
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run:
 
@@ -202,7 +202,9 @@ bunx vitest run \
 
 Expected: all selected tests pass.
 
-- [ ] **Step 6: Commit Stage 6A**
+Recorded on Stage 6A closeout: the focused Stage 6A Vitest suite passed with 4 files and 12 tests, covering constrained navigation, viewport breakpoint behavior, first-class Watchlist shell regressions, and orientation guidance. The Watchlists static guard also passed with 1 file and 3 tests.
+
+- [x] **Step 6: Commit Stage 6A**
 
 ```bash
 git add \

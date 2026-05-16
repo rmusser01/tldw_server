@@ -55,6 +55,11 @@ import {
   WATCHLISTS_TAB_HELP_DOCS
 } from "./shared/help-docs"
 import { WatchlistsHealthBar } from "./shared/WatchlistsHealthBar"
+import {
+  WatchlistsMobileNavigation,
+  type WatchlistsMobileNavigationGroup
+} from "./shared/WatchlistsMobileNavigation"
+import { useWatchlistsViewport } from "./shared/useWatchlistsViewport"
 import { WatchlistsCommandPalette, useWatchlistsCommands } from "./shared/WatchlistsCommandPalette"
 import { useWatchlistsKeyboardShortcuts } from "./shared/useWatchlistsKeyboardShortcuts"
 import {
@@ -124,25 +129,6 @@ const SECONDARY_IN_PRIMARY: Record<string, string> = {
   jobs: "sources",    // Monitors section inside Feeds tab
   runs: "items",      // Activity section inside Updates tab
   templates: "outputs" // Templates section inside Reports tab
-}
-
-const MOBILE_BREAKPOINT = 768
-
-const useIsMobile = (): boolean => {
-  const [isMobile, setIsMobile] = React.useState(() => {
-    if (typeof window === "undefined") return false
-    return window.innerWidth < MOBILE_BREAKPOINT
-  })
-
-  React.useEffect(() => {
-    if (typeof window === "undefined") return
-    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches)
-    mql.addEventListener("change", handler)
-    return () => mql.removeEventListener("change", handler)
-  }, [])
-
-  return isMobile
 }
 
 const readShowAllViews = (): boolean => {
@@ -509,7 +495,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   const [watchlistFormMode, setWatchlistFormMode] = React.useState<WatchlistFormMode>("create")
   const [watchlistFormSaving, setWatchlistFormSaving] = React.useState(false)
   const [watchlistForm, setWatchlistForm] = React.useState<WatchlistFormState>(WATCHLIST_FORM_DEFAULTS)
-  const isMobile = useIsMobile()
+  const { isConstrained } = useWatchlistsViewport()
   const selectedWatchlist = React.useMemo(
     () =>
       Array.isArray(watchlists)
@@ -682,7 +668,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
 
   // Navigate to a tab, auto-expanding inline secondary sections in progressive mode
   const navigateToTab = useCallback((key: string) => {
-    const isProgressive = !showAllViews && !iaExperimentEnabled
+    const isProgressive = !isConstrained && !showAllViews && !iaExperimentEnabled
     if (isProgressive && SECONDARY_IN_PRIMARY[key]) {
       const primaryTab = SECONDARY_IN_PRIMARY[key]
       setActiveTab(primaryTab as typeof activeTab)
@@ -695,7 +681,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       return
     }
     setActiveTab(key as typeof activeTab)
-  }, [setActiveTab, showAllViews, iaExperimentEnabled])
+  }, [isConstrained, setActiveTab, showAllViews, iaExperimentEnabled])
 
   // Refresh key — incrementing forces tab components to remount and refetch
   const [refreshKey, setRefreshKey] = React.useState(0)
@@ -1785,6 +1771,9 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         })()
       : allTabItems
 
+  const constrainedActiveTabItem =
+    allTabItems.find((item) => String(item?.key) === activeTab) ||
+    renderedTabItems?.find((item) => String(item?.key) === activeTab)
 
   // Resolve active tab for the tab bar (in progressive mode, secondary tabs map to their parent)
   const resolvedActiveTab = useProgressiveLayout && SECONDARY_IN_PRIMARY[activeTab]
@@ -1801,6 +1790,89 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
           ? t("watchlists:tabs.runs", "Activity")
           : t("watchlists:tabs.templates", "Templates")
   }))
+  const constrainedNavigationGroups = useMemo<WatchlistsMobileNavigationGroup[]>(
+    () => [
+      {
+        key: "overview",
+        label: t("watchlists:mobileNav.overviewGroup", "Overview"),
+        items: [
+          {
+            key: "overview",
+            label: t("watchlists:tabs.overview", "Overview"),
+            description: t("watchlists:mobileNav.overviewDescription", "Intent, health, and next actions")
+          }
+        ]
+      },
+      {
+        key: "collect",
+        label: t("watchlists:mobileNav.collectGroup", "Collect"),
+        items: [
+          {
+            key: "sources",
+            label: t("watchlists:tabs.sources", "Feeds"),
+            description: t("watchlists:mobileNav.sourcesDescription", "Sources, groups, tags, and imports"),
+            count: overviewBadges.sources
+          },
+          {
+            key: "jobs",
+            label: t("watchlists:tabs.jobs", "Monitors"),
+            description: t("watchlists:mobileNav.jobsDescription", "Schedules, scope, filters, and run now")
+          }
+        ]
+      },
+      {
+        key: "review",
+        label: t("watchlists:mobileNav.reviewGroup", "Review"),
+        items: [
+          {
+            key: "alerts",
+            label: t("watchlists:tabs.alerts", "Alerts"),
+            description: t("watchlists:mobileNav.alertsDescription", "Content matches and alert rules")
+          },
+          {
+            key: "items",
+            label: t("watchlists:tabs.items", "Updates"),
+            description: t("watchlists:mobileNav.itemsDescription", "Triage, saved views, and report queue")
+          },
+          {
+            key: "runs",
+            label: t("watchlists:tabs.runs", "Activity"),
+            description: t("watchlists:mobileNav.runsDescription", "Run history, health, and details"),
+            count: overviewBadges.runs
+          }
+        ]
+      },
+      {
+        key: "reports",
+        label: t("watchlists:mobileNav.reportsGroup", "Reports"),
+        items: [
+          {
+            key: "outputs",
+            label: t("watchlists:tabs.outputs", "Reports"),
+            description: t("watchlists:mobileNav.outputsDescription", "Generated reports, evidence, and downloads"),
+            count: overviewBadges.outputs
+          },
+          {
+            key: "templates",
+            label: t("watchlists:tabs.templates", "Templates"),
+            description: t("watchlists:mobileNav.templatesDescription", "Report template authoring and preview")
+          }
+        ]
+      },
+      {
+        key: "settings",
+        label: t("watchlists:mobileNav.settingsGroup", "Settings"),
+        items: [
+          {
+            key: "settings",
+            label: t("watchlists:tabs.settings", "Settings"),
+            description: t("watchlists:mobileNav.settingsDescription", "Lifecycle, defaults, and subscriptions")
+          }
+        ]
+      }
+    ],
+    [overviewBadges.outputs, overviewBadges.runs, overviewBadges.sources, t]
+  )
   const watchlistOptions = React.useMemo(
     () =>
       (Array.isArray(watchlists) ? watchlists : []).map((watchlist) => ({
@@ -2248,24 +2320,22 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       />
 
       {watchlistViewsAvailable && (
-        isMobile ? (
+        isConstrained ? (
           <>
-            <Select
-              value={resolvedActiveTab}
-              onChange={navigateToTab}
-              className="mb-4 w-full"
-              data-testid="watchlists-mobile-tab-select"
-              options={renderedTabItems?.map((item) => ({
-                value: String(item?.key),
-                label: item?.label
-              })) || []}
+            <WatchlistsMobileNavigation
+              activeKey={activeTab}
+              fallbackLabel={t("watchlists:mobileNav.fallbackLabel", "Manage Watchlist")}
+              groups={constrainedNavigationGroups}
+              navigationLabel={t("watchlists:mobileNav.navigationLabel", "Watchlist management destinations")}
+              onNavigate={navigateToTab}
+              title={t("watchlists:mobileNav.title", "Manage Watchlist")}
             />
             <div
               key={refreshKey}
               className="min-w-0 max-w-full overflow-x-auto"
               data-testid="watchlists-tab-content-shell"
             >
-              {renderedTabItems?.find((item) => String(item?.key) === resolvedActiveTab)?.children}
+              {constrainedActiveTabItem?.children}
             </div>
           </>
         ) : (
@@ -2290,7 +2360,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         title={t("watchlists:tabs.settings", "Settings")}
         open={settingsDrawerOpen}
         onClose={() => setSettingsDrawerOpen(false)}
-        size={isMobile ? "100%" : 520}
+        size={isConstrained ? "100%" : 520}
         data-testid="watchlists-settings-drawer"
       >
         {renderWatchlistsTab("settings")}

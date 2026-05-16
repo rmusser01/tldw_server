@@ -2459,6 +2459,57 @@
   "quickActions_outputs": {
     "message": "View reports"
   },
+  "mobileNav_title": {
+    "message": "Manage Watchlist"
+  },
+  "mobileNav_fallbackLabel": {
+    "message": "Manage Watchlist"
+  },
+  "mobileNav_navigationLabel": {
+    "message": "Watchlist management destinations"
+  },
+  "mobileNav_overviewGroup": {
+    "message": "Overview"
+  },
+  "mobileNav_collectGroup": {
+    "message": "Collect"
+  },
+  "mobileNav_reviewGroup": {
+    "message": "Review"
+  },
+  "mobileNav_reportsGroup": {
+    "message": "Reports"
+  },
+  "mobileNav_settingsGroup": {
+    "message": "Settings"
+  },
+  "mobileNav_overviewDescription": {
+    "message": "Intent, health, and next actions"
+  },
+  "mobileNav_sourcesDescription": {
+    "message": "Sources, groups, tags, and imports"
+  },
+  "mobileNav_jobsDescription": {
+    "message": "Schedules, scope, filters, and run now"
+  },
+  "mobileNav_alertsDescription": {
+    "message": "Content matches and alert rules"
+  },
+  "mobileNav_itemsDescription": {
+    "message": "Triage, saved views, and report queue"
+  },
+  "mobileNav_runsDescription": {
+    "message": "Run history, health, and details"
+  },
+  "mobileNav_outputsDescription": {
+    "message": "Generated reports, evidence, and downloads"
+  },
+  "mobileNav_templatesDescription": {
+    "message": "Report template authoring and preview"
+  },
+  "mobileNav_settingsDescription": {
+    "message": "Lifecycle, defaults, and subscriptions"
+  },
   "orientation_label": {
     "message": "Current view guide"
   },

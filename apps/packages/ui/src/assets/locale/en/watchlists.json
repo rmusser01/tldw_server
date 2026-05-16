@@ -59,6 +59,25 @@
     "briefings": "Briefings",
     "briefingsHint": "Reports and templates"
   },
+  "mobileNav": {
+    "title": "Manage Watchlist",
+    "fallbackLabel": "Manage Watchlist",
+    "navigationLabel": "Watchlist management destinations",
+    "overviewGroup": "Overview",
+    "collectGroup": "Collect",
+    "reviewGroup": "Review",
+    "reportsGroup": "Reports",
+    "settingsGroup": "Settings",
+    "overviewDescription": "Intent, health, and next actions",
+    "sourcesDescription": "Sources, groups, tags, and imports",
+    "jobsDescription": "Schedules, scope, filters, and run now",
+    "alertsDescription": "Content matches and alert rules",
+    "itemsDescription": "Triage, saved views, and report queue",
+    "runsDescription": "Run history, health, and details",
+    "outputsDescription": "Generated reports, evidence, and downloads",
+    "templatesDescription": "Report template authoring and preview",
+    "settingsDescription": "Lifecycle, defaults, and subscriptions"
+  },
   "setupWizard": {
     "title": "Create Watchlist",
     "presets": {
