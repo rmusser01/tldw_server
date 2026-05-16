@@ -39,7 +39,7 @@ def mock_tts_service(monkeypatch):
         return DummyTTS()
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.TTS.tts_service_v2.get_tts_service_v2",
+        "tldw_Server_API.app.services.outputs_service.get_tts_service_v2",
         _fake_get_tts_service_v2,
     )
 
