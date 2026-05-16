@@ -80,4 +80,47 @@ describe("TldwApiClient getModels normalization", () => {
     expect(models[0]?.id).toBe("openai/gpt-4o-mini")
     expect(models[0]?.name).toBe("GPT-4o Mini (openai/gpt-4o-mini)")
   })
+
+  it("routes llama.cpp profile runtime methods to managed runtime endpoints", async () => {
+    const requests: Array<{ path?: string; method?: string; body?: unknown }> = []
+    mocks.bgRequest.mockImplementation(async (request: { path?: string; method?: string; body?: unknown }) => {
+      requests.push(request)
+      if (request.path === "/api/v1/llamacpp/profiles") return { profiles: [] }
+      if (request.path === "/api/v1/llamacpp/instances") return { runtimes: [] }
+      if (request.path === "/api/v1/llamacpp/instances/default/logs/tail?lines=10") {
+        return { lines: [], truncated: false, warnings: [] }
+      }
+      return { profile_id: "default", action: "ok", state: "running", accepted: true }
+    })
+
+    const client = new TldwApiClient()
+
+    await client.listLlamacppProfiles()
+    await client.createLlamacppProfile({ name: "Default", model_id: "gguf:default" })
+    await client.updateLlamacppProfile("default", { name: "Updated" })
+    await client.deleteLlamacppProfile("default")
+    await client.startLlamacppProfile("default")
+    await client.stopLlamacppProfile("default")
+    await client.pauseLlamacppProfile("default")
+    await client.resumeLlamacppProfile("default")
+    await client.useLlamacppProfileInChat("default")
+    await client.listLlamacppInstances()
+    await client.tailLlamacppInstanceLogs("default", 10)
+
+    expect(requests.map((request) => [request.method, request.path])).toEqual([
+      ["GET", "/api/v1/llamacpp/profiles"],
+      ["POST", "/api/v1/llamacpp/profiles"],
+      ["PUT", "/api/v1/llamacpp/profiles/default"],
+      ["DELETE", "/api/v1/llamacpp/profiles/default"],
+      ["POST", "/api/v1/llamacpp/profiles/default/start"],
+      ["POST", "/api/v1/llamacpp/profiles/default/stop"],
+      ["POST", "/api/v1/llamacpp/profiles/default/pause"],
+      ["POST", "/api/v1/llamacpp/profiles/default/resume"],
+      ["POST", "/api/v1/llamacpp/profiles/default/use-in-chat"],
+      ["GET", "/api/v1/llamacpp/instances"],
+      ["GET", "/api/v1/llamacpp/instances/default/logs/tail?lines=10"]
+    ])
+    expect(requests[1]?.body).toEqual({ name: "Default", model_id: "gguf:default" })
+    expect(requests[2]?.body).toEqual({ name: "Updated" })
+  })
 })

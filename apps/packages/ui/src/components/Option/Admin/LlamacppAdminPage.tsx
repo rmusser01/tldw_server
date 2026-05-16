@@ -7,7 +7,9 @@ import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type {
   LlamacppConfigResponse,
   LlamacppHardwareSnapshotResponse,
-  LlamacppInventoryResponse
+  LlamacppInventoryResponse,
+  LlamacppProfile,
+  LlamacppRuntime
 } from "@/types/llamacpp-admin"
 import {
   buildLlamacppServerArgs,
@@ -23,6 +25,7 @@ import {
 import { LlamacppInventoryPanel } from "./LlamacppInventoryPanel"
 import { LlamacppLaunchPanel } from "./LlamacppLaunchPanel"
 import { LlamacppReadinessPanel } from "./LlamacppReadinessPanel"
+import { LlamacppRuntimePanel } from "./LlamacppRuntimePanel"
 
 const { Title, Text } = Typography
 const passiveAlertProps = {
@@ -117,14 +120,19 @@ export const LlamacppAdminPage: React.FC = () => {
   const [status, setStatus] = React.useState<LlamacppStatus | null>(null)
   const [inventory, setInventory] = React.useState<LlamacppInventoryResponse | null>(null)
   const [hardware, setHardware] = React.useState<LlamacppHardwareSnapshotResponse | null>(null)
+  const [runtimeProfiles, setRuntimeProfiles] = React.useState<LlamacppProfile[]>([])
+  const [runtimeInstances, setRuntimeInstances] = React.useState<LlamacppRuntime[]>([])
 
   const [loadingConfig, setLoadingConfig] = React.useState(false)
   const [loadingStatus, setLoadingStatus] = React.useState(false)
   const [loadingInventory, setLoadingInventory] = React.useState(true)
+  const [loadingRuntimes, setLoadingRuntimes] = React.useState(true)
   const [registeringPath, setRegisteringPath] = React.useState(false)
 
   const [statusError, setStatusError] = React.useState<string | null>(null)
   const [inventoryError, setInventoryError] = React.useState<string | null>(null)
+  const [runtimeError, setRuntimeError] = React.useState<string | null>(null)
+  const [runtimeUnsupported, setRuntimeUnsupported] = React.useState(false)
   const [adminGuard, setAdminGuard] = React.useState<AdminGuardState>(null)
 
   const [selectedModelId, setSelectedModelId] = React.useState<string | undefined>()
@@ -135,6 +143,7 @@ export const LlamacppAdminPage: React.FC = () => {
   const [chatActionLoading, setChatActionLoading] = React.useState(false)
   const [chatNotice, setChatNotice] = React.useState<string | null>(null)
   const [chatWarnings, setChatWarnings] = React.useState<string[]>([])
+  const [runtimeActionProfileId, setRuntimeActionProfileId] = React.useState<string | null>(null)
 
   const markAdminGuardFromError = React.useCallback((error: unknown) => {
     const guardState = deriveAdminGuardFromError(error)
@@ -213,6 +222,39 @@ export const LlamacppAdminPage: React.FC = () => {
     }
   }, [])
 
+  const loadRuntimePlane = React.useCallback(async () => {
+    try {
+      setLoadingRuntimes(true)
+      setRuntimeError(null)
+      const [profileData, instanceData] = await Promise.all([
+        tldwClient.listLlamacppProfiles(),
+        tldwClient.listLlamacppInstances()
+      ])
+      setRuntimeProfiles(profileData.profiles || [])
+      setRuntimeInstances(instanceData.runtimes || [])
+      setRuntimeUnsupported(false)
+    } catch (error: unknown) {
+      const guardState = deriveAdminGuardFromError(error)
+      if (guardState === "forbidden") {
+        setAdminGuard(guardState)
+        return
+      }
+      setRuntimeProfiles([])
+      setRuntimeInstances([])
+      if (guardState === "notFound") {
+        setRuntimeUnsupported(true)
+        setRuntimeError(null)
+        return
+      }
+      setRuntimeUnsupported(false)
+      setRuntimeError(
+        sanitizeAdminErrorMessage(error, "Failed to load Llama.cpp runtime instances.")
+      )
+    } finally {
+      setLoadingRuntimes(false)
+    }
+  }, [])
+
   React.useEffect(() => {
     if (initialLoadRef.current) return
     initialLoadRef.current = true
@@ -221,9 +263,10 @@ export const LlamacppAdminPage: React.FC = () => {
       loadConfig(),
       loadStatus(),
       loadInventory(),
-      loadHardware()
+      loadHardware(),
+      loadRuntimePlane()
     ])
-  }, [loadConfig, loadHardware, loadInventory, loadStatus])
+  }, [loadConfig, loadHardware, loadInventory, loadRuntimePlane, loadStatus])
 
   const effectiveState =
     status?.state || status?.status || status?.backend || "unknown"
@@ -277,7 +320,7 @@ export const LlamacppAdminPage: React.FC = () => {
       const serverArgs = buildLlamacppServerArgs(settings)
       await tldwClient.startLlamacppModel(selectedModelId, serverArgs)
       setChatActionVisible(true)
-      await loadStatus()
+      await Promise.all([loadStatus(), loadRuntimePlane()])
     } catch (error: unknown) {
       setStatusError(
         sanitizeAdminErrorMessage(error, "Failed to start Llama.cpp server.")
@@ -295,7 +338,7 @@ export const LlamacppAdminPage: React.FC = () => {
       setStatusError(null)
       await tldwClient.startLlamacppModel(selectedModelId)
       setChatActionVisible(true)
-      await loadStatus()
+      await Promise.all([loadStatus(), loadRuntimePlane()])
     } catch (error: unknown) {
       setStatusError(
         sanitizeAdminErrorMessage(error, "Failed to start Llama.cpp server.")
@@ -311,7 +354,7 @@ export const LlamacppAdminPage: React.FC = () => {
       setActionLoading(true)
       await tldwClient.stopLlamacppServer()
       setChatActionVisible(false)
-      await loadStatus()
+      await Promise.all([loadStatus(), loadRuntimePlane()])
     } catch (error: unknown) {
       setStatusError(
         sanitizeAdminErrorMessage(error, "Failed to stop Llama.cpp server.")
@@ -342,6 +385,79 @@ export const LlamacppAdminPage: React.FC = () => {
       markAdminGuardFromError(error)
     } finally {
       setChatActionLoading(false)
+    }
+  }
+
+  const runRuntimeAction = async (
+    profileId: string,
+    action: () => Promise<unknown>,
+    fallbackMessage: string
+  ) => {
+    try {
+      setRuntimeActionProfileId(profileId)
+      setRuntimeError(null)
+      await action()
+      await Promise.all([loadStatus(), loadRuntimePlane()])
+    } catch (error: unknown) {
+      setRuntimeError(sanitizeAdminErrorMessage(error, fallbackMessage))
+      markAdminGuardFromError(error)
+    } finally {
+      setRuntimeActionProfileId(null)
+    }
+  }
+
+  const handleStartProfile = (profileId: string) => {
+    void runRuntimeAction(
+      profileId,
+      () => tldwClient.startLlamacppProfile(profileId),
+      "Failed to start Llama.cpp runtime profile."
+    )
+  }
+
+  const handleStopProfile = (profileId: string) => {
+    void runRuntimeAction(
+      profileId,
+      () => tldwClient.stopLlamacppProfile(profileId),
+      "Failed to stop Llama.cpp runtime profile."
+    )
+  }
+
+  const handlePauseProfile = (profileId: string) => {
+    void runRuntimeAction(
+      profileId,
+      () => tldwClient.pauseLlamacppProfile(profileId),
+      "Failed to pause Llama.cpp runtime profile."
+    )
+  }
+
+  const handleResumeProfile = (profileId: string) => {
+    void runRuntimeAction(
+      profileId,
+      () => tldwClient.resumeLlamacppProfile(profileId),
+      "Failed to resume Llama.cpp runtime profile."
+    )
+  }
+
+  const handleUseProfileInChat = async (profileId: string) => {
+    try {
+      setRuntimeActionProfileId(profileId)
+      setChatNotice(null)
+      setChatWarnings([])
+      const response = await tldwClient.useLlamacppProfileInChat(profileId)
+      setChatNotice(
+        response.effective
+          ? "Chat provider updated."
+          : "Chat provider setting saved, but an override may still be active."
+      )
+      setChatWarnings(response.warnings || [])
+    } catch (error: unknown) {
+      setChatNotice(null)
+      setChatWarnings([
+        sanitizeAdminErrorMessage(error, "Failed to wire llama.cpp into Chat.")
+      ])
+      markAdminGuardFromError(error)
+    } finally {
+      setRuntimeActionProfileId(null)
     }
   }
 
@@ -486,6 +602,24 @@ export const LlamacppAdminPage: React.FC = () => {
               config={config}
               loading={loadingConfig}
             />
+
+            {!runtimeUnsupported && (
+              <LlamacppRuntimePanel
+                profiles={runtimeProfiles}
+                runtimes={runtimeInstances}
+                loading={loadingRuntimes}
+                error={runtimeError}
+                actionProfileId={runtimeActionProfileId}
+                onRefresh={loadRuntimePlane}
+                onStart={handleStartProfile}
+                onStop={handleStopProfile}
+                onPause={handlePauseProfile}
+                onResume={handleResumeProfile}
+                onUseInChat={(profileId) => {
+                  void handleUseProfileInChat(profileId)
+                }}
+              />
+            )}
 
             <LlamacppInventoryPanel
               inventory={inventory}

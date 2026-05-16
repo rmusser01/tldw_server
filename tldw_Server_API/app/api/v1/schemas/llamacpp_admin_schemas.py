@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
+    LlamaCppPortPolicy,
+    LlamaCppProfileMode,
+    LlamaCppRuntimeState,
+)
+
 
 class LlamaCppSavedConfig(BaseModel):
     """Saved [LlamaCpp] settings as persisted in config.txt."""
@@ -202,3 +208,120 @@ class LlamaCppHardwareSnapshotResponse(BaseModel):
     cpu_count: int | None = None
     gpus: list[LlamaCppGpuSnapshot] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class LlamaCppProfileCreateRequest(BaseModel):
+    """Request to create a managed llama.cpp runtime profile."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile_id: str | None = Field(default=None, min_length=1)
+    name: str = Field(..., min_length=1)
+    enabled: bool = True
+    mode: LlamaCppProfileMode = LlamaCppProfileMode.CHAT
+    model_id: str | None = None
+    model_path: str | None = None
+    mmproj_model_id: str | None = None
+    host: str = "127.0.0.1"
+    port: int = Field(default=8080, ge=1, le=65535)
+    port_policy: LlamaCppPortPolicy = LlamaCppPortPolicy.EXPLICIT
+    server_args: dict[str, object] = Field(default_factory=dict)
+    autostart: bool = False
+    restart_policy: dict[str, object] = Field(default_factory=dict)
+    provider_alias: str | None = None
+    tags: list[str] = Field(default_factory=list)
+
+
+class LlamaCppProfileUpdateRequest(BaseModel):
+    """Partial update request for a managed llama.cpp runtime profile."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1)
+    enabled: bool | None = None
+    mode: LlamaCppProfileMode | None = None
+    model_id: str | None = None
+    model_path: str | None = None
+    mmproj_model_id: str | None = None
+    host: str | None = None
+    port: int | None = Field(default=None, ge=1, le=65535)
+    port_policy: LlamaCppPortPolicy | None = None
+    server_args: dict[str, object] | None = None
+    autostart: bool | None = None
+    restart_policy: dict[str, object] | None = None
+    provider_alias: str | None = None
+    tags: list[str] | None = None
+
+
+class LlamaCppProfileResponse(BaseModel):
+    """Managed llama.cpp runtime profile returned by admin APIs."""
+
+    profile_id: str
+    name: str
+    enabled: bool
+    mode: LlamaCppProfileMode
+    model_id: str | None = None
+    model_path: str | None = None
+    mmproj_model_id: str | None = None
+    host: str
+    port: int
+    port_policy: LlamaCppPortPolicy
+    server_args: dict[str, object] = Field(default_factory=dict)
+    autostart: bool
+    restart_policy: dict[str, object] = Field(default_factory=dict)
+    provider_alias: str | None = None
+    tags: list[str] = Field(default_factory=list)
+
+
+class LlamaCppProfileListResponse(BaseModel):
+    """List of managed llama.cpp runtime profiles."""
+
+    profiles: list[LlamaCppProfileResponse] = Field(default_factory=list)
+
+
+class LlamaCppProfileDeleteResponse(BaseModel):
+    """Response returned after deleting a managed llama.cpp runtime profile."""
+
+    profile_id: str
+    deleted: bool = True
+
+
+class LlamaCppRuntimeResponse(BaseModel):
+    """Observed runtime state for one managed llama.cpp profile."""
+
+    profile_id: str
+    state: LlamaCppRuntimeState
+    pid: int | None = None
+    host: str | None = None
+    port: int | None = Field(default=None, ge=1, le=65535)
+    endpoint: str | None = None
+    model_id: str | None = None
+    model_path: str | None = None
+    resolved_args: list[str] = Field(default_factory=list)
+    started_at: str | None = None
+    stopped_at: str | None = None
+    last_health_at: str | None = None
+    restart_count: int = Field(default=0, ge=0)
+    next_restart_at: str | None = None
+    exit_code: int | None = None
+    last_error: str | None = None
+    log_tail_available: bool = False
+    warnings: list[str] = Field(default_factory=list)
+    health: dict[str, object] = Field(default_factory=dict)
+    message: str | None = None
+
+
+class LlamaCppRuntimeListResponse(BaseModel):
+    """List of managed llama.cpp runtime states."""
+
+    runtimes: list[LlamaCppRuntimeResponse] = Field(default_factory=list)
+
+
+class LlamaCppLifecycleActionResponse(BaseModel):
+    """Response returned after a managed llama.cpp lifecycle action."""
+
+    profile_id: str
+    action: str
+    state: LlamaCppRuntimeState
+    accepted: bool = True
+    message: str | None = None

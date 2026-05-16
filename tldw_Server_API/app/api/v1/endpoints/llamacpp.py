@@ -9,7 +9,7 @@ from typing import Any, Optional
 #
 # Thid-party Libraries
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, RequireRole, User
 from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
@@ -18,8 +18,16 @@ from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
     LlamaCppHardwareSnapshotResponse,
     LlamaCppInventoryItem,
     LlamaCppInventoryResponse,
+    LlamaCppLifecycleActionResponse,
     LlamaCppLogTailResponse,
+    LlamaCppProfileCreateRequest,
+    LlamaCppProfileDeleteResponse,
+    LlamaCppProfileListResponse,
+    LlamaCppProfileResponse,
+    LlamaCppProfileUpdateRequest,
     LlamaCppRegisterModelPathRequest,
+    LlamaCppRuntimeListResponse,
+    LlamaCppRuntimeResponse,
     LlamaCppStartByModelRequest,
     LlamaCppStartByModelResponse,
     LlamaCppUseInChatResponse,
@@ -34,11 +42,21 @@ from tldw_Server_API.app.core.Local_LLM.LlamaCpp_Handler import LlamaCppHandler
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import InferenceError, ModelNotFoundError, ServerError
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Manager import LLMInferenceManager
 from tldw_Server_API.app.core.Local_LLM import (
+    http_utils,
     llamacpp_config_service,
     llamacpp_hardware_service,
     llamacpp_inventory_service,
     llamacpp_provider_service,
 )
+from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_store import DEFAULT_PROFILE_ID
+from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
+    LlamaCppProfile,
+    LlamaCppProfileConflictError,
+    LlamaCppProfileNotFoundError,
+    LlamaCppRuntime,
+    LlamaCppRuntimeState,
+)
+from tldw_Server_API.app.core.Local_LLM.llamacpp_supervisor_service import LlamaCppSupervisor
 
 #
 ########################################################################################################################
@@ -110,9 +128,202 @@ def _resolve_llamacpp_target(llm_manager: LLMInferenceManager, required: tuple[s
     raise _llamacpp_unavailable()
 
 
+def _resolve_llamacpp_supervisor(llm_manager: LLMInferenceManager) -> LlamaCppSupervisor:
+    supervisor = getattr(llm_manager, "llamacpp_supervisor", None)
+    if supervisor is None:
+        raise _llamacpp_unavailable()
+    return supervisor
+
+
 def _log_sanitized_manager_error(llm_manager: LLMInferenceManager, message: str) -> None:
     """Log a sanitized manager fallback without attaching exception details."""
     llm_manager.logger.error(message)
+
+
+def _profile_response(profile: LlamaCppProfile) -> LlamaCppProfileResponse:
+    return LlamaCppProfileResponse.model_validate(profile.model_dump(mode="python"))
+
+
+def _runtime_response(runtime: LlamaCppRuntime) -> LlamaCppRuntimeResponse:
+    return LlamaCppRuntimeResponse.model_validate(runtime.model_dump(mode="python"))
+
+
+def _get_profile_or_404(supervisor: LlamaCppSupervisor, profile_id: str) -> LlamaCppProfile:
+    for profile in supervisor.list_profiles():
+        if profile.profile_id == profile_id:
+            return profile
+    raise HTTPException(status_code=404, detail=f"Llama.cpp profile '{profile_id}' was not found.")
+
+
+def _supervisor_error_to_http(exc: Exception, llm_manager: LLMInferenceManager, log_message: str) -> HTTPException:
+    if isinstance(exc, HTTPException):
+        return exc
+    if isinstance(exc, LlamaCppProfileNotFoundError):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, LlamaCppProfileConflictError):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, (ValidationError, ValueError, ModelNotFoundError, ServerError)):
+        return HTTPException(status_code=400, detail=str(exc))
+    if isinstance(exc, InferenceError):
+        return _llamacpp_unavailable(str(exc))
+    _log_sanitized_manager_error(llm_manager, log_message)
+    return HTTPException(status_code=500, detail="An unexpected error occurred.")
+
+
+def _lifecycle_response(profile_id: str, action: str, runtime: LlamaCppRuntime) -> LlamaCppLifecycleActionResponse:
+    return LlamaCppLifecycleActionResponse(
+        profile_id=profile_id,
+        action=action,
+        state=runtime.state,
+        accepted=True,
+        message=runtime.message,
+    )
+
+
+def _start_by_model_response(runtime: LlamaCppRuntime, model_id: str) -> dict[str, object]:
+    return {
+        "status": "running" if runtime.state == LlamaCppRuntimeState.RUNNING else runtime.state.value,
+        "backend": "llamacpp",
+        "model_id": model_id,
+        "model": runtime.model_path,
+        "path": runtime.model_path,
+        "host": runtime.host,
+        "port": runtime.port,
+        "pid": runtime.pid,
+        "endpoint": runtime.endpoint,
+        "message": runtime.message,
+    }
+
+
+def _start_by_path_response(runtime: LlamaCppRuntime, model_filename: str) -> dict[str, object]:
+    return {
+        "status": "running" if runtime.state == LlamaCppRuntimeState.RUNNING else runtime.state.value,
+        "backend": "llamacpp",
+        "model": runtime.model_path or model_filename,
+        "path": runtime.model_path,
+        "host": runtime.host,
+        "port": runtime.port,
+        "pid": runtime.pid,
+        "endpoint": runtime.endpoint,
+        "message": runtime.message,
+    }
+
+
+def _runtime_base_url(runtime: LlamaCppRuntime) -> str:
+    if runtime.state != LlamaCppRuntimeState.RUNNING or runtime.port is None:
+        raise llamacpp_provider_service.ManagedServerNotRunningError("Managed llama.cpp server is not running.")
+    return llamacpp_provider_service.normalize_managed_base_url(runtime.host, runtime.port)
+
+
+async def _use_runtime_in_chat(runtime: LlamaCppRuntime) -> dict[str, object]:
+    endpoint = _runtime_base_url(runtime)
+    try:
+        with llamacpp_provider_service.llamacpp_config_write_lock():
+            llamacpp_provider_service.setup_manager.update_config(
+                {
+                    llamacpp_provider_service.PROVIDER_SECTION: {
+                        llamacpp_provider_service.PROVIDER_ENDPOINT_FIELD: endpoint
+                    }
+                }
+            )
+            llamacpp_provider_service.refresh_config_cache()
+    except Exception as exc:
+        raise llamacpp_provider_service.ProviderConfigWriteError(
+            "Failed to update llama.cpp chat provider endpoint."
+        ) from exc
+
+    warnings: list[str] = []
+    effective = True
+    env_override = llamacpp_provider_service.get_provider_endpoint_env_override()
+    if env_override:
+        effective = False
+        warnings.append(
+            f"{env_override} is set, so updating "
+            f"{llamacpp_provider_service.PROVIDER_SECTION}."
+            f"{llamacpp_provider_service.PROVIDER_ENDPOINT_FIELD} may not affect chat."
+        )
+    return {
+        "provider": llamacpp_provider_service.PROVIDER_NAME,
+        "endpoint": endpoint,
+        "updated": True,
+        "effective": effective,
+        "warnings": warnings,
+    }
+
+
+async def _use_default_runtime_in_chat(supervisor: LlamaCppSupervisor) -> dict[str, object]:
+    try:
+        runtime = supervisor.get_runtime(DEFAULT_PROFILE_ID)
+    except LlamaCppProfileNotFoundError as exc:
+        raise llamacpp_provider_service.ManagedServerNotRunningError(
+            "Managed llama.cpp server is not running."
+        ) from exc
+    return await _use_runtime_in_chat(runtime)
+
+
+def _messages_to_prompt(messages: list[dict[str, object]]) -> str:
+    parts: list[str] = []
+    for message in messages:
+        role = str(message.get("role") or "user")
+        content = message.get("content")
+        parts.append(f"{role}: {content}")
+    return "\n".join(parts)
+
+
+def _is_chat_endpoint(api_endpoint: str) -> bool:
+    return "chat/completions" in api_endpoint
+
+
+async def _post_supervisor_runtime_inference(
+    runtime: LlamaCppRuntime,
+    payload: "LlamaCppInferenceRequest",
+) -> dict[str, Any]:
+    base_url = _runtime_base_url(runtime)
+    request_payload = payload.to_kwargs()
+    api_endpoint = str(request_payload.pop("api_endpoint", "/v1/chat/completions") or "/v1/chat/completions")
+    timeout = request_payload.pop("timeout", None)
+    request_payload.pop("stream", None)
+    prompt_value = request_payload.pop("prompt", None)
+    messages_value = request_payload.pop("messages", None)
+    if _is_chat_endpoint(api_endpoint):
+        if messages_value:
+            request_payload["messages"] = messages_value
+        elif prompt_value is not None:
+            request_payload["messages"] = [{"role": "user", "content": prompt_value}]
+        else:
+            raise InferenceError("Either 'prompt' or 'messages' must be provided for inference.")
+    else:
+        if prompt_value is None and messages_value:
+            prompt_value = _messages_to_prompt(messages_value)
+        if prompt_value is None:
+            raise InferenceError("Prompt is required for completion endpoint inference.")
+        request_payload["prompt"] = prompt_value
+    request_payload["stream"] = False
+    target_url = f"{base_url}/{api_endpoint.lstrip('/')}"
+    async with http_utils.create_async_client(timeout=timeout) as client:
+        try:
+            return await http_utils.request_json(
+                client,
+                "POST",
+                target_url,
+                json=request_payload,
+                headers={"Content-Type": "application/json"},
+            )
+        except Exception as exc:
+            status = http_utils.get_http_status_from_exception(exc)
+            if status is not None:
+                error_text = http_utils.get_http_error_text(exc)
+                raise HTTPException(status_code=status, detail=error_text or "Llama.cpp API request failed.") from exc
+            if http_utils.is_network_error(exc):
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Could not communicate with managed llama.cpp server at {target_url}: {exc}",
+                ) from exc
+            error_text = http_utils.get_http_error_text(exc)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected error during Llama.cpp inference: {error_text}",
+            ) from exc
 
 
 # --- Llama.cpp Specific Endpoints ---
@@ -190,6 +401,225 @@ async def register_llamacpp_model_path_endpoint(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+@router.get(
+    "/llamacpp/profiles",
+    summary="List llama.cpp Runtime Profiles",
+    response_model=LlamaCppProfileListResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def list_llamacpp_profiles_endpoint(
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+) -> LlamaCppProfileListResponse:
+    supervisor = _resolve_llamacpp_supervisor(llm_manager)
+    return LlamaCppProfileListResponse(profiles=[_profile_response(profile) for profile in supervisor.list_profiles()])
+
+
+@router.post(
+    "/llamacpp/profiles",
+    summary="Create llama.cpp Runtime Profile",
+    response_model=LlamaCppProfileResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def create_llamacpp_profile_endpoint(
+    payload: LlamaCppProfileCreateRequest,
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+) -> LlamaCppProfileResponse:
+    supervisor = _resolve_llamacpp_supervisor(llm_manager)
+    try:
+        return _profile_response(await supervisor.create_profile(payload))
+    except Exception as e:
+        raise _supervisor_error_to_http(e, llm_manager, "Unexpected error creating Llama.cpp profile") from e
+
+
+@router.get(
+    "/llamacpp/profiles/{profile_id}",
+    summary="Get llama.cpp Runtime Profile",
+    response_model=LlamaCppProfileResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def get_llamacpp_profile_endpoint(
+    profile_id: str,
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+) -> LlamaCppProfileResponse:
+    supervisor = _resolve_llamacpp_supervisor(llm_manager)
+    return _profile_response(_get_profile_or_404(supervisor, profile_id))
+
+
+@router.put(
+    "/llamacpp/profiles/{profile_id}",
+    summary="Update llama.cpp Runtime Profile",
+    response_model=LlamaCppProfileResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def update_llamacpp_profile_endpoint(
+    profile_id: str,
+    payload: LlamaCppProfileUpdateRequest,
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+) -> LlamaCppProfileResponse:
+    supervisor = _resolve_llamacpp_supervisor(llm_manager)
+    try:
+        return _profile_response(await supervisor.update_profile(profile_id, payload))
+    except Exception as e:
+        raise _supervisor_error_to_http(e, llm_manager, "Unexpected error updating Llama.cpp profile") from e
+
+
+@router.delete(
+    "/llamacpp/profiles/{profile_id}",
+    summary="Delete llama.cpp Runtime Profile",
+    response_model=LlamaCppProfileDeleteResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def delete_llamacpp_profile_endpoint(
+    profile_id: str,
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+) -> LlamaCppProfileDeleteResponse:
+    supervisor = _resolve_llamacpp_supervisor(llm_manager)
+    try:
+        deleted = await supervisor.delete_profile(profile_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"Llama.cpp profile '{profile_id}' was not found.")
+        return LlamaCppProfileDeleteResponse(profile_id=profile_id, deleted=True)
+    except Exception as e:
+        raise _supervisor_error_to_http(e, llm_manager, "Unexpected error deleting Llama.cpp profile") from e
+
+
+@router.post(
+    "/llamacpp/profiles/{profile_id}/start",
+    summary="Start llama.cpp Runtime Profile",
+    response_model=LlamaCppLifecycleActionResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def start_llamacpp_profile_endpoint(
+    profile_id: str,
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+) -> LlamaCppLifecycleActionResponse:
+    supervisor = _resolve_llamacpp_supervisor(llm_manager)
+    try:
+        return _lifecycle_response(profile_id, "start", await supervisor.start_profile(profile_id))
+    except Exception as e:
+        raise _supervisor_error_to_http(e, llm_manager, "Unexpected error starting Llama.cpp profile") from e
+
+
+@router.post(
+    "/llamacpp/profiles/{profile_id}/stop",
+    summary="Stop llama.cpp Runtime Profile",
+    response_model=LlamaCppLifecycleActionResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def stop_llamacpp_profile_endpoint(
+    profile_id: str,
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+) -> LlamaCppLifecycleActionResponse:
+    supervisor = _resolve_llamacpp_supervisor(llm_manager)
+    try:
+        return _lifecycle_response(profile_id, "stop", await supervisor.stop_profile(profile_id))
+    except Exception as e:
+        raise _supervisor_error_to_http(e, llm_manager, "Unexpected error stopping Llama.cpp profile") from e
+
+
+@router.post(
+    "/llamacpp/profiles/{profile_id}/pause",
+    summary="Pause llama.cpp Runtime Profile",
+    response_model=LlamaCppLifecycleActionResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def pause_llamacpp_profile_endpoint(
+    profile_id: str,
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+) -> LlamaCppLifecycleActionResponse:
+    supervisor = _resolve_llamacpp_supervisor(llm_manager)
+    try:
+        return _lifecycle_response(profile_id, "pause", await supervisor.pause_profile(profile_id))
+    except Exception as e:
+        raise _supervisor_error_to_http(e, llm_manager, "Unexpected error pausing Llama.cpp profile") from e
+
+
+@router.post(
+    "/llamacpp/profiles/{profile_id}/resume",
+    summary="Resume llama.cpp Runtime Profile",
+    response_model=LlamaCppLifecycleActionResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def resume_llamacpp_profile_endpoint(
+    profile_id: str,
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+) -> LlamaCppLifecycleActionResponse:
+    supervisor = _resolve_llamacpp_supervisor(llm_manager)
+    try:
+        return _lifecycle_response(profile_id, "resume", await supervisor.resume_profile(profile_id))
+    except Exception as e:
+        raise _supervisor_error_to_http(e, llm_manager, "Unexpected error resuming Llama.cpp profile") from e
+
+
+@router.post(
+    "/llamacpp/profiles/{profile_id}/use-in-chat",
+    summary="Use llama.cpp Runtime Profile in Chat",
+    response_model=LlamaCppUseInChatResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def use_llamacpp_profile_in_chat_endpoint(
+    profile_id: str,
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+) -> LlamaCppUseInChatResponse:
+    supervisor = _resolve_llamacpp_supervisor(llm_manager)
+    try:
+        return await _use_runtime_in_chat(supervisor.get_runtime(profile_id))
+    except llamacpp_provider_service.ManagedServerNotRunningError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except llamacpp_provider_service.ProviderConfigWriteError as e:
+        raise HTTPException(status_code=500, detail="Failed to update llama.cpp chat provider endpoint.") from e
+    except Exception as e:
+        raise _supervisor_error_to_http(e, llm_manager, "Unexpected error wiring Llama.cpp profile endpoint") from e
+
+
+@router.get(
+    "/llamacpp/instances",
+    summary="List llama.cpp Runtime Instances",
+    response_model=LlamaCppRuntimeListResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def list_llamacpp_instances_endpoint(
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+) -> LlamaCppRuntimeListResponse:
+    supervisor = _resolve_llamacpp_supervisor(llm_manager)
+    return LlamaCppRuntimeListResponse(runtimes=[_runtime_response(runtime) for runtime in supervisor.list_runtimes()])
+
+
+@router.get(
+    "/llamacpp/instances/{profile_id}",
+    summary="Get llama.cpp Runtime Instance",
+    response_model=LlamaCppRuntimeResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def get_llamacpp_instance_endpoint(
+    profile_id: str,
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+) -> LlamaCppRuntimeResponse:
+    supervisor = _resolve_llamacpp_supervisor(llm_manager)
+    try:
+        return _runtime_response(supervisor.get_runtime(profile_id))
+    except Exception as e:
+        raise _supervisor_error_to_http(e, llm_manager, "Unexpected error getting Llama.cpp instance") from e
+
+
+@router.get(
+    "/llamacpp/instances/{profile_id}/logs/tail",
+    summary="Tail llama.cpp Runtime Instance Logs",
+    response_model=LlamaCppLogTailResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def tail_llamacpp_instance_logs_endpoint(
+    profile_id: str,
+    lines: int = Query(default=200, ge=1, le=1000),
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+) -> LlamaCppLogTailResponse:
+    supervisor = _resolve_llamacpp_supervisor(llm_manager)
+    try:
+        return await run_in_threadpool(supervisor.tail_logs, profile_id, lines)
+    except Exception as e:
+        raise _supervisor_error_to_http(e, llm_manager, "Unexpected error tailing Llama.cpp instance logs") from e
+
+
 @router.post(
     "/llamacpp/start-by-model",
     summary="Start llama.cpp Server by Inventory Model ID",
@@ -200,6 +630,14 @@ async def start_llamacpp_by_model_endpoint(
     payload: LlamaCppStartByModelRequest,
     llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
 ) -> LlamaCppStartByModelResponse:
+    supervisor = getattr(llm_manager, "llamacpp_supervisor", None)
+    if supervisor is not None:
+        try:
+            runtime = await supervisor.start_default_by_model(payload.model_id, payload.server_args)
+            return _start_by_model_response(runtime, payload.model_id)
+        except Exception as e:
+            raise _supervisor_error_to_http(e, llm_manager, "Unexpected error starting Llama.cpp default profile") from e
+
     try:
         target = _resolve_llamacpp_target(llm_manager, ("start_server_by_path",))
         model_path = llamacpp_inventory_service.resolve_model_id(payload.model_id)
@@ -246,6 +684,9 @@ async def use_llamacpp_in_chat_endpoint(
     llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
 ) -> LlamaCppUseInChatResponse:
     try:
+        supervisor = getattr(llm_manager, "llamacpp_supervisor", None)
+        if supervisor is not None:
+            return await _use_default_runtime_in_chat(supervisor)
         return await llamacpp_provider_service.use_managed_server_in_chat(llm_manager)
     except llamacpp_provider_service.ManagedServerNotRunningError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
@@ -274,6 +715,22 @@ async def start_llamacpp_server_endpoint(
     Starts the Llama.cpp server with the specified model.
     If a server is already running, it will be stopped and restarted with the new model (model swap).
     """
+    supervisor = getattr(llm_manager, "llamacpp_supervisor", None)
+    if supervisor is not None:
+        try:
+            requested = Path(model_filename)
+            if requested.is_absolute() or ".." in requested.parts:
+                raise ServerError("Model filename must be a relative filename under the configured models directory.")
+            model_path = Path(supervisor.config.models_dir) / requested
+            runtime = await supervisor.start_default_by_path(
+                model_path,
+                dict(server_args or {}),
+                model_label=model_filename,
+            )
+            return _start_by_path_response(runtime, model_filename)
+        except Exception as e:
+            raise _supervisor_error_to_http(e, llm_manager, "Unexpected error starting Llama.cpp default profile") from e
+
     try:
         target = _resolve_llamacpp_target(llm_manager, ("start_server",))
         # Prefer handler.start_server if available, else manager.start_server
@@ -302,6 +759,20 @@ async def start_llamacpp_server_endpoint(
     dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
 )
 async def stop_llamacpp_server_endpoint(llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager)):
+    supervisor = getattr(llm_manager, "llamacpp_supervisor", None)
+    if supervisor is not None:
+        try:
+            runtime = await supervisor.stop_default()
+            return {"status": "stopped", "message": runtime.message or "Stopped", "backend": "llamacpp"}
+        except LlamaCppProfileNotFoundError:
+            return {
+                "status": "stopped",
+                "message": "No managed llama.cpp server is currently running.",
+                "backend": "llamacpp",
+            }
+        except Exception as e:
+            raise _supervisor_error_to_http(e, llm_manager, "Unexpected error stopping Llama.cpp default profile") from e
+
     try:
         target = _resolve_llamacpp_target(llm_manager, ("stop_server",))
         if isinstance(target, LlamaCppHandler):
@@ -326,6 +797,13 @@ async def stop_llamacpp_server_endpoint(llm_manager: LLMInferenceManager = Depen
     dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
 )
 async def get_llamacpp_status_endpoint(llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager)):
+    supervisor = getattr(llm_manager, "llamacpp_supervisor", None)
+    if supervisor is not None:
+        try:
+            return supervisor.default_status_compat()
+        except Exception as e:
+            raise _supervisor_error_to_http(e, llm_manager, "Unexpected error getting Llama.cpp default status") from e
+
     try:
         target = _resolve_llamacpp_target(llm_manager, ("get_server_status",))
         if isinstance(target, LlamaCppHandler):
@@ -354,6 +832,15 @@ async def tail_llamacpp_logs_endpoint(
     lines: int = Query(default=200, ge=1, le=1000),
     llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
 ) -> LlamaCppLogTailResponse:
+    supervisor = getattr(llm_manager, "llamacpp_supervisor", None)
+    if supervisor is not None:
+        try:
+            return await run_in_threadpool(supervisor.tail_logs, DEFAULT_PROFILE_ID, lines)
+        except LlamaCppProfileNotFoundError as e:
+            raise HTTPException(status_code=409, detail="Managed llama.cpp server is not running.") from e
+        except Exception as e:
+            raise _supervisor_error_to_http(e, llm_manager, "Unexpected error tailing Llama.cpp default logs") from e
+
     try:
         return await llamacpp_provider_service.tail_managed_log(llm_manager, requested_lines=lines)
     except llamacpp_provider_service.ManagedServerNotRunningError as e:
@@ -452,6 +939,18 @@ async def run_llamacpp_inference_endpoint(
     Example: {"messages": [{"role": "user", "content": "Hello!"}], "temperature": 0.7}
     """
     try:
+        supervisor = getattr(llm_manager, "llamacpp_supervisor", None)
+        if supervisor is not None:
+            try:
+                runtime = supervisor.get_runtime(DEFAULT_PROFILE_ID)
+            except LlamaCppProfileNotFoundError:
+                runtime = None
+            if runtime is not None and runtime.state == LlamaCppRuntimeState.RUNNING:
+                result = await _post_supervisor_runtime_inference(runtime, payload)
+                result.setdefault("model", runtime.model_path or runtime.model_id or "unknown_active_model")
+                result.setdefault("backend", "llamacpp")
+                return result
+
         handler = getattr(llm_manager, "llamacpp", None)
         # Prefer handler methods when available; fallback to manager for compatibility with tests
         if handler and hasattr(handler, "get_server_status") and hasattr(handler, "inference"):
