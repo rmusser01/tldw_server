@@ -11,6 +11,8 @@ import {
   UserRound,
 } from "lucide-react";
 import { DEGRADED_STATE_LABEL, READY_STATE_LABEL } from "@/design-system";
+import { PlaygroundCompositionPreview } from "./PlaygroundCompositionPreview";
+import type { PlaygroundCompositionPreviewSummary } from "./playground-composition-preview";
 
 const railSectionClass = "rounded-md border border-border bg-surface px-3 py-2";
 const railHeadingClass = "text-[11px] font-semibold uppercase text-text-muted";
@@ -91,6 +93,7 @@ export type PlaygroundContextRailProps = {
   onClearKnowledge?: () => void;
   onClearMedia?: () => void;
   onClearResearch?: () => void;
+  compositionPreviewSummary?: PlaygroundCompositionPreviewSummary;
 };
 
 const sourceIcon = (kind: PlaygroundContextSource["kind"]) => {
@@ -143,6 +146,7 @@ export const PlaygroundContextRail = ({
   onClearKnowledge,
   onClearMedia,
   onClearResearch,
+  compositionPreviewSummary,
 }: PlaygroundContextRailProps) => {
   const { t } = useTranslation("playground");
   const railRef = React.useRef<HTMLDivElement | null>(null);
@@ -268,6 +272,12 @@ export const PlaygroundContextRail = ({
       data-testid="playground-context-rail"
       className="flex min-w-0 flex-col gap-2 text-sm"
     >
+      {compositionPreviewSummary ? (
+        <div className={railSectionClass}>
+          <PlaygroundCompositionPreview summary={compositionPreviewSummary} />
+        </div>
+      ) : null}
+
       <section
         className={railSectionClass}
         aria-label={t("cockpit.conversationContext", "Conversation context")}

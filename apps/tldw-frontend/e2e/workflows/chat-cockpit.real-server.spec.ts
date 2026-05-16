@@ -32,6 +32,12 @@ type ApiHit = {
   status: number;
 };
 
+type RealChatModelSelection = {
+  provider: string;
+  model: string;
+  key: string;
+};
+
 const apiHeaders = () => ({
   'x-api-key': apiKey,
 });
@@ -142,9 +148,54 @@ const extractConfiguredProviders = (payload: any): any[] => {
   });
 };
 
-const seedRealServerConfig = async (page: Page) => {
+const buildConfiguredChatModelSelection = (payload: any): RealChatModelSelection => {
+  const configuredProviders = extractConfiguredProviders(payload).filter(
+    (provider: any) => Array.isArray(provider?.models) && provider.models.length > 0
+  );
+  const provider =
+    configuredProviders.find((candidate: any) => candidate?.name === 'openai') ||
+    configuredProviders[0];
+
+  if (!provider) {
+    throw new Error('No configured provider with chat models is available on the real server');
+  }
+
+  const model =
+    typeof provider.default_model === 'string' && provider.default_model.trim().length > 0
+      ? provider.default_model.trim()
+      : String(provider.models[0] || '').trim();
+
+  if (!model) {
+    throw new Error(`Configured provider ${provider.name || '<unknown>'} has no usable model`);
+  }
+
+  const providerName = String(provider.name || '').trim();
+  if (!providerName) {
+    throw new Error(`Configured model ${model} is missing a provider name`);
+  }
+
+  return {
+    provider: providerName,
+    model,
+    key: `tldw:${model}`,
+  };
+};
+
+const getConfiguredChatModelSelection = async (
+  request: APIRequestContext
+): Promise<RealChatModelSelection> => {
+  const providers = await apiGet<any>(request, '/api/v1/llm/providers');
+  expect(providers.status).toBe(200);
+  expect(extractConfiguredProviders(providers.body).length).toBeGreaterThan(0);
+  return buildConfiguredChatModelSelection(providers.body);
+};
+
+const seedRealServerConfig = async (
+  page: Page,
+  options: { selectedModel?: RealChatModelSelection } = {}
+) => {
   await page.addInitScript(
-    ({ configuredServerUrl, configuredApiKey }) => {
+    ({ configuredServerUrl, configuredApiKey, configuredSelectedModel }) => {
       const config = {
         serverUrl: configuredServerUrl,
         authMode: 'single-user',
@@ -163,10 +214,24 @@ const seedRealServerConfig = async (page: Page) => {
       localStorage.setItem('__tldw_first_run_complete', 'true');
       localStorage.setItem('assistant_setup_dismissed', 'true');
       localStorage.setItem('playgroundComposerOptionsExpanded', 'true');
+
+      if (configuredSelectedModel?.key) {
+        localStorage.setItem('selectedModel', configuredSelectedModel.key);
+        localStorage.setItem(
+          'chatModelUsageByProviderModel',
+          JSON.stringify({
+            [configuredSelectedModel.key]: {
+              selectedCount: 1,
+              lastSelectedAt: Date.now(),
+            },
+          })
+        );
+      }
     },
     {
       configuredServerUrl: serverUrl,
       configuredApiKey: apiKey,
+      configuredSelectedModel: options.selectedModel || null,
     }
   );
 };
@@ -302,6 +367,11 @@ const closeSearchContextIfOpen = async (page: Page) => {
 
 const getDesktopContextRail = (page: Page): Locator =>
   page.getByTestId('playground-cockpit-left-rail').getByTestId('playground-context-rail');
+
+const getDesktopCompositionPreview = (page: Page): Locator =>
+  getDesktopContextRail(page).getByRole('region', {
+    name: 'Next message composition',
+  });
 
 const getDesktopRuntimeInspector = (page: Page): Locator =>
   page
@@ -519,13 +589,14 @@ test.describe('/chat cockpit real-server parity', () => {
     const providers = await apiGet<any>(request, '/api/v1/llm/providers');
     expect(providers.status).toBe(200);
     expect(extractConfiguredProviders(providers.body).length).toBeGreaterThan(0);
+    const chatModelSelection = buildConfiguredChatModelSelection(providers.body);
 
     const models = await apiGet<any>(request, '/api/v1/llm/models/metadata');
     expect(models.status).toBe(200);
     expect(extractModels(models.body).length).toBeGreaterThan(0);
 
     const apiTracker = trackRealApiHits(page);
-    await seedRealServerConfig(page);
+    await seedRealServerConfig(page, { selectedModel: chatModelSelection });
     await page.setViewportSize({ width: 1440, height: 960 });
     await page.goto('/chat', { waitUntil: 'domcontentloaded' });
 
@@ -548,6 +619,9 @@ test.describe('/chat cockpit real-server parity', () => {
 
     await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
+    await expect(getDesktopCompositionPreview(page)).toContainText(
+      `Scope: ${chatModelSelection.key}`
+    );
     await page.getByRole('button', { name: 'Hide context rail' }).click();
     await expect(page.getByTestId('playground-cockpit-left-rail')).toHaveCount(0);
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
@@ -610,9 +684,8 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(page.getByTestId('composer-options-panel')).toBeVisible();
 
     await page.getByTestId('model-selector').first().click();
-    await expect(
-      page.getByRole('button', { name: /OpenAI \/|Anthropic \/|Ollama \/|Select a model/i }).first()
-    ).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Search models' })).toBeVisible();
+    await expect(page.getByRole('menu').first()).toBeVisible();
     await page.keyboard.press('Escape');
 
     await contextRail.getByRole('button', { name: /Select prompt|Select a prompt/i }).click();
@@ -712,13 +785,14 @@ test.describe('/chat cockpit real-server parity', () => {
 
     const health = await apiGet<any>(request, '/api/v1/health');
     assertHealthResponse(health);
+    const chatModelSelection = await getConfiguredChatModelSelection(request);
 
     const promptId = `cockpit-prompt-${Date.now()}`;
     const promptName = `Cockpit prompt ${Date.now()}`;
     const promptContent = 'Use concise cockpit proof wording.';
     const now = Date.now();
 
-    await seedRealServerConfig(page);
+    await seedRealServerConfig(page, { selectedModel: chatModelSelection });
     await page.setViewportSize({ width: 1440, height: 960 });
     await page.goto('/chat', { waitUntil: 'domcontentloaded' });
     await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
@@ -776,6 +850,13 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(
         contextRail.getByRole('region', { name: 'Prompt context' }).getByText(promptName)
       ).toBeVisible();
+      const compositionPreview = getDesktopCompositionPreview(page);
+      await expect(compositionPreview).toBeVisible();
+      await expect(compositionPreview).toContainText(promptName);
+      await expect(compositionPreview).toContainText(/Scope: [^:]+:.+/);
+      await expect(compositionPreview).toContainText(
+        /MCP tools|MCP unavailable|Tools managed from composer/
+      );
       const sourceList = contextRail.getByRole('list', { name: 'Context sources' });
       const promptSource = sourceList.getByRole('listitem').filter({ hasText: promptName });
       await expect(promptSource).toContainText('Prompt');
@@ -823,6 +904,7 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(runtimeInspector.getByText('Temperature')).toBeVisible();
       await expect(runtimeInspector.getByText(nextTemperature, { exact: true })).toBeVisible();
       await expect(runtimeInspector.getByText('Override')).toBeVisible();
+      await expect(compositionPreview).toContainText(`Temperature: ${nextTemperature}`);
 
       await modelSettingsTrigger.click();
       await expect(modelSettingsDialog).toBeVisible();
@@ -833,6 +915,7 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(modelSettingsDialog).toBeHidden();
       await expect(modelSettingsTrigger).toBeFocused({ timeout: 5_000 });
       await expect(runtimeInspector.getByText(restoredTemperature, { exact: true })).toBeVisible();
+      await expect(compositionPreview).toContainText(`Temperature: ${restoredTemperature}`);
 
       await assertRuntimeMcpRailState(runtimeInspector);
       const mcpSettingsTrigger = runtimeInspector.locator(
@@ -890,8 +973,9 @@ test.describe('/chat cockpit real-server parity', () => {
 
     const health = await apiGet<any>(request, '/api/v1/health');
     assertHealthResponse(health);
+    const chatModelSelection = await getConfiguredChatModelSelection(request);
 
-    await seedRealServerConfig(page);
+    await seedRealServerConfig(page, { selectedModel: chatModelSelection });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/chat', { waitUntil: 'domcontentloaded' });
 
@@ -1003,6 +1087,7 @@ test.describe('/chat cockpit real-server parity', () => {
 
     const health = await apiGet<any>(request, '/api/v1/health');
     assertHealthResponse(health);
+    const chatModelSelection = await getConfiguredChatModelSelection(request);
 
     const characterName = `Cockpit Rail ${Date.now()}`;
     const created = await apiPost<any>(request, '/api/v1/characters', {
@@ -1021,7 +1106,7 @@ test.describe('/chat cockpit real-server parity', () => {
         description: `Could not create disposable character via real server: status ${created.status}`,
       });
 
-      await seedRealServerConfig(page);
+      await seedRealServerConfig(page, { selectedModel: chatModelSelection });
       await page.setViewportSize({ width: 1440, height: 960 });
       await page.goto('/chat', { waitUntil: 'domcontentloaded' });
       await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
@@ -1051,7 +1136,7 @@ test.describe('/chat cockpit real-server parity', () => {
         )
       ).toBe(true);
 
-      await seedRealServerConfig(page);
+      await seedRealServerConfig(page, { selectedModel: chatModelSelection });
       await page.setViewportSize({ width: 1440, height: 960 });
       await page.goto('/chat', { waitUntil: 'domcontentloaded' });
 
@@ -1079,6 +1164,9 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(runtimeInspector.getByRole('button', { name: 'Clear assistant' })).toBeVisible();
       await expect(runtimeInspector.getByRole('button', { name: 'Open Scene Director' })).toBeVisible();
       const contextRail = getDesktopContextRail(page);
+      const compositionPreview = getDesktopCompositionPreview(page);
+      await expect(compositionPreview).toContainText(characterName);
+      await expect(compositionPreview).toContainText(/Scope: [^:]+:.+/);
       const assistantContextSource = contextRail
         .getByRole('list', { name: 'Context sources' })
         .getByRole('listitem')
@@ -1117,6 +1205,7 @@ test.describe('/chat cockpit real-server parity', () => {
 
     const health = await apiGet<any>(request, '/api/v1/health');
     assertHealthResponse(health);
+    const chatModelSelection = await getConfiguredChatModelSelection(request);
 
     const personaName = `Cockpit Persona ${Date.now()}`;
     const personaId = `cockpit_persona_${Date.now()}`;
@@ -1147,7 +1236,7 @@ test.describe('/chat cockpit real-server parity', () => {
     }
 
     if (!selectedPersona?.id || !selectedPersona?.name) {
-      await seedRealServerConfig(page);
+      await seedRealServerConfig(page, { selectedModel: chatModelSelection });
       await page.setViewportSize({ width: 1440, height: 960 });
       await page.goto('/chat', { waitUntil: 'domcontentloaded' });
       await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
@@ -1161,7 +1250,7 @@ test.describe('/chat cockpit real-server parity', () => {
     }
 
     try {
-      await seedRealServerConfig(page);
+      await seedRealServerConfig(page, { selectedModel: chatModelSelection });
       await page.setViewportSize({ width: 1440, height: 960 });
       await page.goto('/chat', { waitUntil: 'domcontentloaded' });
 
@@ -1200,6 +1289,9 @@ test.describe('/chat cockpit real-server parity', () => {
       ).toBeVisible();
 
       const contextRail = getDesktopContextRail(page);
+      const compositionPreview = getDesktopCompositionPreview(page);
+      await expect(compositionPreview).toContainText(String(selectedPersona.name));
+      await expect(compositionPreview).toContainText(/Scope: [^:]+:.+/);
       const personaContextSource = contextRail
         .getByRole('list', { name: 'Context sources' })
         .getByRole('listitem')

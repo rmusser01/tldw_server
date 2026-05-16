@@ -349,6 +349,18 @@ describe("Playground cockpit controls", () => {
 
       const leftRail = await screen.findByTestId("playground-cockpit-left-rail");
       const contextRail = within(leftRail).getByTestId("playground-context-rail");
+      const compositionPreview = within(contextRail).getByRole("region", {
+        name: "Next message composition",
+      });
+      expect(within(compositionPreview).getByText("Draft a concise summary")).toBeInTheDocument();
+      expect(within(compositionPreview).getByText("Mira Vale")).toBeInTheDocument();
+      expect(
+        within(compositionPreview).getAllByText("openai:gpt-4.1-mini").length,
+      ).toBeGreaterThan(0);
+      expect(within(compositionPreview).getByText("MCP tools")).toBeInTheDocument();
+      expect(
+        within(compositionPreview).getByText("Scope: openai:gpt-4.1-mini"),
+      ).toBeInTheDocument();
       expect(within(contextRail).getByText("Context active")).toBeInTheDocument();
       expect(within(contextRail).getByText("1 file")).toBeInTheDocument();
       expect(
@@ -904,6 +916,9 @@ describe("Playground cockpit controls", () => {
     ).toHaveAttribute("data-mode", "focus");
     expect(screen.queryByTestId("playground-context-rail")).toBeNull();
     expect(screen.queryByTestId("playground-runtime-inspector")).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Next message composition" }),
+    ).toBeNull();
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
   });

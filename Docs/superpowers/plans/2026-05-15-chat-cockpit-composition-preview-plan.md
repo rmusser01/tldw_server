@@ -4,6 +4,8 @@
 
 **Goal:** Add a first-class Context Stack plus Prompt/Persona/Model Composition Preview to the main `/chat` cockpit so users can inspect the effective setup for the next message before sending.
 
+**Implementation Status:** Complete for this first slice. Verified with focused Vitest coverage, the design-system product-state guard, and the full real-server `/chat` cockpit Playwright spec.
+
 **Architecture:** Keep `Playground` as the coordinator. Build a small, testable summary layer from existing prompt, assistant, provider route, context-source, MCP, and conversation composition data. Rails remain presentational and call shared handlers. Do not create a parallel prompt/model/context state system.
 
 **Tech Stack:** React 18, TypeScript, i18next, existing WebUI design-system tokens, Vitest with Testing Library, Playwright real-server checks.

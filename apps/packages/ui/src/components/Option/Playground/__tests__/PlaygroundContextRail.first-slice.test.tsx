@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { PlaygroundContextRail } from "../PlaygroundContextRail";
+import type { PlaygroundCompositionPreviewSummary } from "../playground-composition-preview";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -49,7 +50,69 @@ const renderRail = (
   return props;
 };
 
+const compositionSummary = (): PlaygroundCompositionPreviewSummary => ({
+  overallState: "ready",
+  settingsScopeLabel: "openai:gpt-4.1-mini",
+  entries: [
+    {
+      id: "prompt",
+      kind: "prompt",
+      label: "Prompt",
+      title: "Research brief",
+      detail: "System prompt",
+      state: "active",
+    },
+    {
+      id: "model",
+      kind: "model",
+      label: "Model",
+      title: "openai:gpt-4.1-mini",
+      detail: "openai",
+      state: "active",
+    },
+    {
+      id: "tools",
+      kind: "tools",
+      label: "Tools",
+      title: "MCP tools",
+      detail: "2 chat tools available",
+      state: "active",
+    },
+  ],
+  contextStack: [
+    {
+      id: "prompt",
+      kind: "prompt",
+      label: "Prompt",
+      title: "Research brief",
+      detail: "System prompt",
+      state: "active",
+    },
+  ],
+  footprint: {
+    providerMessageCount: 0,
+    previewSectionCount: 0,
+    contextPieceCount: 0,
+    warningCount: 0,
+    readiness: "unavailable",
+  },
+});
+
 describe("PlaygroundContextRail first-slice controls", () => {
+  it("renders the next-message composition preview when supplied", () => {
+    renderRail({
+      compositionPreviewSummary: compositionSummary(),
+    });
+
+    const preview = screen.getByRole("region", {
+      name: "Next message composition",
+    });
+
+    expect(preview).toHaveTextContent("Research brief");
+    expect(preview).toHaveTextContent("openai:gpt-4.1-mini");
+    expect(preview).toHaveTextContent("MCP tools");
+  });
+
   it("exposes web search as a pressed-state control", () => {
     const props = renderRail();
 
