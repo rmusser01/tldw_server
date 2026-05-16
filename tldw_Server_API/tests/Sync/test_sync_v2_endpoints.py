@@ -149,7 +149,7 @@ def test_capabilities_endpoint_returns_sync_v2_contract(client: TestClient):
     assert body["supported_domains"] == ["chat", "notes", "source_cache"]
     assert body["supports_restore_manifest"] is True
     assert body["supports_conflicts"] is True
-    assert body["supports_attachments"] is False
+    assert body["supports_attachments"] is True
     assert body["server_time"] == _clock()
 
 
@@ -488,7 +488,10 @@ def test_conflict_resolve_endpoint_returns_client_error_for_invalid_private_reso
     assert "known plaintext" not in str(response.json())
 
 
-def test_attachments_endpoint_returns_feature_detect_response(client: TestClient):
+def test_attachments_endpoint_stores_and_deduplicates_ciphertext(client: TestClient):
+    _register_device(client)
+    _enroll_dataset(client, domains=["notes"])
+
     response = client.post(
         "/api/v1/sync/attachments",
         json={
@@ -502,21 +505,82 @@ def test_attachments_endpoint_returns_feature_detect_response(client: TestClient
             "payload_hash": "sha256:attachment",
         },
     )
+    duplicate = client.post(
+        "/api/v1/sync/attachments",
+        json={
+            "dataset_id": "dataset-1",
+            "domain": "notes",
+            "entity_id": "note-1",
+            "attachment_id": "attachment-1",
+            "content_type": "application/octet-stream",
+            "size_bytes": 12,
+            "payload_ciphertext": "ciphertext:attachment-secret",
+            "payload_hash": "sha256:attachment",
+        },
+    )
+    manifest = client.get("/api/v1/sync/restore-manifest")
 
-    assert response.status_code == 501
-    assert response.json()["detail"]["error_code"] == "sync_attachments_not_enabled"
+    assert response.status_code == 200
+    assert duplicate.status_code == 200
+    assert response.json()["stored"] is True
+    assert duplicate.json()["stored"] is False
+    assert response.json()["payload_hash"] == "sha256:attachment"
+    assert manifest.json()["datasets"][0]["attachment_availability"] == {"available": 1}
+    assert manifest.json()["datasets"][0]["attachment_size_classes"] == {"small": 1}
     assert "attachment-secret" not in str(response.json())
+    assert "attachment-secret" not in str(duplicate.json())
+    assert "attachment-secret" not in str(manifest.json())
 
 
-def test_attachments_endpoint_feature_detects_without_strict_body_validation(client: TestClient):
+def test_attachments_endpoint_validates_request_and_hides_ciphertext(client: TestClient):
     response = client.post(
         "/api/v1/sync/attachments",
         json={"payload_ciphertext": "ciphertext:attachment-secret"},
     )
 
-    assert response.status_code == 501
-    assert response.json()["detail"]["error_code"] == "sync_attachments_not_enabled"
+    assert response.status_code == 422
     assert "attachment-secret" not in str(response.json())
+
+
+def test_attachments_endpoint_rejects_oversize_and_inaccessible_dataset(
+    client: TestClient,
+):
+    _register_device(client)
+    _enroll_dataset(client, domains=["notes"])
+
+    oversize = client.post(
+        "/api/v1/sync/attachments",
+        json={
+            "dataset_id": "dataset-1",
+            "domain": "notes",
+            "entity_id": "note-1",
+            "attachment_id": "attachment-large",
+            "content_type": "application/octet-stream",
+            "size_bytes": 1_048_577,
+            "payload_ciphertext": "ciphertext:large-secret",
+            "payload_hash": "sha256:large",
+        },
+    )
+    missing = client.post(
+        "/api/v1/sync/attachments",
+        json={
+            "dataset_id": "missing-dataset",
+            "domain": "notes",
+            "entity_id": "note-1",
+            "attachment_id": "attachment-missing",
+            "content_type": "application/octet-stream",
+            "size_bytes": 12,
+            "payload_ciphertext": "ciphertext:missing-secret",
+            "payload_hash": "sha256:missing",
+        },
+    )
+
+    assert oversize.status_code == 413
+    assert oversize.json()["detail"]["error_code"] == "sync_attachment_too_large"
+    assert missing.status_code == 404
+    assert missing.json()["detail"]["error_code"] == "sync_resource_not_found"
+    assert "large-secret" not in str(oversize.json())
+    assert "missing-secret" not in str(missing.json())
 
 
 def test_key_recovery_bundle_endpoint_stores_safe_metadata(client: TestClient):

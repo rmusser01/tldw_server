@@ -18,7 +18,7 @@ uses the existing `/api/v1/sync` route family and keeps the older media-only
 | `POST` | `/api/v1/sync/conflicts/{conflict_id}/resolve` | Resolve or dismiss a conflict, optionally with a resolution envelope. |
 | `GET` | `/api/v1/sync/keys/recovery-bundle` | Retrieve stored opaque key-recovery bundles for an accessible dataset. |
 | `POST` | `/api/v1/sync/keys/recovery-bundle` | Store opaque key-recovery metadata for encrypted datasets. |
-| `POST` | `/api/v1/sync/attachments` | Feature-detect attachment upload support. Currently returns not enabled. |
+| `POST` | `/api/v1/sync/attachments` | Store or deduplicate a small client-encrypted attachment payload for an accessible dataset. |
 
 ## Envelope Shape
 
@@ -79,6 +79,27 @@ bundle records for a dataset the authenticated user can access. Optional
 is the only Sync v2 response that returns `wrapped_key_blob` and `kdf_metadata`;
 restore manifests continue to expose only `key_recovery_available`.
 
+## Attachment Uploads
+
+`POST /api/v1/sync/attachments` stores small opaque attachment ciphertext for
+later restore hydration. The server validates that the authenticated user owns
+the dataset, that the requested domain is enrolled for that dataset, and that
+the payload is within the advertised `max_attachment_bytes` capability.
+
+Requests must use `client_private_v1`; plaintext/server-trusted attachment
+storage is rejected. The response returns only storage metadata:
+
+- `attachment_id`
+- `dataset_id`
+- `stored`, which is `false` for an idempotent duplicate upload
+- `size_bytes`
+- `payload_hash`
+
+The route does not return `payload_ciphertext`, and validation/storage errors
+use sanitized messages so malformed or oversized uploads do not echo ciphertext.
+Restore manifests summarize persisted attachment availability and size classes
+without exposing attachment payloads.
+
 ## Conflict Policy
 
 Domain adapters decide whether an incoming envelope is accepted, rejected, or
@@ -105,9 +126,9 @@ restore-manifest endpoints.
 
 ## Known Limits
 
-- Attachment upload persistence is not enabled yet; the attachment route exists
-  for capability detection.
-- Large binary media replication is out of V1 scope.
+- Attachment upload persistence is limited to small client-encrypted payloads
+  within `max_attachment_bytes`.
+- Large binary media replication remains out of V1 scope.
 - Embeddings and vector stores are treated as rebuildable or reference data in
   V1.
 - `client_private_v1` recovery only works if the user configured and retained a

@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncConflictCreate,
+    SyncAttachmentCreate,
     SyncDatasetCreate,
     SyncDeviceCursor,
     SyncDeviceUpsert,
@@ -116,6 +117,23 @@ def _key_record(**overrides) -> SyncKeyRecordCreate:
     return SyncKeyRecordCreate(**payload)
 
 
+def _attachment(**overrides) -> SyncAttachmentCreate:
+    payload = {
+        "attachment_id": "attachment-1",
+        "dataset_id": "dataset-1",
+        "domain": "notes",
+        "entity_id": "note-1",
+        "content_type": "application/octet-stream",
+        "size_bytes": 512,
+        "payload_ciphertext": "ciphertext:attachment",
+        "payload_hash": "sha256:attachment",
+        "encryption_policy": "client_private_v1",
+        "metadata": {"slot": "body-image"},
+    }
+    payload.update(overrides)
+    return SyncAttachmentCreate(**payload)
+
+
 def test_sync_database_rejects_unsupported_database_url_scheme(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("SYNC_V2_DATABASE_URL", "mysql://sync.example/sync_v2")
     monkeypatch.delenv("SYNC_V2_SQLITE_PATH", raising=False)
@@ -133,6 +151,7 @@ def test_sync_database_bootstrap_creates_required_tables(sync_store: SyncV2Store
         "sync_device_cursors",
         "sync_conflicts",
         "sync_key_records",
+        "sync_attachments",
     }
 
     for table_name in required_tables:
@@ -485,3 +504,78 @@ def test_key_record_duplicate_drift_raises(sync_store: SyncV2Store):
 
     with pytest.raises(SyncIdempotencyConflictError):
         sync_store.store_key_record(_key_record(user_id="user-2"))
+
+
+def test_attachment_store_is_idempotent_and_keeps_ciphertext_out_of_manifest(
+    sync_store: SyncV2Store,
+):
+    sync_store.enroll_dataset(_dataset())
+
+    stored = sync_store.store_attachment(_attachment())
+    duplicate = sync_store.store_attachment(_attachment())
+    stats = sync_store.summarize_restore_manifest_dataset(
+        "dataset-1",
+        user_id="user-1",
+        domains=["notes"],
+    )
+
+    assert stored.stored is True
+    assert duplicate.stored is False
+    assert duplicate.attachment_id == stored.attachment_id
+    assert duplicate.payload_hash == "sha256:attachment"
+    assert duplicate.payload_ciphertext == "ciphertext:attachment"
+    assert stats.attachment_availability == {"available": 1}
+    assert stats.attachment_size_classes == {"small": 1}
+    assert "ciphertext:attachment" not in repr(stats)
+
+
+def test_attachment_store_rejects_duplicate_drift_and_unenrolled_domain(
+    sync_store: SyncV2Store,
+):
+    sync_store.enroll_dataset(_dataset(domains=["notes"]))
+    sync_store.store_attachment(_attachment())
+
+    with pytest.raises(SyncIdempotencyConflictError):
+        sync_store.store_attachment(_attachment(payload_hash="sha256:changed"))
+
+    with pytest.raises(SyncInvalidDomainError):
+        sync_store.store_attachment(
+            _attachment(
+                attachment_id="attachment-chat",
+                domain="chat",
+                entity_id="conversation-1",
+                payload_hash="sha256:chat-attachment",
+            )
+        )
+
+
+def test_attachment_store_restore_summary_respects_domain_filter(
+    sync_store: SyncV2Store,
+):
+    sync_store.enroll_dataset(_dataset(domains=["notes", "chat"]))
+    sync_store.store_attachment(_attachment(domain="notes", size_bytes=512))
+    sync_store.store_attachment(
+        _attachment(
+            attachment_id="attachment-chat",
+            domain="chat",
+            entity_id="conversation-1",
+            size_bytes=2_097_152,
+            payload_hash="sha256:chat-attachment",
+        )
+    )
+
+    notes_stats = sync_store.summarize_restore_manifest_dataset(
+        "dataset-1",
+        user_id="user-1",
+        domains=["notes"],
+    )
+    all_stats = sync_store.summarize_restore_manifest_dataset(
+        "dataset-1",
+        user_id="user-1",
+        domains=["notes", "chat"],
+    )
+
+    assert notes_stats.attachment_availability == {"available": 1}
+    assert notes_stats.attachment_size_classes == {"small": 1}
+    assert all_stats.attachment_availability == {"available": 2}
+    assert all_stats.attachment_size_classes == {"medium": 1, "small": 1}

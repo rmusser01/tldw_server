@@ -20,6 +20,8 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
     ConflictStatus,
+    SyncAttachment,
+    SyncAttachmentCreate,
     SyncConflict,
     SyncConflictCreate,
     SyncDataset,
@@ -166,6 +168,25 @@ CREATE INDEX IF NOT EXISTS idx_sync_key_records_dataset
     ON sync_key_records(dataset_id, key_purpose, created_at);
 CREATE INDEX IF NOT EXISTS idx_sync_key_records_device
     ON sync_key_records(dataset_id, device_id);
+
+CREATE TABLE IF NOT EXISTS sync_attachments (
+    attachment_id TEXT NOT NULL,
+    dataset_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    payload_ciphertext TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    encryption_policy TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (dataset_id, attachment_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_attachments_dataset_domain
+    ON sync_attachments(dataset_id, domain, created_at);
+CREATE INDEX IF NOT EXISTS idx_sync_attachments_dataset_hash
+    ON sync_attachments(dataset_id, payload_hash);
 """
 
 SYNC_POSTGRES_SCHEMA = """
@@ -294,6 +315,25 @@ CREATE INDEX IF NOT EXISTS idx_sync_key_records_dataset
     ON sync_key_records(dataset_id, key_purpose, created_at);
 CREATE INDEX IF NOT EXISTS idx_sync_key_records_device
     ON sync_key_records(dataset_id, device_id);
+
+CREATE TABLE IF NOT EXISTS sync_attachments (
+    attachment_id TEXT NOT NULL,
+    dataset_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    payload_ciphertext TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    encryption_policy TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (dataset_id, attachment_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_attachments_dataset_domain
+    ON sync_attachments(dataset_id, domain, created_at);
+CREATE INDEX IF NOT EXISTS idx_sync_attachments_dataset_hash
+    ON sync_attachments(dataset_id, payload_hash);
 """
 
 
@@ -498,6 +538,25 @@ def _key_record_from_row(row: dict[str, Any]) -> SyncKeyRecord:
     )
 
 
+def _attachment_from_row(row: dict[str, Any], *, stored: bool = True) -> SyncAttachment:
+    """Convert a sync_attachments row into a core attachment model."""
+
+    return SyncAttachment(
+        attachment_id=row["attachment_id"],
+        dataset_id=row["dataset_id"],
+        domain=row["domain"],
+        entity_id=row["entity_id"],
+        content_type=row["content_type"],
+        size_bytes=int(row["size_bytes"]),
+        payload_ciphertext=row["payload_ciphertext"],
+        payload_hash=row["payload_hash"],
+        encryption_policy=row["encryption_policy"],
+        metadata=decode_json(row.get("metadata_json"), default={}),
+        created_at=row["created_at"],
+        stored=stored,
+    )
+
+
 def _dataset_domains_from_row(row: dict[str, Any]) -> set[str]:
     domains = decode_json(row.get("domain_set_json"), default=[])
     return {str(domain) for domain in domains}
@@ -577,6 +636,40 @@ def _key_record_fingerprint_from_row(row: dict[str, Any]) -> dict[str, Any]:
         "recovery_hint": row.get("recovery_hint"),
         "rotation_of_key_record_id": row.get("rotation_of_key_record_id"),
         "revoked_at": row.get("revoked_at"),
+    }
+
+
+def _attachment_fingerprint_from_create(attachment: SyncAttachmentCreate) -> dict[str, Any]:
+    """Return idempotency-comparable fields from an attachment create model."""
+
+    return {
+        "attachment_id": attachment.attachment_id,
+        "dataset_id": attachment.dataset_id,
+        "domain": attachment.domain,
+        "entity_id": attachment.entity_id,
+        "content_type": attachment.content_type,
+        "size_bytes": attachment.size_bytes,
+        "payload_ciphertext": attachment.payload_ciphertext,
+        "payload_hash": attachment.payload_hash,
+        "encryption_policy": attachment.encryption_policy,
+        "metadata": attachment.metadata,
+    }
+
+
+def _attachment_fingerprint_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Return idempotency-comparable fields from a stored attachment row."""
+
+    return {
+        "attachment_id": row["attachment_id"],
+        "dataset_id": row["dataset_id"],
+        "domain": row["domain"],
+        "entity_id": row["entity_id"],
+        "content_type": row["content_type"],
+        "size_bytes": int(row["size_bytes"]),
+        "payload_ciphertext": row["payload_ciphertext"],
+        "payload_hash": row["payload_hash"],
+        "encryption_policy": row["encryption_policy"],
+        "metadata": decode_json(row.get("metadata_json"), default={}),
     }
 
 
@@ -1406,6 +1499,65 @@ class SyncDatabase:
         result = self.execute(sql, tuple(params))
         return [_key_record_from_row(row) for row in result.rows]
 
+    def store_attachment(self, attachment: SyncAttachmentCreate) -> SyncAttachment:
+        """Store or idempotently deduplicate an encrypted Sync v2 attachment."""
+
+        now = utcnow_iso()
+        with self.backend.transaction() as conn:
+            self._require_dataset_domain(
+                attachment.dataset_id,
+                attachment.domain,
+                connection=conn,
+            )
+            insert_result = self.execute(
+                """
+                INSERT INTO sync_attachments (
+                    attachment_id, dataset_id, domain, entity_id, content_type,
+                    size_bytes, payload_ciphertext, payload_hash, encryption_policy,
+                    metadata_json, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (dataset_id, attachment_id) DO NOTHING
+                """,
+                (
+                    attachment.attachment_id,
+                    attachment.dataset_id,
+                    attachment.domain,
+                    attachment.entity_id,
+                    attachment.content_type,
+                    attachment.size_bytes,
+                    attachment.payload_ciphertext,
+                    attachment.payload_hash,
+                    attachment.encryption_policy,
+                    encode_json(attachment.metadata, default={}),
+                    now,
+                ),
+                connection=conn,
+            )
+            inserted = insert_result.rowcount > 0
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_attachments
+                     WHERE dataset_id = ? AND attachment_id = ?
+                    """,
+                    (attachment.dataset_id, attachment.attachment_id),
+                    connection=conn,
+                )
+            )
+            if row is None:
+                raise SyncStoreError(
+                    "Sync attachment insert did not produce a retrievable record"
+                )
+            if (
+                _attachment_fingerprint_from_row(row)
+                != _attachment_fingerprint_from_create(attachment)
+            ):
+                raise SyncIdempotencyConflictError(
+                    "Sync attachment ID was reused with different content"
+                )
+        return _attachment_from_row(row, stored=inserted)
+
     def summarize_restore_manifest_dataset(
         self,
         dataset_id: str,
@@ -1463,28 +1615,36 @@ class SyncDatabase:
 
             params = [dataset_id]
             sql = """
-                SELECT payload_clear_json
-                  FROM sync_envelopes
+                SELECT COUNT(*) AS attachment_count,
+                       COALESCE(SUM(CASE WHEN size_bytes <= 1048576 THEN 1 ELSE 0 END), 0)
+                           AS small_count,
+                       COALESCE(SUM(
+                           CASE
+                               WHEN size_bytes > 1048576 AND size_bytes <= 16777216
+                               THEN 1 ELSE 0
+                           END
+                       ), 0) AS medium_count,
+                       COALESCE(SUM(CASE WHEN size_bytes > 16777216 THEN 1 ELSE 0 END), 0)
+                           AS large_count
+                  FROM sync_attachments
                  WHERE dataset_id = ?
-                   AND payload_clear_json LIKE ?
             """
-            params.append('%"attachment_id"%')
             sql += _domain_filter_sql(domain_list if domain_filter_enabled else None, params)
-            for row in self.execute(sql, tuple(params)).rows:
-                payload_clear = decode_json(row.get("payload_clear_json"), default={})
-                if not isinstance(payload_clear, dict) or not payload_clear.get("attachment_id"):
-                    continue
-                availability = str(payload_clear.get("availability", "unknown"))
-                attachment_availability[availability] = (
-                    attachment_availability.get(availability, 0) + 1
-                )
-                try:
-                    size_bytes = int(payload_clear.get("size_bytes") or 0)
-                except (TypeError, ValueError):
-                    size_bytes = 0
-                size_class = _manifest_attachment_size_class(size_bytes)
-                attachment_size_classes[size_class] = (
-                    attachment_size_classes.get(size_class, 0) + 1
+            attachment_row = _first(self.execute(sql, tuple(params)))
+            attachment_count = int((attachment_row or {}).get("attachment_count") or 0)
+            if attachment_count:
+                attachment_availability["available"] = attachment_count
+                size_counts = {
+                    "small": int((attachment_row or {}).get("small_count") or 0),
+                    "medium": int((attachment_row or {}).get("medium_count") or 0),
+                    "large": int((attachment_row or {}).get("large_count") or 0),
+                }
+                attachment_size_classes.update(
+                    {
+                        size_class: count
+                        for size_class, count in size_counts.items()
+                        if count > 0
+                    }
                 )
 
         key_row = _first(
