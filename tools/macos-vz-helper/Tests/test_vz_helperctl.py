@@ -2781,6 +2781,141 @@ def test_ping_helper_reports_protocol_mismatch(monkeypatch, tmp_path):
     CASE.assertEqual(result.result, helperctl.CheckResult(ok=False, reason="helper_protocol_mismatch", message="macos_virtualization_helper_protocol_mismatch"))
 
 
+def test_ping_helper_falls_back_to_socket_when_helper_client_import_breaks(monkeypatch):
+    helperctl = load_helperctl()
+    sent_payloads = []
+
+    original_import = __import__
+
+    def broken_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client":
+            raise TypeError("dataclass() got an unexpected keyword argument 'slots'")
+        return original_import(name, globals, locals, fromlist, level)
+
+    class FakeSocket:
+        def __init__(self, *_args, **_kwargs):
+            self._chunks = [
+                json.dumps(
+                    {
+                        "protocol_version": helperctl.EXPECTED_HELPER_PROTOCOL_VERSION,
+                        "helper_version": "fallback-test",
+                        "status": "ok",
+                    }
+                ).encode("utf-8")
+                + b"\n",
+                b"",
+            ]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def settimeout(self, timeout):
+            CASE.assertEqual(timeout, 5.0)
+
+        def connect(self, socket_path):
+            CASE.assertEqual(socket_path, "/tmp/helper.sock")
+
+        def sendall(self, payload):
+            sent_payloads.append(json.loads(payload.decode("utf-8").strip()))
+
+        def recv(self, _size):
+            return self._chunks.pop(0)
+
+    monkeypatch.setattr("builtins.__import__", broken_import)
+    monkeypatch.setattr(helperctl.socket, "socket", FakeSocket)
+
+    result = helperctl.ping_helper_state(Path("/tmp/helper.sock"))
+
+    CASE.assertEqual(result.result, helperctl.CheckResult(ok=True))
+    CASE.assertEqual(result.protocol_version, helperctl.EXPECTED_HELPER_PROTOCOL_VERSION)
+    CASE.assertEqual(result.helper_version, "fallback-test")
+    CASE.assertEqual(
+        sent_payloads,
+        [
+            {
+                "operation": "ping",
+                "protocol_version": helperctl.EXPECTED_HELPER_PROTOCOL_VERSION,
+                "request": {},
+            }
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("chunks", "expected_message"),
+    [
+        ([b""], "macos_virtualization_helper_empty_response"),
+        ([b"not-json\n"], "macos_virtualization_helper_invalid_json"),
+    ],
+)
+def test_ping_helper_socket_fallback_reports_stable_protocol_errors(monkeypatch, chunks, expected_message):
+    helperctl = load_helperctl()
+
+    class FakeSocket:
+        def __init__(self, *_args, **_kwargs):
+            self._chunks = list(chunks)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def settimeout(self, _timeout):
+            return None
+
+        def connect(self, _socket_path):
+            return None
+
+        def sendall(self, _payload):
+            return None
+
+        def recv(self, _size):
+            return self._chunks.pop(0)
+
+    monkeypatch.setattr(helperctl.socket, "socket", FakeSocket)
+
+    result = helperctl.ping_helper_state(Path("/tmp/helper.sock"))
+
+    CASE.assertEqual(
+        result.result,
+        helperctl.CheckResult(ok=False, reason="helper_ping_failed", message=expected_message),
+    )
+
+
+def test_ping_helper_socket_fallback_reports_stable_transport_error(monkeypatch):
+    helperctl = load_helperctl()
+
+    class FakeSocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def settimeout(self, _timeout):
+            return None
+
+        def connect(self, _socket_path):
+            raise FileNotFoundError("missing helper socket")
+
+    monkeypatch.setattr(helperctl.socket, "socket", lambda *_args, **_kwargs: FakeSocket())
+
+    result = helperctl.ping_helper_state(Path("/tmp/helper.sock"))
+
+    CASE.assertEqual(
+        result.result,
+        helperctl.CheckResult(
+            ok=False,
+            reason="helper_ping_failed",
+            message="macos_virtualization_helper_unavailable",
+        ),
+    )
+
+
 def test_stop_helper_terminates_only_validated_pid(tmp_path):
     helperctl = load_helperctl()
     helper = tmp_path / "macos-vz-helper"
