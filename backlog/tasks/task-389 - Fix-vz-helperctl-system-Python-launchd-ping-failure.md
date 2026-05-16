@@ -4,7 +4,7 @@ title: Fix vz-helperctl system Python launchd ping failure
 status: Done
 assignee: []
 created_date: '2026-05-15 19:56'
-updated_date: '2026-05-15 20:07'
+updated_date: '2026-05-16 01:03'
 labels:
   - sandbox
   - macos-vz-helper
@@ -38,12 +38,18 @@ The merged launchd-drill operator path works when run with the project Python, b
 2026-05-15: Reproduced the host failure during local launchd-drill validation: direct script invocation used macOS system Python 3.9 and helper_status failed with dataclass(slots=...) import incompatibility. Added a failing regression that blocks helper_client import and proves ping_helper_state can still ping a reachable helper socket through the operator CLI path.
 
 Implemented a narrow direct socket ping in vz-helperctl.py for default helper readiness checks. client_factory remains available for tests. Verified focused regression, launchd/ping helperctl slice, full helperctl tests, direct launchd-drill with the documented script invocation, git diff --check, and Bandit. No docs change was needed because direct script invocation now works without requiring project Python.
+
+2026-05-15 review pass: PR #1731 has two actionable Qodo review threads. Scope: add a docstring for _request_helper_ping and normalize direct socket transport/empty/invalid JSON failures to stable macos_virtualization_helper_* messages before resolving review threads.
+
+2026-05-15 review fix: Added _request_helper_ping docstring and stable-message regressions for empty response, invalid JSON, and missing helper socket. Normalized direct socket transport failures to macos_virtualization_helper_unavailable, empty responses to macos_virtualization_helper_empty_response, and decode/JSON failures to macos_virtualization_helper_invalid_json.
+
+Review-fix verification: focused review tests passed 3 passed; full helperctl pytest passed 129 passed, 1 skipped; direct launchd-drill --skip-smoke passed bootstrap/status/kickstart/helper_status/protocol/version/bootout; git diff --check passed; Bandit JSON at /tmp/bandit_vz_helperctl_python39_ping_review_fix.json reported errors=0 and results=0.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed the system-Python launchd ping failure discovered during local validation. vz-helperctl now performs helper ping directly over the Unix socket instead of importing the full server helper client for operator readiness checks, avoiding Python 3.9 dataclass(slots=...) import incompatibility while preserving protocol/version validation and test injection through client_factory. Verified with full helperctl tests, direct launchd-drill execution, git diff --check, and Bandit.
+Fixed the system-Python launchd ping failure and the PR #1731 review findings. vz-helperctl now pings the helper directly over the Unix socket without importing server modules, documents that helper, and normalizes transport/protocol parse failures to stable macos_virtualization_helper_* messages. Regression coverage verifies the import-break fallback and stable messages for missing socket, empty response, and invalid JSON. Verified full helperctl tests, direct launchd-drill, git diff --check, and Bandit.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

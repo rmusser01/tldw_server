@@ -732,25 +732,41 @@ def _kill_process(pid: int) -> None:
 
 
 def _request_helper_ping(socket_path: Path, *, timeout_sec: float = 5.0) -> dict[str, object]:
+    """Ping the helper over its Unix socket without importing server modules.
+
+    The request uses the helper's newline-delimited JSON protocol and returns
+    the decoded response object. Transport failures are normalized to
+    stable operator-facing helper error identifiers; malformed or empty
+    responses are treated as protocol errors.
+    """
     payload = {
         "operation": "ping",
         "protocol_version": str(EXPECTED_HELPER_PROTOCOL_VERSION),
         "request": {},
     }
 
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.settimeout(timeout_sec)
-        client.connect(str(socket_path))
-        client.sendall(json.dumps(payload).encode("utf-8") + b"\n")
-        response_bytes = bytearray()
-        while b"\n" not in response_bytes:
-            chunk = client.recv(65536)
-            if not chunk:
-                break
-            response_bytes.extend(chunk)
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(timeout_sec)
+            client.connect(str(socket_path))
+            client.sendall(json.dumps(payload).encode("utf-8") + b"\n")
+            response_bytes = bytearray()
+            while b"\n" not in response_bytes:
+                chunk = client.recv(65536)
+                if not chunk:
+                    break
+                response_bytes.extend(chunk)
+    except (FileNotFoundError, ConnectionRefusedError, OSError, socket.timeout) as exc:
+        raise RuntimeError("macos_virtualization_helper_unavailable") from exc
 
-    response_text = bytes(response_bytes).split(b"\n", 1)[0].decode("utf-8")
-    response = json.loads(response_text)
+    raw_response = bytes(response_bytes).split(b"\n", 1)[0].strip()
+    if not raw_response:
+        raise RuntimeError("macos_virtualization_helper_empty_response")
+    try:
+        response_text = raw_response.decode("utf-8")
+        response = json.loads(response_text)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("macos_virtualization_helper_invalid_json") from exc
     if not isinstance(response, dict):
         raise RuntimeError("macos_virtualization_helper_protocol_error")
     return response

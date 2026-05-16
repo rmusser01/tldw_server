@@ -2844,6 +2844,78 @@ def test_ping_helper_falls_back_to_socket_when_helper_client_import_breaks(monke
     )
 
 
+@pytest.mark.parametrize(
+    ("chunks", "expected_message"),
+    [
+        ([b""], "macos_virtualization_helper_empty_response"),
+        ([b"not-json\n"], "macos_virtualization_helper_invalid_json"),
+    ],
+)
+def test_ping_helper_socket_fallback_reports_stable_protocol_errors(monkeypatch, chunks, expected_message):
+    helperctl = load_helperctl()
+
+    class FakeSocket:
+        def __init__(self, *_args, **_kwargs):
+            self._chunks = list(chunks)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def settimeout(self, _timeout):
+            return None
+
+        def connect(self, _socket_path):
+            return None
+
+        def sendall(self, _payload):
+            return None
+
+        def recv(self, _size):
+            return self._chunks.pop(0)
+
+    monkeypatch.setattr(helperctl.socket, "socket", FakeSocket)
+
+    result = helperctl.ping_helper_state(Path("/tmp/helper.sock"))
+
+    CASE.assertEqual(
+        result.result,
+        helperctl.CheckResult(ok=False, reason="helper_ping_failed", message=expected_message),
+    )
+
+
+def test_ping_helper_socket_fallback_reports_stable_transport_error(monkeypatch):
+    helperctl = load_helperctl()
+
+    class FakeSocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def settimeout(self, _timeout):
+            return None
+
+        def connect(self, _socket_path):
+            raise FileNotFoundError("missing helper socket")
+
+    monkeypatch.setattr(helperctl.socket, "socket", lambda *_args, **_kwargs: FakeSocket())
+
+    result = helperctl.ping_helper_state(Path("/tmp/helper.sock"))
+
+    CASE.assertEqual(
+        result.result,
+        helperctl.CheckResult(
+            ok=False,
+            reason="helper_ping_failed",
+            message="macos_virtualization_helper_unavailable",
+        ),
+    )
+
+
 def test_stop_helper_terminates_only_validated_pid(tmp_path):
     helperctl = load_helperctl()
     helper = tmp_path / "macos-vz-helper"
