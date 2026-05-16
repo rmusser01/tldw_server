@@ -78,10 +78,10 @@
 
 **Tests:** `python -m pytest tldw_Server_API/tests/PrototypeWorkspaces -q`, targeted sharing/prototype contract tests, Bandit on touched backend files, and `git diff --check`.
 
-**Status:** In Progress
+**Status:** Complete
 
 - [x] Run focused backend tests.
 - [x] Run Bandit on touched backend endpoint/schema paths.
 - [x] Run `git diff --check`.
-- [ ] Update TASK-399 acceptance criteria, notes, and final summary.
-- [ ] Open a PR linked to GitHub issue #1456.
+- [x] Update TASK-399 acceptance criteria and notes.
+- [x] Open a PR linked to GitHub issue #1456.
