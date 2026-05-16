@@ -1,10 +1,10 @@
 ---
 id: TASK-397.5
 title: Implement llama.cpp asset inventory v2
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-16 06:37'
+updated_date: '2026-05-16 07:00'
 labels:
   - llamacpp
   - backend
@@ -26,35 +26,51 @@ Implement the merged Asset Inventory V2 plan: local asset schemas, imported fold
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Backend exposes asset schemas, imported folder config parsing, and local asset scanning for GGUF, mmproj, folder, and unknown assets.
-- [ ] #2 Backend supports admin-only asset list/register-path/import-folder endpoints while preserving legacy inventory and start-by-model compatibility.
-- [ ] #3 Asset discovery reports stale-path, allowlist, unknown-capability, and inferred mmproj pairing warnings without remote download behavior.
-- [ ] #4 WebUI shared client/types and Admin page expose a minimal assets panel with register/import actions and warnings.
-- [ ] #5 Focused backend, frontend, Bandit, and diff verification are recorded.
+- [x] #1 Backend exposes asset schemas, imported folder config parsing, and local asset scanning for GGUF, mmproj, folder, and unknown assets.
+- [x] #2 Backend supports admin-only asset list/register-path/import-folder endpoints while preserving legacy inventory and start-by-model compatibility.
+- [x] #3 Asset discovery reports stale-path, allowlist, unknown-capability, and inferred mmproj pairing warnings without remote download behavior.
+- [x] #4 WebUI shared client/types and Admin page expose a minimal assets panel with register/import actions and warnings.
+- [x] #5 Focused backend, frontend, Bandit, and diff verification are recorded.
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Executing Docs/superpowers/plans/2026-05-16-llamacpp-asset-inventory-v2-implementation-plan.md inline with TDD in worktree .worktrees/llamacpp-asset-inventory-v2.
+Executed Docs/superpowers/plans/2026-05-16-llamacpp-asset-inventory-v2-implementation-plan.md inline with TDD in worktree .worktrees/llamacpp-asset-inventory-v2.
+
+Implementation commits:
+- dc0ab2d7c Add llama.cpp asset inventory schema contract
+- 9ed473e40 Add llama.cpp local asset discovery
+- 2819c1d92 Infer llama.cpp mmproj asset candidates
+- eba5b9a32 Add llama.cpp asset inventory APIs
+- 9658889e9 Preserve llama.cpp legacy inventory compatibility
+- 0a21954c7 Add llama.cpp asset API client types
+- 334cb100b Add llama.cpp assets panel
+- 1334a5062 Wire llama.cpp assets into admin page
+
+Known verification skip: bunx tsc --noEmit --pretty false could not run because Bun could not write to its tempdir inside the sandbox; the required escalated rerun was rejected by the approval reviewer. Frontend behavior was validated through focused Vitest coverage instead.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented llama.cpp Asset Inventory V2 across backend and WebUI. The backend now exposes asset schemas, imported folder config parsing, GGUF/mmproj/folder/unknown scanning, inferred mmproj candidate metadata, asset register/import endpoints, and legacy inventory/start-by-model compatibility. The WebUI now has shared asset types/client methods plus an Admin assets panel with register/import actions, grouped assets, warnings, and inferred candidate labels.
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-<!-- SECTION:FINAL_SUMMARY:END -->
+Verification recorded:
+- Backend: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/LLM_Local/test_llamacpp_asset_inventory_service.py tldw_Server_API/tests/LLM_Local/test_llamacpp_inventory_api.py tldw_Server_API/tests/LLM_Local/test_llamacpp_runtime_api.py -v -> 32 passed, 5 warnings.
+- Frontend: ./node_modules/.bin/vitest run src/components/Option/Admin/__tests__/LlamacppAssetsPanel.test.tsx src/components/Option/Admin/__tests__/LlamacppInventoryPanel.test.tsx src/components/Option/Admin/__tests__/LlamacppAdminPage.test.tsx from apps/packages/ui -> 3 files passed, 20 tests passed.
+- Bandit: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r touched llama.cpp Python files -f json -o /tmp/bandit_llamacpp_asset_inventory_v2.json -> 0 results.
+- Whitespace: git diff --check -> clean.
 
+Deferred by design: remote downloads, model-family routing, automatic profile mutation, and automatic mmproj pairing.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

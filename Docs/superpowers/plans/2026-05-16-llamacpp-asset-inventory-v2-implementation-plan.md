@@ -967,7 +967,7 @@ git commit -m "Wire llama.cpp assets into admin page"
 - All touched files.
 - Backlog task for the implementation slice.
 
-- [ ] **Step 1: Run backend tests**
+- [x] **Step 1: Run backend tests**
 
 Run:
 
@@ -980,7 +980,9 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 2: Run frontend tests**
+Verification note: passed with 32 tests, 5 warnings.
+
+- [x] **Step 2: Run frontend tests**
 
 Run:
 
@@ -992,7 +994,9 @@ bunx vitest run apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppA
 
 Expected: PASS.
 
-- [ ] **Step 3: Run Bandit on touched Python scope**
+Verification note: `./node_modules/.bin/vitest run src/components/Option/Admin/__tests__/LlamacppAssetsPanel.test.tsx src/components/Option/Admin/__tests__/LlamacppInventoryPanel.test.tsx src/components/Option/Admin/__tests__/LlamacppAdminPage.test.tsx` passed from `apps/packages/ui` with 3 test files and 20 tests.
+
+- [x] **Step 3: Run Bandit on touched Python scope**
 
 Run:
 
@@ -1006,7 +1010,9 @@ Run:
 
 Expected: PASS with no new findings in touched code. If Bandit reports existing baseline issues outside the changed lines, document them separately and do not hide new issues.
 
-- [ ] **Step 4: Run whitespace check**
+Verification note: Bandit wrote `/tmp/bandit_llamacpp_asset_inventory_v2.json` with 0 results.
+
+- [x] **Step 4: Run whitespace check**
 
 Run:
 
@@ -1016,7 +1022,9 @@ git diff --check
 
 Expected: no output.
 
-- [ ] **Step 5: Update Backlog task**
+Verification note: `git diff --check` produced no output.
+
+- [x] **Step 5: Update Backlog task**
 
 Update the implementation task with:
 
@@ -1026,7 +1034,7 @@ Update the implementation task with:
 - known skips or blockers;
 - PR link if one is opened.
 
-- [ ] **Step 6: Final commit**
+- [x] **Step 6: Final commit**
 
 If any verification/backlog edits remain:
 
