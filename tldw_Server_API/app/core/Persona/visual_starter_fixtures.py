@@ -871,6 +871,9 @@ def _basic_pack(
     description: str,
     style: str,
     tags: tuple[str, ...],
+    identity_brief: str,
+    neutral_anchor: str,
+    static_sheet: str,
 ) -> PersonaVisualStarterPack:
     """Create a reviewed low-complexity starter with required-state loops."""
     state_assets = tuple(
@@ -917,12 +920,9 @@ def _basic_pack(
         expected_asset_groups=_BASIC_EXPECTED_ASSET_GROUPS,
         animation_coverage_notes=_BASIC_ANIMATION_NOTES,
         production_recipe=_production_recipe(
-            identity_brief=description,
-            neutral_anchor=("Reviewed neutral pose is included as the starter identity anchor."),
-            static_sheet=(
-                "Basic tier uses direct required-state frames; optional expression "
-                "sheet source material is not required for this bundled default."
-            ),
+            identity_brief=identity_brief,
+            neutral_anchor=neutral_anchor,
+            static_sheet=static_sheet,
             animation_outputs=("required_state_loops",),
         ),
     )
@@ -1055,6 +1055,18 @@ DEFAULT_PERSONA_VISUAL_STARTER_PACKS: tuple[PersonaVisualStarterPack, ...] = (
         description=("Clean assistant mascot starter with readable required-state coverage."),
         style="research",
         tags=("research", "mascot"),
+        identity_brief=(
+            "Clean monitor-headed assistant mascot with rounded display, compact blue body, "
+            "antenna glow, and calm readable face."
+        ),
+        neutral_anchor=(
+            "Neutral anchor: front-facing rounded screen above compact body, centered "
+            "antenna dot, relaxed arms and feet."
+        ),
+        static_sheet=(
+            "Recreate state loops from neutral by keeping silhouette fixed; mouth, "
+            "eye focus, bounce, and accent marks carry expression."
+        ),
     ),
     _basic_pack(
         starter_id="migu-marker-basic",
@@ -1062,6 +1074,18 @@ DEFAULT_PERSONA_VISUAL_STARTER_PACKS: tuple[PersonaVisualStarterPack, ...] = (
         description=("Rough marker-line inspired starter that keeps a playful user-art feel."),
         style="migu",
         tags=("user-art", "marker"),
+        identity_brief=(
+            "Playful marker-line Migu with tiny gray body, cream oval face, cyan twin tails, "
+            "magenta ties, and sketchy charm."
+        ),
+        neutral_anchor=(
+            "Neutral anchor: front-facing chibi pose with cream oval face, gray body, "
+            "black marker limbs, and wide twin-tail silhouette."
+        ),
+        static_sheet=(
+            "Recreate state loops from neutral by preserving rough asymmetry; hair bob, "
+            "mouth changes, and teal marks carry animation."
+        ),
     ),
     _basic_pack(
         starter_id="minimal-helper-basic",
@@ -1069,6 +1093,18 @@ DEFAULT_PERSONA_VISUAL_STARTER_PACKS: tuple[PersonaVisualStarterPack, ...] = (
         description=("Geometric low-complexity starter for quick custom Buddy setup."),
         style="minimal",
         tags=("minimal", "geometric"),
+        identity_brief=(
+            "Simple geometric helper with green diamond body, lime face panel, stub limbs, "
+            "blue signal icons, and crisp readable silhouette."
+        ),
+        neutral_anchor=(
+            "Neutral anchor: centered diamond body and face panel, stub limbs, dot eyes, "
+            "and small smile on transparent canvas."
+        ),
+        static_sheet=(
+            "Recreate state loops from neutral by changing bounce, mouth, signal icons, "
+            "thought diamonds, and red error mark only."
+        ),
     ),
     _multi_asset_pack(
         starter_id="study-desk-intermediate",

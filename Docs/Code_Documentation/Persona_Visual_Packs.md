@@ -271,6 +271,57 @@ assets, a neutral anchor, a preview image, and two-frame loops for `idle`,
 
 ![Basic Buddy defaults review sheet](assets/persona-basic-buddy-defaults-review.png)
 
+### Basic Buddy recreation walkthrough
+
+The basic tier intentionally models the simplest user-facing creation process:
+start with one neutral anchor, preserve that silhouette, and author only the
+smallest state deltas needed for expressive runtime feedback. The bundled basic
+packs do not require a separate static talking sheet, reaction sheet, atlas, or
+tool-specific variants.
+
+#### `research-buddy-basic`
+
+1. Create the neutral anchor as a clean monitor-headed assistant mascot: rounded
+   display head, compact blue body, centered antenna glow, relaxed arms and feet,
+   and a calm readable face.
+2. Keep the rounded screen and compact body fixed across the two-frame loops so
+   the Buddy reads as the same character even at small sizes.
+3. Derive state frames from that neutral pose:
+   - `idle`: tiny vertical bounce with the neutral smile.
+   - `listening`: wider eyes plus side attention marks.
+   - `thinking`: focused eyes, flat mouth, and a small thought bubble.
+   - `speaking`: alternating open/smile mouth with speech accent marks.
+   - `error`: worried mouth plus a red alert mark.
+
+#### `migu-marker-basic`
+
+1. Create the neutral anchor from the supplied Migu direction as a rough
+   marker-line chibi: cream oval face, tiny gray body, black sketch limbs, cyan
+   twin tails, and magenta hair ties.
+2. Preserve the handmade asymmetry and cyan twin-tail silhouette. The roughness
+   is part of the design, so cleanup should improve readability without turning
+   it into a polished mascot.
+3. Derive state frames from that neutral pose:
+   - `idle`: small bounce with the simple happy face.
+   - `listening`: hair and attention marks lift outward.
+   - `thinking`: mouth flattens and a small thought bubble appears.
+   - `speaking`: mouth opens while teal speech marks carry the beat.
+   - `error`: worried mouth plus a red alert mark.
+
+#### `minimal-helper-basic`
+
+1. Create the neutral anchor as a geometric low-complexity helper: centered green
+   diamond body, lime face panel, dot eyes, short stub limbs, and a small smile.
+2. Keep the diamond silhouette and face panel locked. This default is meant to
+   show that a useful Buddy can be built from simple shapes rather than character
+   illustration.
+3. Derive state frames from that neutral pose:
+   - `idle`: tiny bounce with neutral smile.
+   - `listening`: blue side signal icons appear.
+   - `thinking`: small diamond thought marks appear.
+   - `speaking`: mouth opens and blue signal icons act as speech marks.
+   - `error`: worried mouth plus a red error mark.
+
 The six intermediate and intricate starters remain catalog scaffolds until their
 own asset-production issues produce reviewed final art. Their included PNGs are
 small deterministic fixtures and their manifest animations are metadata examples

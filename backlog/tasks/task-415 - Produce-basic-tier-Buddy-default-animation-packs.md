@@ -4,16 +4,16 @@ title: Produce basic tier Buddy default animation packs
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-16 22:33'
+updated_date: 2026-05-16 22:33
 labels:
-  - persona
-  - buddy
-  - visuals
+- persona
+- buddy
+- visuals
 dependencies: []
 references:
-  - 'https://github.com/rmusser01/tldw_server/issues/1807'
-  - 'https://github.com/rmusser01/tldw_server/issues/1803'
-  - 'https://github.com/rmusser01/tldw_server/issues/1787'
+- https://github.com/rmusser01/tldw_server/issues/1807
+- https://github.com/rmusser01/tldw_server/issues/1803
+- https://github.com/rmusser01/tldw_server/issues/1787
 priority: high
 ---
 
@@ -54,7 +54,7 @@ Verification:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the basic tier Buddy default asset slice. The three basic bundled starters now expose art_ready production metadata, deterministic transparent 96x96 neutral/preview assets, and two-frame required-state loops for idle, listening, thinking, speaking, and error. Intermediate and intricate starters remain scaffolded for their later tracking issues. Verification passed: focused pytest, py_compile, Bandit, and git diff --check.
+Implemented the basic tier Buddy default asset slice and follow-up recreation walkthrough. The three basic bundled starters now expose art_ready production metadata, deterministic transparent 96x96 neutral/preview assets, two-frame required-state loops for idle, listening, thinking, speaking, and error, and design-specific neutral-pose/state-delta guidance for recreating each default. Intermediate and intricate starters remain scaffolded for later tracking issues. Verification passed: focused pytest, py_compile, Bandit, and git diff --check.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -66,3 +66,9 @@ Implemented the basic tier Buddy default asset slice. The three basic bundled st
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Follow-up PR update: added design-specific recreation guidance for research-buddy-basic, migu-marker-basic, and minimal-helper-basic in starter production metadata and docs. Verification: focused recreation-guidance pytest failed before metadata updates, then passed; full starter catalog pytest -> 67 passed, 5 warnings; py_compile passed; Bandit -> 0 findings; git diff --check passed.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

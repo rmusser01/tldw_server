@@ -47,6 +47,23 @@ _BASIC_STARTER_PACK_IDS = {
     "minimal-helper-basic",
 }
 _REQUIRED_BUDDY_STATES = {"idle", "listening", "thinking", "speaking", "error"}
+_BASIC_PRODUCTION_GUIDANCE_EXPECTATIONS = {
+    "research-buddy-basic": {
+        "identity": ("monitor", "antenna"),
+        "neutral": ("rounded screen", "compact body"),
+        "state_delta": ("mouth", "accent marks"),
+    },
+    "migu-marker-basic": {
+        "identity": ("marker-line", "cyan twin tails"),
+        "neutral": ("cream oval face", "gray body"),
+        "state_delta": ("hair bob", "teal"),
+    },
+    "minimal-helper-basic": {
+        "identity": ("geometric", "green diamond"),
+        "neutral": ("centered diamond", "stub limbs"),
+        "state_delta": ("signal icons", "red error"),
+    },
+}
 
 
 def _png_bytes(width: int = 2, height: int = 2) -> bytes:
@@ -278,6 +295,27 @@ def test_basic_starter_packs_use_reviewed_multi_frame_state_assets(
         assert image.size == (96, 96)
         assert image.getpixel((0, 0))[3] == 0
         assert image.getbbox() is not None
+
+
+@pytest.mark.parametrize("starter_pack_id", sorted(_BASIC_STARTER_PACK_IDS))
+def test_basic_starter_packs_expose_design_specific_recreation_guidance(
+    db_instance: CharactersRAGDB,
+    starter_pack_id: str,
+) -> None:
+    service = PersonaVisualStarterCatalogService(db_instance)
+
+    recipe = service.get_starter_pack(starter_pack_id)["production_recipe"]
+
+    expectations = _BASIC_PRODUCTION_GUIDANCE_EXPECTATIONS[starter_pack_id]
+    identity_brief = recipe["identity_brief"].lower()
+    neutral_anchor = recipe["neutral_anchor"].lower()
+    state_delta_guidance = recipe["static_sheet"].lower()
+    for snippet in expectations["identity"]:
+        assert snippet in identity_brief
+    for snippet in expectations["neutral"]:
+        assert snippet in neutral_anchor
+    for snippet in expectations["state_delta"]:
+        assert snippet in state_delta_guidance
 
 
 def test_default_starter_production_recipes_use_pipeline_taxonomy(
