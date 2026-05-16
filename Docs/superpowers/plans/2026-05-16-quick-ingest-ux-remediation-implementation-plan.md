@@ -546,7 +546,7 @@ Task 4 completion notes:
 
 **Large-file decision for this implementation pass:** use the **Truthful limit fix**. Lower the displayed and enforced Quick Ingest client-buffered upload limit to a conservative value and document that preserving 500 MB requires a separate transport fix. Do not attempt the large-file transport redesign inside this remediation pass unless the human owner explicitly changes this decision.
 
-- [ ] **Step 1: Write failing tests for normalized URL dedupe**
+- [x] **Step 1: Write failing tests for normalized URL dedupe**
 
 In `AddContentStep.url-detection.test.ts` or a new `queue-validation.test.ts`, cover:
 
@@ -559,7 +559,7 @@ expect(normalizeUrlForDedupe("https://youtu.be/abc123?t=30"))
 
 If `normalizeUrlForDedupe` already has tests elsewhere, write the failing wizard queue test instead: adding two normalized-equivalent URLs should show a duplicate warning before processing.
 
-- [ ] **Step 2: Write failing tests for mixed URL paste counts**
+- [x] **Step 2: Write failing tests for mixed URL paste counts**
 
 In `QuickIngestWizardModal.integration.test.tsx`, paste one valid and one invalid URL. Assert the UI communicates both counts and does not make users infer validity item-by-item only.
 
@@ -570,7 +570,7 @@ expect(screen.getByText(/1 valid/i)).toBeInTheDocument()
 expect(screen.getByText(/1 invalid/i)).toBeInTheDocument()
 ```
 
-- [ ] **Step 3: Run failing input tests**
+- [x] **Step 3: Run failing input tests**
 
 Run:
 
@@ -580,13 +580,13 @@ bunx vitest run apps/packages/ui/src/components/Common/QuickIngest/__tests__/Add
 
 Expected: new dedupe/count assertions fail before implementation.
 
-- [ ] **Step 4: Reuse URL normalization in wizard queue validation**
+- [x] **Step 4: Reuse URL normalization in wizard queue validation**
 
 In `AddContentStep.tsx` or `queue-validation.ts`, import or call the existing `normalizeUrlForDedupe` from `apps/packages/ui/src/entries/shared/ingest-payloads.ts`.
 
 Use normalized keys only for validation/dedupe. Preserve the original URL for display and submission unless the existing ingest path already normalizes submission URLs.
 
-- [ ] **Step 5: Add mixed paste summary**
+- [x] **Step 5: Add mixed paste summary**
 
 Add a compact queue summary near the queued-items header when both valid and invalid items exist:
 
@@ -600,7 +600,7 @@ Add a compact queue summary near the queued-items header when both valid and inv
 
 Use i18n default-string patterns and avoid adding a noisy alert for every normal paste.
 
-- [ ] **Step 6: Reconcile file support copy and accept string**
+- [x] **Step 6: Reconcile file support copy and accept string**
 
 Compare `detectTypeFromExtension`, `QUICK_INGEST_ACCEPT_STRING`, and backend-supported ingest types. Choose one of:
 
@@ -609,7 +609,7 @@ Compare `detectTypeFromExtension`, `QUICK_INGEST_ACCEPT_STRING`, and backend-sup
 
 Do not advertise images, HTML, JSON, CSV, XML, or other types unless the quick-ingest upload path can process them end-to-end.
 
-- [ ] **Step 7: Apply truthful large-file limit**
+- [x] **Step 7: Apply truthful large-file limit**
 
 In `constants.ts`, introduce an explicitly named limit for the current buffered-client implementation:
 
@@ -620,11 +620,11 @@ export const QUICK_INGEST_TRANSPORT_REDESIGN_FILE_SIZE = 500 * 1024 * 1024 // fu
 
 Use only one displayed current limit. Update copy from "500 MB" to the chosen current limit. If the owner rejects `50 MB`, choose another explicit value before coding and keep tests aligned.
 
-- [ ] **Step 8: Add a preflight warning for larger files**
+- [x] **Step 8: Add a preflight warning for larger files**
 
 For files over the current limit, show an error that explains the current quick-ingest limit and points users to the intended large-file path if one exists. Do not silently imply the file can be processed.
 
-- [ ] **Step 9: Run input tests**
+- [x] **Step 9: Run input tests**
 
 Run:
 
@@ -634,7 +634,7 @@ bunx vitest run apps/packages/ui/src/components/Common/QuickIngest/__tests__/Add
 
 Expected: queue validation and quick-ingest batch tests pass.
 
-- [ ] **Step 10: Run constrained viewport e2e**
+- [x] **Step 10: Run constrained viewport e2e**
 
 Run:
 
@@ -644,7 +644,7 @@ npx playwright test apps/tldw-frontend/e2e/workflows/media-ingest.spec.ts --grep
 
 Expected: constrained viewport test passes with updated copy and file limit.
 
-- [ ] **Step 11: Commit input hardening changes**
+- [x] **Step 11: Commit input hardening changes**
 
 Run:
 
@@ -654,6 +654,17 @@ git commit -m "fix: harden quick ingest input validation"
 ```
 
 Omit untouched files from `git add`.
+
+**Completion notes:**
+- Commit: `87dfd455a fix: harden quick ingest input validation`.
+- URL queue validation now uses normalized dedupe keys while preserving original URLs for display/submission.
+- Mixed valid/invalid paste results show a compact queue summary.
+- File support copy, picker accept string, and local detection now align on PDF, EPUB, DOC/DOCX/TXT/Markdown/HTML/XML/JSON, audio, and video; image/CSV/MOBI/AZW3 are no longer treated as supported quick-ingest uploads.
+- Current browser-buffered quick-ingest file limit is explicitly `50 MB`; the future `500 MB` transport target remains named separately.
+- Verification: `./node_modules/.bin/vitest run src/components/Common/QuickIngest/__tests__/AddContentStep.url-detection.test.ts src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx src/services/__tests__/quick-ingest-batch.test.ts --maxWorkers=1 --no-file-parallelism` passed with 3 files / 59 tests.
+- Verification: `git diff --check` passed.
+- Verification: `TLDW_WEB_AUTOSTART=false TLDW_WEB_URL=http://127.0.0.1:18001 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/media-ingest.spec.ts --grep "quick ingest configure options stay reachable" --project=chromium --reporter=line` passed outside the macOS sandbox after the first sandboxed Chromium launch failed with `bootstrap_check_in ... Permission denied`.
+- Bandit: skipped for this task because the touched implementation/test files are frontend TypeScript/TSX/JSON only.
 
 ---
 
