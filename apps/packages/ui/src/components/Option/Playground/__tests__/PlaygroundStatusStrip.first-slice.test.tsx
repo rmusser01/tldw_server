@@ -21,6 +21,9 @@ describe("PlaygroundStatusStrip first-slice state", () => {
         selectedModel="gpt-4.1-mini"
         messageCount={3}
         sessionLabel="Server chat"
+        sessionStatus="loaded"
+        sessionStatusLabel="Local history"
+        sessionDetail="History linked"
         hasContext
         contextSummary={["Web search on", "2 files"]}
         temporaryChat={false}
@@ -35,10 +38,41 @@ describe("PlaygroundStatusStrip first-slice state", () => {
     expect(status).toHaveTextContent("3 messages");
     expect(status).not.toHaveTextContent("Cockpit");
     expect(status).not.toHaveTextContent("Server chat");
+    expect(status).not.toHaveTextContent("Local history");
+    expect(status).not.toHaveTextContent("History linked");
     expect(status).not.toHaveTextContent("Saved");
     expect(status).not.toHaveTextContent("Context active");
     expect(status).not.toHaveTextContent("Web search on");
     expect(status).not.toHaveTextContent("2 files");
+  });
+
+  it("does not treat routine temporary-session labels as critical status", () => {
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider="openai"
+        selectedModel="gpt-4.1-mini"
+        messageCount={1}
+        sessionLabel="Temporary chat"
+        sessionStatus="idle"
+        sessionStatusLabel="Local only"
+        sessionDetail="Not saved"
+        hasContext={false}
+        contextSummary={[]}
+        temporaryChat
+        degradedChecks={[]}
+        errorMessage={null}
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Ready");
+    expect(status).toHaveTextContent("openai:gpt-4.1-mini");
+    expect(status).toHaveTextContent("1 message");
+    expect(status).not.toHaveTextContent("Temporary chat");
+    expect(status).not.toHaveTextContent("Local only");
+    expect(status).not.toHaveTextContent("Not saved");
   });
 
   it("renders degraded checks as warning-only status", () => {
@@ -209,6 +243,7 @@ describe("PlaygroundStatusStrip first-slice state", () => {
         messageCount={5}
         sessionLabel="Server chat"
         sessionTitle="Archived investigation"
+        sessionStatus="failed"
         sessionStatusLabel="Load failed"
         sessionDetail="Failed to load conversation"
         sessionError="Conversation no longer exists"

@@ -158,13 +158,15 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
 
     expect(collapseRuntime).toHaveAttribute("aria-expanded", "true");
     expect(runtimePanel).not.toBeNull();
-    expect(runtimePanel).not.toHaveAttribute("hidden");
+    expect(runtimePanel).toHaveAttribute("aria-hidden", "false");
+    expect(runtimePanel).not.toHaveClass("hidden");
 
     fireEvent.click(collapseRuntime);
 
     expect(rail).toBeInTheDocument();
     expect(collapseRuntime).toHaveAttribute("aria-expanded", "false");
-    expect(runtimePanel).toHaveAttribute("hidden");
+    expect(runtimePanel).toHaveAttribute("aria-hidden", "true");
+    expect(runtimePanel).toHaveClass("hidden");
     expect(
       within(rail).getByRole("button", { name: "Expand Runtime" }),
     ).toBeInTheDocument();

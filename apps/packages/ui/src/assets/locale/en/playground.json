@@ -926,6 +926,8 @@
     "runtime": "Runtime",
     "focus": "Focus",
     "cockpit": "Cockpit",
+    "collapseRailSection": "Collapse {{title}}",
+    "expandRailSection": "Expand {{title}}",
     "contextLandmark": "Chat cockpit context",
     "runtimeLandmark": "Chat cockpit runtime",
     "conversationContext": "Conversation context",

@@ -222,6 +222,7 @@ describe("Playground mature cockpit surfaces", () => {
             messageCount={2}
             sessionLabel="Server chat"
             sessionTitle="Archived investigation"
+            sessionStatus="failed"
             sessionStatusLabel="Load failed"
             sessionError="Conversation no longer exists"
             hasContext={false}

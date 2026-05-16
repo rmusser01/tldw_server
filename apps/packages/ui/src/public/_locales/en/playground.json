@@ -2463,7 +2463,7 @@
     "message": "Loading prompt details..."
   },
   "cockpit_noPromptContext": {
-    "message": "No prompt context will be added."
+    "message": "No system prompt will be added."
   },
   "cockpit_noPromptSelected": {
     "message": "No prompt selected"
@@ -2790,7 +2790,7 @@
     "message": "Scoped settings"
   },
   "cockpit_settingsDefault": {
-    "message": "Using default settings for this provider:model."
+    "message": "Default settings for this provider:model."
   },
   "cockpit_settingInherited": {
     "message": "Inherited"
@@ -2832,9 +2832,48 @@
     "message": "Open tools"
   },
   "cockpit_toolsComposerManaged": {
-    "message": "Open composer tool controls to inspect availability."
+    "message": "Use composer MCP controls to inspect availability."
   },
   "cockpit_mobilePanelTabs": {
     "message": "Mobile cockpit panels"
+  },
+  "cockpit_collapseRailSection": {
+    "message": "Collapse {{title}}"
+  },
+  "cockpit_expandRailSection": {
+    "message": "Expand {{title}}"
+  },
+  "cockpit_searchAndSources": {
+    "message": "Search & sources"
+  },
+  "cockpit_searchSourcesDetail": {
+    "message": "Manage web, files, knowledge, media, and research context."
+  },
+  "cockpit_promptManagement": {
+    "message": "Prompt management"
+  },
+  "cockpit_prompt": {
+    "message": "Prompt"
+  },
+  "cockpit_reviewModelSettings": {
+    "message": "Review model settings"
+  },
+  "cockpit_modelRoute": {
+    "message": "Model route"
+  },
+  "cockpit_noAssistantDetail": {
+    "message": "No persona or character will shape replies."
+  },
+  "cockpit_providerModelSettings": {
+    "message": "Provider:model settings"
+  },
+  "cockpit_chatToolAccess": {
+    "message": "Chat tool access"
+  },
+  "cockpit_configureMcpTools": {
+    "message": "Configure MCP tools"
+  },
+  "cockpit_empty": {
+    "message": "Empty"
   }
 }

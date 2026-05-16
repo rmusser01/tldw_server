@@ -41,7 +41,7 @@ Implemented a shared PlaygroundRailSection primitive for in-place collapsible co
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed the main /chat cockpit status/sidechannel polish slice and opened draft PR #1801. Focused Vitest coverage proves compact critical status behavior, rail-section collapse semantics, and adjacent cockpit accessibility/composition behavior. Verification run: bunx vitest run PlaygroundStatusStrip.first-slice, PlaygroundContextRail.first-slice, PlaygroundRuntimeInspector.first-slice, Playground.cockpit-maturity, Playground.cockpit-a11y, PlaygroundCompositionPreview; bun run verify:design-system-state; git diff --check. Bandit skipped because this touched frontend TypeScript/TSX and Backlog markdown only. Live browser verification was not run because no local /chat WebUI/API listener was discoverable at the common checked ports and /api/v1/health on 127.0.0.1:18001 was unavailable.
+Completed the main /chat cockpit status/sidechannel polish slice and PR #1801 review fixes. Focused Vitest coverage now proves compact critical status behavior, realistic routine session labels staying hidden from the ready/degraded strip, rail-section collapse semantics, adjacent cockpit accessibility/composition behavior, and locale mirroring. Verification run: bunx vitest run PlaygroundStatusStrip.first-slice, PlaygroundContextRail.first-slice, PlaygroundRuntimeInspector.first-slice, Playground.cockpit-maturity, Playground.cockpit-a11y, PlaygroundCompositionPreview, playground-locale-mirror; bun run verify:design-system-state; git diff --check. Bandit skipped because this touched frontend TypeScript/TSX, locale JSON, and Backlog markdown only. Live browser verification was not run in this review-fix pass.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -53,3 +53,9 @@ Completed the main /chat cockpit status/sidechannel polish slice and opened draf
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Implemented PR #1801 review fixes for the main /chat cockpit slice. Added structured sessionStatus wiring so routine loaded/idle local-history and temporary-session labels stay out of the simplified status strip while loading/failed/session-error states remain visible. Removed redundant collapse-toggle title attributes, replaced HTML hidden collapse bodies with CSS hiding plus aria-hidden, and added the missing collapse/expand rail-section locale keys with the public locale mirror synced by the repo script. Review-fix verification: bunx vitest run PlaygroundStatusStrip.first-slice, PlaygroundContextRail.first-slice, PlaygroundRuntimeInspector.first-slice, Playground.cockpit-maturity, Playground.cockpit-a11y, PlaygroundCompositionPreview, playground-locale-mirror (66 tests); bun run verify:design-system-state; git diff --check. Bandit skipped because touched code is frontend TS/TSX/JSON plus Backlog markdown only.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

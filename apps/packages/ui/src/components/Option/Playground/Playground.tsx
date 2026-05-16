@@ -2324,6 +2324,7 @@ export const Playground = () => {
       messageCount={cockpitMessageCount}
       sessionLabel={sessionLabel}
       sessionTitle={sessionSummary.title}
+      sessionStatus={sessionSummary.status}
       sessionStatusLabel={sessionSummary.statusLabel}
       sessionDetail={sessionSummary.detail}
       sessionError={sessionSummary.error}

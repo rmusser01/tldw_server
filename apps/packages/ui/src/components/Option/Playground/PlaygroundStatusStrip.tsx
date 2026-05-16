@@ -34,6 +34,12 @@ type PlaygroundStatusStripRuntimeState =
   | "degraded"
   | "ready";
 
+type PlaygroundStatusStripSessionStatus =
+  | "idle"
+  | "loading"
+  | "loaded"
+  | "failed";
+
 export type PlaygroundStatusStripProps = {
   mode: PlaygroundCockpitMode;
   streaming: boolean;
@@ -42,6 +48,7 @@ export type PlaygroundStatusStripProps = {
   messageCount: number;
   sessionLabel: string;
   sessionTitle?: string | null;
+  sessionStatus?: PlaygroundStatusStripSessionStatus | null;
   sessionStatusLabel?: string | null;
   sessionDetail?: string | null;
   sessionError?: string | null;
@@ -70,6 +77,7 @@ export const PlaygroundStatusStrip = ({
   messageCount,
   sessionLabel,
   sessionTitle,
+  sessionStatus,
   sessionStatusLabel,
   sessionDetail,
   sessionError,
@@ -161,11 +169,14 @@ export const PlaygroundStatusStrip = ({
   const hasSessionDetail =
     Boolean(normalizedSessionDetail) &&
     normalizedSessionDetail !== normalizedSessionStatusLabel;
+  const isCriticalSessionStatus =
+    sessionStatus === "loading" || sessionStatus === "failed";
   const sessionDetailLabel =
     normalizedSessionError ||
-    (hasSessionDetail ? normalizedSessionDetail : null);
+    (isCriticalSessionStatus && hasSessionDetail ? normalizedSessionDetail : null);
   const showSessionStatusLabel = Boolean(
-    normalizedSessionStatusLabel &&
+    isCriticalSessionStatus &&
+      normalizedSessionStatusLabel &&
       normalizedSessionStatusLabel !== sessionLabel &&
       normalizedSessionStatusLabel !== READY_STATE_LABEL &&
       normalizedSessionStatusLabel !== t("cockpit.idle", "Idle"),

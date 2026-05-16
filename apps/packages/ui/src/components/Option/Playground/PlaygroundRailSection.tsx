@@ -39,7 +39,6 @@ export const PlaygroundRailSection = ({
           aria-label={toggleLabel}
           aria-expanded={open}
           aria-controls={panelId}
-          title={toggleLabel}
           onClick={() => setOpen((value) => !value)}
         >
           {open ? (
@@ -49,7 +48,11 @@ export const PlaygroundRailSection = ({
           )}
         </button>
       </div>
-      <div id={panelId} hidden={!open}>
+      <div
+        id={panelId}
+        aria-hidden={!open}
+        className={open ? undefined : "hidden"}
+      >
         {children}
       </div>
     </section>

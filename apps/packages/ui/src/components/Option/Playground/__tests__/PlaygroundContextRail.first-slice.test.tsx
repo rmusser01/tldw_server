@@ -234,13 +234,15 @@ describe("PlaygroundContextRail first-slice controls", () => {
 
     expect(collapseContext).toHaveAttribute("aria-expanded", "true");
     expect(contextPanel).not.toBeNull();
-    expect(contextPanel).not.toHaveAttribute("hidden");
+    expect(contextPanel).toHaveAttribute("aria-hidden", "false");
+    expect(contextPanel).not.toHaveClass("hidden");
 
     fireEvent.click(collapseContext);
 
     expect(rail).toBeInTheDocument();
     expect(collapseContext).toHaveAttribute("aria-expanded", "false");
-    expect(contextPanel).toHaveAttribute("hidden");
+    expect(contextPanel).toHaveAttribute("aria-hidden", "true");
+    expect(contextPanel).toHaveClass("hidden");
     expect(
       within(rail).getByRole("button", { name: "Expand Context stack" }),
     ).toBeInTheDocument();

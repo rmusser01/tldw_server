@@ -174,7 +174,6 @@ export const PlaygroundCompositionPreview = ({
             aria-label={sectionToggleLabel}
             aria-expanded={sectionOpen}
             aria-controls={bodyId}
-            title={sectionToggleLabel}
             onClick={() => setSectionOpen((value) => !value)}
           >
             {sectionOpen ? (
@@ -186,7 +185,11 @@ export const PlaygroundCompositionPreview = ({
         </div>
       </div>
 
-      <div id={bodyId} hidden={!sectionOpen}>
+      <div
+        id={bodyId}
+        aria-hidden={!sectionOpen}
+        className={sectionOpen ? undefined : "hidden"}
+      >
         <ul className="mt-2 divide-y divide-border/60">
           {summary.entries.map((entry) => (
             <PreviewRow key={entry.id} entry={entry} />
