@@ -34,7 +34,12 @@ const starter = {
   asset_count: 1,
   total_bytes: 512,
   tags: ["starter"],
-  license_label: "bundled"
+  license_label: "bundled",
+  complexity_tier: "basic",
+  production_status: "scaffold",
+  neutral_anchor_required: true,
+  expected_asset_groups: ["neutral_anchor", "required_state_loops"],
+  animation_coverage_notes: ["Scaffold fixture only; replace with authored loops."]
 }
 
 describe("VisualBuddySetupChoiceCard", () => {
@@ -58,6 +63,27 @@ describe("VisualBuddySetupChoiceCard", () => {
     expect(screen.getByRole("button", { name: /import pack/i })).toBeEnabled()
     expect(screen.getByRole("button", { name: /start blank/i })).toBeEnabled()
     expect(screen.getByText(/no visual buddy is active/i)).toBeInTheDocument()
+  })
+
+  it("surfaces starter production readiness metadata", () => {
+    render(
+      <VisualBuddySetupChoiceCard
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        hasActiveVisual={false}
+        packCount={0}
+        recommendedStarter={starter}
+        starterCount={1}
+        onUseDefault={vi.fn()}
+        onImportPack={vi.fn()}
+        onStartBlank={vi.fn()}
+      />
+    )
+
+    const setupCard = screen.getByTestId("visual-buddy-setup-choice-card")
+    expect(setupCard).toHaveTextContent(/scaffold/i)
+    expect(setupCard).toHaveTextContent(/basic/i)
+    expect(setupCard).toHaveTextContent(/neutral anchor/i)
   })
 
   it("frames existing drafts as reviewable but inactive", () => {

@@ -99,7 +99,12 @@ describe("persona visuals service", () => {
       asset_count: 1,
       total_bytes: 92,
       tags: ["starter", "sprite_frames"],
-      license_label: "bundled"
+      license_label: "bundled",
+      complexity_tier: "basic",
+      production_status: "scaffold",
+      neutral_anchor_required: true,
+      expected_asset_groups: ["neutral_anchor", "required_state_loops"],
+      animation_coverage_notes: ["Scaffold fixture only; replace with authored loops."]
     }
     mocks.fetchWithAuth.mockResolvedValueOnce({
       ok: true,
