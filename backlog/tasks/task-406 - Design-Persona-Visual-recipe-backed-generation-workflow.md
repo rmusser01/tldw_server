@@ -10,6 +10,7 @@ priority: medium
 references:
 - https://github.com/rmusser01/tldw_server/issues/1765
 - https://github.com/rmusser01/tldw_server/issues/1510
+- https://github.com/rmusser01/tldw_server/pull/1767
 documentation:
 - Docs/superpowers/specs/2026-05-16-persona-visual-recipe-generation-design.md
 modified_files:
