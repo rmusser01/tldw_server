@@ -9,6 +9,8 @@ labels:
 priority: high
 documentation:
 - Docs/superpowers/plans/2026-05-16-llamacpp-model-family-mmproj-profile-wiring-plan.md
+references:
+- https://github.com/rmusser01/tldw_server/pull/1777
 ---
 
 ## Description
