@@ -125,6 +125,72 @@ def test_create_persona_visual_generation_job_idempotency_distinguishes_prompt_a
     assert len(set(keys)) == 3
 
 
+def test_create_persona_visual_generation_job_carries_recipe_intent_and_request_id() -> None:
+    from tldw_Server_API.app.core.Persona.visual_jobs import create_generate_candidate_job
+
+    manager = FakeJobsManager()
+    recipe_intent = {
+        "starter_pack_id": "research-buddy-basic",
+        "recipe_output": "required_state_loops",
+        "correlation_id": "recipe-request-1",
+        "user_prompt": "make the speaking loop upbeat",
+        "identity_brief": "Simple readable buddy.",
+        "neutral_anchor": "Create one front-facing neutral pose.",
+        "static_sheet": "Keep expression frames separate from timed loops.",
+        "review_checks": ["neutral_identity_consistency"],
+    }
+
+    first = create_generate_candidate_job(
+        manager,
+        user_id="user-1",
+        persona_id="persona-1",
+        pack_id="pack-1",
+        prompt="effective recipe prompt",
+        target_state="speaking",
+        backend="fake",
+        request_id="recipe-request-1",
+        recipe_intent=recipe_intent,
+    )
+    second = create_generate_candidate_job(
+        manager,
+        user_id="user-1",
+        persona_id="persona-1",
+        pack_id="pack-1",
+        prompt="effective recipe prompt",
+        target_state="speaking",
+        backend="fake",
+        request_id="recipe-request-2",
+        recipe_intent={**recipe_intent, "correlation_id": "recipe-request-2"},
+    )
+
+    assert first["idempotency_key"] == second["idempotency_key"]
+    assert manager.created[0]["request_id"] == "recipe-request-1"
+    assert manager.created[0]["payload"] == {
+        "user_id": "user-1",
+        "persona_id": "persona-1",
+        "pack_id": "pack-1",
+        "prompt": "effective recipe prompt",
+        "target_state": "speaking",
+        "backend": "fake",
+        "request_id": "recipe-request-1",
+        "recipe_intent": recipe_intent,
+    }
+    assert (
+        manager.created[0]["idempotency_key"]
+        != create_generate_candidate_job(
+            manager,
+            user_id="user-1",
+            persona_id="persona-1",
+            pack_id="pack-1",
+            prompt="different effective recipe prompt",
+            target_state="speaking",
+            backend="fake",
+            request_id="recipe-request-1",
+            recipe_intent=recipe_intent,
+        )["idempotency_key"]
+    )
+
+
 def test_create_persona_visual_pack_export_job_includes_options_digest() -> None:
     from tldw_Server_API.app.core.Persona.visual_jobs import (
         PERSONA_VISUALS_DOMAIN,

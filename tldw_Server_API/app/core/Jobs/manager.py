@@ -1334,7 +1334,11 @@ class JobManager:
                                     "job_type": job_type,
                                 }
                             )
-                            emitted_job = {**d, "request_id": request_id, "trace_id": trace_id}
+                            emitted_job = {
+                                **d,
+                                "request_id": d.get("request_id") or request_id,
+                                "trace_id": d.get("trace_id") or trace_id,
+                            }
                             # Counters bump (PG, idempotent insert occurred)
                             try:
                                 if was_insert and JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
@@ -1554,8 +1558,8 @@ class JobManager:
                                     INSERT OR IGNORE INTO jobs (
                                       uuid, domain, queue, job_type, owner_user_id, project_id, batch_group,
                                       idempotency_key, payload, result, status, priority, max_retries,
-                                      retry_count, available_at, created_at, updated_at
-                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, 0, ?, ?, ?)
+                                      retry_count, available_at, created_at, updated_at, request_id, trace_id
+                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, 0, ?, ?, ?, ?, ?)
                                     """,
                                     (
                                         uuid_val,
@@ -1576,6 +1580,8 @@ class JobManager:
                                         ),
                                         now,
                                         now,
+                                        request_id,
+                                        trace_id,
                                     ),
                                 )
                                 inserted = bool(getattr(conn, "total_changes", 0))

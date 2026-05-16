@@ -29,8 +29,10 @@ def build_generate_candidate_payload(
     prompt: str,
     target_state: str | None,
     backend: str | None,
+    request_id: str | None = None,
+    recipe_intent: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "user_id": str(user_id),
         "persona_id": str(persona_id),
         "pack_id": str(pack_id),
@@ -38,6 +40,11 @@ def build_generate_candidate_payload(
         "target_state": str(target_state).strip() if target_state else None,
         "backend": str(backend).strip() if backend else None,
     }
+    if request_id:
+        payload["request_id"] = str(request_id).strip()
+    if recipe_intent:
+        payload["recipe_intent"] = dict(recipe_intent)
+    return payload
 
 
 def build_visual_pack_export_payload(
@@ -217,13 +224,17 @@ def visual_generate_candidate_idempotency_key(
     prompt: str,
     target_state: str | None = None,
     backend: str | None = None,
+    request_id: str | None = None,
+    recipe_intent: dict[str, Any] | None = None,
 ) -> str:
     normalized_target_state = str(target_state).strip() if target_state else None
+    normalized_recipe_intent = _recipe_intent_for_idempotency(recipe_intent)
     generation_digest = hashlib.sha256(
         json.dumps(
             {
                 "backend": str(backend).strip() if backend else None,
                 "prompt": str(prompt or "").strip(),
+                "recipe_intent": normalized_recipe_intent,
                 "target_state": normalized_target_state,
             },
             sort_keys=True,
@@ -245,11 +256,15 @@ def create_generate_candidate_job(
     prompt: str,
     target_state: str | None = None,
     backend: str | None = None,
+    request_id: str | None = None,
+    recipe_intent: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized_prompt = str(prompt or "").strip()
     if not normalized_prompt:
         raise ValueError("prompt is required")
     normalized_target_state = str(target_state).strip() if target_state else None
+    normalized_request_id = str(request_id).strip() if request_id else None
+    normalized_recipe_intent = dict(recipe_intent) if recipe_intent else None
     payload = build_generate_candidate_payload(
         user_id=user_id,
         persona_id=persona_id,
@@ -257,6 +272,8 @@ def create_generate_candidate_job(
         prompt=normalized_prompt,
         target_state=normalized_target_state,
         backend=backend,
+        request_id=normalized_request_id,
+        recipe_intent=normalized_recipe_intent,
     )
     return jobs_manager.create_job(
         domain=PERSONA_VISUALS_DOMAIN,
@@ -271,9 +288,22 @@ def create_generate_candidate_job(
             prompt=normalized_prompt,
             target_state=normalized_target_state,
             backend=backend,
+            request_id=normalized_request_id,
+            recipe_intent=normalized_recipe_intent,
         ),
+        request_id=normalized_request_id,
         max_retries=1,
     )
+
+
+def _recipe_intent_for_idempotency(
+    recipe_intent: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not recipe_intent:
+        return None
+    normalized = dict(recipe_intent)
+    normalized.pop("correlation_id", None)
+    return normalized
 
 
 def create_visual_pack_export_job(
