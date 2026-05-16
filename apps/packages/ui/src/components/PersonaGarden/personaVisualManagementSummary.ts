@@ -99,16 +99,13 @@ export interface PersonaVisualManagementModel {
   attentionRows: PersonaVisualManagementAttentionRow[]
 }
 
-const PACK_STATUSES: PersonaVisualPackStatus[] = [
-  "active",
-  "draft",
-  "review",
-  "archived",
-  "failed"
-]
-
 const PENDING_JOB_STATUSES = new Set(["queued", "pending", "processing", "running"])
-const FAILED_JOB_STATUSES = new Set(["failed", "cancelled", "quarantined"])
+const FAILED_JOB_STATUSES = new Set([
+  "failed",
+  "cancelled",
+  "deleted",
+  "quarantined"
+])
 
 const normalizeStatus = (status: string | null | undefined): string =>
   String(status || "").trim().toLowerCase()
@@ -130,19 +127,13 @@ const dedupePacks = (
 const countByStatus = (
   packs: readonly PersonaVisualPack[]
 ): Record<PersonaVisualPackStatus, number> => {
-  const counts = PACK_STATUSES.reduce<Record<PersonaVisualPackStatus, number>>(
-    (nextCounts, status) => {
-      nextCounts[status] = 0
-      return nextCounts
-    },
-    {
-      active: 0,
-      draft: 0,
-      review: 0,
-      archived: 0,
-      failed: 0
-    }
-  )
+  const counts: Record<PersonaVisualPackStatus, number> = {
+    active: 0,
+    draft: 0,
+    review: 0,
+    archived: 0,
+    failed: 0
+  }
 
   for (const pack of packs) {
     counts[pack.status] += 1
@@ -166,16 +157,24 @@ const getJobVisualStatus = (
   return normalizeStatus(job.visual_status)
 }
 
+const getCanonicalJobState = (
+  job: PersonaVisualManagementJob | null | undefined
+): string => {
+  const status = getJobStatus(job)
+  const visualStatus = getJobVisualStatus(job)
+  if (FAILED_JOB_STATUSES.has(status)) return status
+  if (FAILED_JOB_STATUSES.has(visualStatus)) return visualStatus
+  return status || visualStatus
+}
+
 const isPendingJob = (job: PersonaVisualManagementJob | null | undefined): boolean =>
-  PENDING_JOB_STATUSES.has(getJobStatus(job)) ||
-  PENDING_JOB_STATUSES.has(getJobVisualStatus(job))
+  PENDING_JOB_STATUSES.has(getCanonicalJobState(job))
 
 const isFailedJob = (job: PersonaVisualManagementJob | null | undefined): boolean =>
-  FAILED_JOB_STATUSES.has(getJobStatus(job)) ||
-  FAILED_JOB_STATUSES.has(getJobVisualStatus(job))
+  FAILED_JOB_STATUSES.has(getCanonicalJobState(job))
 
 const isCompletedJob = (job: PersonaVisualManagementJob | null | undefined): boolean =>
-  getJobStatus(job) === "completed" || getJobVisualStatus(job) === "completed"
+  getCanonicalJobState(job) === "completed"
 
 const countJobs = (
   jobs: readonly (PersonaVisualManagementJob | null | undefined)[],

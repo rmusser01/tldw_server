@@ -164,6 +164,33 @@ describe("buildPersonaVisualManagementSummary", () => {
     expect(model.attentionRows.map((row) => row.kind)).toEqual(["failed_pack"])
   })
 
+  it("deduplicates the same active pack when it also appears in the pack list", () => {
+    const sharedPack = makePack({
+      id: "shared-pack",
+      title: "Shared pack",
+      status: "active"
+    })
+
+    const model = buildPersonaVisualManagementSummary({
+      activePack: sharedPack,
+      packs: [
+        sharedPack,
+        makePack({ id: "draft-pack", status: "draft" }),
+        makePack({ id: "failed-pack", status: "failed" })
+      ]
+    })
+
+    expect(model.summary.activePackId).toBe("shared-pack")
+    expect(model.summary.packCounts).toEqual({
+      active: 1,
+      draft: 1,
+      review: 0,
+      archived: 0,
+      failed: 1
+    })
+    expect(model.attentionRows.map((row) => row.kind)).toEqual(["failed_pack"])
+  })
+
   it("surfaces selected-pack validation and generated candidate review state", () => {
     const model = buildPersonaVisualManagementSummary({
       packs: [makePack({ id: "pack-1", status: "draft" })],
@@ -208,6 +235,42 @@ describe("buildPersonaVisualManagementSummary", () => {
       "import_commit_completed",
       "export_completed"
     ])
+  })
+
+  it("treats deleted import previews as failed jobs, not preview-ready work", () => {
+    const model = buildPersonaVisualManagementSummary({
+      packs: [makePack({ id: "pack-1", status: "draft" })],
+      importPreview: makeImportPreview({
+        status: "deleted",
+        visual_status: "deleted",
+        stage: "deleted"
+      })
+    })
+
+    expect(model.summary.attentionCounts.failedJobs).toBe(1)
+    expect(model.attentionRows.map((row) => row.kind)).toEqual(["failed_job"])
+  })
+
+  it("uses failure precedence for conflicting job status fields", () => {
+    const model = buildPersonaVisualManagementSummary({
+      packs: [makePack({ id: "pack-1", status: "draft" })],
+      importCommitJob: makePortabilityJob({
+        operation: "import_commit",
+        status: "processing",
+        visual_status: "failed",
+        stage: "processing"
+      }),
+      exportJob: makePortabilityJob({
+        operation: "export",
+        status: "failed",
+        visual_status: "completed",
+        stage: "failed"
+      })
+    })
+
+    expect(model.summary.attentionCounts.pendingJobs).toBe(0)
+    expect(model.summary.attentionCounts.failedJobs).toBe(2)
+    expect(model.attentionRows.map((row) => row.kind)).toEqual(["failed_job"])
   })
 
   it("tracks stale library sources, unavailable generation, and failed jobs", () => {
