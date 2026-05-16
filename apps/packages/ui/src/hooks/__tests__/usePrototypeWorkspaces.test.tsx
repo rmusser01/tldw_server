@@ -265,6 +265,44 @@ describe("usePrototypeWorkspaces", () => {
     })
   })
 
+  it("preserves structured collaborator session errors for setup-failed UI states", async () => {
+    fetchWithTldwAuthMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          detail: {
+            category: "bootstrap_failed",
+            frontend_state: "setup_failed",
+            message: "Prototype branch session could not be created",
+            retryable: true
+          }
+        }),
+        {
+          status: 503,
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+    )
+
+    const { result } = renderHook(() => useCreateCollaboratorBranchSession(), {
+      wrapper: buildWrapper()
+    })
+
+    await expect(
+      result.current.mutateAsync({
+        session_token: "session-token-1"
+      })
+    ).rejects.toMatchObject({
+      status: 503,
+      detail: {
+        category: "bootstrap_failed",
+        frontend_state: "setup_failed",
+        retryable: true,
+        message: "Prototype branch session could not be created"
+      },
+      message: "Prototype branch session could not be created"
+    })
+  })
+
   it("creates a prototype promotion request through the authenticated tldw fetch helper", async () => {
     fetchWithTldwAuthMock.mockResolvedValue(
       new Response(

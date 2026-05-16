@@ -1,4 +1,5 @@
 import { fetchWithTldwAuth } from "@/services/tldw/auth-fetch"
+import { buildTldwApiError } from "@/services/tldw/api-error"
 import { getTldwServerURL } from "@/services/tldw-server"
 import type {
   PrototypeCollaboratorSessionCreateInput,
@@ -31,8 +32,7 @@ const jsonPost = async <T>(path: string, body: unknown): Promise<T> => {
   })
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail || "Request failed")
+    throw await buildTldwApiError(res)
   }
 
   return res.json()
@@ -43,8 +43,7 @@ const jsonGet = async <T>(path: string): Promise<T> => {
   const res = await fetchWithTldwAuth(url)
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail || "Request failed")
+    throw await buildTldwApiError(res)
   }
 
   return res.json()

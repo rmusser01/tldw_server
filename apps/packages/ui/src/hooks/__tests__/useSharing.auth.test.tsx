@@ -134,4 +134,43 @@ describe("useSharing auth wiring", () => {
       })
     )
   })
+
+  it("preserves structured prototype link exchange error details for route-state mapping", async () => {
+    fetchWithTldwAuthMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          detail: {
+            category: "invalid_or_unavailable_link",
+            frontend_state: "link_unavailable",
+            message: "Prototype link is unavailable",
+            retryable: false
+          }
+        }),
+        {
+          status: 404,
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+    )
+
+    const { result } = renderHook(() => usePrototypePrivateLinkExchange(), {
+      wrapper: buildWrapper()
+    })
+
+    await expect(
+      result.current.mutateAsync({
+        token: "prototype-token",
+        display_name: "Acme PM"
+      })
+    ).rejects.toMatchObject({
+      status: 404,
+      detail: {
+        category: "invalid_or_unavailable_link",
+        frontend_state: "link_unavailable",
+        retryable: false,
+        message: "Prototype link is unavailable"
+      },
+      message: "Prototype link is unavailable"
+    })
+  })
 })
