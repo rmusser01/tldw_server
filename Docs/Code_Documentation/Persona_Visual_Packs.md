@@ -257,12 +257,23 @@ scaffolds from final authored default assets:
 5. `animation_coverage_notes` are bounded notes for reviewers and future
    generation jobs. They describe the missing neutral-anchor-derived animation
    work and do not grant runtime support by themselves.
+6. `production_recipe` is structured handoff metadata for authored assets. It
+   includes an `identity_brief`, `neutral_anchor` guidance, `static_sheet`
+   guidance, expected `animation_outputs`, and `review_checks`.
 
 The neutral-anchor pipeline remains: identity brief, neutral anchor, optional
 static talking/reaction sheet, animation strips or atlas regions, review, then
 copy/import into an inactive draft with separate activation. The production
 metadata is catalog guidance for that pipeline; it does not create final art,
 run image generation, activate a pack, or change renderer support.
+
+Production recipes make the scaffold-to-art handoff explicit. Basic starters
+usually expect only required-state loops derived from a single neutral anchor.
+Intermediate starters add a static talking/reaction sheet and custom-state
+variants. Intricate starters add animation strips or atlas regions on top of the
+same neutral anchor. These recipes are not prompts that the server executes and
+are not proof that finished animation assets exist; they are bounded metadata
+for reviewers, future generation jobs, and custom provider handoffs.
 
 Copying a bundled starter pack creates a normal user-owned draft pack attached
 to the selected target persona. The copy path validates the fixture manifest and

@@ -65,6 +65,53 @@ _INTRICATE_ANIMATION_NOTES = (
     "Scaffold fixture only: final intricate art should compile reviewed "
     "neutral-anchor-derived strips or atlas regions into runtime animations.",
 )
+_RECIPE_REVIEW_CHECKS = (
+    "neutral_identity_consistency",
+    "transparent_background",
+    "one_subject_per_frame",
+    "state_manifest_alignment",
+)
+
+
+@dataclass(frozen=True)
+class PersonaVisualStarterProductionRecipe:
+    """Authored-asset handoff recipe for one bundled starter scaffold."""
+
+    identity_brief: str
+    neutral_anchor: str
+    static_sheet: str
+    animation_outputs: tuple[str, ...]
+    review_checks: tuple[str, ...] = _RECIPE_REVIEW_CHECKS
+
+
+def _production_recipe(
+    *,
+    identity_brief: str,
+    neutral_anchor: str,
+    static_sheet: str,
+    animation_outputs: tuple[str, ...],
+    review_checks: tuple[str, ...] = _RECIPE_REVIEW_CHECKS,
+) -> PersonaVisualStarterProductionRecipe:
+    """Create one immutable starter production-recipe metadata block."""
+    return PersonaVisualStarterProductionRecipe(
+        identity_brief=identity_brief,
+        neutral_anchor=neutral_anchor,
+        static_sheet=static_sheet,
+        animation_outputs=animation_outputs,
+        review_checks=review_checks,
+    )
+
+
+def _default_basic_production_recipe() -> PersonaVisualStarterProductionRecipe:
+    """Return the default low-complexity starter production recipe."""
+    return _production_recipe(
+        identity_brief="Simple readable buddy with one strong silhouette and limited props.",
+        neutral_anchor="Create one front-facing neutral pose used as the identity anchor.",
+        static_sheet=(
+            "Optional small mouth or expression sheet; keep it separate from timed loops."
+        ),
+        animation_outputs=("required_state_loops",),
+    )
 
 
 @dataclass(frozen=True)
@@ -95,6 +142,9 @@ class PersonaVisualStarterPack:
     neutral_anchor_required: bool = True
     expected_asset_groups: tuple[str, ...] = _BASIC_EXPECTED_ASSET_GROUPS
     animation_coverage_notes: tuple[str, ...] = _BASIC_ANIMATION_NOTES
+    production_recipe: PersonaVisualStarterProductionRecipe = field(
+        default_factory=_default_basic_production_recipe
+    )
 
 
 def _png_chunk(kind: bytes, payload: bytes) -> bytes:
@@ -288,6 +338,17 @@ def _basic_pack(
         neutral_anchor_required=True,
         expected_asset_groups=_BASIC_EXPECTED_ASSET_GROUPS,
         animation_coverage_notes=_BASIC_ANIMATION_NOTES,
+        production_recipe=_production_recipe(
+            identity_brief=description,
+            neutral_anchor=(
+                "Author one clean neutral pose that preserves the starter silhouette."
+            ),
+            static_sheet=(
+                "Create a tiny optional expression sheet for speaking or reactions; "
+                "do not treat the sheet as animation unless cells are mapped as frames."
+            ),
+            animation_outputs=("required_state_loops",),
+        ),
     )
 
 
@@ -356,6 +417,31 @@ def _multi_asset_pack(
             if complexity_tier == "intricate"
             else _INTERMEDIATE_ANIMATION_NOTES
         ),
+        production_recipe=_production_recipe(
+            identity_brief=description,
+            neutral_anchor=(
+                "Author a neutral model sheet or pose set before generating state frames."
+            ),
+            static_sheet=(
+                "Create a static talking/reaction sheet for mouth, face, and small pose "
+                "changes before compiling timed animation loops."
+            ),
+            animation_outputs=(
+                (
+                    "required_state_loops",
+                    "static_talking_reaction_sheet",
+                    "animation_strips",
+                    "animation_atlas",
+                    "custom_state_variants",
+                )
+                if complexity_tier == "intricate"
+                else (
+                    "required_state_loops",
+                    "static_talking_reaction_sheet",
+                    "custom_state_variants",
+                )
+            ),
+        ),
     )
 
 
@@ -392,6 +478,23 @@ def _atlas_pack(
         neutral_anchor_required=True,
         expected_asset_groups=_INTRICATE_EXPECTED_ASSET_GROUPS,
         animation_coverage_notes=_INTRICATE_ANIMATION_NOTES,
+        production_recipe=_production_recipe(
+            identity_brief=description,
+            neutral_anchor=(
+                "Author a full neutral model sheet before generating atlas-backed loops."
+            ),
+            static_sheet=(
+                "Create a separate talking/reaction sheet for expression choices before "
+                "compiling timed atlas regions."
+            ),
+            animation_outputs=(
+                "required_state_loops",
+                "static_talking_reaction_sheet",
+                "animation_strips",
+                "animation_atlas",
+                "custom_state_variants",
+            ),
+        ),
     )
 
 
@@ -585,4 +688,5 @@ __all__ = [
     "LEGACY_PERSONA_VISUAL_STARTER_PACK_ID",
     "PersonaVisualStarterAsset",
     "PersonaVisualStarterPack",
+    "PersonaVisualStarterProductionRecipe",
 ]
