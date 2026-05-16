@@ -485,7 +485,13 @@ def sign_helper(
     *,
     dry_run: bool = False,
     identity: str = "-",
+    command_runner: Callable[..., int] | None = None,
 ) -> CheckResult:
+    """Codesign the helper with explicit entitlements for operator-managed runs.
+
+    `command_runner` exists so tests and JSON-mode callers can capture the
+    subprocess without changing the public failure reasons.
+    """
     if entitlements_path is None:
         return CheckResult(ok=False, reason="helper_entitlements_missing")
     helper_result = validate_helper_binary(helper_path)
@@ -493,10 +499,11 @@ def sign_helper(
         return helper_result
     if not entitlements_path.exists():
         return CheckResult(ok=False, reason="helper_entitlements_missing")
-    if not dry_run and shutil.which("codesign") is None:
+    if not dry_run and command_runner is None and shutil.which("codesign") is None:
         return CheckResult(ok=False, reason="helper_codesign_unavailable")
 
-    code = run_command(
+    runner = command_runner or run_command
+    code = runner(
         [
             "codesign",
             "--force",
@@ -508,6 +515,8 @@ def sign_helper(
         ],
         dry_run=dry_run,
     )
+    if code == 127:
+        return CheckResult(ok=False, reason="helper_codesign_unavailable")
     if code != 0:
         return CheckResult(ok=False, reason="helper_codesign_failed")
     return CheckResult(ok=True)
@@ -849,6 +858,8 @@ def run_launchd_drill(
     dry_run: bool = False,
     ping_checker: Callable[[Path], CheckResult | PingState] = ping_helper_state,
     launchd_runner: Callable[..., int] | None = None,
+    entitlements_path: Path | None = None,
+    signing_runner: Callable[..., int] | None = None,
     bundle_path: Path | None = None,
     python_path: Path | None = None,
     smoke_command_runner: Callable[..., int] | None = None,
@@ -871,6 +882,17 @@ def run_launchd_drill(
     results.append(("launchd_preflight", preflight))
     if not preflight.ok:
         return results
+
+    if entitlements_path is not None:
+        signing = sign_helper(
+            helper_path,
+            entitlements_path,
+            dry_run=dry_run,
+            command_runner=signing_runner,
+        )
+        results.append(("helper_signing", signing))
+        if not signing.ok:
+            return results
 
     bootstrap = run_launchd_action(
         "bootstrap",
@@ -1946,11 +1968,13 @@ def _launchd_drill_command(args: argparse.Namespace) -> int:
         "write_plist": args.write_plist,
         "create_dirs": args.create_dirs,
         "dry_run": args.dry_run,
+        "entitlements_path": Path(args.entitlements) if args.entitlements else None,
         "bundle_path": bundle_path,
         "python_path": Path(args.python) if args.python else None,
     }
     if args.json:
         drill_kwargs["launchd_runner"] = run_command_captured
+        drill_kwargs["signing_runner"] = run_command_captured
         drill_kwargs["smoke_command_runner"] = run_command_captured
         with contextlib.redirect_stdout(io.StringIO()):
             results = run_launchd_drill(**drill_kwargs)
@@ -2090,6 +2114,7 @@ def build_parser() -> argparse.ArgumentParser:
     launchd_drill.add_argument("--label")
     launchd_drill.add_argument("--uid", type=int)
     launchd_drill.add_argument("--python")
+    launchd_drill.add_argument("--entitlements")
     launchd_drill.add_argument("--write-plist", action="store_true")
     launchd_drill.add_argument("--create-dirs", action="store_true")
     launchd_drill.add_argument("--skip-smoke", action="store_true")
