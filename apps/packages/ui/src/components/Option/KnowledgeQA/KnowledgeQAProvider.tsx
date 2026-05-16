@@ -26,6 +26,7 @@ import type {
   CitationRef,
   SearchRuntimeDetails,
   KnowledgeSourceStatus,
+  KnowledgeSourceHealthState,
   QueryStage,
   ScopeSnapshot,
   PinnedSourceFilters,
@@ -46,6 +47,10 @@ import { trackKnowledgeQaSearchMetric } from "@/utils/knowledge-qa-search-metric
 import { persistKnowledgeQaHistory } from "./historyStorage"
 import { mapKnowledgeQaSearchErrorMessage } from "./errorMessages"
 import { truncateAnswerPreview } from "./historyUtils"
+import {
+  EMPTY_SOURCE_HEALTH_STATE,
+  normalizeKnowledgeSourceHealth,
+} from "./sourceHealth"
 
 const LOCAL_THREAD_PREFIX = "local-"
 const DEFAULT_CHARACTER_NAME = "Helpful AI Assistant"
@@ -112,6 +117,7 @@ const initialState: KnowledgeQAState = {
     mediaIds: [],
     noteIds: [],
   },
+  sourceHealth: EMPTY_SOURCE_HEALTH_STATE,
 }
 
 const isLocalThreadId = (id: string | null | undefined) =>
@@ -175,6 +181,9 @@ type Action =
   | { type: "SET_QUERY_STAGE"; payload: QueryStage }
   | { type: "SET_LAST_SEARCH_SCOPE"; payload: ScopeSnapshot | null }
   | { type: "SET_PINNED_SOURCE_FILTERS"; payload: PinnedSourceFilters }
+  | { type: "SET_SOURCE_HEALTH_LOADING" }
+  | { type: "SET_SOURCE_HEALTH"; payload: KnowledgeSourceHealthState }
+  | { type: "SET_SOURCE_HEALTH_ERROR"; payload: string }
   | {
       type: "HYDRATE_RESTORED_SCOPE"
       payload: {
@@ -328,6 +337,26 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
       return { ...state, lastSearchScope: action.payload }
     case "SET_PINNED_SOURCE_FILTERS":
       return { ...state, pinnedSourceFilters: action.payload }
+    case "SET_SOURCE_HEALTH_LOADING":
+      return {
+        ...state,
+        sourceHealth: {
+          ...state.sourceHealth,
+          loading: true,
+          error: null,
+        },
+      }
+    case "SET_SOURCE_HEALTH":
+      return { ...state, sourceHealth: action.payload }
+    case "SET_SOURCE_HEALTH_ERROR":
+      return {
+        ...state,
+        sourceHealth: {
+          ...state.sourceHealth,
+          loading: false,
+          error: action.payload,
+        },
+      }
     case "HYDRATE_RESTORED_SCOPE": {
       const { nextPreset, nextSettings } = resolveHydratedScopeState(
         state.preset,
@@ -2818,6 +2847,23 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "SET_PINNED_SOURCE_FILTERS", payload: normalized })
   }, [])
 
+  const refreshSourceHealth = useCallback(async () => {
+    dispatch({ type: "SET_SOURCE_HEALTH_LOADING" })
+    try {
+      const payload = await tldwClient.ragSourceHealth()
+      dispatch({
+        type: "SET_SOURCE_HEALTH",
+        payload: normalizeKnowledgeSourceHealth(payload),
+      })
+    } catch {
+      dispatch({
+        type: "SET_SOURCE_HEALTH_ERROR",
+        payload:
+          "Source health could not be loaded. You can still search selected sources.",
+      })
+    }
+  }, [])
+
   const scrollToSource = useCallback((index: number) => {
     const element = document.getElementById(`source-card-${index}`)
     if (element) {
@@ -2953,6 +2999,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
       setEvidenceRailTab,
       setQueryStage,
       setPinnedSourceFilters,
+      refreshSourceHealth,
       persistRagContext,
       scrollToSource,
       scrollToCitation,
@@ -2986,6 +3033,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
       setEvidenceRailTab,
       setQueryStage,
       setPinnedSourceFilters,
+      refreshSourceHealth,
       persistRagContext,
       scrollToSource,
       scrollToCitation,
