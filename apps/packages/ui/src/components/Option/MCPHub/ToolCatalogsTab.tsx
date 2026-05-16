@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Alert, Button, Card, Empty, Space, Tag, Typography } from "antd"
+import { Button, Card, Empty, Space, Tag, Typography } from "antd"
 import { useQueryClient } from "@tanstack/react-query"
+import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
 
 import {
   describeExternalServerDiscoveryRefreshFailure,

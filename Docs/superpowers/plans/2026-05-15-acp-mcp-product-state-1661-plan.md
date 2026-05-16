@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Migrate the first ACP/MCP product-state guard slice from AntD state widgets to shared design-system primitives for issue #1661.
+**Goal:** Migrate the owned ACP/MCP/Workspace product-state guard scope from AntD state widgets to shared design-system primitives for issue #1661.
 
-**Architecture:** Replace direct AntD product-state rendering with `Alert` from `@/components/ui/primitives` while leaving form, list, and layout AntD usage intact. Update focused component tests to assert the shared primitive contract, then remove only the baseline entries proven stale by the guard.
+**Architecture:** Replace direct AntD product-state rendering with shared design-system primitives while leaving form, list, modal, tab, and layout AntD usage intact. Use a thin product-state adapter only for legacy AntD alert/badge prop compatibility, backed by the shared `Alert` and `Badge` primitives. Update focused component tests to assert the shared primitive contract, then remove only the scoped baseline entries proven stale by the guard.
 
 **Tech Stack:** React, TypeScript, Vitest, Testing Library, shared `apps/packages/ui` design-system primitives.
 
@@ -59,3 +59,21 @@ Baseline note: the full guard was red on `dev` in this worktree because unrelate
 - [x] Run `git diff --check`.
 - [x] Skip Bandit with an explicit UI-only rationale in the Backlog task.
 - [x] Update the Backlog task with changed files, verification results, and remaining issue #1661 baseline debt.
+
+### Stage 5: Qodo Scoped Baseline Review Fix
+
+**Files:**
+- Modify: `apps/packages/ui/src/components/Option/productStatePrimitives.tsx`
+- Modify: `apps/packages/ui/src/components/Option/MCPHub/**/*.tsx`
+- Modify: `apps/packages/ui/src/components/Option/WorkspacePlayground/SourcesPane/AddSourceModal.tsx`
+- Modify: `apps/packages/ui/src/components/Option/WorkspacePlayground/TransferSourcesModal.tsx`
+- Modify: `apps/packages/ui/src/design-system/__tests__/product-state-guard.mcp-acp-workspace-baseline.test.ts`
+- Modify: `apps/packages/ui/scripts/design-system-product-state-baseline.json`
+
+- [x] Add a failing guard asserting zero baseline entries remain under `MCPHub`, `ACPPlayground`, or `WorkspacePlayground`.
+- [x] Replace remaining scoped AntD product-state `Alert` usage with the shared product-state alert adapter.
+- [x] Replace the flagged MCP external-access/governance-pack product-state `Tag` usage with the shared product-state badge adapter.
+- [x] Replace the flagged permission-profile `Empty` states with `EmptyState`.
+- [x] Remove all 41 scoped baseline exceptions for `MCPHub`, `ACPPlayground`, and `WorkspacePlayground`.
+- [x] Re-run the focused MCPHub/Workspace Vitest suite and product-state guard.
+- [x] Confirm TypeScript still only reports existing diagnostics outside touched paths.

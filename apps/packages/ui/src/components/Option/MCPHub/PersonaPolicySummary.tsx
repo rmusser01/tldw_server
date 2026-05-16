@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
-import { Alert, Button, Card, Empty, Space, Tag, Typography } from "antd"
+import { Button, Card, Empty, Space, Tag, Typography } from "antd"
+import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
 
 import {
   getAssignmentExternalAccess,

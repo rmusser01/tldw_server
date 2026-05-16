@@ -6,7 +6,6 @@ import {
   Upload,
   Input,
   Button,
-  Alert,
   Spin,
   List,
   Checkbox,
@@ -24,6 +23,7 @@ import {
   X,
   Loader2
 } from "lucide-react"
+import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
 import { useWorkspaceStore } from "@/store/workspace"
 import { useMobile } from "@/hooks/useMediaQuery"
 import { tldwClient } from "@/services/tldw/TldwApiClient"

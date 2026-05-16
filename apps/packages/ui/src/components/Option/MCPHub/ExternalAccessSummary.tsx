@@ -1,4 +1,5 @@
-import { Empty, Space, Tag, Typography } from "antd"
+import { Empty, Space, Typography } from "antd"
+import { ProductStateBadge as Tag } from "@/components/Option/productStatePrimitives"
 
 import type { McpHubEffectiveExternalAccess } from "@/services/tldw/mcp-hub"
 
