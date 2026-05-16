@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Playground } from "../Playground";
@@ -222,9 +228,9 @@ describe("Playground cockpit shell", () => {
     expect(
       screen.getByTestId("playground-cockpit-status-strip"),
     ).toBeInTheDocument();
-    expect(screen.getByTestId("playground-cockpit-mode-summary")).toHaveTextContent(
-      "Context and runtime rails visible.",
-    );
+    expect(
+      screen.getByTestId("playground-cockpit-mode-summary"),
+    ).toHaveTextContent("Context and runtime rails visible.");
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
   });
@@ -239,7 +245,9 @@ describe("Playground cockpit shell", () => {
     ).toHaveAttribute("data-mode", "focus");
     expect(screen.queryByTestId("playground-cockpit-left-rail")).toBeNull();
     expect(screen.queryByTestId("playground-cockpit-right-rail")).toBeNull();
-    expect(screen.getByTestId("playground-cockpit-mode-summary")).toHaveTextContent(
+    expect(
+      screen.getByTestId("playground-cockpit-mode-summary"),
+    ).toHaveTextContent(
       "Focus mode hides rails. Chat and composer remain active.",
     );
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
@@ -281,16 +289,14 @@ describe("Playground cockpit shell", () => {
       screen.getByTestId("playground-cockpit-right-rail"),
     ).toBeInTheDocument();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /hide context rail/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /hide context rail/i }));
 
     await waitFor(() => {
       expect(screen.queryByTestId("playground-cockpit-left-rail")).toBeNull();
     });
-    expect(screen.getByTestId("playground-cockpit-mode-summary")).toHaveTextContent(
-      "Context rail hidden. Runtime rail visible.",
-    );
+    expect(
+      screen.getByTestId("playground-cockpit-mode-summary"),
+    ).toHaveTextContent("Context rail hidden. Runtime rail visible.");
     expect(
       screen.getByTestId("playground-cockpit-right-rail"),
     ).toBeInTheDocument();
@@ -301,28 +307,22 @@ describe("Playground cockpit shell", () => {
       screen.getByRole("button", { name: /show context rail/i }),
     ).toBeInTheDocument();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /hide runtime rail/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /hide runtime rail/i }));
 
     await waitFor(() => {
       expect(screen.queryByTestId("playground-cockpit-right-rail")).toBeNull();
     });
-    expect(screen.getByTestId("playground-cockpit-mode-summary")).toHaveTextContent(
-      "Cockpit rails hidden. Status remains visible.",
-    );
+    expect(
+      screen.getByTestId("playground-cockpit-mode-summary"),
+    ).toHaveTextContent("Cockpit rails hidden. Status remains visible.");
     expect(storageState.values.get("playgroundChatRuntimeRailVisible")).toBe(
       false,
     );
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /show context rail/i }),
-    );
-    fireEvent.click(
-      screen.getByRole("button", { name: /show runtime rail/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /show context rail/i }));
+    fireEvent.click(screen.getByRole("button", { name: /show runtime rail/i }));
 
     await waitFor(() => {
       expect(
@@ -335,6 +335,72 @@ describe("Playground cockpit shell", () => {
     expect(storageState.values.get("playgroundChatContextRailVisible")).toBe(
       true,
     );
+    expect(storageState.values.get("playgroundChatRuntimeRailVisible")).toBe(
+      true,
+    );
+  });
+
+  it("persists sidechannel collapse and restore from rail-local controls", async () => {
+    render(<Playground />);
+
+    const contextRail = await screen.findByTestId(
+      "playground-cockpit-left-rail",
+    );
+    const runtimeRail = screen.getByTestId("playground-cockpit-right-rail");
+
+    fireEvent.click(
+      within(contextRail).getByRole("button", {
+        name: /collapse context sidechannel/i,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("playground-cockpit-left-rail")).toBeNull();
+    });
+    expect(storageState.values.get("playgroundChatContextRailVisible")).toBe(
+      false,
+    );
+    expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
+    expect(screen.getByTestId("playground-form")).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /restore context sidechannel/i }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("playground-cockpit-left-rail"),
+      ).toBeInTheDocument();
+    });
+    expect(storageState.values.get("playgroundChatContextRailVisible")).toBe(
+      true,
+    );
+
+    fireEvent.click(
+      within(runtimeRail).getByRole("button", {
+        name: /collapse runtime sidechannel/i,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("playground-cockpit-right-rail")).toBeNull();
+    });
+    expect(storageState.values.get("playgroundChatRuntimeRailVisible")).toBe(
+      false,
+    );
+    expect(
+      screen.getByTestId("playground-cockpit-status-strip"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /restore runtime sidechannel/i }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("playground-cockpit-right-rail"),
+      ).toBeInTheDocument();
+    });
     expect(storageState.values.get("playgroundChatRuntimeRailVisible")).toBe(
       true,
     );

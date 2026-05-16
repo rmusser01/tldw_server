@@ -117,6 +117,22 @@ export const PlaygroundCockpitShell = ({
   const rightRailLabel = rightRailVisible
     ? t("cockpit.hideRuntimeRail", "Hide runtime rail")
     : t("cockpit.showRuntimeRail", "Show runtime rail");
+  const collapseContextSidechannelLabel = t(
+    "cockpit.collapseContextSidechannel",
+    "Collapse context sidechannel",
+  );
+  const collapseRuntimeSidechannelLabel = t(
+    "cockpit.collapseRuntimeSidechannel",
+    "Collapse runtime sidechannel",
+  );
+  const restoreContextSidechannelLabel = t(
+    "cockpit.restoreContextSidechannel",
+    "Restore context sidechannel",
+  );
+  const restoreRuntimeSidechannelLabel = t(
+    "cockpit.restoreRuntimeSidechannel",
+    "Restore runtime sidechannel",
+  );
   const modeSummaryKey = buildModeSummaryKey(
     focusMode,
     leftRailVisible,
@@ -193,9 +209,7 @@ export const PlaygroundCockpitShell = ({
                 aria-label={leftRailLabel}
                 aria-pressed={leftRailVisible}
                 title={leftRailLabel}
-                onClick={() =>
-                  onLeftRailVisibleChange?.(!leftRailVisible)
-                }
+                onClick={() => onLeftRailVisibleChange?.(!leftRailVisible)}
                 className="inline-flex min-h-[30px] items-center gap-1 rounded-md border border-border bg-surface2 px-2 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
               >
                 {leftRailVisible ? (
@@ -212,9 +226,7 @@ export const PlaygroundCockpitShell = ({
                 aria-label={rightRailLabel}
                 aria-pressed={rightRailVisible}
                 title={rightRailLabel}
-                onClick={() =>
-                  onRightRailVisibleChange?.(!rightRailVisible)
-                }
+                onClick={() => onRightRailVisibleChange?.(!rightRailVisible)}
                 className="inline-flex min-h-[30px] items-center gap-1 rounded-md border border-border bg-surface2 px-2 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
               >
                 {rightRailVisible ? (
@@ -326,14 +338,63 @@ export const PlaygroundCockpitShell = ({
         </div>
       )}
 
-      <div className={bodyClassName}>
+      <div className={`${bodyClassName} relative`}>
+        {!focusMode && !leftRailVisible ? (
+          <button
+            type="button"
+            data-testid="playground-cockpit-left-rail-restore"
+            aria-label={restoreContextSidechannelLabel}
+            aria-controls="playground-cockpit-left-rail"
+            aria-expanded="false"
+            title={restoreContextSidechannelLabel}
+            onClick={() => onLeftRailVisibleChange?.(true)}
+            className="absolute left-2 top-2 z-20 hidden min-h-[32px] items-center gap-1 rounded-md border border-border bg-surface2 px-2 py-1 text-xs font-medium text-text shadow-sm hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus lg:inline-flex"
+          >
+            <PanelLeftOpen className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{t("cockpit.context", "Context")}</span>
+          </button>
+        ) : null}
+
+        {!focusMode && !rightRailVisible ? (
+          <button
+            type="button"
+            data-testid="playground-cockpit-right-rail-restore"
+            aria-label={restoreRuntimeSidechannelLabel}
+            aria-controls="playground-cockpit-right-rail"
+            aria-expanded="false"
+            title={restoreRuntimeSidechannelLabel}
+            onClick={() => onRightRailVisibleChange?.(true)}
+            className="absolute right-2 top-2 z-20 hidden min-h-[32px] items-center gap-1 rounded-md border border-border bg-surface2 px-2 py-1 text-xs font-medium text-text shadow-sm hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus lg:inline-flex"
+          >
+            <span>{t("cockpit.runtime", "Runtime")}</span>
+            <PanelRightOpen className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        ) : null}
+
         {showLeftRail && (
           <aside
+            id="playground-cockpit-left-rail"
             data-testid="playground-cockpit-left-rail"
             aria-label={t("cockpit.contextLandmark", "Chat cockpit context")}
             className="hidden min-h-0 overflow-y-auto border-r border-border bg-surface2/30 p-2 lg:block"
           >
-            {leftRail}
+            <div className="mb-2 flex min-h-[32px] items-center justify-between gap-2 rounded-md border border-border/70 bg-bg px-2 py-1 text-xs text-text-muted">
+              <span className="font-semibold text-text">
+                {t("cockpit.context", "Context")}
+              </span>
+              <button
+                type="button"
+                aria-label={collapseContextSidechannelLabel}
+                aria-controls="playground-cockpit-left-rail"
+                aria-expanded="true"
+                title={collapseContextSidechannelLabel}
+                onClick={() => onLeftRailVisibleChange?.(false)}
+                className="inline-flex min-h-[28px] min-w-[28px] items-center justify-center rounded-md border border-border bg-surface2 text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              >
+                <PanelLeftClose className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="min-w-0">{leftRail}</div>
           </aside>
         )}
 
@@ -350,11 +411,28 @@ export const PlaygroundCockpitShell = ({
 
         {showRightRail && (
           <aside
+            id="playground-cockpit-right-rail"
             data-testid="playground-cockpit-right-rail"
             aria-label={t("cockpit.runtimeLandmark", "Chat cockpit runtime")}
             className="hidden min-h-0 overflow-y-auto border-l border-border bg-surface2/30 p-2 lg:block"
           >
-            {rightRail}
+            <div className="mb-2 flex min-h-[32px] items-center justify-between gap-2 rounded-md border border-border/70 bg-bg px-2 py-1 text-xs text-text-muted">
+              <span className="font-semibold text-text">
+                {t("cockpit.runtime", "Runtime")}
+              </span>
+              <button
+                type="button"
+                aria-label={collapseRuntimeSidechannelLabel}
+                aria-controls="playground-cockpit-right-rail"
+                aria-expanded="true"
+                title={collapseRuntimeSidechannelLabel}
+                onClick={() => onRightRailVisibleChange?.(false)}
+                className="inline-flex min-h-[28px] min-w-[28px] items-center justify-center rounded-md border border-border bg-surface2 text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              >
+                <PanelRightClose className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="min-w-0">{rightRail}</div>
           </aside>
         )}
       </div>
