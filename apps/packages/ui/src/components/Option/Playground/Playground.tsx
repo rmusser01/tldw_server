@@ -36,6 +36,7 @@ import {
 import { getCockpitMessageCount } from "./playground-cockpit-state";
 import { buildPlaygroundCompositionPreviewSummary } from "./playground-composition-preview";
 import { ChatErrorBoundary } from "@/components/Common/Playground/ChatErrorBoundary";
+import { hasVisibleAssistantResponse } from "@/components/Common/Playground/message-visibility";
 import { useMessageOption } from "@/hooks/useMessageOption";
 import { usePlaygroundSessionPersistence } from "@/hooks/usePlaygroundSessionPersistence";
 import { shouldRestorePersistedPlaygroundSession } from "@/hooks/playground-session-restore";
@@ -111,7 +112,6 @@ import {
 } from "./mobile-composer-layout";
 import { buildPersonaGardenRoute } from "@/utils/persona-garden-route";
 import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return";
-import { IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE } from "@/utils/image-generation-chat";
 
 const toText = (value: unknown): string =>
   typeof value === "string" ? value : String(value);
@@ -1719,9 +1719,6 @@ export const Playground = () => {
         ),
     },
   });
-  const canRegenerateLastResponse = messages.some(
-    (message) => message.role === "assistant" || message?.isBot,
-  );
   const latestAssistantMessage = React.useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index];
@@ -1731,27 +1728,10 @@ export const Playground = () => {
     }
     return null;
   }, [messages]);
+  const canRegenerateLastResponse = Boolean(latestAssistantMessage);
   const emptyAssistantResponse = React.useMemo(() => {
     if (!latestAssistantMessage || streaming || isProcessing) return false;
-    const messageText =
-      typeof latestAssistantMessage.message === "string"
-        ? latestAssistantMessage.message.trim()
-        : "";
-    if (messageText.length > 0) return false;
-    const messageType =
-      latestAssistantMessage.messageType ??
-      (latestAssistantMessage as { message_type?: string }).message_type;
-    if (messageType === IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE) return false;
-    const images = Array.isArray(latestAssistantMessage.images)
-      ? latestAssistantMessage.images
-      : [];
-    if (images.some((image) => typeof image === "string" && image.length > 0)) {
-      return false;
-    }
-    const toolCalls = Array.isArray(latestAssistantMessage.toolCalls)
-      ? latestAssistantMessage.toolCalls
-      : [];
-    return toolCalls.length === 0;
+    return !hasVisibleAssistantResponse(latestAssistantMessage);
   }, [isProcessing, latestAssistantMessage, streaming]);
   const runtimeStatusDetail =
     serverReadinessState === "blocked"

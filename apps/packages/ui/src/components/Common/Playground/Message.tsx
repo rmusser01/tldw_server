@@ -82,6 +82,7 @@ import {
   resolveImageGenerationMetadata,
   type ImageGenerationRequestSnapshot
 } from "@/utils/image-generation-chat"
+import { hasVisibleAssistantResponse } from "./message-visibility"
 import { isDeepResearchCompletionMetadata } from "@/components/Option/Playground/research-chat-context"
 import {
   DEFAULT_TLDW_TTS_MODEL,
@@ -469,13 +470,12 @@ export const PlaygroundMessage = (props: Props) => {
     partialResponseSaved &&
     !interruptedGeneration &&
     !errorPayload
-  const hasVisibleAssistantText = props.message.trim().length > 0
-  const hasVisibleAssistantImages = Boolean(
-    props.images?.some((image) => typeof image === "string" && image.length > 0)
-  )
-  const hasVisibleAssistantToolCalls = Boolean(
-    props.toolCalls && props.toolCalls.length > 0
-  )
+  const hasVisibleAssistantResponseContent = hasVisibleAssistantResponse({
+    message: props.message,
+    message_type: props.message_type,
+    images: props.images,
+    toolCalls: props.toolCalls
+  })
   const messageTimestamp = React.useMemo(() => {
     const info = props.generationInfo as
       | { created_at?: string | number; createdAt?: string | number; timestamp?: string | number }
@@ -1621,9 +1621,7 @@ export const PlaygroundMessage = (props: Props) => {
     !interruptedGeneration &&
     !showPartialSaveMarker &&
     !isImageGenerationAssistantEvent &&
-    !hasVisibleAssistantText &&
-    !hasVisibleAssistantImages &&
-    !hasVisibleAssistantToolCalls
+    !hasVisibleAssistantResponseContent
 
   const handleThumbUp = React.useCallback(() => {
     void submitThumb("up")
