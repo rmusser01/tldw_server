@@ -37,6 +37,8 @@ import {
   useQuickIngestSessionStore,
 } from "@/store/quick-ingest-session"
 import { useQuickIngestStore } from "@/store/quick-ingest"
+import { useConnectionStore } from "@/store/connection"
+import { ConnectionPhase } from "@/types/connection"
 import type {
   CommonOptions,
   DetectedMediaType,
@@ -799,6 +801,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     goNext,
   } = useIngestWizard()
   const { currentStep, queueItems, processingState, presetConfig, results } = state
+  const connectionState = useConnectionStore((store) => store.state)
+  const checkConnection = useConnectionStore((store) => store.checkOnce)
   const activeSessionIdRef = useRef<string | null>(null)
   const resultsRef = useRef(results)
   const hasStartedRunRef = useRef(false)
@@ -825,6 +829,55 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         : "",
     [session.tracking, shouldAttemptPersistedReattach]
   )
+  const qi = useCallback(
+    (key: string, defaultValue: string, options?: Record<string, unknown>) =>
+      options
+        ? t(`quickIngest.${key}`, { defaultValue, ...options })
+        : t(`quickIngest.${key}`, defaultValue),
+    [t],
+  )
+  const isOnlineForIngest =
+    connectionState.offlineBypass === true ||
+    (
+      connectionState.isConnected &&
+      connectionState.phase === ConnectionPhase.CONNECTED
+    )
+  const isCheckingConnection =
+    connectionState.isChecking ||
+    connectionState.phase === ConnectionPhase.SEARCHING
+  const connectionRecoveryMessage = useMemo(() => {
+    if (isCheckingConnection) {
+      return qi(
+        "wizard.offline.checkingDescription",
+        "Checking your tldw server connection before processing."
+      )
+    }
+    if (connectionState.phase === ConnectionPhase.UNCONFIGURED) {
+      return qi(
+        "wizard.offline.unconfiguredDescription",
+        "Configure your tldw server under Settings -> tldw server before processing."
+      )
+    }
+    if (connectionState.lastError) {
+      return qi(
+        "wizard.offline.errorDescription",
+        "Cannot reach your tldw server. {{error}}",
+        { error: connectionState.lastError }
+      )
+    }
+    return qi(
+      "wizard.offline.description",
+      "Reconnect to your tldw server before processing. You can still add URLs and configure queued items."
+    )
+  }, [
+    connectionState.lastError,
+    connectionState.phase,
+    isCheckingConnection,
+    qi,
+  ])
+  const handleRetryConnection = useCallback(() => {
+    void checkConnection()
+  }, [checkConnection])
 
   useEffect(() => {
     resultsRef.current = results
@@ -891,19 +944,16 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   // Auto-process on mount if autoProcessQueued is set and there are queued items
   const autoProcessedRef = useRef(false)
   useEffect(() => {
-    if (autoProcessQueued && !autoProcessedRef.current && queueItems.length > 0) {
+    if (
+      autoProcessQueued &&
+      !autoProcessedRef.current &&
+      queueItems.length > 0 &&
+      isOnlineForIngest
+    ) {
       autoProcessedRef.current = true
       skipToProcessing()
     }
-  }, [autoProcessQueued, queueItems.length, skipToProcessing])
-
-  const qi = useCallback(
-    (key: string, defaultValue: string, options?: Record<string, unknown>) =>
-      options
-        ? t(`quickIngest.${key}`, { defaultValue, ...options })
-        : t(`quickIngest.${key}`, defaultValue),
-    [t],
-  )
+  }, [autoProcessQueued, isOnlineForIngest, queueItems.length, skipToProcessing])
 
   // Whether processing is actively running
   const isProcessingActive = processingState.status === "running"
@@ -968,8 +1018,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     // TODO(i18n): extract STAGE_LABELS to i18n resources
     const STAGE_LABELS: Record<string, string> = {
       uploading: "Uploading",
-      processing: "Processing your file... This may take a few minutes for large files.",
-      analyzing: "Transcribing and indexing content",
+      processing: "Processing content... This may take a few minutes for large files.",
+      analyzing: "Processing and indexing content",
       storing: "Storing results",
     }
 
@@ -1457,8 +1507,9 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   // Quick-process callback for AddContentStep (skip to processing with defaults)
   const handleQuickProcess = useCallback(() => {
+    if (!isOnlineForIngest || isCheckingConnection) return
     skipToProcessing()
-  }, [skipToProcessing])
+  }, [isCheckingConnection, isOnlineForIngest, skipToProcessing])
 
   // Navigation callbacks for WizardResultsStep CTAs
   const navigate = useNavigate()
@@ -1497,7 +1548,15 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const stepContent = useMemo(() => {
     switch (currentStep) {
       case 1:
-        return <AddContentStep onQuickProcess={handleQuickProcess} />
+        return (
+          <AddContentStep
+            isOnlineForIngest={isOnlineForIngest}
+            isCheckingConnection={isCheckingConnection}
+            connectionRecoveryMessage={connectionRecoveryMessage}
+            onRetryConnection={handleRetryConnection}
+            onQuickProcess={handleQuickProcess}
+          />
+        )
       case 2:
         return (
           <WizardConfigureStep
@@ -1505,7 +1564,14 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           />
         )
       case 3:
-        return <ReviewStep />
+        return (
+          <ReviewStep
+            isOnlineForIngest={isOnlineForIngest}
+            isCheckingConnection={isCheckingConnection}
+            connectionRecoveryMessage={connectionRecoveryMessage}
+            onRetryConnection={handleRetryConnection}
+          />
+        )
       case 4:
         return <ProcessingStep />
       case 5:
@@ -1520,7 +1586,20 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       default:
         return null
     }
-  }, [currentStep, handleOpenMedia, handleQuickProcess, handleSearchKnowledge, handleOpenWorkspace, onClose, open, state.isMinimized])
+  }, [
+    connectionRecoveryMessage,
+    currentStep,
+    handleOpenMedia,
+    handleOpenWorkspace,
+    handleQuickProcess,
+    handleRetryConnection,
+    handleSearchKnowledge,
+    isCheckingConnection,
+    isOnlineForIngest,
+    onClose,
+    open,
+    state.isMinimized,
+  ])
 
   return (
     <>

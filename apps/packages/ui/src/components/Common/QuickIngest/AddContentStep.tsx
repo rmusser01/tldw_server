@@ -160,11 +160,17 @@ const LARGE_FILE_WARNING_THRESHOLD = 500 * 1024 * 1024 // 500 MB
 
 type AddContentStepProps = {
   isOnlineForIngest?: boolean
+  isCheckingConnection?: boolean
+  connectionRecoveryMessage?: string
+  onRetryConnection?: () => void
   onQuickProcess?: () => void
 }
 
 export const AddContentStep: React.FC<AddContentStepProps> = ({
   isOnlineForIngest = true,
+  isCheckingConnection = false,
+  connectionRecoveryMessage,
+  onRetryConnection,
   onQuickProcess,
 }) => {
   const { t } = useTranslation(["option"])
@@ -263,6 +269,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     [queueItems]
   )
   const canProceed = validItemCount > 0
+  const canStartProcessing = canProceed && isOnlineForIngest && !isCheckingConnection
 
   const hasLargeFiles = useMemo(
     () => queueItems.some((item) => item.fileSize >= LARGE_FILE_WARNING_THRESHOLD),
@@ -355,6 +362,37 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
             "ffmpegMissing",
             "FFmpeg is not installed on the server. Audio and video files may fail to process. Other file types (PDF, documents, ebooks) are unaffected."
           )}
+        />
+      )}
+
+      {!isOnlineForIngest && (
+        <Alert
+          type="warning"
+          showIcon
+          icon={<AlertTriangle className="h-4 w-4" />}
+          className="mt-3"
+          message={qi("wizard.offline.title", "Server offline")}
+          description={
+            connectionRecoveryMessage ||
+            qi(
+              "wizard.offline.description",
+              "Reconnect to your tldw server before processing. You can still add URLs and configure queued items."
+            )
+          }
+          action={
+            onRetryConnection ? (
+              <Button
+                size="small"
+                onClick={onRetryConnection}
+                loading={isCheckingConnection}
+                disabled={isCheckingConnection}
+              >
+                {isCheckingConnection
+                  ? qi("wizard.offline.checking", "Checking...")
+                  : qi("wizard.offline.retry", "Retry connection")}
+              </Button>
+            ) : undefined
+          }
         />
       )}
 
@@ -476,7 +514,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
           <Button
             type="primary"
             onClick={onQuickProcess}
-            disabled={!canProceed}
+            disabled={!canStartProcessing}
           >
             {qi("wizard.useDefaultsProcess", "Use defaults & process")}
           </Button>

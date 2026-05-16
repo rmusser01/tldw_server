@@ -140,6 +140,13 @@ vi.mock("antd", () => ({
       ))}
     </div>
   ),
+  Alert: ({ message, description, action, ...props }: any) => (
+    <div role="alert" {...props}>
+      <span>{message}</span>
+      {description ? <p>{description}</p> : null}
+      {action}
+    </div>
+  ),
   Tooltip: ({ children }: any) => <>{children}</>,
   Input: Object.assign(
     (props: any) => <input {...props} />,
@@ -317,7 +324,20 @@ const ContextSpy: React.FC = () => {
 const InnerWizardContent: React.FC<{
   onClose: () => void
   isStepVisible?: boolean
-}> = ({ onClose, isStepVisible = true }) => {
+  isOnlineForIngest?: boolean
+  connectionRecoveryMessage?: string
+  isCheckingConnection?: boolean
+  onRetryConnection?: () => void
+  onQuickProcess?: () => void
+}> = ({
+  onClose,
+  isStepVisible = true,
+  isOnlineForIngest = true,
+  connectionRecoveryMessage,
+  isCheckingConnection,
+  onRetryConnection,
+  onQuickProcess,
+}) => {
   const ctx = useIngestWizard()
   const { currentStep } = ctx.state
 
@@ -332,11 +352,26 @@ const InnerWizardContent: React.FC<{
         <span>Processing</span>
         <span>Results</span>
       </nav>
-      {currentStep === 1 && <AddContentStep />}
+      {currentStep === 1 && (
+        <AddContentStep
+          isOnlineForIngest={isOnlineForIngest}
+          connectionRecoveryMessage={connectionRecoveryMessage}
+          isCheckingConnection={isCheckingConnection}
+          onRetryConnection={onRetryConnection}
+          onQuickProcess={onQuickProcess}
+        />
+      )}
       {currentStep === 2 && (
         <WizardConfigureStep isStepVisible={isStepVisible} />
       )}
-      {currentStep === 3 && <ReviewStep />}
+      {currentStep === 3 && (
+        <ReviewStep
+          isOnlineForIngest={isOnlineForIngest}
+          connectionRecoveryMessage={connectionRecoveryMessage}
+          isCheckingConnection={isCheckingConnection}
+          onRetryConnection={onRetryConnection}
+        />
+      )}
       {currentStep === 4 && <ProcessingStep />}
       {currentStep === 5 && <WizardResultsStep onClose={onClose} />}
     </div>
@@ -344,13 +379,32 @@ const InnerWizardContent: React.FC<{
 }
 
 // Final testable wrapper
-const WizardTestHarness: React.FC<{ onClose: () => void }> = ({
+const WizardTestHarness: React.FC<{
+  onClose: () => void
+  isOnlineForIngest?: boolean
+  connectionRecoveryMessage?: string
+  isCheckingConnection?: boolean
+  onRetryConnection?: () => void
+  onQuickProcess?: () => void
+}> = ({
   onClose,
+  isOnlineForIngest,
+  connectionRecoveryMessage,
+  isCheckingConnection,
+  onRetryConnection,
+  onQuickProcess,
 }) => {
   return (
     <IngestWizardProvider>
       <ContextSpy />
-      <InnerWizardContent onClose={onClose} />
+      <InnerWizardContent
+        onClose={onClose}
+        isOnlineForIngest={isOnlineForIngest}
+        connectionRecoveryMessage={connectionRecoveryMessage}
+        isCheckingConnection={isCheckingConnection}
+        onRetryConnection={onRetryConnection}
+        onQuickProcess={onQuickProcess}
+      />
     </IngestWizardProvider>
   )
 }
@@ -453,6 +507,45 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     expect(configureButton).not.toBeDisabled()
   })
 
+  it("Step 1 — blocks quick processing while disconnected and shows recovery", async () => {
+    const user = userEvent.setup()
+    const retryConnection = vi.fn()
+    const onQuickProcess = vi.fn()
+
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        isOnlineForIngest={false}
+        connectionRecoveryMessage="Cannot reach your tldw server. Retry connection from this dialog or open Health & diagnostics."
+        onRetryConnection={retryConnection}
+        onQuickProcess={onQuickProcess}
+      />
+    )
+
+    const textarea = screen.getByPlaceholderText(/https:\/\/example\.com/i)
+    await user.type(textarea, "https://example.com/offline-article")
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+
+    expect(screen.getByText(/server offline/i)).toBeInTheDocument()
+    expect(screen.getByText(/cannot reach your tldw server/i)).toBeInTheDocument()
+
+    const processButton = screen.getByRole("button", {
+      name: /use defaults & process/i,
+    })
+    expect(processButton).toBeDisabled()
+
+    const retryButton = screen.getByRole("button", { name: /retry connection/i })
+    await user.click(retryButton)
+    expect(retryConnection).toHaveBeenCalledTimes(1)
+
+    const configureButton = screen.getByRole("button", {
+      name: /configure 1 items/i,
+    })
+    expect(configureButton).not.toBeDisabled()
+    await user.click(processButton)
+    expect(onQuickProcess).not.toHaveBeenCalled()
+  })
+
   // -------------------------------------------------------------------------
   // Step 1 -> Step 2: Advance to Configure
   // -------------------------------------------------------------------------
@@ -534,6 +627,47 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     // "Start Processing" button should be present
     const startButton = screen.getByText("Start Processing")
     expect(startButton).toBeTruthy()
+  })
+
+  it("Step 3 — blocks final processing while disconnected and allows going back", async () => {
+    const user = userEvent.setup()
+    const retryConnection = vi.fn()
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        isOnlineForIngest={false}
+        connectionRecoveryMessage="Cannot reach your tldw server. Retry connection from this dialog or open Health & diagnostics."
+        onRetryConnection={retryConnection}
+      />
+    )
+
+    const textarea = screen.getByPlaceholderText(/https:\/\/example\.com/i)
+    await user.type(textarea, "https://example.com/review-offline")
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+    await user.click(screen.getByRole("button", { name: /Configure 1 items/i }))
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /standard preset/i })
+      ).toBeTruthy()
+    })
+
+    await user.click(screen.getByText("Next"))
+
+    await waitFor(() => {
+      expect(screen.getByText("Ready to Process")).toBeTruthy()
+    })
+    expect(screen.getByText(/server offline/i)).toBeInTheDocument()
+    expect(screen.getByText(/cannot reach your tldw server/i)).toBeInTheDocument()
+
+    const startButton = screen.getByRole("button", { name: /start processing/i })
+    expect(startButton).toBeDisabled()
+
+    await user.click(screen.getByRole("button", { name: /retry connection/i }))
+    expect(retryConnection).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByRole("button", { name: /back to settings/i }))
+    expect(screen.getByRole("button", { name: /standard preset/i })).toBeTruthy()
   })
 
   // -------------------------------------------------------------------------

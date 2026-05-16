@@ -453,13 +453,13 @@ export const ProcessingStep: React.FC = () => {
             <p className="text-sm font-medium text-text">
               {qi(
                 "processing.banner.title",
-                "Processing your file... This may take a few minutes for large files."
+                "Processing content... This may take a few minutes for large files."
               )}
             </p>
             <p className="mt-0.5 text-xs text-text-muted">
               {qi(
                 "processing.banner.subtitle",
-                "Transcribing and indexing content"
+                "Processing and indexing content"
               )}
             </p>
           </div>
