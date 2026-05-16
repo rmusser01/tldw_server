@@ -38,6 +38,23 @@ const resolveVisibleMobilePanel = (
   return null;
 };
 
+const buildModeSummaryKey = (
+  focusMode: boolean,
+  leftRailVisible: boolean,
+  rightRailVisible: boolean,
+):
+  | "focus"
+  | "both-visible"
+  | "context-hidden"
+  | "runtime-hidden"
+  | "both-hidden" => {
+  if (focusMode) return "focus";
+  if (leftRailVisible && rightRailVisible) return "both-visible";
+  if (!leftRailVisible && rightRailVisible) return "context-hidden";
+  if (leftRailVisible && !rightRailVisible) return "runtime-hidden";
+  return "both-hidden";
+};
+
 export const PlaygroundCockpitShell = ({
   mode,
   onModeChange,
@@ -85,6 +102,36 @@ export const PlaygroundCockpitShell = ({
   const rightRailLabel = rightRailVisible
     ? t("cockpit.hideRuntimeRail", "Hide runtime rail")
     : t("cockpit.showRuntimeRail", "Show runtime rail");
+  const modeSummaryKey = buildModeSummaryKey(
+    focusMode,
+    leftRailVisible,
+    rightRailVisible,
+  );
+  const modeSummary =
+    modeSummaryKey === "focus"
+      ? t(
+          "cockpit.focusModeSummary",
+          "Focus mode hides rails. Chat and composer remain active.",
+        )
+      : modeSummaryKey === "both-visible"
+        ? t(
+            "cockpit.cockpitRailsVisibleSummary",
+            "Context and runtime rails visible.",
+          )
+        : modeSummaryKey === "context-hidden"
+          ? t(
+              "cockpit.contextRailHiddenSummary",
+              "Context rail hidden. Runtime rail visible.",
+            )
+          : modeSummaryKey === "runtime-hidden"
+            ? t(
+                "cockpit.runtimeRailHiddenSummary",
+                "Runtime rail hidden. Context rail visible.",
+              )
+            : t(
+                "cockpit.cockpitRailsHiddenSummary",
+                "Cockpit rails hidden. Status remains visible.",
+              );
   const bodyClassName = focusMode
     ? "flex min-h-0 flex-1 justify-center overflow-hidden"
     : showLeftRail && showRightRail
@@ -112,6 +159,12 @@ export const PlaygroundCockpitShell = ({
             {focusMode
               ? t("cockpit.focusChat", "Focus chat")
               : t("cockpit.chatCockpit", "Chat cockpit")}
+          </p>
+          <p
+            data-testid="playground-cockpit-mode-summary"
+            className="mt-0.5 max-w-[44rem] truncate text-[11px] text-text-muted"
+          >
+            {modeSummary}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">

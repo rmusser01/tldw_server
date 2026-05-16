@@ -18,6 +18,10 @@ export type PlaygroundStatusStripProps = {
   selectedModel: string | null | undefined;
   messageCount: number;
   sessionLabel: string;
+  sessionTitle?: string | null;
+  sessionStatusLabel?: string | null;
+  sessionDetail?: string | null;
+  sessionError?: string | null;
   hasContext: boolean;
   contextSummary?: string[];
   temporaryChat?: boolean;
@@ -41,6 +45,10 @@ export const PlaygroundStatusStrip = ({
   selectedModel,
   messageCount,
   sessionLabel,
+  sessionTitle,
+  sessionStatusLabel,
+  sessionDetail,
+  sessionError,
   hasContext,
   contextSummary = [],
   temporaryChat,
@@ -77,6 +85,22 @@ export const PlaygroundStatusStrip = ({
     isDegraded && !errorMessage
       ? t("cockpit.degradedChatAvailable", "Chat remains available.")
       : null;
+  const normalizedSessionTitle = sessionTitle?.trim() || null;
+  const normalizedSessionStatusLabel = sessionStatusLabel?.trim() || null;
+  const normalizedSessionDetail = sessionDetail?.trim() || null;
+  const normalizedSessionError = sessionError?.trim() || null;
+  const hasSessionDetail =
+    Boolean(normalizedSessionDetail) &&
+    normalizedSessionDetail !== normalizedSessionStatusLabel;
+  const sessionDetailLabel =
+    normalizedSessionError ||
+    (hasSessionDetail ? normalizedSessionDetail : null);
+  const showSessionStatusLabel = Boolean(
+    normalizedSessionStatusLabel &&
+      normalizedSessionStatusLabel !== sessionLabel &&
+      normalizedSessionStatusLabel !== READY_STATE_LABEL &&
+      normalizedSessionStatusLabel !== t("cockpit.idle", "Idle"),
+  );
 
   return (
     <footer
@@ -116,11 +140,28 @@ export const PlaygroundStatusStrip = ({
             : t("cockpit.cockpit", "Cockpit")}
         </span>
         <span className={pillClass}>{sessionLabel}</span>
+        {normalizedSessionTitle ? (
+          <span className={pillClass}>{normalizedSessionTitle}</span>
+        ) : null}
+        {showSessionStatusLabel ? (
+          <span className={pillClass}>{normalizedSessionStatusLabel}</span>
+        ) : null}
         {typeof temporaryChat === "boolean" ? (
           <span className={pillClass}>
             {temporaryChat
               ? t("cockpit.temporary", "Temporary")
               : t("cockpit.saved", "Saved")}
+          </span>
+        ) : null}
+        {sessionDetailLabel ? (
+          <span
+            className={`${pillClass} ${
+              normalizedSessionError
+                ? "border-error/40 bg-error/10 text-error"
+                : ""
+            }`}
+          >
+            {sessionDetailLabel}
           </span>
         ) : null}
         {hasContext ? (

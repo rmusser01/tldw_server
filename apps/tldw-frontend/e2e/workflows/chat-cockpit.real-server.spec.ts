@@ -666,19 +666,32 @@ test.describe('/chat cockpit real-server parity', () => {
 
     await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
+    const modeSummary = page.getByTestId('playground-cockpit-mode-summary');
+    await expect(modeSummary).toHaveText('Context and runtime rails visible.');
+    const cockpitStatus = page.getByRole('status', { name: 'Chat status' });
+    await expect(cockpitStatus).toBeVisible();
+    if (health.body?.status === 'degraded') {
+      await expect(cockpitStatus).toContainText('Degraded');
+    }
     await expect(getDesktopCompositionPreview(page)).toContainText(
       `Scope: ${chatModelSelection.key}`
     );
     await page.getByRole('button', { name: 'Hide context rail' }).click();
     await expect(page.getByTestId('playground-cockpit-left-rail')).toHaveCount(0);
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
+    await expect(modeSummary).toHaveText('Context rail hidden. Runtime rail visible.');
+    await page.getByRole('button', { name: 'Hide runtime rail' }).click();
+    await expect(page.getByTestId('playground-cockpit-left-rail')).toHaveCount(0);
+    await expect(page.getByTestId('playground-cockpit-right-rail')).toHaveCount(0);
+    await expect(modeSummary).toHaveText('Cockpit rails hidden. Status remains visible.');
+    await expect(cockpitStatus).toBeVisible();
     await page.getByRole('button', { name: 'Show context rail' }).click();
     await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
-    await page.getByRole('button', { name: 'Hide runtime rail' }).click();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toHaveCount(0);
-    await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
+    await expect(modeSummary).toHaveText('Runtime rail hidden. Context rail visible.');
     await page.getByRole('button', { name: 'Show runtime rail' }).click();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
+    await expect(modeSummary).toHaveText('Context and runtime rails visible.');
     const contextRail = getDesktopContextRail(page);
     const runtimeInspector = getDesktopRuntimeInspector(page);
     await assertRuntimeProviderSummary(runtimeInspector);
@@ -687,7 +700,6 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(runtimeInspector.getByRole('button', { name: 'Open Model & Chat settings' })).toBeVisible();
     await expect(runtimeInspector.getByRole('button', { name: 'Select character or persona' })).toBeVisible();
     await assertRuntimeMcpRailState(runtimeInspector);
-    const cockpitStatus = page.getByRole('status', { name: 'Chat status' });
     const webSearchControl = contextRail.getByRole('button', { name: 'Web search', exact: true });
     const initialWebSearchState = await webSearchControl.getAttribute('aria-pressed');
     expect(['true', 'false']).toContain(initialWebSearchState);
@@ -769,6 +781,9 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
       'data-mode',
       'focus'
+    );
+    await expect(modeSummary).toHaveText(
+      'Focus mode hides rails. Chat and composer remain active.'
     );
     await expect(page.getByTestId('playground-cockpit-left-rail')).toHaveCount(0);
     await expect(page.getByTestId('playground-cockpit-right-rail')).toHaveCount(0);

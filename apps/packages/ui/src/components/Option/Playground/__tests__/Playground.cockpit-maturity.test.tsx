@@ -204,6 +204,52 @@ describe("Playground mature cockpit surfaces", () => {
     expect(openContext).toHaveBeenCalledTimes(1)
   })
 
+  it("keeps critical warnings visible when both cockpit rails are collapsed", () => {
+    render(
+      <PlaygroundCockpitShell
+        mode="cockpit"
+        onModeChange={vi.fn()}
+        leftRailVisible={false}
+        rightRailVisible={false}
+        leftRail={<div>Context controls</div>}
+        rightRail={<div>Runtime controls</div>}
+        statusStrip={
+          <PlaygroundStatusStrip
+            mode="cockpit"
+            streaming={false}
+            selectedProvider="openai"
+            selectedModel="gpt-4.1-mini"
+            messageCount={2}
+            sessionLabel="Server chat"
+            sessionTitle="Archived investigation"
+            sessionStatusLabel="Load failed"
+            sessionError="Conversation no longer exists"
+            hasContext={false}
+            degradedChecks={["Chacha notes unavailable"]}
+            temporaryChat={false}
+          />
+        }
+      >
+        <div>Chat transcript</div>
+      </PlaygroundCockpitShell>
+    )
+
+    expect(screen.queryByTestId("playground-cockpit-left-rail")).toBeNull()
+    expect(screen.queryByTestId("playground-cockpit-right-rail")).toBeNull()
+    expect(screen.getByTestId("playground-cockpit-mode-summary")).toHaveTextContent(
+      "Cockpit rails hidden. Status remains visible."
+    )
+
+    const status = screen.getByRole("status", { name: "Chat status" })
+    expect(within(status).getByText("Load failed")).toBeInTheDocument()
+    expect(
+      within(status).getByText("Conversation no longer exists")
+    ).toBeInTheDocument()
+    expect(
+      within(status).getByText("Chacha notes unavailable")
+    ).toBeInTheDocument()
+  })
+
   it("uses a controlled mobile cockpit panel instead of independent details", () => {
     const onMobilePanelChange = vi.fn()
 

@@ -92,4 +92,37 @@ describe("PlaygroundStatusStrip first-slice state", () => {
     fireEvent.click(screen.getByRole("button", { name: "Review Model & Chat settings" }));
     expect(openModelSettings).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps server-session failures visible when cockpit rails are hidden", () => {
+    const openModelSettings = vi.fn();
+
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider="openai"
+        selectedModel="gpt-4.1-mini"
+        messageCount={5}
+        sessionLabel="Server chat"
+        sessionTitle="Archived investigation"
+        sessionStatusLabel="Load failed"
+        sessionDetail="Failed to load conversation"
+        sessionError="Conversation no longer exists"
+        hasContext={false}
+        contextSummary={[]}
+        temporaryChat={false}
+        degradedChecks={["Chacha notes unavailable"]}
+        errorMessage={null}
+        onOpenModelSettings={openModelSettings}
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Server chat");
+    expect(status).toHaveTextContent("Archived investigation");
+    expect(status).toHaveTextContent("Load failed");
+    expect(status).toHaveTextContent("Conversation no longer exists");
+    expect(status).toHaveTextContent("Chacha notes unavailable");
+    expect(status).toHaveTextContent("Chat remains available.");
+  });
 });

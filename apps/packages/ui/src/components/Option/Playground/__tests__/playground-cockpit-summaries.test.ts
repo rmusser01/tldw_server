@@ -418,4 +418,58 @@ describe("playground cockpit summary helpers", () => {
       error: "Conversation no longer exists",
     });
   });
+
+  it("summarizes local unsaved and server-backed loading and loaded sessions", () => {
+    expect(
+      buildCockpitSessionSummary({
+        temporaryChat: false,
+        serverChatId: null,
+        historyId: null,
+      }),
+    ).toEqual({
+      label: "Local chat",
+      title: null,
+      detail: "No saved history yet",
+      status: "idle",
+      statusLabel: "Idle",
+      error: null,
+    });
+
+    expect(
+      buildCockpitSessionSummary({
+        temporaryChat: false,
+        serverChatId: "server-chat-1",
+        historyId: "history-1",
+        serverChatTitle: "Research follow-up",
+        serverChatLoadState: "loading",
+      }),
+    ).toEqual({
+      label: "Server chat",
+      title: "Research follow-up",
+      detail: "Loading conversation",
+      status: "loading",
+      statusLabel: "Loading conversation",
+      error: null,
+    });
+
+    expect(
+      buildCockpitSessionSummary({
+        temporaryChat: false,
+        serverChatId: "server-chat-1",
+        historyId: "history-1",
+        serverChatTitle: "Research follow-up",
+        serverChatLoadState: "loaded",
+        serverChatTopic: "MCP planning",
+        serverChatState: "Recovered",
+        serverChatSource: "Imported",
+      }),
+    ).toEqual({
+      label: "Server chat",
+      title: "Research follow-up",
+      detail: "MCP planning - Recovered - Imported",
+      status: "loaded",
+      statusLabel: "Ready",
+      error: null,
+    });
+  });
 });

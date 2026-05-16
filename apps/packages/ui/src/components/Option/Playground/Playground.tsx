@@ -2280,6 +2280,10 @@ export const Playground = () => {
       selectedModel={providerRouteSummary.selectedModel}
       messageCount={cockpitMessageCount}
       sessionLabel={sessionLabel}
+      sessionTitle={sessionSummary.title}
+      sessionStatusLabel={sessionSummary.statusLabel}
+      sessionDetail={sessionSummary.detail}
+      sessionError={sessionSummary.error}
       hasContext={hasChatContext}
       contextSummary={statusContextSummary}
       temporaryChat={temporaryChat}
