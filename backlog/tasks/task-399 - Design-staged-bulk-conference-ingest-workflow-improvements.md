@@ -37,7 +37,7 @@ Create a critique-hardened staged design for PR-sized improvements that take Qui
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Drafted and repeatedly hardening-reviewed the staged bulk conference ingest workflow design. The latest review pass fixed PR 5/PR 6 sequencing around scoped Knowledge QA, separated server capability checks from extension client/platform readiness, normalized `submit_failed` collection states, and made retry actions target retryable failures. Awaiting user review before implementation planning.
+Drafted and repeatedly hardening-reviewed the staged bulk conference ingest workflow design. The final review pass clarified that planned collection items are created before job submission, completed media IDs resolve into those collection items, `submit_failed` carries metadata/error/export behavior consistently, PR 4/5 cover all-retry controls, and PR 8 owns selection-based retry. Awaiting user approval before implementation planning.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
