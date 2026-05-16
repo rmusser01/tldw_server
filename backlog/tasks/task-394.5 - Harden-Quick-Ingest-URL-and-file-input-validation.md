@@ -1,9 +1,10 @@
 ---
 id: TASK-394.5
 title: Harden Quick Ingest URL and file input validation
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-16 00:44'
+updated_date: '2026-05-16 03:19'
 labels:
   - quick-ingest
   - ux
@@ -29,6 +30,12 @@ Execute implementation plan Task 5: strengthen URL/text/file input validation, d
 - [ ] #2 Duplicate or unsupported content is detected or messaged consistently with backend limits
 - [ ] #3 File-size handling truthfully reflects the implemented browser memory/upload strategy
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Started Task 5 after completing TASK-394.4. Scope: normalized URL dedupe, mixed valid/invalid paste summary, file support copy/accept alignment, and truthful client-buffered file-size limits per the approved plan.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
