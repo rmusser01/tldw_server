@@ -281,4 +281,36 @@ describe("Playground mature cockpit surfaces", () => {
     fireEvent.click(within(mobilePanels).getByRole("tab", { name: "Runtime" }))
     expect(onMobilePanelChange).toHaveBeenCalledWith("runtime")
   })
+
+  it("keeps mobile cockpit panel state explicit while preserving the draft surface", () => {
+    render(
+      <PlaygroundCockpitShell
+        mode="cockpit"
+        onModeChange={vi.fn()}
+        leftRailVisible
+        rightRailVisible
+        mobilePanel={"context" satisfies PlaygroundCockpitMobilePanel}
+        leftRail={<div>Context controls</div>}
+        rightRail={<div>Runtime controls</div>}
+        statusStrip={<div>Ready</div>}
+      >
+        <label htmlFor="mobile-draft">Message</label>
+        <textarea id="mobile-draft" data-testid="mobile-draft" defaultValue="Draft stays here" />
+      </PlaygroundCockpitShell>
+    )
+
+    const mobilePanels = screen.getByTestId("playground-cockpit-mobile-rails")
+    expect(mobilePanels).toHaveAttribute("data-mobile-panel", "context")
+    expect(screen.getByTestId("mobile-draft")).toHaveValue("Draft stays here")
+    expect(
+      within(mobilePanels).getByTestId("playground-cockpit-mobile-panel-summary")
+    ).toHaveTextContent("Context panel active. Composer draft remains available below.")
+
+    expect(within(mobilePanels).getByRole("tab", { name: "Context" })).toHaveClass(
+      "min-h-[44px]"
+    )
+    expect(within(mobilePanels).getByRole("tab", { name: "Runtime" })).toHaveClass(
+      "min-h-[44px]"
+    )
+  })
 })

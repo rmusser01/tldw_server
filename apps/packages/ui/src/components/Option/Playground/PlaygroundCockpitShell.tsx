@@ -96,6 +96,21 @@ export const PlaygroundCockpitShell = ({
     leftRailVisible,
     rightRailVisible,
   );
+  const mobilePanelSummary =
+    visibleMobilePanel === "context"
+      ? t(
+          "cockpit.mobileContextPanelSummary",
+          "Context panel active. Composer draft remains available below.",
+        )
+      : visibleMobilePanel === "runtime"
+        ? t(
+            "cockpit.mobileRuntimePanelSummary",
+            "Runtime panel active. Composer draft remains available below.",
+          )
+        : t(
+            "cockpit.mobilePanelsHiddenSummary",
+            "Cockpit panels hidden. Composer draft remains available below.",
+          );
   const leftRailLabel = leftRailVisible
     ? t("cockpit.hideContextRail", "Hide context rail")
     : t("cockpit.showContextRail", "Show context rail");
@@ -238,6 +253,7 @@ export const PlaygroundCockpitShell = ({
       {!focusMode && (leftRailVisible || rightRailVisible) && (
         <div
           data-testid="playground-cockpit-mobile-rails"
+          data-mobile-panel={visibleMobilePanel ?? "none"}
           className="grid shrink-0 grid-cols-1 gap-2 border-b border-border bg-surface2/40 p-2 text-xs lg:hidden"
         >
           <div
@@ -252,7 +268,7 @@ export const PlaygroundCockpitShell = ({
                 aria-selected={visibleMobilePanel === "context"}
                 aria-controls="playground-mobile-context-panel"
                 onClick={() => setMobilePanel("context")}
-                className={`rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+                className={`min-h-[44px] rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
                   visibleMobilePanel === "context"
                     ? "bg-bg text-text shadow-sm"
                     : "text-text-muted hover:bg-bg"
@@ -268,7 +284,7 @@ export const PlaygroundCockpitShell = ({
                 aria-selected={visibleMobilePanel === "runtime"}
                 aria-controls="playground-mobile-runtime-panel"
                 onClick={() => setMobilePanel("runtime")}
-                className={`rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+                className={`min-h-[44px] rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
                   visibleMobilePanel === "runtime"
                     ? "bg-bg text-text shadow-sm"
                     : "text-text-muted hover:bg-bg"
@@ -278,10 +294,18 @@ export const PlaygroundCockpitShell = ({
               </button>
             ) : null}
           </div>
+          <p
+            id="playground-mobile-panel-summary"
+            data-testid="playground-cockpit-mobile-panel-summary"
+            className="rounded-md border border-border bg-bg px-2.5 py-2 text-[11px] leading-4 text-text-muted"
+          >
+            {mobilePanelSummary}
+          </p>
           {visibleMobilePanel === "context" ? (
             <section
               id="playground-mobile-context-panel"
               role="tabpanel"
+              aria-describedby="playground-mobile-panel-summary"
               aria-label={t("cockpit.context", "Context")}
               className="max-h-[42vh] overflow-y-auto rounded-md border border-border bg-surface p-2"
             >
@@ -292,6 +316,7 @@ export const PlaygroundCockpitShell = ({
             <section
               id="playground-mobile-runtime-panel"
               role="tabpanel"
+              aria-describedby="playground-mobile-panel-summary"
               aria-label={t("cockpit.runtime", "Runtime")}
               className="max-h-[42vh] overflow-y-auto rounded-md border border-border bg-surface p-2"
             >

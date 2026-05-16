@@ -301,6 +301,21 @@ export const PromptSelect: React.FC<Props> = ({
     }
   }, [dropdownOpen])
 
+  useEffect(() => {
+    if (!dropdownOpen) return
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      setDropdownOpen(false)
+      restorePromptSelectFocus()
+    }
+
+    window.addEventListener("keydown", handleEscape, true)
+    return () => {
+      window.removeEventListener("keydown", handleEscape, true)
+    }
+  }, [dropdownOpen, restorePromptSelectFocus])
+
   return (
     <>
       {data && (
@@ -333,7 +348,13 @@ export const PromptSelect: React.FC<Props> = ({
                     onChange={(e) => setSearchText(e.target.value)}
                     allowClear
                     size="small"
-                    onKeyDown={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        setDropdownOpen(false)
+                        restorePromptSelectFocus()
+                      }
+                      e.stopPropagation()
+                    }}
                   />
                 </div>
                 {menu}

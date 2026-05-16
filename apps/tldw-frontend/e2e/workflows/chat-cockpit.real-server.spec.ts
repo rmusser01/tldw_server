@@ -1048,6 +1048,18 @@ test.describe('/chat cockpit real-server parity', () => {
     await assertNoBlockingServerDialog(page);
     await assertCoreComposerControls(page, { mobile: true });
 
+    const mobileDraft = `mobile cockpit draft ${Date.now()}`;
+    const expectMobileDraftPreserved = async () => {
+      await expect(page.getByTestId('chat-input')).toHaveValue(mobileDraft);
+    };
+    const expectMobileDraftReachable = async () => {
+      await expectMobileDraftPreserved();
+      const draftBox = await page.getByTestId('chat-input').boundingBox();
+      expect(draftBox?.width ?? 0).toBeGreaterThanOrEqual(180);
+    };
+    await page.getByTestId('chat-input').fill(mobileDraft);
+    await expectMobileDraftReachable();
+
     await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
       'data-mode',
       'focus'
@@ -1061,6 +1073,11 @@ test.describe('/chat cockpit real-server parity', () => {
     );
     const mobileRails = page.getByTestId('playground-cockpit-mobile-rails');
     await expect(mobileRails).toBeVisible();
+    await expect(mobileRails).toHaveAttribute('data-mobile-panel', 'context');
+    await expect(mobileRails.getByTestId('playground-cockpit-mobile-panel-summary')).toHaveText(
+      'Context panel active. Composer draft remains available below.'
+    );
+    await expectMobileDraftPreserved();
     await expect(mobileRails.getByRole('tab', { name: 'Context' })).toHaveAttribute(
       'aria-selected',
       'true'
@@ -1076,11 +1093,18 @@ test.describe('/chat cockpit real-server parity', () => {
     await page.getByRole('button', { name: 'Hide context rail' }).click();
     await expect(mobileRails.getByRole('tab', { name: 'Context' })).toHaveCount(0);
     await expect(mobileRails.getByRole('tab', { name: 'Runtime' })).toBeVisible();
+    await expect(mobileRails).toHaveAttribute('data-mobile-panel', 'runtime');
+    await expect(mobileRails.getByTestId('playground-cockpit-mobile-panel-summary')).toHaveText(
+      'Runtime panel active. Composer draft remains available below.'
+    );
+    await expectMobileDraftPreserved();
     await page.getByRole('button', { name: 'Show context rail' }).click();
     const contextTab = mobileRails.getByRole('tab', { name: 'Context' });
     await expect(contextTab).toBeVisible();
     await contextTab.click();
     await expect(contextTab).toHaveAttribute('aria-selected', 'true');
+    await expect(mobileRails).toHaveAttribute('data-mobile-panel', 'context');
+    await expectMobileDraftPreserved();
     const contextPanel = mobileRails.getByRole('tabpanel', { name: 'Context' });
     await expect(contextPanel.getByRole('button', { name: 'Open Search & Context' })).toBeVisible();
     const mobileWebSearchControl = contextPanel.getByRole('button', {
@@ -1094,30 +1118,59 @@ test.describe('/chat cockpit real-server parity', () => {
       'aria-pressed',
       initialMobileWebSearchState === 'true' ? 'false' : 'true'
     );
+    await mobileWebSearchControl.click();
+    await expect(mobileWebSearchControl).toHaveAttribute(
+      'aria-pressed',
+      initialMobileWebSearchState || 'false'
+    );
+    await expectMobileDraftPreserved();
     await contextPanel.getByRole('button', { name: 'Open Search & Context' }).click();
     await expect(page.getByRole('heading', { name: /Knowledge Search/i })).toBeVisible();
     await closeSearchContextIfOpen(page);
+    await expectMobileDraftPreserved();
     await contextPanel.getByRole('button', { name: /Select prompt|Select a prompt/i }).click();
-    await expect(page.getByPlaceholder('Search prompts...')).toBeVisible();
+    const promptSearch = page.getByPlaceholder('Search prompts...').first();
+    await expect(promptSearch).toBeVisible();
     await page.keyboard.press('Escape');
+    await expect(promptSearch).toBeHidden();
     await expect(page.getByTestId('chat-input')).toBeVisible();
+    await expectMobileDraftReachable();
     const runtimeTab = mobileRails.getByRole('tab', { name: 'Runtime' });
     await runtimeTab.click();
     await expect(runtimeTab).toHaveAttribute('aria-selected', 'true');
+    await expect(mobileRails).toHaveAttribute('data-mobile-panel', 'runtime');
+    await expect(mobileRails.getByTestId('playground-cockpit-mobile-panel-summary')).toHaveText(
+      'Runtime panel active. Composer draft remains available below.'
+    );
+    await expectMobileDraftPreserved();
     const runtimePanel = mobileRails.getByRole('tabpanel', { name: 'Runtime' });
     await assertRuntimeProviderSummary(runtimePanel);
     await expect(runtimePanel.getByText('Scoped settings')).toBeVisible();
     await expect(runtimePanel.getByRole('heading', { name: 'Tools' })).toBeVisible();
-    await expect(runtimePanel.getByRole('button', { name: 'Open Model & Chat settings' })).toBeVisible();
+    const mobileModelSettingsTrigger = runtimePanel.getByRole('button', {
+      name: 'Open Model & Chat settings',
+    });
+    await expect(mobileModelSettingsTrigger).toBeVisible();
     await expect(runtimePanel.getByRole('button', { name: 'Select character or persona' })).toBeVisible();
     await expect(runtimePanel.getByRole('button', { name: 'Configure MCP tools' })).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath('chat-cockpit-mobile-runtime.png'),
       fullPage: true,
     });
+    await mobileModelSettingsTrigger.click();
+    const modelSettingsDialog = page.getByRole('dialog', {
+      name: 'Current Chat Model Settings',
+    });
+    await expect(modelSettingsDialog).toBeVisible();
+    await expect(modelSettingsDialog.getByText(/API \/ model/i).first()).toBeVisible();
+    await modelSettingsDialog.getByRole('button', { name: 'Close' }).click();
+    await expect(modelSettingsDialog).toBeHidden();
+    await expect(mobileModelSettingsTrigger).toBeFocused({ timeout: 5_000 });
+    await expectMobileDraftPreserved();
     await runtimePanel.getByRole('button', { name: 'Select character or persona' }).click();
     await expect(page.getByRole('tab', { name: 'Characters' })).toBeVisible();
     await page.keyboard.press('Escape');
+    await expectMobileDraftPreserved();
     await runtimePanel.getByRole('button', { name: 'Configure MCP tools' }).click();
     const mcpSettingsDialog = page.getByRole('dialog', {
       name: 'MCP tool settings',
@@ -1128,6 +1181,11 @@ test.describe('/chat cockpit real-server parity', () => {
       .getByRole('button', { name: 'Close' })
       .click();
     await expect(mcpSettingsDialog).toBeHidden();
+    await expectMobileDraftReachable();
+    await page.screenshot({
+      path: testInfo.outputPath('chat-cockpit-mobile-active-draft.png'),
+      fullPage: true,
+    });
 
     await page.getByRole('button', { name: 'Enter focus chat' }).click();
     await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
@@ -1136,10 +1194,18 @@ test.describe('/chat cockpit real-server parity', () => {
     );
     await expect(page.getByTestId('playground-cockpit-mobile-rails')).toHaveCount(0);
     await assertCoreComposerControls(page, { mobile: true, composerOnly: true });
+    await expectMobileDraftReachable();
     await page.screenshot({
       path: testInfo.outputPath('chat-cockpit-mobile-focus.png'),
       fullPage: true,
     });
+    await page.getByRole('button', { name: 'Show cockpit panels' }).click();
+    await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
+      'data-mode',
+      'cockpit'
+    );
+    await expect(mobileRails).toHaveAttribute('data-mobile-panel', 'runtime');
+    await expectMobileDraftPreserved();
   });
 
   test('selects and clears a real disposable character through the runtime rail', async ({

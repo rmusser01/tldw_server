@@ -4973,7 +4973,13 @@ export const PlaygroundForm = ({
                         const composerTextareaNode = (
                           <div className="relative">
                             {replyTargetNode}
-                            <div className="flex items-end gap-2">
+                            <div
+                              className={
+                                isMobileViewport
+                                  ? "grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2"
+                                  : "flex items-end gap-2"
+                              }
+                            >
                               <button
                                 type="button"
                                 data-testid="composer-options-toggle"
@@ -5019,7 +5025,13 @@ export const PlaygroundForm = ({
                                   aria-hidden="true"
                                 />
                               </button>
-                              <div className="min-w-0 flex-1">
+                              <div
+                                className={
+                                  isMobileViewport
+                                    ? "min-w-0"
+                                    : "min-w-0 flex-1"
+                                }
+                              >
                                 {wrapComposerProfile(
                                   "composer-textarea",
                                   <ComposerTextarea
@@ -5081,7 +5093,11 @@ export const PlaygroundForm = ({
                               </div>
                               <div
                                 data-testid="composer-inline-send-control"
-                                className="flex shrink-0 items-end self-end"
+                                className={
+                                  isMobileViewport
+                                    ? "col-span-2 flex justify-end self-end"
+                                    : "flex shrink-0 items-end self-end"
+                                }
                               >
                                 {sendControl}
                               </div>
