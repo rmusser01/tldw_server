@@ -211,6 +211,44 @@ describe("LlamacppRuntimePanel", () => {
     expect(screen.getByText("Rerank")).toBeTruthy()
   })
 
+  it("uses profile modalities when runtime modalities are empty", () => {
+    render(
+      <LlamacppRuntimePanel
+        profiles={[
+          {
+            ...profiles[0],
+            profile_id: "profile-modalities",
+            name: "Profile modalities",
+            capabilities: {},
+            modalities: {
+              input: ["text", "image"],
+              output: ["text"]
+            }
+          }
+        ]}
+        runtimes={[
+          {
+            ...runtimes[0],
+            profile_id: "profile-modalities",
+            model_id: "gguf:profile-modalities",
+            model_path: "/models/profile-modalities.gguf",
+            modalities: {}
+          }
+        ]}
+        loading={false}
+        actionProfileId={null}
+        onRefresh={vi.fn()}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        onPause={vi.fn()}
+        onResume={vi.fn()}
+        onUseInChat={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText("Vision input")).toBeTruthy()
+  })
+
   it("renders runtime load errors through the design-system alert primitive", () => {
     render(
       <LlamacppRuntimePanel

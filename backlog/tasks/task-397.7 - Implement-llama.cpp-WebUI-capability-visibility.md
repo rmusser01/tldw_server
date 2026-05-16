@@ -4,16 +4,15 @@ title: Implement llama.cpp WebUI capability visibility
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-16 20:48'
+updated_date: 2026-05-16 21:45
 labels:
-  - llamacpp
-  - webui
-  - admin
+- llamacpp
+- webui
+- admin
 dependencies: []
 documentation:
-  - Docs/superpowers/specs/2026-05-16-llamacpp-managed-runtime-roadmap-design.md
-  - >-
-    Docs/superpowers/plans/2026-05-16-llamacpp-model-family-mmproj-profile-wiring-plan.md
+- Docs/superpowers/specs/2026-05-16-llamacpp-managed-runtime-roadmap-design.md
+- Docs/superpowers/plans/2026-05-16-llamacpp-model-family-mmproj-profile-wiring-plan.md
 parent_task_id: TASK-397
 priority: high
 ---
@@ -36,12 +35,17 @@ Implement Task 4 from the llama.cpp model-family/mmproj profile wiring plan: sur
 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented the display-only WebUI capability visibility slice. Added optional response-only profile/runtime capability, modality, capability warning, and mmproj display fields to the llama.cpp admin TS types while excluding those response-only fields from create/update request types. Updated LlamacppRuntimePanel to render compact Vision input, Embeddings, Rerank, and mmproj tags from profile/runtime capability metadata, mmproj display/path/model IDs, and merged profile/runtime capability warnings with existing runtime warnings. Added regression coverage for managed profile capability and projector state visibility.
+
+PR review follow-up: Qodo reported two actionable findings on PR #1799: narrow the capability/modalities map types to known optional keys, and merge runtime/profile modalities so an empty runtime modalities object does not suppress profile-derived capability tags. Reopening TASK-397.7 for the minimal review-fix patch.
+
+PR review fix complete: narrowed llama.cpp capability/modalities metadata to known optional keys and merged profile/runtime modalities so an empty runtime modalities object no longer suppresses profile-derived capability tags. Added focused regression coverage for the fallback case.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Llama.cpp Admin runtime rows now surface managed-profile capabilities and multimodal projector state without adding editor controls. Verification: watched the new runtime-panel test fail on missing Vision input display, then pass after implementation; final focused Vitest suite passed with 23 tests across runtime/assets/admin page specs; git diff --check passed. Package-wide tsc --noEmit still fails on existing unrelated baseline type debt and did not report touched llama.cpp runtime/type files. Bandit was not applicable because this slice only touched frontend TypeScript and Backlog task files. Attempted a temporary Vite/Playwright visual preview, but the preview harness hung before producing a useful screenshot; temporary files/processes were cleaned up.
+PR review update: addressed both Qodo findings on PR #1799. Verified the new runtime modality fallback test fails before the merge fix and passes after; focused Admin llama.cpp Vitest suite passes with 24 tests. Full UI tsc --noEmit still fails on existing baseline errors outside the touched llama.cpp files. PR-style git diff --check origin/dev...HEAD passes; two-dot origin/dev..HEAD reports unrelated base-drift whitespace in Watchlists history and is not representative of the PR diff. Bandit remains not applicable because this follow-up only touched frontend TypeScript and Backlog task metadata.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

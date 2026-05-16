@@ -153,8 +153,10 @@ export type LlamacppProfileMode =
   | "rerank"
   | "server_generic"
 
-export type LlamacppCapabilityMap = Record<string, boolean>
-export type LlamacppModalities = Record<string, string[]>
+export type LlamacppCapabilityKey = "chat" | "vision" | "embeddings" | "rerank"
+export type LlamacppModalityDirection = "input" | "output"
+export type LlamacppCapabilityMap = Partial<Record<LlamacppCapabilityKey, boolean>>
+export type LlamacppModalities = Partial<Record<LlamacppModalityDirection, string[]>>
 
 export type LlamacppPortPolicy = "explicit" | "autoselect"
 

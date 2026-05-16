@@ -98,7 +98,10 @@ const capabilityTags = (row: RuntimeRow, projector: string | null) => {
     ...(row.profile?.capabilities || {}),
     ...(row.runtime?.capabilities || {})
   }
-  const modalities = row.runtime?.modalities || row.profile?.modalities || {}
+  const modalities = {
+    ...(row.profile?.modalities || {}),
+    ...(row.runtime?.modalities || {})
+  }
   const inputModalities = modalities.input || []
   const outputModalities = modalities.output || []
   const mode = row.profile?.mode
