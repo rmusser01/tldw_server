@@ -51,6 +51,26 @@ class LlamaCppProfile(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class LlamaCppRuntime(BaseModel):
+    """Observed runtime state for one managed llama.cpp profile."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile_id: str
+    state: LlamaCppRuntimeState
+    pid: int | None = None
+    host: str | None = None
+    port: int | None = Field(default=None, ge=1, le=65535)
+    model_id: str | None = None
+    model_path: str | None = None
+    started_at: str | None = None
+    stopped_at: str | None = None
+    exit_code: int | None = None
+    log_file: str | None = None
+    command: list[str] = Field(default_factory=list)
+    message: str | None = None
+
+
 class LlamaCppProfileStoreError(RuntimeError):
     """Base error for managed llama.cpp profile persistence."""
 
