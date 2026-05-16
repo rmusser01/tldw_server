@@ -123,10 +123,13 @@ persist provider output.
 Portable archive results then pass through
 `build_provider_archive_import_preview_handoff()`. That handoff validates the
 normalized archive metadata and returns an MCP resource retrieval descriptor for
-the next intake step. It does not create preview rows, write archive files,
-enqueue Jobs, commit imports, or activate packs; a later resource-retrieval
-adapter must materialize a local archive path before using the existing
-import-preview job payload.
+the next intake step. `materialize_provider_archive_import_preview_handoff()`
+then accepts the ready descriptor plus an injected authenticated resource
+reader, writes bounded bytes into the local import-preview staging area,
+verifies the provider checksum, and returns the existing local-archive-path
+import-preview job payload. These helpers do not create preview rows, enqueue
+Jobs, commit imports, activate packs, change renderer support, or expose raw
+provider payloads in diagnostics.
 
 ```json
 {
@@ -204,13 +207,16 @@ Use this when the provider can produce a `.tldw-persona-vpack` archive.
 
 Handoff:
 
-1. tldw retrieves the MCP resource through an authenticated MCP client path.
-2. tldw runs the existing archive import preview flow.
-3. Preview records warnings, blockers, conflicts, quota estimates, renderer
+1. tldw builds a review-only handoff descriptor from the normalized provider
+   envelope.
+2. tldw materializes the MCP resource through an authenticated injected reader
+   into local import-preview staging, enforcing size and checksum validation.
+3. tldw runs the existing archive import preview flow.
+4. Preview records warnings, blockers, conflicts, quota estimates, renderer
    diagnostics, and proposed commit plan.
-4. Commit creates or replaces a reviewed draft only when the preview is
+5. Commit creates or replaces a reviewed draft only when the preview is
    eligible and required choices are supplied.
-5. Activation remains separate.
+6. Activation remains separate.
 
 ### Generated Candidate
 
@@ -401,7 +407,9 @@ Recommended sequence:
    into an MCP resource retrieval request without writing assets or enqueueing
    Jobs.
 4. Portable archive intake: retrieve a provider archive resource and enqueue the
-   existing import-preview job after a local archive path exists.
+   existing import-preview job after a local archive path exists. The backend
+   materialization helper for this path exists, but endpoint/worker orchestration
+   remains a separate slice.
 5. Generated-candidate intake: retrieve provider assets, validate metadata, and
    create a reviewed candidate for an existing draft.
 6. Persona Garden provider review UI: show provider offers, diagnostics,
