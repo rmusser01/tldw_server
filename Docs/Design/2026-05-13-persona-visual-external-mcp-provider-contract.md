@@ -120,6 +120,14 @@ activation. The helper is review-only: it returns sanitized metadata and
 machine-readable blockers or warnings, but it does not execute providers or
 persist provider output.
 
+Portable archive results then pass through
+`build_provider_archive_import_preview_handoff()`. That handoff validates the
+normalized archive metadata and returns an MCP resource retrieval descriptor for
+the next intake step. It does not create preview rows, write archive files,
+enqueue Jobs, commit imports, or activate packs; a later resource-retrieval
+adapter must materialize a local archive path before using the existing
+import-preview job payload.
+
 ```json
 {
   "contract_version": 1,
@@ -389,13 +397,16 @@ Recommended sequence:
 1. Contract docs and examples: this slice.
 2. Provider discovery/intake adapter: list provider offers and normalize result
    envelopes without persisting assets.
-3. Portable archive intake: retrieve a provider archive resource and enqueue the
-   existing import-preview job.
-4. Generated-candidate intake: retrieve provider assets, validate metadata, and
+3. Portable archive handoff: validate a normalized provider archive descriptor
+   into an MCP resource retrieval request without writing assets or enqueueing
+   Jobs.
+4. Portable archive intake: retrieve a provider archive resource and enqueue the
+   existing import-preview job after a local archive path exists.
+5. Generated-candidate intake: retrieve provider assets, validate metadata, and
    create a reviewed candidate for an existing draft.
-5. Persona Garden provider review UI: show provider offers, diagnostics,
+6. Persona Garden provider review UI: show provider offers, diagnostics,
    provenance, and handoff actions.
-6. Optional Live2D provider fixture only after the Live2D runtime spike has its
+7. Optional Live2D provider fixture only after the Live2D runtime spike has its
    own feature gate and fallback rules.
 
 ## Non-Goals

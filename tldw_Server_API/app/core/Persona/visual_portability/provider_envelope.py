@@ -14,6 +14,8 @@ from collections.abc import Mapping, Sequence
 from itertools import islice
 from typing import Any
 
+from tldw_Server_API.app.core.Persona.visual_jobs import PERSONA_VISUAL_PACK_IMPORT_PREVIEW_JOB_TYPE
+
 
 PROVIDER_CONTRACT_VERSION = 1
 CANONICAL_PERSONA_VISUAL_ARCHIVE_MEDIA_TYPE = "application/vnd.tldw.persona.visual-pack+zip"
@@ -43,6 +45,7 @@ _SECRET_VALUE_RE = re.compile(
     r"bearer\s+[A-Za-z0-9._-]{8,}|api[_-]?key|secret|token|session[_-]?cookie)",
     re.IGNORECASE,
 )
+_SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 _UNSAFE_PATH_RE = re.compile(
     r"(^/|^[A-Za-z]:[\\/]|\.\.|~[/\\]|file://|localhost|127\.0\.0\.1|::1)",
     re.IGNORECASE,
@@ -146,6 +149,66 @@ def normalize_provider_result_envelope(raw: Any) -> dict[str, Any]:
     return normalized
 
 
+def build_provider_archive_import_preview_handoff(
+    raw: Any,
+    *,
+    user_id: str,
+    request_id: str,
+    preview_id: str,
+    target_persona_id: str | None = None,
+) -> dict[str, Any]:
+    """Build a review-only MCP resource handoff for portable archive import preview.
+
+    The returned object is intentionally not a Jobs payload: provider archives
+    still need an authenticated MCP resource retrieval step that materializes a
+    local archive path before the existing import-preview worker can run.
+    """
+    normalized = normalize_provider_result_envelope(raw)
+    blockers = list(normalized["blockers"])
+    archive = None
+
+    if normalized.get("result_type") != "portable_archive":
+        blockers.append(
+            _diagnostic(
+                "unsupported_archive_handoff_result_type",
+                "Only portable archive provider output can be handed to import preview.",
+            )
+        )
+    else:
+        archive = _provider_archive_from_normalized_envelope(normalized, blockers)
+    if blockers:
+        archive = None
+
+    normalized_blockers = _dedupe_diagnostics(blockers)
+    safe_target_persona_id = (
+        _safe_text(target_persona_id, max_length=128)
+        if target_persona_id
+        else None
+    )
+    return {
+        "ready": not normalized_blockers,
+        "operation": "import_preview",
+        "job_type": PERSONA_VISUAL_PACK_IMPORT_PREVIEW_JOB_TYPE,
+        "request": {
+            "user_id": _safe_text(user_id, max_length=128),
+            "preview_id": _safe_text(preview_id, max_length=128),
+            "request_id": _safe_text(request_id, max_length=128),
+            "target_persona_id": safe_target_persona_id,
+        },
+        "archive": archive,
+        "provider": normalized.get("provider"),
+        "pack": normalized.get("pack"),
+        "provenance": normalized.get("provenance"),
+        "diagnostics": {
+            "status": "ready_for_import_preview_handoff" if not normalized_blockers else "blocked",
+            "blockers": normalized_blockers,
+            "warnings": list(normalized.get("warnings") or []),
+        },
+        "blockers": normalized_blockers,
+        "warnings": list(normalized.get("warnings") or []),
+    }
+
+
 def _validate_portable_archive_payload(
     *,
     payload: Any,
@@ -170,6 +233,55 @@ def _validate_portable_archive_payload(
                 "Portable archive media type must be a supported zip payload type.",
             )
         )
+
+
+def _provider_archive_from_normalized_envelope(
+    normalized: Mapping[str, Any],
+    blockers: list[dict[str, str]],
+) -> dict[str, str] | None:
+    """Return safe portable archive source metadata from a normalized envelope."""
+    payload = normalized.get("payload")
+    if not isinstance(payload, Mapping):
+        blockers.append(_diagnostic("archive_payload_missing", "Portable archive payload is required."))
+        return None
+    archive = payload.get("archive")
+    if not isinstance(archive, Mapping):
+        blockers.append(_diagnostic("archive_payload_missing", "Portable archive payload is required."))
+        return None
+
+    resource_uri = _safe_text(archive.get("mcp_resource_uri"), max_length=500)
+    archive_sha256 = _safe_text(archive.get("sha256"), max_length=80).lower()
+    media_type = _safe_text(archive.get("media_type"), max_length=120)
+
+    if not resource_uri or not resource_uri.startswith(_ALLOWED_URI_SCHEME_PREFIXES):
+        blockers.append(
+            _diagnostic(
+                "archive_resource_uri_missing",
+                "Portable archive MCP resource URI is required.",
+            )
+        )
+    if not _SHA256_RE.fullmatch(archive_sha256):
+        blockers.append(
+            _diagnostic(
+                "archive_sha256_invalid",
+                "Portable archive SHA-256 checksum is required.",
+            )
+        )
+    if media_type not in COMPATIBLE_PERSONA_VISUAL_ARCHIVE_MEDIA_TYPES:
+        blockers.append(
+            _diagnostic(
+                "unsupported_archive_media_type",
+                "Portable archive media type must be a supported zip payload type.",
+            )
+        )
+    if blockers:
+        return None
+    return {
+        "source_type": "mcp_resource",
+        "mcp_resource_uri": resource_uri,
+        "sha256": archive_sha256,
+        "media_type": media_type,
+    }
 
 
 def _normalize_diagnostics(value: Any) -> tuple[dict[str, Any], bool]:
