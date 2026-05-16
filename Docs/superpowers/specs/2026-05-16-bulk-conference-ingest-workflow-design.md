@@ -74,6 +74,8 @@ The end-to-end workflow should become:
 
 Playlist preflight must not enqueue jobs, download media, create media rows, mutate collections, or write user library state. It may create only short-lived preflight/cache records needed to return metadata and support pagination or retry. Any durable user-visible mutation starts only after the user confirms ingest.
 
+Preflight records, if persisted, must be owner-scoped, TTL-bound, and safe to abandon. They must not store secrets, browser cookies, or downloaded media artifacts. Large or slow preflights must support partial results, timeout recovery, or pagination instead of blocking the modal behind one long request.
+
 Required verification:
 
 - API tests prove preflight does not create media ingest jobs.
@@ -86,6 +88,15 @@ Required verification:
 The conference collection source of truth must be server-owned or stored in durable per-user media metadata before any workflow depends on it. The existing client-side `media:collections:v1` state can be migrated, bridged, or left as a local convenience, but it cannot be the authoritative model for conference ingest.
 
 PR 2 must begin with a collection-contract inventory and end with a chosen contract. Later PRs must use that contract and cannot create a second grouping model.
+
+The inventory must explicitly evaluate:
+
+- existing Media DB metadata, keywords, or association tables
+- existing `CollectionsDatabase` `content_items`, `collection_tags`, `job_id`, and `run_id` behavior
+- the current client-side Media collection model
+- whether a small new media collection table is simpler than overloading an adjacent concept
+
+Free-form tags alone are not a valid collection identity unless paired with a stable hidden collection ID and membership metadata. If the existing `CollectionsDatabase` content item path is reused, PR 2 must account for its URL/hash upsert semantics so planned items or duplicate URLs do not overwrite unrelated saved content.
 
 ### Metadata and Job Sequencing
 
@@ -100,6 +111,8 @@ Rules:
 - A skipped existing item may join the collection only when the user explicitly includes existing duplicates.
 - A failed or cancelled item keeps enough metadata and source URL for retry or export.
 - Synchronous fallback must preserve the same collection metadata semantics even if status tracking is less durable.
+- Submit failures are distinct from processing failures. If job creation fails before processing starts, the item remains retryable as `submit_failed` or an equivalent planned-item state.
+- Retry actions must be idempotent by collection item and retry attempt. Retrying failed items must not duplicate completed items or silently overwrite successful media rows.
 
 ### Knowledge QA Scope
 
@@ -112,6 +125,21 @@ Rules:
 - The QA surface must show readiness counts, such as "24 of 34 talks searchable."
 - If no items are ready, the scoped QA action is disabled or opens an explanatory empty state.
 - Summaries may be displayed in collection review, but retrieval scope must be explicit about whether it searches transcript chunks, summaries, or both.
+- Collection scoping must be enforced by the backend retrieval request, not only by client-side filtering. If the existing Knowledge QA API cannot constrain by media IDs or collection ID, PR 6 must add or reuse a backend contract before exposing scoped QA as ready.
+
+### Capability and Degraded-Mode Contract
+
+The existing frontend `hasMedia` capability is not granular enough for this workflow. The UI needs separate capability signals, or an equivalent endpoint/method, for:
+
+- metadata-only playlist preflight
+- media ingest job submission
+- media ingest worker availability
+- ingest job event streaming
+- durable media collection support
+- Knowledge QA collection or media-ID scoping
+- extension-side playlist capture handoff
+
+Endpoint existence alone is not enough for worker-backed durability. The UI must distinguish "endpoint exists but worker disabled" from "jobs are ready" and must keep destructive or misleading actions disabled when the required capability is absent.
 
 ## Data Concepts
 
@@ -129,6 +157,9 @@ Fields:
 - `item_count`
 - `items[]`
 - `warnings[]`
+- `status`: `pending`, `partial`, `ready`, `failed`, or `expired`
+- `expires_at`
+- `next_page_token`, when large playlist results are paginated
 - `created_at`
 
 Item fields:
@@ -170,7 +201,9 @@ Fields:
 Collection item fields:
 
 - `collection_item_id` or `planned_item_id`
-- `status`: `planned`, `processing`, `completed`, `skipped_existing`, `failed`, or `cancelled`
+- `status`: `planned`, `processing`, `completed`, `skipped_existing`, `submit_failed`, `failed`, or `cancelled`
+- `retry_attempt`
+- `idempotency_key`
 - `media_id`, present after the item is resolved to an existing or newly created media record
 - `source_url`
 - `normalized_source_id`
@@ -214,8 +247,9 @@ Fields:
 - `collection_id`
 - `source_preflight_id`
 - `status`: `queued`, `running`, `completed`, `completed_with_errors`, `cancelled`, `failed`
+- `capability_mode`: `jobs`, `synchronous_fallback`, or `unavailable`
 - `job_ids[]`
-- `counts`: queued, running, succeeded, skipped, failed, cancelled
+- `counts`: queued, running, succeeded, skipped, submit_failed, failed, cancelled
 - `started_at`
 - `updated_at`
 - `completed_at`
@@ -231,6 +265,7 @@ Scope:
 
 - Detect YouTube playlist and watch-with-list URLs in Quick Ingest.
 - Add a server-owned metadata-only preflight contract around existing playlist expansion capability.
+- Add or reuse a granular server capability for playlist preflight availability.
 - Show expanded item list with count, title, duration, URL, position, thumbnail when available, and duplicate status.
 - Let users deselect/remove items before continuing.
 - Add basic duplicate indicators:
@@ -238,6 +273,7 @@ Scope:
   - duplicate within this preflight
   - unknown when lookup fails
 - Add item-count guardrails and partial metadata failure handling.
+- Support loading, timeout, partial-result, and expired-preflight states.
 
 Out of scope:
 
@@ -254,6 +290,7 @@ Acceptance criteria:
 - Duplicate-in-batch and already-ingested states are visible when known.
 - Preflight does not enqueue jobs, download videos, create media records, or mutate collections.
 - Cancelling or closing preflight leaves the user's library unchanged.
+- When preflight capability is unavailable, the UI falls back to the current single/video URL behavior with clear copy instead of implying playlist expansion will happen in the UI.
 - Single URL and file ingest flows remain unchanged.
 
 Risk:
@@ -268,6 +305,7 @@ Scope:
 
 - Inventory existing collection/grouping models and choose one server-owned or durable media-metadata-backed source of truth.
 - Define or reuse the chosen media collection/grouping contract.
+- Document why tag-only grouping, localStorage grouping, vector-store collections, prompt collections, and unrelated keyword collections are accepted or rejected for this workflow.
 - Store collection name, conference name, source playlist URL, shared tags, event date/year, and membership.
 - Represent planned, processing, completed, skipped-existing, failed, and cancelled item states.
 - Link collection items to media records as they are created or explicitly resolved from duplicates.
@@ -284,8 +322,10 @@ Acceptance criteria:
 
 - The selected collection source of truth is documented with rejected alternatives.
 - A conference collection survives refresh and is visible across WebUI and extension contexts.
+- A collection can be fetched by stable collection ID with ordered membership and per-item status.
 - Completed collection membership is based on stable media IDs, while planned, failed, and cancelled items remain represented by durable planned/source item IDs.
 - Planned, failed, and cancelled items retain source URL and metadata needed for retry or export.
+- Planned collection items do not collide with or overwrite existing saved `content_items` or media rows.
 - Existing one-off Media usage is not forced into collections.
 - The plan for localStorage Media collections is explicit: migrate, ignore, or bridge.
 
@@ -341,6 +381,7 @@ Scope:
 
 - Submit batch ingest through media ingest jobs when server capabilities indicate support.
 - Bind job submission to the existing collection/planned-item state so status updates can resolve planned items to final media IDs.
+- Use collection item IDs or equivalent idempotency keys when submitting and retrying jobs.
 - Show a persistent ingest-run panel/page with:
   - batch status
   - per-item job status
@@ -365,6 +406,7 @@ Acceptance criteria:
 - Refreshing during a jobs-backed 34-item run restores the run state.
 - Failed items can be exported and retried.
 - Job status updates preserve collection membership and item metadata across success, skip, failure, cancellation, and retry.
+- Re-running retry for the same failed item is idempotent and does not enqueue duplicate work for completed items.
 - Users can tell whether the run is durable or using a less recoverable fallback.
 - One-off ingest remains possible.
 
@@ -382,6 +424,7 @@ Scope:
 - Show grouped results:
   - succeeded
   - skipped/existing
+  - submit failed
   - failed
   - cancelled
 - Primary action: open the created conference collection.
@@ -404,6 +447,7 @@ Acceptance criteria:
 - The user can recover failed URLs without copying from logs.
 - Duplicate/skipped items do not disappear from the user's mental model.
 - Results are understandable for mixed success/failure batches.
+- Submit failures are separated from processing failures so users know whether retry will create new jobs or rerun failed processing.
 
 Risk:
 
@@ -428,6 +472,7 @@ Scope:
 - Add a V1 "compare selected talks" action limited to selected talk metadata plus available summaries/transcript excerpts. It should not create a new chat mode or broad synthesis workspace in this PR.
 - Add Knowledge QA scoped to the collection.
 - Show Knowledge QA readiness counts and explain which talks are searchable.
+- Add or reuse backend-enforced media-ID or collection-ID filtering for scoped Knowledge QA before exposing the action.
 - Preserve access to individual media detail, transcript, summary, notes, and chat actions.
 
 Out of scope:
@@ -441,6 +486,7 @@ Acceptance criteria:
 - A user can move through the conference talks without returning to global Media search.
 - A user can see which talks are ready for review and which failed or are still processing.
 - Knowledge QA can be launched scoped to ready media IDs in the conference collection.
+- Scoped QA is enforced by the request contract, not only by UI filtering.
 - If only some talks are ready, the QA surface states the ready/not-ready counts.
 - Selection-based comparison works for a small set of talks using metadata and available summary/transcript snippets only.
 
@@ -458,6 +504,7 @@ Scope:
 - Show an "Import playlist to tldw" action in the extension sidepanel or relevant quick action surface.
 - Pass URL and detected context to the shared Quick Ingest preflight.
 - Keep expansion, metadata editing, and ingest submission in shared UI/services.
+- Avoid new broad host permissions unless a separate permission review proves they are required.
 
 Out of scope:
 
@@ -470,6 +517,7 @@ Acceptance criteria:
 - The same playlist URL produces the same preflight state from WebUI paste and extension capture.
 - Extension users can start the conference workflow without manually copying 34 URLs.
 - Unsupported pages do not show misleading playlist import actions.
+- Extension capture works from the active tab URL/context handoff without duplicating playlist expansion logic.
 
 Risk:
 
@@ -548,10 +596,12 @@ Risk:
 - Preserve ordinary one-file and one-URL Quick Ingest behavior.
 - Keep shared implementation in `apps/packages/ui/src` unless platform-specific browser APIs are required.
 - Use existing backend/client API helpers and OpenAPI guard patterns.
+- Add granular capability checks before enabling playlist preflight, jobs-backed durability, durable collection actions, scoped Knowledge QA, or extension capture.
 - Prefer server-owned persistent state for anything that must survive refresh, device changes, or WebUI/extension transitions.
 - Keep localStorage-only state limited to temporary UI preferences or draft state.
 - Avoid hidden downloads during preflight.
 - Avoid storing secrets or auth cookies in job payloads.
+- Avoid broad extension host permission expansion unless reviewed separately.
 - Make degraded modes visible.
 
 ## Testing Strategy
@@ -561,9 +611,10 @@ Each PR should include focused tests matching its blast radius.
 Recommended coverage:
 
 - Unit tests for YouTube URL classification and preflight normalization.
-- API tests for metadata-only preflight, dedupe lookup, collection creation, and job status behavior.
+- API tests for granular capabilities, metadata-only preflight, dedupe lookup, collection creation, idempotent retry, and job status behavior.
 - UI tests for Quick Ingest playlist preflight, batch metadata, results handoff, and collection review.
 - Extension tests for playlist context detection and shared preflight handoff.
+- Knowledge QA tests proving collection/media-ID scope is sent to and enforced by the backend contract.
 - Browser-observed QA for:
   - one normal URL
   - one playlist URL
@@ -576,6 +627,7 @@ Recommended coverage:
 
 - Gate playlist preflight behind a server capability until the endpoint is stable.
 - Gate jobs-backed run tracking behind existing media-ingest job capability checks.
+- Treat worker availability as separate from endpoint presence.
 - Keep synchronous ingest fallback for deployments without media ingest workers.
 - Prefer progressive rollout by route/surface rather than a single all-or-nothing flag.
 
@@ -589,6 +641,8 @@ Recommended coverage:
 - Where should the collection review page live: Media, Knowledge, or a dedicated Collections route?
 - What exact server capability field should communicate media ingest worker availability?
 - Should scoped Knowledge QA search transcript chunks only in V1, or transcript chunks plus generated summaries when available?
+- Should durable conference collections reuse `CollectionsDatabase` with a new stable collection identity, extend Media DB metadata, or add a narrow media collection table?
+- What TTL is acceptable for abandoned playlist preflight records?
 
 ## Definition of Done for the Program
 
