@@ -50,6 +50,8 @@ _ALLOWED_STARTER_RESPONSE_ASSET_ROLES = frozenset(
         "generated_candidate",
     }
 )
+_ALLOWED_STARTER_COMPLEXITY_TIERS = frozenset({"basic", "intermediate", "intricate"})
+_ALLOWED_STARTER_PRODUCTION_STATUSES = frozenset({"scaffold", "art_ready"})
 
 
 class PersonaVisualStarterCatalogError(Exception):
@@ -299,6 +301,11 @@ class PersonaVisualStarterCatalogService:
             "total_bytes": sum(len(asset.content) for asset in starter.assets),
             "tags": list(starter.tags),
             "license_label": starter.license_label,
+            "complexity_tier": starter.complexity_tier,
+            "production_status": starter.production_status,
+            "neutral_anchor_required": bool(starter.neutral_anchor_required),
+            "expected_asset_groups": list(starter.expected_asset_groups),
+            "animation_coverage_notes": list(starter.animation_coverage_notes),
         }
 
     @staticmethod
@@ -327,6 +334,41 @@ class PersonaVisualStarterCatalogService:
                     "renderer_type": renderer_type,
                     "manifest_renderer_type": manifest_renderer_type,
                 },
+            )
+
+        complexity_tier = str(starter.complexity_tier or "").strip()
+        if complexity_tier not in _ALLOWED_STARTER_COMPLEXITY_TIERS:
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter complexity_tier is not supported.",
+                details={
+                    "starter_pack_id": starter.id,
+                    "complexity_tier": complexity_tier,
+                },
+            )
+        production_status = str(starter.production_status or "").strip()
+        if production_status not in _ALLOWED_STARTER_PRODUCTION_STATUSES:
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter production_status is not supported.",
+                details={
+                    "starter_pack_id": starter.id,
+                    "production_status": production_status,
+                },
+            )
+        if starter.neutral_anchor_required and "neutral_anchor" not in set(
+            starter.expected_asset_groups
+        ):
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter neutral-anchor metadata is inconsistent.",
+                details={"starter_pack_id": starter.id},
+            )
+        if not starter.animation_coverage_notes:
+            raise PersonaVisualStarterCatalogError(
+                "invalid_starter_fixture",
+                "Bundled starter animation coverage notes are required.",
+                details={"starter_pack_id": starter.id},
             )
 
         asset_keys: set[str] = set()

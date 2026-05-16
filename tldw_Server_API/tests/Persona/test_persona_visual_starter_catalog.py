@@ -104,6 +104,15 @@ def test_starter_catalog_lists_bundled_scaffold_packs(
     assert all("scaffold" in starter["description"].lower() for starter in starters)
     assert any("tier:intricate" in starter["tags"] for starter in starters)
     assert any("tool.notes_search" in starter["states_offered"] for starter in starters)
+    assert {starter["production_status"] for starter in starters} == {"scaffold"}
+    assert {starter["complexity_tier"] for starter in starters} == {
+        "basic",
+        "intermediate",
+        "intricate",
+    }
+    assert all(starter["neutral_anchor_required"] for starter in starters)
+    assert all("neutral_anchor" in starter["expected_asset_groups"] for starter in starters)
+    assert all(starter["animation_coverage_notes"] for starter in starters)
 
 
 def test_get_starter_pack_returns_isolated_manifest_preview(
@@ -112,10 +121,37 @@ def test_get_starter_pack_returns_isolated_manifest_preview(
     service = PersonaVisualStarterCatalogService(db_instance)
     first = service.get_starter_pack(DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID)
     first["manifest"]["states"]["idle"]["animation_id"] = "mutated"
+    first["expected_asset_groups"].append("mutated")
 
     second = service.get_starter_pack(DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID)
 
     assert second["manifest"]["states"]["idle"]["animation_id"] == "idle-loop"
+    assert "mutated" not in second["expected_asset_groups"]
+
+
+@pytest.mark.parametrize(
+    ("starter_pack_id", "complexity_tier", "required_group"),
+    (
+        ("research-buddy-basic", "basic", "required_state_loops"),
+        ("study-desk-intermediate", "intermediate", "static_talking_reaction_sheet"),
+        ("lofi-study-intricate", "intricate", "animation_atlas"),
+    ),
+)
+def test_starter_pack_reports_production_readiness_metadata(
+    db_instance: CharactersRAGDB,
+    starter_pack_id: str,
+    complexity_tier: str,
+    required_group: str,
+) -> None:
+    service = PersonaVisualStarterCatalogService(db_instance)
+
+    detail = service.get_starter_pack(starter_pack_id)
+
+    assert detail["production_status"] == "scaffold"
+    assert detail["complexity_tier"] == complexity_tier
+    assert detail["neutral_anchor_required"] is True
+    assert required_group in detail["expected_asset_groups"]
+    assert all("scaffold" in note.lower() for note in detail["animation_coverage_notes"])
 
 
 def test_get_starter_pack_accepts_legacy_research_buddy_alias(
