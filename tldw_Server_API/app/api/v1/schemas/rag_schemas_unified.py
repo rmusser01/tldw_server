@@ -1649,6 +1649,51 @@ class UnifiedRAGRequest(BaseModel):
             return self
 
 
+KnowledgeSourceIndexStatus = Literal[
+    "ready",
+    "indexing",
+    "stale",
+    "empty",
+    "unavailable",
+    "error",
+    "unknown",
+]
+KnowledgeSourceEmbeddingStatus = Literal[
+    "ready",
+    "indexing",
+    "missing",
+    "unavailable",
+    "not_applicable",
+    "error",
+    "unknown",
+]
+
+
+class KnowledgeSourceHealthEntry(BaseModel):
+    """Safe pre-query readiness details for a canonical Knowledge QA source."""
+
+    source_id: str
+    label: str
+    available: bool
+    searchable: bool
+    item_count: Optional[int] = None
+    indexed_count: Optional[int] = None
+    last_updated: Optional[str] = None
+    last_indexed: Optional[str] = None
+    index_status: KnowledgeSourceIndexStatus = "unknown"
+    embedding_status: KnowledgeSourceEmbeddingStatus = "unknown"
+    disabled_reason: Optional[str] = None
+    workspace_scoped: bool = False
+    hidden_by_default: bool = False
+    privacy_note: Optional[str] = None
+
+
+class KnowledgeSourceHealthResponse(BaseModel):
+    """Read-only source health response for Knowledge QA clients."""
+
+    sources: list[KnowledgeSourceHealthEntry]
+
+
 class UnifiedRAGResponse(BaseModel):
     """Unified response structure for RAG queries."""
 

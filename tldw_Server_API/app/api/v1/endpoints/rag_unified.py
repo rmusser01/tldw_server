@@ -29,6 +29,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 # Schemas
 from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import (
     ImplicitFeedbackEvent,
+    KnowledgeSourceHealthResponse,
     UnifiedBatchRequest,
     UnifiedBatchResponse,
     UnifiedRAGRequest,
@@ -67,6 +68,7 @@ from tldw_Server_API.app.core.RAG.rag_service.response_mapping import (
     rag_result_from_unified_search_result,
     rag_result_to_response,
 )
+from tldw_Server_API.app.core.RAG.rag_service.source_health import build_source_health_entries
 from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import stream_rag_events
 from tldw_Server_API.app.core.config import get_config_value
 
@@ -977,6 +979,62 @@ async def list_vlm_backends():
     except Exception:  # noqa: BLE001 - optional registry failures should not break endpoint
         backends = {}
     return {"backends": backends}
+
+
+@router.get(
+    "/source-health",
+    response_model=KnowledgeSourceHealthResponse,
+    summary="Knowledge source health",
+    description="Read-only pre-query source readiness for Knowledge QA.",
+    dependencies=[
+        Depends(check_rate_limit),
+        Depends(rbac_rate_limit("rag.search")),
+        Depends(RequirePermission(MEDIA_READ)),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="rag.search", count_as="call")),
+    ],
+)
+async def source_health_endpoint(
+    current_user: User = Depends(get_request_user),
+    media_db: Any = Depends(get_media_db_for_user),
+    chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    prompts_db: PromptsDatabase = Depends(get_prompts_db_for_user),
+) -> KnowledgeSourceHealthResponse:
+    """Return safe pre-query readiness for canonical Knowledge QA sources."""
+    db_paths: dict[str, str] = {}
+    media_db_path = getattr(media_db, "db_path", None) if media_db is not None else None
+    if media_db_path:
+        db_paths["media_db"] = str(media_db_path)
+
+    chacha_db_path = getattr(chacha_db, "db_path", None) if chacha_db is not None else None
+    if chacha_db_path:
+        chacha_path = str(chacha_db_path)
+        db_paths["notes_db"] = chacha_path
+        db_paths["character_cards_db"] = chacha_path
+        db_paths["world_books_db"] = chacha_path
+        db_paths["chat_dictionaries_db"] = chacha_path
+
+    prompts_db_path = None
+    if prompts_db is not None:
+        prompts_db_path = getattr(prompts_db, "db_path_str", None) or getattr(prompts_db, "db_path", None)
+    if prompts_db_path:
+        db_paths["prompts_db"] = str(prompts_db_path)
+
+    kanban_db_path = _resolve_kanban_db_path(current_user)
+    if kanban_db_path:
+        db_paths["kanban_db"] = str(kanban_db_path)
+
+    retriever = MultiDatabaseRetriever(
+        db_paths=db_paths,
+        user_id=_resolve_implicit_feedback_user_id(None, current_user) or "0",
+        media_db=media_db,
+        chacha_db=chacha_db,
+        prompts_db=prompts_db,
+    )
+    return KnowledgeSourceHealthResponse(
+        sources=build_source_health_entries(
+            configured_sources=set(retriever.retrievers.keys())
+        )
+    )
 
 
 @router.post(
