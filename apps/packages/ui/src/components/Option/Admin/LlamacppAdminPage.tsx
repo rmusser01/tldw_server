@@ -10,6 +10,8 @@ import type {
   LlamacppHardwareSnapshotResponse,
   LlamacppInventoryResponse,
   LlamacppProfile,
+  LlamacppProfileCreateRequest,
+  LlamacppProfileUpdateRequest,
   LlamacppRuntime
 } from "@/types/llamacpp-admin"
 import {
@@ -26,6 +28,7 @@ import {
 import { LlamacppAssetsPanel } from "./LlamacppAssetsPanel"
 import { LlamacppInventoryPanel } from "./LlamacppInventoryPanel"
 import { LlamacppLaunchPanel } from "./LlamacppLaunchPanel"
+import { LlamacppProfilesPanel } from "./LlamacppProfilesPanel"
 import { LlamacppReadinessPanel } from "./LlamacppReadinessPanel"
 import { LlamacppRuntimePanel } from "./LlamacppRuntimePanel"
 
@@ -150,6 +153,8 @@ export const LlamacppAdminPage: React.FC = () => {
   const [chatActionLoading, setChatActionLoading] = React.useState(false)
   const [chatNotice, setChatNotice] = React.useState<string | null>(null)
   const [chatWarnings, setChatWarnings] = React.useState<string[]>([])
+  const [profileActionId, setProfileActionId] = React.useState<string | null>(null)
+  const [profileError, setProfileError] = React.useState<string | null>(null)
   const [runtimeActionProfileId, setRuntimeActionProfileId] = React.useState<string | null>(null)
 
   const markAdminGuardFromError = React.useCallback((error: unknown) => {
@@ -377,6 +382,65 @@ export const LlamacppAdminPage: React.FC = () => {
       return false
     } finally {
       setImportingAssetFolder(false)
+    }
+  }
+
+  const handleCreateProfile = async (
+    payload: LlamacppProfileCreateRequest
+  ): Promise<boolean> => {
+    try {
+      setProfileActionId("__create__")
+      setProfileError(null)
+      await tldwClient.createLlamacppProfile(payload)
+      await loadRuntimePlane()
+      return true
+    } catch (error: unknown) {
+      setProfileError(
+        sanitizeAdminErrorMessage(error, "Failed to create llama.cpp profile.")
+      )
+      markAdminGuardFromError(error)
+      return false
+    } finally {
+      setProfileActionId(null)
+    }
+  }
+
+  const handleUpdateProfile = async (
+    profileId: string,
+    payload: LlamacppProfileUpdateRequest
+  ): Promise<boolean> => {
+    try {
+      setProfileActionId(profileId)
+      setProfileError(null)
+      await tldwClient.updateLlamacppProfile(profileId, payload)
+      await loadRuntimePlane()
+      return true
+    } catch (error: unknown) {
+      setProfileError(
+        sanitizeAdminErrorMessage(error, "Failed to update llama.cpp profile.")
+      )
+      markAdminGuardFromError(error)
+      return false
+    } finally {
+      setProfileActionId(null)
+    }
+  }
+
+  const handleDeleteProfile = async (profileId: string): Promise<boolean> => {
+    try {
+      setProfileActionId(profileId)
+      setProfileError(null)
+      await tldwClient.deleteLlamacppProfile(profileId)
+      await loadRuntimePlane()
+      return true
+    } catch (error: unknown) {
+      setProfileError(
+        sanitizeAdminErrorMessage(error, "Failed to delete llama.cpp profile.")
+      )
+      markAdminGuardFromError(error)
+      return false
+    } finally {
+      setProfileActionId(null)
     }
   }
 
@@ -671,24 +735,6 @@ export const LlamacppAdminPage: React.FC = () => {
               loading={loadingConfig}
             />
 
-            {!runtimeUnsupported && (
-              <LlamacppRuntimePanel
-                profiles={runtimeProfiles}
-                runtimes={runtimeInstances}
-                loading={loadingRuntimes}
-                error={runtimeError}
-                actionProfileId={runtimeActionProfileId}
-                onRefresh={loadRuntimePlane}
-                onStart={handleStartProfile}
-                onStop={handleStopProfile}
-                onPause={handlePauseProfile}
-                onResume={handleResumeProfile}
-                onUseInChat={(profileId) => {
-                  void handleUseProfileInChat(profileId)
-                }}
-              />
-            )}
-
             <LlamacppAssetsPanel
               assets={assets}
               loading={loadingAssets}
@@ -699,6 +745,38 @@ export const LlamacppAdminPage: React.FC = () => {
               onImportFolder={handleImportAssetFolder}
               onReload={loadAssets}
             />
+
+            {!runtimeUnsupported && (
+              <>
+                <LlamacppProfilesPanel
+                  profiles={runtimeProfiles}
+                  assets={assets}
+                  loading={loadingRuntimes}
+                  savingProfileId={profileActionId}
+                  error={profileError}
+                  onRefresh={loadRuntimePlane}
+                  onCreate={handleCreateProfile}
+                  onUpdate={handleUpdateProfile}
+                  onDelete={handleDeleteProfile}
+                />
+
+                <LlamacppRuntimePanel
+                  profiles={runtimeProfiles}
+                  runtimes={runtimeInstances}
+                  loading={loadingRuntimes}
+                  error={runtimeError}
+                  actionProfileId={runtimeActionProfileId}
+                  onRefresh={loadRuntimePlane}
+                  onStart={handleStartProfile}
+                  onStop={handleStopProfile}
+                  onPause={handlePauseProfile}
+                  onResume={handleResumeProfile}
+                  onUseInChat={(profileId) => {
+                    void handleUseProfileInChat(profileId)
+                  }}
+                />
+              </>
+            )}
 
             <LlamacppInventoryPanel
               inventory={inventory}
