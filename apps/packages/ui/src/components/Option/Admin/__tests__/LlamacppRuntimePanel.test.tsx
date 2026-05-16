@@ -138,6 +138,79 @@ describe("LlamacppRuntimePanel", () => {
     expect(onStart).not.toHaveBeenCalled()
   })
 
+  it("shows managed profile capability and projector state", () => {
+    render(
+      <LlamacppRuntimePanel
+        profiles={[
+          {
+            ...profiles[1],
+            enabled: true,
+            capabilities: {
+              chat: true,
+              vision: true,
+              embeddings: false,
+              rerank: false
+            },
+            modalities: {
+              input: ["text", "image"],
+              output: ["text"]
+            },
+            capability_warnings: ["Projector metadata is filename-derived."],
+            mmproj_display_name: "mmproj-chat.gguf"
+          },
+          {
+            ...profiles[0],
+            profile_id: "embed",
+            name: "Embedding runtime",
+            mode: "embedding" as const,
+            capabilities: {
+              chat: false,
+              vision: false,
+              embeddings: true,
+              rerank: false
+            },
+            modalities: {
+              input: ["text"],
+              output: ["embedding"]
+            }
+          },
+          {
+            ...profiles[0],
+            profile_id: "rerank",
+            name: "Rerank runtime",
+            mode: "rerank" as const,
+            capabilities: {
+              chat: false,
+              vision: false,
+              embeddings: false,
+              rerank: true
+            },
+            modalities: {
+              input: ["text"],
+              output: ["score"]
+            }
+          }
+        ]}
+        runtimes={[]}
+        loading={false}
+        actionProfileId={null}
+        onRefresh={vi.fn()}
+        onStart={vi.fn()}
+        onStop={vi.fn()}
+        onPause={vi.fn()}
+        onResume={vi.fn()}
+        onUseInChat={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText("vision")).toBeTruthy()
+    expect(screen.getByText("Vision input")).toBeTruthy()
+    expect(screen.getByText("mmproj-chat.gguf")).toBeTruthy()
+    expect(screen.getByText("Projector metadata is filename-derived.")).toBeTruthy()
+    expect(screen.getByText("Embeddings")).toBeTruthy()
+    expect(screen.getByText("Rerank")).toBeTruthy()
+  })
+
   it("renders runtime load errors through the design-system alert primitive", () => {
     render(
       <LlamacppRuntimePanel

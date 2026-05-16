@@ -75,6 +75,67 @@ const modelLabel = (row: RuntimeRow) =>
   row.profile?.model_id ||
   "No model selected"
 
+const uniqueStrings = (values: Array<string | null | undefined>) =>
+  Array.from(new Set(values.map((value) => value?.trim()).filter(Boolean) as string[]))
+
+const basename = (value?: string | null) => {
+  const trimmed = value?.trim()
+  if (!trimmed) return null
+  return trimmed.split(/[\\/]/).filter(Boolean).pop() || trimmed
+}
+
+const projectorLabel = (row: RuntimeRow) =>
+  row.runtime?.mmproj_display_name ||
+  row.profile?.mmproj_display_name ||
+  basename(row.runtime?.mmproj_path) ||
+  basename(row.profile?.mmproj_path) ||
+  row.runtime?.mmproj_model_id ||
+  row.profile?.mmproj_model_id ||
+  null
+
+const capabilityTags = (row: RuntimeRow, projector: string | null) => {
+  const capabilities = {
+    ...(row.profile?.capabilities || {}),
+    ...(row.runtime?.capabilities || {})
+  }
+  const modalities = row.runtime?.modalities || row.profile?.modalities || {}
+  const inputModalities = modalities.input || []
+  const outputModalities = modalities.output || []
+  const mode = row.profile?.mode
+  const tags: Array<{ label: string; color: string }> = []
+
+  if (
+    capabilities.vision ||
+    inputModalities.includes("image") ||
+    (mode === "vision" && projector)
+  ) {
+    tags.push({ label: "Vision input", color: "purple" })
+  }
+  if (
+    capabilities.embeddings ||
+    outputModalities.includes("embedding") ||
+    mode === "embedding"
+  ) {
+    tags.push({ label: "Embeddings", color: "geekblue" })
+  }
+  if (
+    capabilities.rerank ||
+    outputModalities.includes("score") ||
+    mode === "rerank"
+  ) {
+    tags.push({ label: "Rerank", color: "cyan" })
+  }
+
+  return tags
+}
+
+const capabilityWarnings = (row: RuntimeRow) =>
+  uniqueStrings([
+    ...(row.profile?.capability_warnings || []),
+    ...(row.runtime?.capability_warnings || []),
+    ...(row.runtime?.warnings || [])
+  ])
+
 export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
   profiles,
   runtimes,
@@ -145,7 +206,9 @@ export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
               const isStarting = state === "starting"
               const isPaused = state === "paused"
               const isBusy = actionProfileId === row.profileId
-              const warnings = row.runtime?.warnings || []
+              const projector = projectorLabel(row)
+              const warnings = capabilityWarnings(row)
+              const tags = capabilityTags(row, projector)
               const actions: React.ReactNode[] = []
 
               if (isRunning) {
@@ -232,6 +295,12 @@ export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
                       <Text strong>{label}</Text>
                       <Tag color={stateColor(state)}>{state}</Tag>
                       {row.profile?.mode && <Tag>{row.profile.mode}</Tag>}
+                      {tags.map((tag) => (
+                        <Tag key={tag.label} color={tag.color}>
+                          {tag.label}
+                        </Tag>
+                      ))}
+                      {projector && <Tag color="purple">mmproj</Tag>}
                       {row.profile?.enabled === false && <Tag color="orange">disabled</Tag>}
                       {row.runtime?.pid && <Tag>pid {row.runtime.pid}</Tag>}
                       {port && <Tag>{port}</Tag>}
@@ -247,6 +316,11 @@ export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
                       <Text type="secondary" className="break-all">
                         {modelLabel(row)}
                       </Text>
+                      {projector && (
+                        <Text type="secondary" className="break-all">
+                          {projector}
+                        </Text>
+                      )}
                     </Space>
 
                     {warnings.length > 0 && (
