@@ -374,14 +374,26 @@ class PersonaVisualCandidateReviewRequest(BaseModel):
 
 
 class PersonaVisualGenerationRequest(BaseModel):
+    request_id: str | None = Field(default=None, min_length=1, max_length=120)
     prompt: str = Field(min_length=1, max_length=4000)
     target_state: str | None = Field(default=None, max_length=80)
     backend: str | None = Field(default=None, max_length=80)
+    starter_pack_id: str | None = Field(default=None, min_length=1, max_length=120)
+    recipe_output: str | None = Field(default=None, min_length=1, max_length=320)
+
+    @field_validator("request_id", "starter_pack_id", "recipe_output", "target_state", "backend")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
 
 
 class PersonaVisualGenerationJobResponse(BaseModel):
     job_id: str
     status: str | None = None
+    request_id: str | None = None
 
 
 class PersonaVisualGenerationReadinessResponse(BaseModel):

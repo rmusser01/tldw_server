@@ -162,6 +162,10 @@ from tldw_Server_API.app.core.Persona.visual_jobs import (
     create_visual_pack_import_preview_job,
     persona_visual_generation_queue,
 )
+from tldw_Server_API.app.core.Persona.visual_generation_recipes import (
+    build_persona_visual_recipe_generation_intent,
+    normalize_persona_visual_generation_request_id,
+)
 from tldw_Server_API.app.core.Persona.visual_portability.archive import (
     DEFAULT_MAX_ARCHIVE_SIZE_BYTES,
 )
@@ -4674,25 +4678,67 @@ async def create_persona_visual_generation_job(
         )
         if pack is None:
             raise HTTPException(status_code=404, detail="Persona visual pack not found")
+        request_id = normalize_persona_visual_generation_request_id(payload.request_id)
+        generation_prompt = payload.prompt.strip()
+        recipe_intent: dict[str, Any] | None = None
+        recipe_resolution = build_persona_visual_recipe_generation_intent(
+            starter_pack_id=payload.starter_pack_id,
+            recipe_output=payload.recipe_output,
+            user_prompt=generation_prompt,
+            request_id=request_id,
+        )
+        if recipe_resolution is not None:
+            generation_prompt = recipe_resolution.effective_prompt
+            recipe_intent = recipe_resolution.recipe_intent
+            logger.bind(
+                request_id=request_id,
+                correlation_id=request_id,
+                persona_id=persona_id,
+                pack_id=pack_id,
+                starter_pack_id=payload.starter_pack_id,
+                recipe_output=payload.recipe_output,
+            ).info("persona_visual.recipe_generation.request_validated")
         job = await _run_persona_db_call(
             create_generate_candidate_job,
             jobs_manager,
             user_id=user_id,
             persona_id=persona_id,
             pack_id=pack_id,
-            prompt=payload.prompt,
+            prompt=generation_prompt,
             target_state=payload.target_state,
             backend=payload.backend,
+            request_id=request_id,
+            recipe_intent=recipe_intent,
         )
+        if recipe_intent:
+            logger.bind(
+                request_id=request_id,
+                correlation_id=request_id,
+                job_id=str(job.get("id") or ""),
+                persona_id=persona_id,
+                pack_id=pack_id,
+                starter_pack_id=recipe_intent["starter_pack_id"],
+                recipe_output=recipe_intent["recipe_output"],
+            ).info("persona_visual.recipe_generation.job_created")
         return PersonaVisualGenerationJobResponse(
             job_id=str(job.get("id") or ""),
             status=None if job.get("status") is None else str(job.get("status")),
+            request_id=request_id,
         )
     except HTTPException:
         raise
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
         raise _to_http_exception(exc, action="create persona visual generation job") from exc
     except ValueError as exc:
+        if str(exc) == "starter_pack_not_found":
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "starter_pack_not_found",
+                    "message": "Persona visual starter pack not found.",
+                    "details": {"starter_pack_id": payload.starter_pack_id},
+                },
+            ) from exc
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 

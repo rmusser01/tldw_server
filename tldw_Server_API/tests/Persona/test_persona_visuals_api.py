@@ -877,9 +877,146 @@ def test_create_generation_job_for_visual_pack(persona_db: CharactersRAGDB) -> N
         )
 
         assert response.status_code == 200, response.text
-        assert response.json()["job_id"] == "9001"
+        payload = response.json()
+        assert payload["job_id"] == "9001"
+        assert payload["request_id"]
         assert manager.created[0]["domain"] == "persona_visuals"
+        assert manager.created[0]["payload"]["request_id"] == payload["request_id"]
         assert manager.created[0]["payload"]["target_state"] == "speaking"
+
+
+def test_create_generation_job_with_recipe_intent_builds_traceable_payload(
+    persona_db: CharactersRAGDB,
+) -> None:
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Recipe Generation Persona")
+        pack = _create_visual_pack(client, persona_id)
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/generation-jobs",
+            json={
+                "request_id": "recipe-request-1",
+                "prompt": "make the speaking loop upbeat",
+                "target_state": "speaking",
+                "backend": "fake",
+                "starter_pack_id": DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID,
+                "recipe_output": "required_state_loops",
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["job_id"] == "9001"
+    assert payload["request_id"] == "recipe-request-1"
+    job_payload = manager.created[0]["payload"]
+    assert job_payload["request_id"] == "recipe-request-1"
+    assert job_payload["target_state"] == "speaking"
+    assert job_payload["prompt"] != "make the speaking loop upbeat"
+    assert "required_state_loops" in job_payload["prompt"]
+    recipe_intent = job_payload["recipe_intent"]
+    assert recipe_intent["starter_pack_id"] == DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID
+    assert recipe_intent["recipe_output"] == "required_state_loops"
+    assert recipe_intent["correlation_id"] == "recipe-request-1"
+    assert recipe_intent["user_prompt"] == "make the speaking loop upbeat"
+    assert recipe_intent["identity_brief"]
+    assert recipe_intent["neutral_anchor"]
+    assert "neutral_identity_consistency" in recipe_intent["review_checks"]
+
+
+@pytest.mark.parametrize(
+    ("request_payload", "expected_detail"),
+    [
+        (
+            {
+                "prompt": "make a speaking pose",
+                "starter_pack_id": DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID,
+            },
+            "recipe_output_required_with_starter_pack_id",
+        ),
+        (
+            {
+                "prompt": "make a speaking pose",
+                "recipe_output": "required_state_loops",
+            },
+            "starter_pack_id_required_with_recipe_output",
+        ),
+        (
+            {
+                "prompt": "make a speaking pose",
+                "starter_pack_id": DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID,
+                "recipe_output": "not_a_recipe_output",
+            },
+            "recipe_output_not_found",
+        ),
+    ],
+)
+def test_create_generation_job_rejects_invalid_recipe_intent(
+    persona_db: CharactersRAGDB,
+    request_payload: dict[str, str],
+    expected_detail: str,
+) -> None:
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Recipe Invalid Persona")
+        pack = _create_visual_pack(client, persona_id)
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/generation-jobs",
+            json=request_payload,
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == expected_detail
+    assert manager.created == []
+
+
+def test_create_generation_job_rejects_overlong_recipe_prompt(
+    persona_db: CharactersRAGDB,
+) -> None:
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Recipe Prompt Persona")
+        pack = _create_visual_pack(client, persona_id)
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/generation-jobs",
+            json={
+                "prompt": "x" * 3900,
+                "starter_pack_id": DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID,
+                "recipe_output": "required_state_loops",
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "recipe_prompt_too_long"
+    assert manager.created == []
+
+
+def test_create_generation_job_rejects_unknown_recipe_starter(
+    persona_db: CharactersRAGDB,
+) -> None:
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Unknown Recipe Starter Persona")
+        pack = _create_visual_pack(client, persona_id)
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/generation-jobs",
+            json={
+                "prompt": "make a speaking pose",
+                "starter_pack_id": "missing-starter",
+                "recipe_output": "required_state_loops",
+            },
+        )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "starter_pack_not_found"
+    assert manager.created == []
 
 
 def test_create_generation_job_rejects_other_user_pack(persona_db: CharactersRAGDB) -> None:
