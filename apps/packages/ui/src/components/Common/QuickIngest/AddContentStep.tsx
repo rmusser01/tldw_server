@@ -175,7 +175,7 @@ const validateQueueItem = (
 
   if (item.detectedType === "unknown") {
     errors.push(
-      "Unsupported file type. Quick Ingest supports PDFs, EPUB, DOCX, TXT, Markdown, HTML, XML, JSON, audio, and video."
+      "Unsupported file type. Quick Ingest supports PDF, EPUB, DOC/DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, and video."
     )
   }
 
@@ -333,7 +333,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
         <Typography.Text className="text-[11px] text-text-subtle">
           {qi(
             "fileSizeLimits",
-            "Supported: PDF, EPUB, DOCX, TXT, Markdown, HTML, XML, JSON, audio, video. Max file size: {{maxSize}}.",
+            "Supported: PDF, EPUB, DOC/DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, video. Max file size: {{maxSize}}.",
             { maxSize: QUICK_INGEST_MAX_FILE_SIZE_LABEL }
           )}
         </Typography.Text>

@@ -11,9 +11,11 @@ references:
 - https://github.com/rmusser01/tldw_server/pull/1751#discussion_r3252230381
 - https://github.com/rmusser01/tldw_server/pull/1751#discussion_r3252230382
 - https://github.com/rmusser01/tldw_server/pull/1751#discussion_r3252230384
+- https://github.com/rmusser01/tldw_server/pull/1751#issuecomment-4465794526
 modified_files:
 - Docs/superpowers/plans/2026-05-10-backlog-md-python-compatibility-clone-implementation-plan.md
 - apps/extension/tests/e2e/quick-ingest-ux-audit.spec.ts
+- apps/packages/ui/src/components/Common/QuickIngest/AddContentStep.tsx
 - apps/packages/ui/src/components/Common/QuickIngest/IngestWizardContext.tsx
 - apps/packages/ui/src/components/Common/QuickIngest/ReviewStep.tsx
 - apps/packages/ui/src/components/Common/QuickIngest/__tests__/IngestWizardContext.test.tsx
@@ -39,7 +41,7 @@ Address live PR #1751 review feedback and recheck review threads, checks, and me
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Resolved all currently actionable PR #1751 review comments found in live review threads. Verification: focused Quick Ingest Vitest suite passed (15 files, 182 tests); focused extension quick-ingest UX audit Playwright spec passed (5/5, outside sandbox due Chromium profile permissions); focused WebUI Quick Ingest Playwright workflow passed (11/11); git diff --check passed; static checks found no test.skip/catch {} in the touched extension audit file and no reviewed hardcoded repo path in the Backlog plan.
+Resolved all currently actionable PR #1751 review comments found in live review threads and the Qodo top-level review advisory. Fixed portable plan paths, removed the extension audit skip and empty catch, aligned invalid queue progress with valid submitted items only, and updated Quick Ingest supported-type copy to include DOC/DOCX and TXT/RTF. Verification: focused Quick Ingest Vitest suite passed (15 files, 182 tests); focused extension quick-ingest UX audit Playwright spec passed (5/5, outside sandbox due Chromium profile permissions); focused WebUI Quick Ingest Playwright workflow passed (11/11, after starting the local API server outside the sandbox); git diff --check passed; static checks found no test.skip/catch {} in the touched extension audit file, no reviewed hardcoded repo path in the Backlog plan, and no stale supported-type copy. Bandit skipped because the touched files are frontend TypeScript/tests, documentation, and Backlog metadata rather than Python runtime code.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

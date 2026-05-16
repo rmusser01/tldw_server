@@ -189,7 +189,7 @@ test.describe('Quick ingest – UX audit', () => {
         modal.getByText(/Add URLs or files\. Stored items appear in Media/i)
       ).toBeVisible()
       await expect(
-        modal.getByText(/Supported: PDF, EPUB, DOCX, TXT, Markdown, HTML, XML, JSON, audio, video/i)
+        modal.getByText(/Supported: PDF, EPUB, DOC\/DOCX, TXT\/RTF, Markdown, HTML, XML, JSON, audio, video/i)
       ).toBeVisible()
       await expect(
         modal.getByText(/Max file size: 50 MB/i)
