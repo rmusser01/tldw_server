@@ -3,6 +3,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { getTldwServerURL } from "@/services/tldw-server"
+import { buildTldwApiError } from "@/services/tldw/api-error"
 import { fetchWithTldwAuth } from "@/services/tldw/auth-fetch"
 import type {
   ShareWorkspaceRequest,
@@ -33,8 +34,7 @@ const jsonPost = async <T>(path: string, body: unknown): Promise<T> => {
     body: JSON.stringify(body),
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail || "Request failed")
+    throw await buildTldwApiError(res)
   }
   return res.json()
 }
@@ -47,8 +47,7 @@ const jsonPatch = async <T>(path: string, body: unknown): Promise<T> => {
     body: JSON.stringify(body),
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail || "Request failed")
+    throw await buildTldwApiError(res)
   }
   return res.json()
 }
@@ -57,8 +56,7 @@ const jsonGet = async <T>(path: string): Promise<T> => {
   const url = await sharingUrl(path)
   const res = await fetchWithTldwAuth(url)
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail || "Request failed")
+    throw await buildTldwApiError(res)
   }
   return res.json()
 }
@@ -67,8 +65,7 @@ const jsonDelete = async (path: string): Promise<void> => {
   const url = await sharingUrl(path)
   const res = await fetchWithTldwAuth(url, { method: "DELETE" })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail || "Request failed")
+    throw await buildTldwApiError(res)
   }
 }
 

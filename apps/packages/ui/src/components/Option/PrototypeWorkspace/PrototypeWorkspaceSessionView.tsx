@@ -1,10 +1,12 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { usePrototypePrivateLinkExchange } from "@/hooks/useSharing"
 import {
   usePrototypeWorkspace,
   useCreateCollaboratorBranchSession,
   useCreatePromotionRequest
 } from "@/hooks/usePrototypeWorkspaces"
+import { getStructuredApiErrorDetail } from "@/services/tldw/api-error"
 import { usePrototypeWorkspaceStore } from "@/store/prototype-workspace"
 import type { PrototypeWorkspaceDetail } from "@/types/prototype-workspace"
 
@@ -16,6 +18,68 @@ interface PrototypeWorkspaceSessionViewProps {
   workspace?: PrototypeWorkspaceDetail | null
 }
 
+const PROTOTYPE_ENTRY_STATE_LABELS: Record<string, string> = {
+  link_unavailable: "Link unavailable",
+  password_required: "Password required",
+  password_rejected: "Password rejected",
+  workspace_unavailable: "Workspace unavailable",
+  session_inactive: "Session inactive",
+  setup_failed: "Setup failed",
+  preview_unavailable: "Preview unavailable",
+  promotion_stale: "Promotion stale",
+  promotion_conflict: "Promotion conflict",
+  promotion_failed: "Promotion failed"
+}
+
+const PROTOTYPE_ENTRY_CATEGORY_STATES: Record<string, string> = {
+  invalid_or_unavailable_link: "link_unavailable",
+  password_required: "password_required",
+  invalid_password: "password_rejected",
+  workspace_unavailable: "workspace_unavailable",
+  inactive_session: "session_inactive",
+  bootstrap_failed: "setup_failed",
+  preview_unavailable: "preview_unavailable",
+  stale_promotion: "promotion_stale",
+  promotion_conflict: "promotion_conflict",
+  promotion_validation_failed: "promotion_failed"
+}
+
+const toDisplayLabel = (value: string): string =>
+  value
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
+
+const getPrototypeEntryErrorState = (error: unknown) => {
+  const detail = getStructuredApiErrorDetail(error)
+  if (detail) {
+    const frontendState =
+      detail.frontend_state ??
+      (detail.category
+        ? PROTOTYPE_ENTRY_CATEGORY_STATES[detail.category]
+        : undefined)
+    const label =
+      (frontendState ? PROTOTYPE_ENTRY_STATE_LABELS[frontendState] : null) ??
+      (frontendState ? toDisplayLabel(frontendState) : "Request failed")
+    return {
+      label,
+      message: detail.message ?? label,
+      retryable: detail.retryable === true
+    }
+  }
+
+  if (error instanceof Error) {
+    return {
+      label: "Request failed",
+      message: error.message,
+      retryable: false
+    }
+  }
+
+  return null
+}
+
 export const PrototypeWorkspaceSessionView = ({
   prototypeWorkspaceId,
   sessionToken,
@@ -23,6 +87,7 @@ export const PrototypeWorkspaceSessionView = ({
   initialPassword,
   workspace
 }: PrototypeWorkspaceSessionViewProps) => {
+  const navigate = useNavigate()
   const activeWorkspaceId = usePrototypeWorkspaceStore(
     (state) => state.activeWorkspaceId
   )
@@ -31,6 +96,9 @@ export const PrototypeWorkspaceSessionView = ({
   )
   const collaboratorSessionToken = usePrototypeWorkspaceStore(
     (state) => state.collaboratorSessionToken
+  )
+  const collaboratorShareToken = usePrototypeWorkspaceStore(
+    (state) => state.collaboratorShareToken
   )
   const setActiveWorkspaceId = usePrototypeWorkspaceStore(
     (state) => state.setActiveWorkspaceId
@@ -54,18 +122,68 @@ export const PrototypeWorkspaceSessionView = ({
   const createSession = useCreateCollaboratorBranchSession()
   const createPromotion = useCreatePromotionRequest()
 
-  const effectiveSessionToken = sessionToken ?? collaboratorSessionToken
+  const isRouteTokenEntry = Boolean(sessionToken || shareToken)
+  const routeTokenMatchesStoredState =
+    (!shareToken || collaboratorShareToken === shareToken) &&
+    (!sessionToken || collaboratorSessionToken === sessionToken)
+  const canUseStoredCollaboratorState =
+    !isRouteTokenEntry || routeTokenMatchesStoredState
+  const routeScopedSessionToken = canUseStoredCollaboratorState
+    ? collaboratorSessionToken
+    : null
+  const routeScopedSessionId = canUseStoredCollaboratorState
+    ? collaboratorSessionId
+    : null
+  const effectiveSessionToken = sessionToken ?? routeScopedSessionToken
+  const createSessionMatchesCurrentToken =
+    Boolean(effectiveSessionToken) &&
+    createSession.variables?.session_token === effectiveSessionToken
+  const routeScopedCreatedWorkspaceId = createSessionMatchesCurrentToken
+    ? createSession.data?.prototype_workspace_id
+    : null
+  const routeScopedCreatedSessionId = createSessionMatchesCurrentToken
+    ? createSession.data?.prototype_session_id
+    : null
   const resolvedWorkspaceId =
     prototypeWorkspaceId ??
-    activeWorkspaceId ??
-    createSession.data?.prototype_workspace_id ??
+    routeScopedCreatedWorkspaceId ??
+    (!isRouteTokenEntry ? activeWorkspaceId : null) ??
     null
   const resolvedSessionId =
-    collaboratorSessionId ?? createSession.data?.prototype_session_id ?? null
+    routeScopedSessionId ?? routeScopedCreatedSessionId ?? null
   const workspaceQuery = usePrototypeWorkspace(
     workspace ? null : resolvedWorkspaceId
   )
   const resolvedWorkspace = workspace ?? workspaceQuery.data ?? null
+  const exchangeLinkMatchesCurrentShareToken =
+    Boolean(shareToken) && exchangeLink.variables?.token === shareToken
+  const routeScopedExchangeError =
+    !shareToken || exchangeLinkMatchesCurrentShareToken ? exchangeLink.error : null
+  const routeScopedCreateSessionError =
+    !isRouteTokenEntry || createSessionMatchesCurrentToken
+      ? createSession.error
+      : null
+  const entryErrorState = getPrototypeEntryErrorState(
+    routeScopedExchangeError ?? routeScopedCreateSessionError
+  )
+
+  useEffect(() => {
+    if (!isRouteTokenEntry || canUseStoredCollaboratorState) {
+      return
+    }
+    setCollaboratorEntry({
+      collaboratorSessionId: null,
+      collaboratorSessionToken: sessionToken ?? null,
+      collaboratorShareToken: shareToken ?? null,
+      sharedActorId: null
+    })
+  }, [
+    canUseStoredCollaboratorState,
+    isRouteTokenEntry,
+    sessionToken,
+    setCollaboratorEntry,
+    shareToken
+  ])
 
   const handleExchangeLink = async () => {
     if (!shareToken) {
@@ -97,6 +215,12 @@ export const PrototypeWorkspaceSessionView = ({
       collaboratorShareToken: shareToken,
       sharedActorId: result.shared_actor_id ?? null
     })
+    if (isRouteTokenEntry) {
+      navigate(
+        `/prototype-workspaces?workspace=${encodeURIComponent(result.prototype_workspace_id)}`,
+        { replace: true }
+      )
+    }
   }
 
   const handleCreatePromotionRequest = async () => {
@@ -125,6 +249,20 @@ export const PrototypeWorkspaceSessionView = ({
           and submit a promotion request back to the canonical prototype.
         </p>
       </div>
+
+      {entryErrorState ? (
+        <div
+          data-testid="prototype-entry-error-state"
+          className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm"
+          role="status"
+        >
+          <div className="font-medium">{entryErrorState.label}</div>
+          <p className="mt-1 text-muted-foreground">{entryErrorState.message}</p>
+          {entryErrorState.retryable ? (
+            <p className="mt-1 text-muted-foreground">Retry is available</p>
+          ) : null}
+        </div>
+      ) : null}
 
       <section className="rounded-lg border p-4">
         <div className="mb-3 space-y-1">

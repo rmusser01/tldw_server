@@ -19,6 +19,7 @@ import {
   usePrototypePrivateLinkExchange,
   useSharedWithMe
 } from "@/hooks/useSharing"
+import { getPrototypeContractState } from "@/test-utils/prototype-contract-fixtures"
 
 const buildWrapper = () => {
   const queryClient = new QueryClient({
@@ -133,5 +134,33 @@ describe("useSharing auth wiring", () => {
         })
       })
     )
+  })
+
+  it("preserves structured prototype link exchange error details for route-state mapping", async () => {
+    const invalidLink = getPrototypeContractState("invalid_link")
+    fetchWithTldwAuthMock.mockResolvedValue(
+      new Response(
+        JSON.stringify(invalidLink.mockResponse),
+        {
+          status: invalidLink.httpStatus,
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+    )
+
+    const { result } = renderHook(() => usePrototypePrivateLinkExchange(), {
+      wrapper: buildWrapper()
+    })
+
+    await expect(
+      result.current.mutateAsync({
+        token: "prototype-token",
+        display_name: "Acme PM"
+      })
+    ).rejects.toMatchObject({
+      status: invalidLink.httpStatus,
+      detail: invalidLink.mockResponse.detail,
+      message: invalidLink.mockResponse.detail.message
+    })
   })
 })
