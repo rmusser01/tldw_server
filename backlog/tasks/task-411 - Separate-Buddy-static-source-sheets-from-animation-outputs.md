@@ -1,7 +1,7 @@
 ---
 id: TASK-411
 title: Separate Buddy static source sheets from animation outputs
-status: In Progress
+status: Done
 labels:
 - persona
 - visual-starter
@@ -41,7 +41,7 @@ Implement the first executable Buddy Animation Pipeline Catalog Metadata unit by
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implementation in progress. Completed committed slices: taxonomy/static sheet separation, recipe metadata bounds at catalog/API boundaries, and recipe-output consumer test alignment. Remaining: final docs/task closeout, full focused pytest, py_compile, Bandit, diff check, and issue #1787 update.
+Implemented the Buddy starter catalog metadata slice for static-sheet versus timed-animation semantics. Added shared taxonomy constants, removed static_talking_reaction_sheet from recipe animation_outputs while retaining it as expected source material, enforced taxonomy at catalog and API response boundaries, aligned API/job/DB provenance tests to use valid timed recipe_output IDs, and updated docs/plan tracking. Verification: focused pytest suite passed with 150 passed, 5 warnings; py_compile passed for touched production modules; Bandit passed with no findings on touched production modules; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
