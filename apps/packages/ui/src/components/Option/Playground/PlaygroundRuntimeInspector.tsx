@@ -22,6 +22,7 @@ import {
   cockpitRailStyles,
   cockpitRailToneClass,
 } from "./playground-cockpit-rail-styles";
+import { PlaygroundRailSection } from "./PlaygroundRailSection";
 
 export type RuntimeSettingSummary = {
   label: string;
@@ -228,11 +229,10 @@ export const PlaygroundRuntimeInspector = ({
       data-message-count={effectiveMessageCount}
       className={cockpitRailStyles.stack}
     >
-      <section
-        className={cockpitRailStyles.section}
-        aria-label={t("cockpit.runtimeState", "Runtime state")}
+      <PlaygroundRailSection
+        label={t("cockpit.runtimeState", "Runtime state")}
+        title={t("cockpit.runtime", "Runtime")}
       >
-        <h2 className={cockpitRailStyles.heading}>{t("cockpit.runtime", "Runtime")}</h2>
         <div className="mt-1 flex items-start justify-between gap-2">
           <div className="min-w-0">
             <p className={cockpitRailStyles.value}>{statusLabel}</p>
@@ -272,15 +272,12 @@ export const PlaygroundRuntimeInspector = ({
             </p>
           </div>
         ) : null}
-      </section>
+      </PlaygroundRailSection>
 
-      <section
-        className={cockpitRailStyles.section}
-        aria-label={t("cockpit.modelRoute", "Model route")}
+      <PlaygroundRailSection
+        label={t("cockpit.modelRoute", "Model route")}
+        title={t("cockpit.modelRoute", "Model route")}
       >
-        <h2 className={cockpitRailStyles.heading}>
-          {t("cockpit.modelRoute", "Model route")}
-        </h2>
         <div className="mt-2 flex flex-col gap-2">
           <button
             type="button"
@@ -330,15 +327,12 @@ export const PlaygroundRuntimeInspector = ({
             </p>
           )}
         </div>
-      </section>
+      </PlaygroundRailSection>
 
-      <section
-        className={cockpitRailStyles.section}
-        aria-label={t("cockpit.assistant", "Assistant")}
+      <PlaygroundRailSection
+        label={t("cockpit.assistant", "Assistant")}
+        title={t("cockpit.assistant", "Assistant")}
       >
-        <h2 className={cockpitRailStyles.heading}>
-          {t("cockpit.assistant", "Assistant")}
-        </h2>
         <div className="mt-1 flex items-start justify-between gap-2">
           <div className="min-w-0">
             <p className={cockpitRailStyles.value}>{assistantLabel}</p>
@@ -409,13 +403,12 @@ export const PlaygroundRuntimeInspector = ({
             )}
           </p>
         ) : null}
-      </section>
+      </PlaygroundRailSection>
 
-      <section
-        className={cockpitRailStyles.section}
-        aria-label={mcpToolsLabel}
+      <PlaygroundRailSection
+        label={mcpToolsLabel}
+        title={mcpToolsLabel}
       >
-        <h2 className={cockpitRailStyles.heading}>{mcpToolsLabel}</h2>
         {toolSummary ? (
           <div className={`mt-2 ${cockpitRailStyles.inset}`}>
             <div className="flex items-start gap-2">
@@ -507,15 +500,12 @@ export const PlaygroundRuntimeInspector = ({
             )}
           </p>
         )}
-      </section>
+      </PlaygroundRailSection>
 
-      <section
-        className={cockpitRailStyles.section}
-        aria-label={t("cockpit.runControls", "Run controls")}
+      <PlaygroundRailSection
+        label={t("cockpit.runControls", "Run controls")}
+        title={t("cockpit.runControls", "Run controls")}
       >
-        <h2 className={cockpitRailStyles.heading}>
-          {t("cockpit.runControls", "Run controls")}
-        </h2>
         {emptyAssistantResponse && !streaming ? (
           <div
             role="status"
@@ -594,7 +584,7 @@ export const PlaygroundRuntimeInspector = ({
               : t("cockpit.searchClosed", "Search closed")}
           </p>
         </div>
-      </section>
+      </PlaygroundRailSection>
     </div>
   );
 };

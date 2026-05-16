@@ -17,6 +17,7 @@ import {
   cockpitRailStyles,
   cockpitRailToneClass,
 } from "./playground-cockpit-rail-styles";
+import { PlaygroundRailSection } from "./PlaygroundRailSection";
 
 const railActionClass = cockpitRailStyles.action;
 const PROMPT_SELECT_TRIGGER_SELECTOR = "[data-cockpit-prompt-select-trigger]";
@@ -286,13 +287,10 @@ export const PlaygroundContextRail = ({
         </div>
       ) : null}
 
-      <section
-        className={cockpitRailStyles.section}
-        aria-label={t("cockpit.contextStack", "Context stack")}
+      <PlaygroundRailSection
+        label={t("cockpit.contextStack", "Context stack")}
+        title={t("cockpit.contextStack", "Context stack")}
       >
-        <h2 className={cockpitRailStyles.heading}>
-          {t("cockpit.contextStack", "Context stack")}
-        </h2>
         <div className="mt-1 flex items-start justify-between gap-2">
           <div className="min-w-0">
             <p className={cockpitRailStyles.value}>
@@ -424,13 +422,12 @@ export const PlaygroundContextRail = ({
             )}
           </div>
         )}
-      </section>
+      </PlaygroundRailSection>
 
-      <section
-        className={cockpitRailStyles.section}
-        aria-label={t("cockpit.promptManagement", "Prompt management")}
+      <PlaygroundRailSection
+        label={t("cockpit.promptManagement", "Prompt management")}
+        title={t("cockpit.prompt", "Prompt")}
       >
-        <h2 className={cockpitRailStyles.heading}>{t("cockpit.prompt", "Prompt")}</h2>
         <div className="mt-1 flex items-start justify-between gap-2">
           <div className="min-w-0">
             <p className={cockpitRailStyles.value}>{promptManagementLabel}</p>
@@ -461,15 +458,12 @@ export const PlaygroundContextRail = ({
             </button>
           ) : null}
         </div>
-      </section>
+      </PlaygroundRailSection>
 
-      <section
-        className={cockpitRailStyles.section}
-        aria-label={t("cockpit.searchAndSources", "Search & sources")}
+      <PlaygroundRailSection
+        label={t("cockpit.searchAndSources", "Search & sources")}
+        title={t("cockpit.searchAndSources", "Search & sources")}
       >
-        <h2 className={cockpitRailStyles.heading}>
-          {t("cockpit.searchAndSources", "Search & sources")}
-        </h2>
         <p className={cockpitRailStyles.muted}>
           {t(
             "cockpit.searchSourcesDetail",
@@ -530,13 +524,12 @@ export const PlaygroundContextRail = ({
             {t("cockpit.searchContext", "Search & Context")}
           </button>
         </div>
-      </section>
+      </PlaygroundRailSection>
 
-      <section
-        className={cockpitRailStyles.section}
-        aria-label={t("cockpit.conversationSession", "Conversation session")}
+      <PlaygroundRailSection
+        label={t("cockpit.conversationSession", "Conversation session")}
+        title={t("cockpit.session", "Session")}
       >
-        <h2 className={cockpitRailStyles.heading}>{t("cockpit.session", "Session")}</h2>
         <div className="mt-1 flex items-start justify-between gap-2">
           <div className="min-w-0">
             <p className={cockpitRailStyles.value}>{sessionLabel}</p>
@@ -582,7 +575,7 @@ export const PlaygroundContextRail = ({
             ? t("cockpit.saveConversation", "Save conversation")
             : t("cockpit.useTemporaryChat", "Use temporary chat")}
         </button>
-      </section>
+      </PlaygroundRailSection>
     </div>
   );
 };

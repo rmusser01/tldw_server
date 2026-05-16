@@ -211,6 +211,64 @@ describe("PlaygroundContextRail first-slice controls", () => {
     ).toBeInTheDocument();
   });
 
+  it("lets each left rail section collapse without removing the rail", () => {
+    renderRail({
+      compositionPreviewSummary: compositionSummary(),
+      hasContext: false,
+      contextSummary: [],
+      promptSelectControl: (
+        <button type="button" aria-label="Select a prompt">
+          Select prompt
+        </button>
+      ),
+    });
+
+    const rail = screen.getByTestId("playground-context-rail");
+    const collapseContext = within(rail).getByRole("button", {
+      name: "Collapse Context stack",
+    });
+    const contextPanelId = collapseContext.getAttribute("aria-controls");
+    const contextPanel = contextPanelId
+      ? document.getElementById(contextPanelId)
+      : null;
+
+    expect(collapseContext).toHaveAttribute("aria-expanded", "true");
+    expect(contextPanel).not.toBeNull();
+    expect(contextPanel).not.toHaveAttribute("hidden");
+
+    fireEvent.click(collapseContext);
+
+    expect(rail).toBeInTheDocument();
+    expect(collapseContext).toHaveAttribute("aria-expanded", "false");
+    expect(contextPanel).toHaveAttribute("hidden");
+    expect(
+      within(rail).getByRole("button", { name: "Expand Context stack" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      within(rail).getByRole("button", { name: "Collapse Composition" }),
+    );
+    fireEvent.click(
+      within(rail).getByRole("button", { name: "Collapse Prompt" }),
+    );
+    fireEvent.click(
+      within(rail).getByRole("button", {
+        name: "Collapse Search & sources",
+      }),
+    );
+    fireEvent.click(
+      within(rail).getByRole("button", { name: "Collapse Session" }),
+    );
+
+    expect(screen.getByRole("heading", { name: "Composition" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Context stack" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Prompt" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Search & sources" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Session" })).toBeInTheDocument();
+  });
+
   it("preserves existing left rail actions after regrouping", () => {
     const props = renderRail({
       compositionPreviewSummary: compositionSummary(),

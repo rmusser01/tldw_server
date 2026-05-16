@@ -1,5 +1,5 @@
 import React from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getDesignSystemState } from "@/design-system";
 import { cockpitRailStyles } from "./playground-cockpit-rail-styles";
@@ -110,8 +110,17 @@ export const PlaygroundCompositionPreview = ({
   summary,
 }: PlaygroundCompositionPreviewProps) => {
   const { t } = useTranslation("playground");
+  const [sectionOpen, setSectionOpen] = React.useState(true);
   const [open, setOpen] = React.useState(false);
+  const bodyId = React.useId();
   const panelId = React.useId();
+  const sectionToggleLabel = sectionOpen
+    ? t("cockpit.collapseRailSection", "Collapse Composition", {
+        title: t("cockpit.composition", "Composition"),
+      })
+    : t("cockpit.expandRailSection", "Expand Composition", {
+        title: t("cockpit.composition", "Composition"),
+      });
   const detailButtonLabel = open
     ? t("cockpit.hideCompositionDetails", "Hide composition details")
     : t("cockpit.showCompositionDetails", "Show composition details");
@@ -151,71 +160,90 @@ export const PlaygroundCompositionPreview = ({
             </p>
           ) : null}
         </div>
-        <span
-          className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${stateClass(
-            summary.overallState === "ready" ? "active" : summary.overallState,
-          )}`}
-        >
-          {overallLabel(summary.overallState, t)}
-        </span>
+        <div className="flex shrink-0 items-start gap-2">
+          <span
+            className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${stateClass(
+              summary.overallState === "ready" ? "active" : summary.overallState,
+            )}`}
+          >
+            {overallLabel(summary.overallState, t)}
+          </span>
+          <button
+            type="button"
+            className={cockpitRailStyles.collapseAction}
+            aria-label={sectionToggleLabel}
+            aria-expanded={sectionOpen}
+            aria-controls={bodyId}
+            title={sectionToggleLabel}
+            onClick={() => setSectionOpen((value) => !value)}
+          >
+            {sectionOpen ? (
+              <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+          </button>
+        </div>
       </div>
 
-      <ul className="mt-2 divide-y divide-border/60">
-        {summary.entries.map((entry) => (
-          <PreviewRow key={entry.id} entry={entry} />
-        ))}
-      </ul>
+      <div id={bodyId} hidden={!sectionOpen}>
+        <ul className="mt-2 divide-y divide-border/60">
+          {summary.entries.map((entry) => (
+            <PreviewRow key={entry.id} entry={entry} />
+          ))}
+        </ul>
 
-      <button
-        type="button"
-        className={`mt-2 gap-1 ${cockpitRailStyles.action}`}
-        aria-expanded={open}
-        aria-controls={panelId}
-        onClick={() => setOpen((value) => !value)}
-      >
+        <button
+          type="button"
+          className={`mt-2 gap-1 ${cockpitRailStyles.action}`}
+          aria-expanded={open}
+          aria-controls={panelId}
+          onClick={() => setOpen((value) => !value)}
+        >
+          {open ? (
+            <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
+          ) : (
+            <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+          {detailButtonLabel}
+        </button>
+
         {open ? (
-          <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
-        ) : (
-          <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
-        )}
-        {detailButtonLabel}
-      </button>
-
-      {open ? (
-        <div id={panelId} className="mt-3 space-y-3">
-          <div>
-            <p className="text-[10px] font-semibold uppercase text-text-muted">
-              {t("cockpit.contextStack", "Context stack")}
-            </p>
-            {summary.contextStack.length > 0 ? (
-              <ul className="mt-1 divide-y divide-border/60">
-                {summary.contextStack.map((entry) => (
-                  <PreviewRow key={`stack-${entry.id}`} entry={entry} />
+          <div id={panelId} className="mt-3 space-y-3">
+            <div>
+              <p className="text-[10px] font-semibold uppercase text-text-muted">
+                {t("cockpit.contextStack", "Context stack")}
+              </p>
+              {summary.contextStack.length > 0 ? (
+                <ul className="mt-1 divide-y divide-border/60">
+                  {summary.contextStack.map((entry) => (
+                    <PreviewRow key={`stack-${entry.id}`} entry={entry} />
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-xs text-text-muted">
+                  {t("cockpit.noContextStack", "No context sources active.")}
+                </p>
+              )}
+            </div>
+            <div>
+              <p className="text-[10px] font-semibold uppercase text-text-muted">
+                {t("cockpit.contextFootprint", "Context footprint")}
+              </p>
+              <ul className="mt-1 flex flex-wrap gap-1.5 text-xs text-text-muted">
+                {footprintItems.map((item) => (
+                  <li
+                    key={item}
+                    className={cockpitRailStyles.tag}
+                  >
+                    {item}
+                  </li>
                 ))}
               </ul>
-            ) : (
-              <p className="mt-1 text-xs text-text-muted">
-                {t("cockpit.noContextStack", "No context sources active.")}
-              </p>
-            )}
+            </div>
           </div>
-          <div>
-            <p className="text-[10px] font-semibold uppercase text-text-muted">
-              {t("cockpit.contextFootprint", "Context footprint")}
-            </p>
-            <ul className="mt-1 flex flex-wrap gap-1.5 text-xs text-text-muted">
-              {footprintItems.map((item) => (
-                <li
-                  key={item}
-                  className={cockpitRailStyles.tag}
-                >
-                  {item}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </section>
   );
 };

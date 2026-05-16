@@ -137,6 +137,58 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     ).toBeInTheDocument();
   });
 
+  it("lets each right rail section collapse without replacing the side rail", () => {
+    renderInspector({
+      settingSummaries: [{ label: "Temperature", value: "0.7" }],
+      toolSummary: {
+        state: "available",
+        label: "MCP tools",
+        detail: "3 chat tools enabled",
+      },
+    });
+
+    const rail = screen.getByTestId("playground-runtime-inspector");
+    const collapseRuntime = within(rail).getByRole("button", {
+      name: "Collapse Runtime",
+    });
+    const runtimePanelId = collapseRuntime.getAttribute("aria-controls");
+    const runtimePanel = runtimePanelId
+      ? document.getElementById(runtimePanelId)
+      : null;
+
+    expect(collapseRuntime).toHaveAttribute("aria-expanded", "true");
+    expect(runtimePanel).not.toBeNull();
+    expect(runtimePanel).not.toHaveAttribute("hidden");
+
+    fireEvent.click(collapseRuntime);
+
+    expect(rail).toBeInTheDocument();
+    expect(collapseRuntime).toHaveAttribute("aria-expanded", "false");
+    expect(runtimePanel).toHaveAttribute("hidden");
+    expect(
+      within(rail).getByRole("button", { name: "Expand Runtime" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      within(rail).getByRole("button", { name: "Collapse Model route" }),
+    );
+    fireEvent.click(
+      within(rail).getByRole("button", { name: "Collapse Assistant" }),
+    );
+    fireEvent.click(
+      within(rail).getByRole("button", { name: "Collapse MCP tools" }),
+    );
+    fireEvent.click(
+      within(rail).getByRole("button", { name: "Collapse Run controls" }),
+    );
+
+    expect(screen.getByRole("heading", { name: "Runtime" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Model route" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Assistant" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "MCP tools" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Run controls" })).toBeInTheDocument();
+  });
+
   it("preserves existing right rail actions after regrouping", () => {
     const props = renderInspector({
       streaming: true,

@@ -64,7 +64,6 @@ const actionClass =
   "inline-flex min-h-[26px] items-center gap-1 rounded-md border border-border bg-surface2 px-2 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus";
 
 export const PlaygroundStatusStrip = ({
-  mode,
   streaming,
   selectedProvider,
   selectedModel,
@@ -75,8 +74,6 @@ export const PlaygroundStatusStrip = ({
   sessionDetail,
   sessionError,
   hasContext,
-  contextSummary = [],
-  temporaryChat,
   degraded = false,
   degradedChecks = [],
   errorMessage,
@@ -173,6 +170,7 @@ export const PlaygroundStatusStrip = ({
       normalizedSessionStatusLabel !== READY_STATE_LABEL &&
       normalizedSessionStatusLabel !== t("cockpit.idle", "Idle"),
   );
+  const hasCriticalSessionState = showSessionStatusLabel || Boolean(sessionDetailLabel);
 
   return (
     <footer
@@ -209,46 +207,28 @@ export const PlaygroundStatusStrip = ({
           )}
           {runtimeLabel}
         </span>
-        <span className={pillClass}>
-          {mode === "focus"
-            ? t("cockpit.focus", "Focus")
-            : t("cockpit.cockpit", "Cockpit")}
-        </span>
-        <span className={pillClass}>{sessionLabel}</span>
-        {normalizedSessionTitle ? (
-          <span className={pillClass}>{normalizedSessionTitle}</span>
+        {hasCriticalSessionState ? (
+          <>
+            <span className={pillClass}>{sessionLabel}</span>
+            {normalizedSessionTitle ? (
+              <span className={pillClass}>{normalizedSessionTitle}</span>
+            ) : null}
+            {showSessionStatusLabel ? (
+              <span className={pillClass}>{normalizedSessionStatusLabel}</span>
+            ) : null}
+            {sessionDetailLabel ? (
+              <span
+                className={`${pillClass} ${
+                  normalizedSessionError
+                    ? "border-error/40 bg-error/10 text-error"
+                    : ""
+                }`}
+              >
+                {sessionDetailLabel}
+              </span>
+            ) : null}
+          </>
         ) : null}
-        {showSessionStatusLabel ? (
-          <span className={pillClass}>{normalizedSessionStatusLabel}</span>
-        ) : null}
-        {typeof temporaryChat === "boolean" ? (
-          <span className={pillClass}>
-            {temporaryChat
-              ? t("cockpit.temporary", "Temporary")
-              : t("cockpit.saved", "Saved")}
-          </span>
-        ) : null}
-        {sessionDetailLabel ? (
-          <span
-            className={`${pillClass} ${
-              normalizedSessionError
-                ? "border-error/40 bg-error/10 text-error"
-                : ""
-            }`}
-          >
-            {sessionDetailLabel}
-          </span>
-        ) : null}
-        {hasContext ? (
-          <span className={pillClass}>
-            {t("cockpit.contextActive", "Context active")}
-          </span>
-        ) : null}
-        {contextSummary.map((item, index) => (
-          <span className={pillClass} key={`context-${index}-${item}`}>
-            {item}
-          </span>
-        ))}
         {errorMessage ? (
           <span className={pillClass}>{errorMessage}</span>
         ) : (

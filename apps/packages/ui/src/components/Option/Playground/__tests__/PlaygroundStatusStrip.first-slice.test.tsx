@@ -12,7 +12,7 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("PlaygroundStatusStrip first-slice state", () => {
-  it("renders model, provider, context, persistence, and message state together", () => {
+  it("keeps the ready status strip limited to critical route and count state", () => {
     render(
       <PlaygroundStatusStrip
         mode="cockpit"
@@ -31,15 +31,14 @@ describe("PlaygroundStatusStrip first-slice state", () => {
 
     const status = screen.getByRole("status", { name: "Chat status" });
     expect(status).toHaveTextContent("Ready");
-    expect(status).toHaveTextContent("Cockpit");
-    expect(status).toHaveTextContent("Server chat");
-    expect(status).toHaveTextContent("Saved");
-    expect(status).toHaveTextContent("Context active");
-    expect(status).toHaveTextContent("Web search on");
-    expect(status).toHaveTextContent("2 files");
-    expect(status).toHaveTextContent("openai");
-    expect(status).toHaveTextContent("gpt-4.1-mini");
+    expect(status).toHaveTextContent("openai:gpt-4.1-mini");
     expect(status).toHaveTextContent("3 messages");
+    expect(status).not.toHaveTextContent("Cockpit");
+    expect(status).not.toHaveTextContent("Server chat");
+    expect(status).not.toHaveTextContent("Saved");
+    expect(status).not.toHaveTextContent("Context active");
+    expect(status).not.toHaveTextContent("Web search on");
+    expect(status).not.toHaveTextContent("2 files");
   });
 
   it("renders degraded checks as warning-only status", () => {
@@ -63,7 +62,7 @@ describe("PlaygroundStatusStrip first-slice state", () => {
     expect(status).toHaveTextContent("Degraded");
     expect(status).toHaveTextContent("Embeddings unavailable");
     expect(status).toHaveTextContent("Chat remains available.");
-    expect(status).toHaveTextContent("Temporary");
+    expect(status).not.toHaveTextContent("Temporary");
   });
 
   it("keeps active streaming primary while degraded health remains warning-only", () => {

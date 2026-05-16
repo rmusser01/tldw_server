@@ -237,8 +237,10 @@ describe("Playground cockpit accessibility", () => {
     expect(status).toHaveAttribute("aria-live", "polite");
     expect(status).toHaveAttribute("aria-atomic", "false");
     expect(status).toHaveTextContent("Streaming");
-    expect(status).toHaveTextContent("Focus");
-    expect(status).toHaveTextContent("Context active");
+    expect(status).toHaveTextContent("anthropic:claude-sonnet-4");
+    expect(status).toHaveTextContent("2 messages");
+    expect(status).not.toHaveTextContent("Focus");
+    expect(status).not.toHaveTextContent("Context active");
   });
 
   it("keeps model catalog controls labeled in the rendered DOM", () => {
