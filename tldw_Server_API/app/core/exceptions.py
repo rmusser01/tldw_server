@@ -61,6 +61,60 @@ class CodeGraphJobError(RuntimeError):
         self.retryable = retryable
 
 
+class PrototypeJobError(RuntimeError):
+    """Worker-visible prototype job failure with explicit retry metadata."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool,
+        failure_code: str,
+        backoff_seconds: int | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.failure_code = failure_code
+        self.backoff_seconds = backoff_seconds
+        self.details = details or {}
+
+
+class PrototypeTerminalRuntimeError(PrototypeJobError):
+    """Terminal prototype runtime state failure that should not be retried."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_code: str = "runtime_terminal",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            retryable=False,
+            failure_code=failure_code,
+            details=details,
+        )
+
+
+class PrototypeJobPayloadError(ValueError):
+    """Terminal prototype job payload error that should not be retried."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_code: str = "invalid_job_payload",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.retryable = False
+        self.failure_code = failure_code
+        self.backoff_seconds = None
+        self.details = details or {}
+
+
 class AuditLogError(RuntimeError):
     """Raised when persisting an audit event fails."""
 

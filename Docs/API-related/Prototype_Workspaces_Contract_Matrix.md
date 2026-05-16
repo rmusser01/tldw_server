@@ -12,7 +12,7 @@ Risk Gate 1 security model: ../Security/Prototype_Workspaces_Threat_Model.md
 
 - Draft owner: Backend/Core
 - Frontend reviewer: Frontend/Product
-- Current gate: Risk Gate 1 draft
+- Current gate: Risk Gate 3 runtime durability draft
 - Frozen by: Risk Gate 4
 
 ## Error And State Matrix
@@ -34,6 +34,15 @@ Risk Gate 1 security model: ../Security/Prototype_Workspaces_Threat_Model.md
 | stale_promotion | Candidate is stale versus canonical snapshot | 409 | stale_promotion | Promotion stale | No | Ask user to resubmit from current branch | Draft |
 | promotion_conflict | Promotion validation detects conflict | 409 | promotion_conflict | Promotion conflict | No | Show conflict/review state | Draft |
 | promotion_validation_failed | Validation failed without promoting | 409 | promotion_validation_failed | Promotion failed | Yes, if backend marks retryable | Show validation failure details | Draft |
+
+## Runtime Job Result Matrix
+
+| Job type | Success status | Terminal failure fields | Retryable failure fields | Idempotency basis | Frontend/operator note |
+| --- | --- | --- | --- | --- | --- |
+| `branch_session_bootstrap` | `status = "ok"`, `job_type`, `retryable = false`, `session_id`, `created` | `failure_code = "invalid_job_payload"`, `permission_denied`, or `runtime_terminal` | `failure_code = "runtime_retryable"`, `retryable = true` | workspace, actor, baseline snapshot, request nonce | Safe to retry from Jobs when retryable; terminal actor/workspace state needs a fresh session/link. |
+| `preview_boot` | `status = "ok"`, `job_type`, `retryable = false`, `preview_handle`, `preview_url` | `failure_code = "invalid_job_payload"` or `runtime_terminal` | `failure_code = "runtime_retryable"`, `retryable = true` | preview scope, snapshot, runtime profile version, target fingerprint | Same target retries renew the active handle; changed targets replace the handle for the scope. |
+| `snapshot_save` | `status = "ok"`, `job_type`, `retryable = false`, `snapshot_id` | `failure_code = "invalid_job_payload"` or `runtime_terminal` | `failure_code = "runtime_retryable"`, `retryable = true` | session and save request id; explicit snapshot id is reused on handler retry | UI can keep showing one saved revision for duplicate completion/retry paths. |
+| `publish_validate_and_promote` | `status = "promoted"`, `job_type`, `retryable = false`, canonical/candidate ids, optional `preview_handle` | `status = "failed"` or `"stale"`, `failure_code`, `retryable = false`, canonical/candidate ids | Reserved for future validators that explicitly return `retryable = true`; default validation failures are terminal | workspace, candidate snapshot, review baseline/canonical snapshot | Failed validation never advances canonical or last-known-good pointers. |
 
 ## Token And Session Security Dispositions
 

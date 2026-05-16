@@ -108,6 +108,117 @@ async def test_preview_broker_keeps_one_active_target_per_scope(repo, prototype_
 
 
 @pytest.mark.asyncio
+async def test_preview_broker_reuses_active_handle_for_same_scope_target_retry(
+    repo,
+    prototype_db,
+    preview_broker,
+):
+    workspace, _actor, session = await _seed_preview_scope(repo, prototype_db)
+
+    first = await preview_broker.issue_preview_grant(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        snapshot_id="snap_preview_base",
+        runtime_target_url="http://127.0.0.1:9011",
+    )
+    second = await preview_broker.issue_preview_grant(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        snapshot_id="snap_preview_base",
+        runtime_target_url="http://127.0.0.1:9011",
+    )
+    first_record = await repo.get_preview_handle_record(first["preview_handle"])
+    active_record = await repo.get_active_preview_handle_for_scope(f"session:{session['id']}")
+
+    assert second["preview_handle"] == first["preview_handle"]
+    assert second["token"]
+    assert first_record is not None
+    assert active_record is not None
+    assert active_record["preview_handle"] == first["preview_handle"]
+
+
+@pytest.mark.asyncio
+async def test_preview_broker_reuses_existing_session_handle_after_workspace_archive(
+    repo,
+    prototype_db,
+    preview_broker,
+):
+    workspace, _actor, session = await _seed_preview_scope(repo, prototype_db)
+
+    first = await preview_broker.issue_preview_grant(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        snapshot_id="snap_preview_base",
+        runtime_target_url="http://127.0.0.1:9011",
+    )
+    await repo.archive_workspace(workspace["id"])
+    second = await preview_broker.issue_preview_grant(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        snapshot_id="snap_preview_base",
+        runtime_target_url="http://127.0.0.1:9011",
+    )
+
+    assert second["preview_handle"] == first["preview_handle"]
+    assert second["token"]
+
+
+@pytest.mark.asyncio
+async def test_preview_broker_metadata_cannot_override_authoritative_snapshot_id(
+    repo,
+    prototype_db,
+    preview_broker,
+):
+    workspace, _actor, session = await _seed_preview_scope(repo, prototype_db)
+
+    grant = await preview_broker.issue_preview_grant(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        snapshot_id="snap_preview_base",
+        runtime_target_url="http://127.0.0.1:9011",
+        metadata={"snapshot_id": "snap_spoofed", "runtime_profile_version": "v1"},
+    )
+    record = await repo.get_preview_handle_record(grant["preview_handle"])
+    renewed = await preview_broker.renew_preview_grant(grant["preview_handle"])
+
+    assert grant["snapshot_id"] == "snap_preview_base"
+    assert renewed["snapshot_id"] == "snap_preview_base"
+    assert record is not None
+    assert record["metadata"]["snapshot_id"] == "snap_preview_base"
+
+
+@pytest.mark.asyncio
+async def test_preview_broker_replaces_active_handle_when_runtime_profile_version_changes(
+    repo,
+    prototype_db,
+    preview_broker,
+):
+    workspace, _actor, session = await _seed_preview_scope(repo, prototype_db)
+
+    first = await preview_broker.issue_preview_grant(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        snapshot_id="snap_preview_base",
+        runtime_target_url="http://127.0.0.1:9011",
+        metadata={"runtime_profile_version": "v1"},
+    )
+    second = await preview_broker.issue_preview_grant(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        snapshot_id="snap_preview_base",
+        runtime_target_url="http://127.0.0.1:9011",
+        metadata={"runtime_profile_version": "v2"},
+    )
+    first_record = await repo.get_preview_handle_record(first["preview_handle"])
+    second_record = await repo.get_preview_handle_record(second["preview_handle"])
+
+    assert second["preview_handle"] != first["preview_handle"]
+    assert first_record["is_active"] is False
+    assert second_record["is_active"] is True
+    assert second_record["metadata"]["runtime_profile_version"] == "v2"
+
+
+@pytest.mark.asyncio
 async def test_preview_broker_recovers_preview_record_after_memory_clear(repo, prototype_db, preview_broker):
     module = importlib.import_module("tldw_Server_API.app.core.Prototype_Workspaces.preview_broker")
     broker_cls = _load_attr(module, "PrototypePreviewBroker", "PrototypeWorkspacePreviewBroker")
