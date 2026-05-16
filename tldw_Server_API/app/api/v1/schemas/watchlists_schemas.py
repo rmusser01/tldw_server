@@ -14,6 +14,9 @@ WatchlistContentAlertRuleKind = Literal["keyword", "regex", "descriptor", "class
 WatchlistContentAlertMatchMode = Literal["contains", "exact", "regex"]
 WatchlistContentAlertSeverity = Literal["info", "low", "medium", "high", "critical"]
 WatchlistContentAlertStatus = Literal["unread", "read", "dismissed"]
+WatchlistReportPreset = Literal["auto", "cti_osint", "news_briefing", "general_research"]
+WatchlistReportReadinessState = Literal["ready", "warning", "blocked", "legacy_live_only"]
+WatchlistReportReadinessWarningSeverity = Literal["info", "warning", "blocking"]
 ScrapedItemMutableStatus = Literal["ingested", "filtered", "ignored", "reviewed"]
 ScrapedItemSavedViewSmartFilter = Literal["all", "today", "today_unread", "todayUnread", "unread", "reviewed", "queued"]
 ScrapedItemSortMode = Literal[
@@ -790,6 +793,79 @@ class WatchlistItemSavedView(BaseModel):
 
 class WatchlistItemSavedViewsList(BaseModel):
     items: list[WatchlistItemSavedView]
+
+
+class WatchlistReportReadinessWarning(BaseModel):
+    code: str
+    severity: WatchlistReportReadinessWarningSeverity = "warning"
+    message: str
+    affected_item_ids: list[int] = Field(default_factory=list)
+
+
+class WatchlistReportReadiness(BaseModel):
+    state: WatchlistReportReadinessState
+    score: int = Field(ge=0, le=100)
+    warnings: list[WatchlistReportReadinessWarning] = Field(default_factory=list)
+
+
+class WatchlistReportEvidenceAlert(BaseModel):
+    id: int
+    rule_id: int
+    rule_name: str | None = None
+    severity: str
+    status: str
+    title: str | None = None
+    snippet: str | None = None
+    matched_text: str | None = None
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    created_at: str | None = None
+
+
+class WatchlistReportEvidenceItem(BaseModel):
+    id: int
+    title: str | None = None
+    url: str | None = None
+    source_id: int | None = None
+    source_name: str | None = None
+    published_at: str | None = None
+    summary: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    reviewed: bool = False
+    queued_for_briefing: bool = False
+    alerts: list[WatchlistReportEvidenceAlert] = Field(default_factory=list)
+
+
+class WatchlistReportExcludedItem(BaseModel):
+    id: int
+    title: str | None = None
+    url: str | None = None
+    reason: str
+
+
+class WatchlistReportEvidenceSnapshot(BaseModel):
+    schema_version: int = 1
+    snapshot_id: str
+    generated_at: str
+    preset: WatchlistReportPreset
+    watchlist_id: int | None = None
+    job_id: int
+    run_id: int
+    output_id: int | None = None
+    included_items: list[WatchlistReportEvidenceItem] = Field(default_factory=list)
+    excluded_items: list[WatchlistReportExcludedItem] = Field(default_factory=list)
+    source_summary: dict[str, Any] = Field(default_factory=dict)
+    included_count: int = 0
+    excluded_count: int = 0
+    alert_count: int = 0
+    critical_alert_count: int = 0
+    readiness: WatchlistReportReadiness
+
+
+class WatchlistOutputEvidenceResponse(BaseModel):
+    output_id: int
+    immutable_snapshot: bool
+    snapshot: WatchlistReportEvidenceSnapshot | None = None
+    readiness: WatchlistReportReadiness
 
 
 class WatchlistOutputEmailDelivery(BaseModel):
