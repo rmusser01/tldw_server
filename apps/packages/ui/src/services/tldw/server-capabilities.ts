@@ -6,6 +6,12 @@ export type ServerCapabilities = {
   hasChat: boolean
   hasRag: boolean
   hasMedia: boolean
+  hasMediaPlaylistPreflight?: boolean
+  hasMediaIngestJobs?: boolean
+  hasMediaIngestJobEvents?: boolean
+  hasMediaIngestWorker?: boolean
+  hasDurableMediaCollections?: boolean
+  hasKnowledgeQaMediaScope?: boolean
   hasNotes: boolean
   hasSlides: boolean
   hasPresentationStudio: boolean
@@ -50,6 +56,12 @@ const defaultCapabilities: ServerCapabilities = {
   hasChat: false,
   hasRag: false,
   hasMedia: false,
+  hasMediaPlaylistPreflight: false,
+  hasMediaIngestJobs: false,
+  hasMediaIngestJobEvents: false,
+  hasMediaIngestWorker: false,
+  hasDurableMediaCollections: false,
+  hasKnowledgeQaMediaScope: false,
   hasNotes: false,
   hasSlides: false,
   hasPresentationStudio: false,
@@ -100,7 +112,9 @@ const fallbackSpec = {
       "/api/v1/rag/health",
       "/api/v1/rag/",
       "/api/v1/rag/feedback/implicit",
+      "/api/v1/media/playlists/preflight",
       "/api/v1/media/ingest/jobs",
+      "/api/v1/media/ingest/jobs/events/stream",
       "/api/v1/media/add",
       "/api/v1/media/",
       "/api/v1/media/process-videos",
@@ -356,13 +370,36 @@ const applyDocsInfoFeatureGates = (
     docsInfo,
     "hasPresentationRender"
   )
+  const mediaPlaylistPreflightEnabled = extractFeatureFlag(
+    docsInfo,
+    "hasMediaPlaylistPreflight"
+  )
+  const mediaIngestJobsEnabled = extractFeatureFlag(docsInfo, "hasMediaIngestJobs")
+  const mediaIngestJobEventsEnabled = extractFeatureFlag(
+    docsInfo,
+    "hasMediaIngestJobEvents"
+  )
+  const mediaIngestWorkerEnabled = extractFeatureFlag(
+    docsInfo,
+    "hasMediaIngestWorker"
+  )
+  const durableMediaCollectionsEnabled = extractFeatureFlag(
+    docsInfo,
+    "hasDurableMediaCollections"
+  )
+  const knowledgeQaMediaScopeEnabled = extractFeatureFlag(
+    docsInfo,
+    "hasKnowledgeQaMediaScope"
+  )
   const personaFeatureEnabled = extractFeatureFlag(docsInfo, "persona")
   const personalizationFeatureEnabled = extractFeatureFlag(
     docsInfo,
     "personalization"
   )
-  const mergeFeatureFlag = (computed: boolean, explicit: boolean | null): boolean =>
-    explicit === null ? computed : explicit
+  const mergeFeatureFlag = (
+    computed: boolean | undefined,
+    explicit: boolean | null
+  ): boolean => (explicit === null ? Boolean(computed) : explicit)
   const hasStt = mergeFeatureFlag(capabilities.hasStt, sttFeatureEnabled)
   const hasTts = mergeFeatureFlag(capabilities.hasTts, ttsFeatureEnabled)
   const hasVoiceChat = mergeFeatureFlag(
@@ -400,6 +437,30 @@ const applyDocsInfoFeatureGates = (
     hasSlides,
     hasPresentationStudio,
     hasPresentationRender,
+    hasMediaPlaylistPreflight: mergeFeatureFlag(
+      capabilities.hasMediaPlaylistPreflight,
+      mediaPlaylistPreflightEnabled
+    ),
+    hasMediaIngestJobs: mergeFeatureFlag(
+      capabilities.hasMediaIngestJobs,
+      mediaIngestJobsEnabled
+    ),
+    hasMediaIngestJobEvents: mergeFeatureFlag(
+      capabilities.hasMediaIngestJobEvents,
+      mediaIngestJobEventsEnabled
+    ),
+    hasMediaIngestWorker: mergeFeatureFlag(
+      capabilities.hasMediaIngestWorker,
+      mediaIngestWorkerEnabled
+    ),
+    hasDurableMediaCollections: mergeFeatureFlag(
+      capabilities.hasDurableMediaCollections,
+      durableMediaCollectionsEnabled
+    ),
+    hasKnowledgeQaMediaScope: mergeFeatureFlag(
+      capabilities.hasKnowledgeQaMediaScope,
+      knowledgeQaMediaScopeEnabled
+    ),
     hasPersona:
       personaFeatureEnabled === null
         ? capabilities.hasPersona
@@ -450,16 +511,27 @@ const computeCapabilities = (
     has("/api/v1/audio/chat/stream") || (hasStt && hasTts)
   const hasVoiceConversationTransport =
     specSource === "fallback" ? false : has("/api/v1/audio/chat/stream")
+  const hasMediaPlaylistPreflight = has("/api/v1/media/playlists/preflight")
+  const hasMediaIngestJobs = has("/api/v1/media/ingest/jobs")
+  const hasMediaIngestJobEvents = has("/api/v1/media/ingest/jobs/events/stream")
+  const hasDurableMediaCollections = has("/api/v1/media/collections")
 
   return {
     hasChat: has("/api/v1/chat/completions"),
     hasRag: has("/api/v1/rag/search") || has("/api/v1/rag/health") || has("/api/v1/rag/"),
     hasMedia:
-      has("/api/v1/media/ingest/jobs") ||
+      hasMediaPlaylistPreflight ||
+      hasMediaIngestJobs ||
       has("/api/v1/media/add") ||
       has("/api/v1/media/") ||
       has("/api/v1/media/process-videos") ||
       has("/api/v1/media/process-documents"),
+    hasMediaPlaylistPreflight,
+    hasMediaIngestJobs,
+    hasMediaIngestJobEvents,
+    hasMediaIngestWorker: false,
+    hasDurableMediaCollections,
+    hasKnowledgeQaMediaScope: false,
     hasNotes: has("/api/v1/notes/"),
     hasSlides,
     hasPresentationStudio,

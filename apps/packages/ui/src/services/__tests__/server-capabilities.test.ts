@@ -162,6 +162,38 @@ describe("server capabilities docs-info merge", () => {
     expect(capabilities.hasMedia).toBe(true)
   })
 
+  it("detects playlist preflight and keeps worker availability separate from job endpoints", async () => {
+    mocks.getOpenAPISpec.mockResolvedValue({
+      info: { version: "bulk-ingest-capabilities" },
+      paths: {
+        "/api/v1/media/playlists/preflight": {},
+        "/api/v1/media/ingest/jobs": {},
+        "/api/v1/media/ingest/jobs/events/stream": {}
+      }
+    })
+    mocks.bgRequest.mockResolvedValue({
+      capabilities: {
+        hasMediaPlaylistPreflight: true,
+        hasMediaIngestJobs: true,
+        hasMediaIngestJobEvents: true,
+        hasMediaIngestWorker: false,
+        hasDurableMediaCollections: false,
+        hasKnowledgeQaMediaScope: false
+      }
+    })
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+
+    expect(capabilities.hasMedia).toBe(true)
+    expect(capabilities.hasMediaPlaylistPreflight).toBe(true)
+    expect(capabilities.hasMediaIngestJobs).toBe(true)
+    expect(capabilities.hasMediaIngestJobEvents).toBe(true)
+    expect(capabilities.hasMediaIngestWorker).toBe(false)
+    expect(capabilities.hasDurableMediaCollections).toBe(false)
+    expect(capabilities.hasKnowledgeQaMediaScope).toBe(false)
+  })
+
   it("detects ingestion source capability from advertised source routes", async () => {
     mocks.getOpenAPISpec.mockResolvedValue({
       info: { version: "ingestion-sources-version" },

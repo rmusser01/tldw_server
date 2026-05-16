@@ -196,6 +196,14 @@ export type QueueItemValidation = {
   warnings?: string[]
 }
 
+export type PlaylistQueueMetadata = {
+  playlistId?: string | null
+  playlistTitle?: string | null
+  ordinal?: number
+  normalizedSourceId?: string | null
+  duplicateStatus?: "new" | "duplicate_in_batch" | "duplicate_existing" | "unknown"
+}
+
 /**
  * An item in the wizard's ingest queue (files + URLs with detected types).
  */
@@ -226,6 +234,8 @@ export type WizardQueueItem = {
   mimeType?: string
   /** Validation state for this item. */
   validation: QueueItemValidation
+  /** Metadata carried from a playlist preflight response. */
+  playlist?: PlaylistQueueMetadata
 }
 
 /**

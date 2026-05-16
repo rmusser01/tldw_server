@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     iter_custom_openai_provider_names,
 )
 from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.services.worker_startup_policy import worker_path_enabled
 
 router = APIRouter()
 _DOCS_API_KEY_PLACEHOLDER = "YOUR_API_KEY"
@@ -120,6 +121,7 @@ def load_safe_config() -> dict:
 
     # Feature flags / capabilities (safe to expose)
     try:
+        has_media_routes = bool(config_mod.route_enabled("media", default_stable=True))
         has_audio_http = bool(config_mod.route_enabled("audio", default_stable=True))
         has_audio_websocket = bool(config_mod.route_enabled("audio-websocket", default_stable=True))
         caps = {
@@ -140,6 +142,19 @@ def load_safe_config() -> dict:
         caps["hasVoiceChat"] = bool(has_audio_http or has_audio_websocket)
         caps["hasVoiceConversationTransport"] = bool(has_audio_websocket)
         caps["hasAudio"] = bool(caps["hasStt"] or caps["hasTts"] or caps["hasVoiceChat"])
+        caps["hasMediaPlaylistPreflight"] = has_media_routes
+        caps["hasMediaIngestJobs"] = has_media_routes
+        caps["hasMediaIngestJobEvents"] = has_media_routes
+        caps["hasMediaIngestWorker"] = bool(
+            worker_path_enabled(
+                "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED",
+                "media-ingest-heavy-jobs",
+                default_stable=False,
+                test_mode=False,
+            )
+        )
+        caps["hasDurableMediaCollections"] = False
+        caps["hasKnowledgeQaMediaScope"] = False
         # expose both for backward-compat and forward-looking UI
         safe_config["supported_features"] = caps
         safe_config["capabilities"] = caps

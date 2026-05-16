@@ -16,6 +16,11 @@ import type {
   ReferenceImageCandidate,
   ReferenceImageListResponse
 } from "../TldwApiClient"
+import {
+  normalizePlaylistPreflightResponse,
+  type ApiPlaylistPreflightResponse,
+  type PlaylistPreflightResult
+} from "@/services/tldw/playlist-preflight"
 
 /**
  * Builds a query string from a record of parameters.
@@ -119,6 +124,30 @@ export const mediaMethods = {
       fields: normalized,
       timeoutMs
     })
+  },
+
+  async preflightPlaylist(payload: {
+    url: string
+    max_items?: number
+    maxItems?: number
+    timeoutMs?: number
+  }): Promise<PlaylistPreflightResult> {
+    const { timeoutMs, maxItems, max_items, ...rest } = payload || {}
+    const body = {
+      ...rest,
+      max_items: max_items ?? maxItems
+    }
+    if (typeof body.max_items === "undefined") {
+      delete (body as Record<string, unknown>).max_items
+    }
+    const response = await bgRequest<ApiPlaylistPreflightResponse>({
+      path: "/api/v1/media/playlists/preflight",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      timeoutMs
+    })
+    return normalizePlaylistPreflightResponse(response)
   },
 
   async getMediaIngestJob(
