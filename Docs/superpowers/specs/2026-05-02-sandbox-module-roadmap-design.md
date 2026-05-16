@@ -1,6 +1,7 @@
 # Sandbox Module Roadmap Design
 
-**Status:** Proposed roadmap spec.
+**Status:** Active roadmap spec, rebaselined 2026-05-16 after the initial
+immediate PR queue landed.
 **Date:** 2026-05-02.
 **Scope:** Full sandbox module: API, orchestrator, store, artifacts, streaming,
 admin surfaces, CI, security, and all current runtime families.
@@ -8,6 +9,9 @@ admin surfaces, CI, security, and all current runtime families.
 ## Related Docs
 
 - `Docs/Sandbox/sandbox-architecture-doctrine.md`
+- `Docs/Sandbox/sandbox-runtime-capability-inventory.md`
+- `Docs/Sandbox/sandbox-security-policy-matrix.md`
+- `Docs/Sandbox/vz-linux-host-gated-ci-acceptance-policy.md`
 - `Docs/Design/2026-05-02-apple-containerization-evaluation.md`
 - `tldw_Server_API/app/core/Sandbox/README.md`
 
@@ -48,6 +52,15 @@ The sandbox module already has substantial production-shaped pieces:
 The biggest remaining risk is not lack of features. It is uneven runtime
 maturity: each runtime reports and enforces a different subset of guarantees,
 and some operational behaviors are mature only for `vz_linux`.
+
+2026-05-16 rebaseline:
+
+- The original immediate PR queue is no longer a pending to-do list. It now
+  serves as a completed-foundation checklist and evidence map.
+- `vz_linux` remains the strongest proving ground, but real execution and
+  failure drills are still prepared-host and operator-gated.
+- The next pragmatic work should close evidence and lifecycle gaps, not reopen
+  metadata, inventory, security, or public-docs slices that already landed.
 
 ## Strategy
 
@@ -307,57 +320,50 @@ Exit criteria:
 - dependency additions are isolated behind adapters
 - compatibility and rollback paths are explicit
 
-## Immediate PR Queue
+## Immediate Queue Rebaseline
 
-This queue starts with a low-risk metadata bridge already identified by the
-Apple containerization evaluation. PR 2 then completes the Phase 0 inventory
-gate before broader lifecycle, reliability, or security hardening expands.
+The initial immediate queue has been worked through as a foundation set. Treat
+this table as the current status map before selecting new sandbox work.
 
-1. **OCI-aware image-store metadata scaffolding**
+| Item | Current status | Evidence / source of truth | Residual boundary |
+| --- | --- | --- | --- |
+| OCI-aware image-store metadata scaffolding | Complete for metadata-only bundle provenance. | `SandboxImageStore` now records `artifact_format`, current bundles use `tldw_bundle`, and macOS diagnostics expose template provenance. See `Docs/superpowers/plans/2026-05-02-oci-aware-image-store-metadata-implementation-plan.md`. | No helper boot, OCI pull, or Apple `containerization` runtime change. |
+| Runtime capability inventory | Complete as the current support-state inventory. | `Docs/Sandbox/sandbox-runtime-capability-inventory.md` plus the portable runtime capability gate. | Real execution remains host-gated per runtime; the inventory is not itself a live-host proof. |
+| `vz_linux` helper lifecycle compatibility | Complete for operator-owned direct helper, launchd-drill, signing, socket safety, status, and protocol/version checks. | `Docs/Sandbox/macos-runtime-operator-notes.md`, `tools/macos-vz-helper/scripts/vz-helperctl.py`, and the launchd/helper lifecycle tasks. | No automatic installation or hidden upgrade daemon. Host reboot remains a manual operator procedure. |
+| Boot logs and resource diagnostics | Complete for current read-only diagnostics. | `TASK-404`, `Docs/superpowers/specs/2026-05-16-vz-boot-resource-diagnostics-design.md`, and `Docs/Sandbox/macos-runtime-operator-notes.md`. | Current resource snapshots are configured VM facts plus uptime, not live CPU/RSS/I/O telemetry. |
+| Cross-runtime cleanup contract tests | Complete for portable cleanup/recovery contracts. | `TASK-62` and `Docs/superpowers/specs/2026-05-05-sandbox-cleanup-recovery-contract-tests-design.md`. | Real VM cleanup behavior remains host-gated where runtime hosts are required. |
+| Security policy matrix | Complete as active guidance, with supporting runtime contracts. | `Docs/Sandbox/sandbox-security-policy-matrix.md`, isolation/network metadata tasks, audit metadata task, and VZ helper `create_vm` validation. | Future runtimes must update the matrix before claiming stronger guarantees. |
+| Host-gated CI acceptance policy | Complete as policy/workflow scaffolding, with manual-only drills. | `.github/workflows/vz-linux-host-gated.yml`, `Docs/Sandbox/vz-linux-host-gated-ci-acceptance-policy.md`, `TASK-145`, `TASK-153`, and launchd-drill tasks. | Ongoing work is prepared-host evidence and regression triage, not PR/push-triggered CI. |
+| Public docs reconciliation | Complete for the current diagnostics and runtime posture. | `TASK-89`, `Docs/API-related/Sandbox_API.md`, `tldw_Server_API/app/core/Sandbox/README.md`, and macOS operator notes. | Docs still need maintenance when runtime behavior changes; do not infer support beyond runtime discovery. |
 
-   Add optional OCI/source fields to `SandboxImageStore` manifests, set
-   `artifact_format="tldw_bundle"` for current bundles, and surface artifact
-   format/provenance in diagnostics. Do not change helper boot.
+## Next Pragmatic Queue
 
-2. **Runtime capability inventory**
+1. **Prepared-host acceptance evidence and gap tracking**
 
-   Add a repo-level matrix documenting each runtime's support state for trust
-   levels, network policies, interactivity, sessions, artifacts, recovery, and
-   CI. Include `worktree` explicitly and cross-check with
-   `/api/v1/sandbox/runtimes`.
+   Capture manual/nightly `vz_linux` host-gated run evidence from a prepared
+   Apple silicon host, including command execution, same-session reuse, helper
+   restart drill, launchd-drill where explicitly requested, artifact upload, and
+   expected skips. This is the best next slice because it tests the stability
+   path the preceding PRs built.
 
-3. **`vz_linux` helper lifecycle compatibility**
+2. **Remaining `vz_linux` lifecycle drill gaps**
 
-   Tighten helper version/protocol checks, startup/shutdown behavior, stale
-   socket handling, and operator status output. Keep launchd scaffolding
-   operator-first, not automatic.
+   Add narrow manual drills or documented operator checks for stale socket,
+   stuck boot/readiness, and guest-agent mismatch behavior. Keep host reboot
+   out of scheduled CI and avoid destructive repair defaults.
 
-4. **Boot logs and resource diagnostics**
+3. **Operator/admin status consolidation**
 
-   Surface serial/boot log pointers, bounded helper logs, and resource snapshots
-   in admin diagnostics, starting with `vz_linux`.
+   After real prepared-host evidence exists, expose the resulting readiness,
+   warning, repair-plan, and CI-status signals through admin/operator surfaces
+   without duplicating runtime-specific logic in clients.
 
-5. **Cross-runtime cleanup contract tests**
+4. **Expansion design only after evidence (Phase 6)**
 
-   Add focused tests for cancel/timeout/failed-start cleanup semantics for the
-   runtimes that can be exercised without special hosts, plus host-gated notes
-   for VM-only checks.
-
-6. **Security policy matrix**
-
-   Document and test trust-level/runtime eligibility, network semantics,
-   workspace mounts, user model, and artifact exposure by runtime.
-
-7. **Host-gated CI acceptance policy**
-
-   Clarify manual/nightly gates, expected skip behavior, artifact uploads,
-   branch allowlisting, and what counts as a blocking `vz_linux` regression.
-
-8. **Public docs reconciliation**
-
-   Align API docs, Sandbox README, Product PRD, and operator notes so they do
-   not overstate support for Firecracker, Lima, `vz_macos`, `seatbelt`, or
-   `worktree`.
+   Resume expansion candidates such as `vz_macos` real execution, vmnet
+   allowlist networking, APFS clone provisioning, Firecracker parity, or direct
+   Apple `containerization` adapters only after the evidence loop above is
+   boring enough to catch regressions.
 
 ## Design Risks And Mitigations
 
@@ -402,9 +408,10 @@ gate before broader lifecycle, reliability, or security hardening expands.
 - Do not make every runtime support every feature before stabilizing how support
   is reported.
 
-## Approval Gate
+## Current Handoff
 
-Once this roadmap is approved, the next artifact should be an implementation
-plan for PR 1: OCI-aware image-store metadata scaffolding. That plan should
-remain narrow and should not change helper boot, networking, guest execution, or
-runtime admission.
+The next implementation artifact should target prepared-host acceptance evidence
+and remaining lifecycle drill gaps. Keep the slice operator-first and
+host-gated: no PR-triggered real VM execution, no scheduled destructive drills,
+no host reboot automation, no networking expansion, and no `vz_macos` real
+execution until the shared contracts remain stable under real-host evidence.

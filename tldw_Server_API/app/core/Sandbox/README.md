@@ -52,7 +52,10 @@ Trust-level rules:
 - The full-module roadmap lives in
   `Docs/superpowers/specs/2026-05-02-sandbox-module-roadmap-design.md`.
   It sequences remaining work across API, orchestrator, runtimes, security,
-  admin, and CI without treating every runtime as equally mature.
+  admin, and CI without treating every runtime as equally mature. Its current
+  queue is status-rebaselined after the initial VZ Linux stability slices, so
+  use it to distinguish completed foundations from the next host-gated evidence
+  work.
 - The runtime capability inventory lives in
   `Docs/Sandbox/sandbox-runtime-capability-inventory.md`. It classifies each
   runtime's current trust, network, lifecycle, recovery, diagnostics, and CI
