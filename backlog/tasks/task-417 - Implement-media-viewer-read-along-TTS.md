@@ -11,6 +11,11 @@ labels:
 references:
 - Docs/superpowers/specs/2026-05-17-media-viewer-read-along-tts-design.md
 - Docs/superpowers/plans/2026-05-17-media-viewer-read-along-tts-implementation-plan.md
+modified_files:
+- apps/packages/ui/src/components/Media/read-along/useMediaReadAlongSession.ts
+- apps/packages/ui/src/services/tts-provider.ts
+- apps/packages/ui/src/components/Media/read-along/__tests__/useMediaReadAlongSession.test.tsx
+- apps/packages/ui/src/services/__tests__/tts-provider.read-along.test.ts
 ---
 
 ## Description
@@ -94,6 +99,19 @@ Task 5 completed:
 - Green verification: `cd apps/packages/ui && bunx vitest run src/components/Media/read-along/__tests__/useMediaReadAlongSession.test.tsx src/components/Media/read-along/__tests__/media-read-along-segments.test.ts src/components/Media/read-along/__tests__/media-read-along-cache.test.ts --maxWorkers=1` passed 3 files / 23 tests.
 - `git diff --check` passed.
 - Bandit skipped for Task 5 because the touched slice is TypeScript/React frontend code only.
+Task 5 review findings fixed:
+- Segment load/play failures now mark the failed pending segment as active so retry and skip target the correct parent segment.
+- Lookahead tracks in-flight segment audio, reuses a pending lookahead request when it becomes current, and aborts stale lookahead on retry/skip/current changes while preserving the bounded window.
+- Provider synthesis now splits over-cap parent segments into deterministic TTS request parts, plays all parts sequentially under the same highlighted/counting parent segment, and keeps lookahead bounded.
+- Read-along uses the session-captured TTS text normalizer for provider/browser synthesis and cache text hashes; browser provider contexts also capture the configured browser voice name.
+- Generated-audio cache keys now include a sanitized active server/auth-scope identity from tldwClient.getConfig() instead of the hard-coded media-read-along scope.
+- Recursive play-next calls now go through a playSegment ref to avoid stale hook callback dependencies.
+
+Verification:
+- cd apps/packages/ui && bunx vitest run src/components/Media/read-along/__tests__/useMediaReadAlongSession.test.tsx src/components/Media/read-along/__tests__/media-read-along-segments.test.ts src/components/Media/read-along/__tests__/media-read-along-cache.test.ts src/services/__tests__/tts-provider.read-along.test.ts --maxWorkers=1 -> passed, 4 files / 44 tests.
+- cd apps/packages/ui && bunx vitest run src/components/Media/read-along/__tests__/useMediaReadAlongSession.test.tsx src/services/__tests__/tts-provider.read-along.test.ts --maxWorkers=1 -> passed, 2 files / 27 tests.
+- git diff --check -> passed.
+- Bandit not run because this review-fix slice touched TypeScript frontend files only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

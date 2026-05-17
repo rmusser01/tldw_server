@@ -11,6 +11,7 @@ import {
   getTldwTTSResponseFormat,
   getTldwTTSSpeed,
   getTldwTTSVoice,
+  getVoice,
   isSSMLEnabled,
   isSupportedTldwTtsResponseFormat,
   normalizeTldwTtsResponseFormat
@@ -78,11 +79,15 @@ export type TtsCacheSettings = {
   language?: string | null
 }
 
+export type TtsTextNormalizer = (text: string) => string
+
 export type TtsProviderContext = {
   provider: string
   utterance: string
+  normalizeText: TtsTextNormalizer
   playbackSpeed: number
   supported: boolean
+  browserVoiceName?: string | null
   synthesize?: (
     text: string,
     options?: TtsSynthesizeOptions
@@ -117,11 +122,17 @@ const formatToMimeType = (format: string): string => {
   }
 }
 
-const normalizeUtterance = async (text: string): Promise<string> => {
+const normalizeUtteranceWithSettings = (
+  text: string,
+  {
+    shouldRemoveReasoning,
+    ssmlEnabled
+  }: {
+    shouldRemoveReasoning: boolean
+    ssmlEnabled: boolean
+  }
+): string => {
   let utterance = text
-  const shouldRemoveReasoning = await getRemoveReasoningTagTTS()
-  const ssmlEnabled = await isSSMLEnabled()
-
   if (shouldRemoveReasoning) {
     utterance = removeReasoning(utterance)
   }
@@ -133,6 +144,50 @@ const normalizeUtterance = async (text: string): Promise<string> => {
   return markdownToText(utterance)
 }
 
+export const resolveTtsTextNormalizer = async (): Promise<TtsTextNormalizer> => {
+  const [shouldRemoveReasoning, ssmlEnabled] = await Promise.all([
+    getRemoveReasoningTagTTS(),
+    isSSMLEnabled()
+  ])
+
+  return (text: string) =>
+    normalizeUtteranceWithSettings(text, { shouldRemoveReasoning, ssmlEnabled })
+}
+
+export const applyBrowserSpeechSynthesisVoice = (
+  utterance: SpeechSynthesisUtterance,
+  synthesis: SpeechSynthesis | null | undefined,
+  voiceName?: string | null
+): void => {
+  const targetVoiceName = String(voiceName || "").trim()
+  if (
+    !targetVoiceName ||
+    !synthesis ||
+    typeof synthesis.getVoices !== "function"
+  ) {
+    return
+  }
+
+  const applyVoice = () => {
+    const selectedVoice = synthesis
+      .getVoices()
+      .find((voice) => voice.name === targetVoiceName)
+    if (selectedVoice) {
+      utterance.voice = selectedVoice
+    }
+  }
+
+  applyVoice()
+  if (utterance.voice) return
+
+  const previousHandler = synthesis.onvoiceschanged
+  synthesis.onvoiceschanged = function onvoiceschanged(event: Event) {
+    applyVoice()
+    if (typeof previousHandler === "function") {
+      previousHandler.call(this, event)
+    }
+  }
+}
 
 export const inferTldwProviderFromModel = (
   model?: string | null
@@ -143,24 +198,29 @@ export const resolveTtsProviderContext = async (
   overrides?: TtsProviderOverrides
 ): Promise<TtsProviderContext> => {
   const provider = overrides?.provider || (await getTTSProvider())
-  const utterance = await normalizeUtterance(text)
+  const normalizeText = await resolveTtsTextNormalizer()
+  const utterance = normalizeText(text)
   const playbackSpeed = await getSpeechPlaybackSpeed()
 
   if (!SUPPORTED_TTS_PROVIDERS.has(provider as TtsProviderKey)) {
     return {
       provider,
       utterance,
+      normalizeText,
       playbackSpeed,
       supported: false
     }
   }
 
   if (provider === "browser") {
+    const browserVoiceName = await getVoice()
     return {
       provider,
       utterance,
+      normalizeText,
       playbackSpeed,
-      supported: true
+      supported: true,
+      browserVoiceName
     }
   }
 
@@ -179,6 +239,7 @@ export const resolveTtsProviderContext = async (
     return {
       provider,
       utterance,
+      normalizeText,
       playbackSpeed,
       supported: true,
       cacheSettings: {
@@ -206,6 +267,7 @@ export const resolveTtsProviderContext = async (
     return {
       provider,
       utterance,
+      normalizeText,
       playbackSpeed,
       supported: true,
       cacheSettings: {
@@ -254,6 +316,7 @@ export const resolveTtsProviderContext = async (
   return {
     provider,
     utterance,
+    normalizeText,
     playbackSpeed,
     supported: true,
     formatInfo,

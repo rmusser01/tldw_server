@@ -90,14 +90,32 @@ class MockSpeechSynthesisUtterance extends EventTarget {
 }
 
 vi.mock('@/services/tts-provider', () => ({
+  applyBrowserSpeechSynthesisVoice: vi.fn(),
   resolveTtsProviderContext: vi.fn(async () => {
     eventLog.push(`provider:resolve:${providerContext.provider}`)
     return providerContext
   })
 }))
 
+vi.mock('@/services/tldw/TldwApiClient', () => ({
+  tldwClient: {
+    getConfig: vi.fn(async () => ({
+      serverUrl: 'http://127.0.0.1:8000/',
+      apiKey: 'secret-api-key',
+      authMode: 'single-user'
+    }))
+  }
+}))
+
 vi.mock('../media-read-along-cache-key', () => ({
-  buildReadAlongCacheKey: vi.fn(async ({ segmentId, settingsSignature }) => {
+  buildReadAlongCacheKey: vi.fn(async ({
+    segmentId,
+    segmentText,
+    serverScope,
+    settingsSignature
+  }) => {
+    eventLog.push(`cache-scope:${serverScope}`)
+    eventLog.push(`cache-text:${segmentId}:${segmentText}`)
     eventLog.push(`cache-key:${segmentId}:${settingsSignature}`)
     return {
       id: `cache:${segmentId}:${settingsSignature}`,
@@ -162,6 +180,7 @@ vi.mock('../media-read-along-cache', () => ({
 }))
 
 import { resolveTtsProviderContext } from '@/services/tts-provider'
+import { tldwClient } from '@/services/tldw/TldwApiClient'
 import {
   getMediaReadAlongAudioCacheEntry,
   saveMediaReadAlongAudioCacheEntry
@@ -239,6 +258,7 @@ describe('useMediaReadAlongSession', () => {
       playbackSpeed: 1,
       supported: true,
       formatInfo: { requested: 'mp3', resolved: 'mp3', isFallback: false },
+      normalizeText: (text: string) => text,
       synthesize: vi.fn(async (text: string) => {
         eventLog.push(`synthesize:${text}`)
         return {
@@ -249,6 +269,11 @@ describe('useMediaReadAlongSession', () => {
       })
     }
     vi.clearAllMocks()
+    vi.mocked(tldwClient.getConfig).mockResolvedValue({
+      serverUrl: 'http://127.0.0.1:8000/',
+      apiKey: 'secret-api-key',
+      authMode: 'single-user'
+    })
     vi.stubGlobal('AbortController', TrackingAbortController)
     vi.stubGlobal('Audio', MockAudio)
     vi.stubGlobal('SpeechSynthesisUtterance', MockSpeechSynthesisUtterance)
@@ -344,7 +369,8 @@ describe('useMediaReadAlongSession', () => {
       provider: 'browser',
       utterance: 'First sentence.',
       playbackSpeed: 1.25,
-      supported: true
+      supported: true,
+      normalizeText: (text: string) => text
     }
     const { result } = setupHook()
 
@@ -356,6 +382,168 @@ describe('useMediaReadAlongSession', () => {
     expect(getMediaReadAlongAudioCacheEntry).not.toHaveBeenCalled()
     expect(saveMediaReadAlongAudioCacheEntry).not.toHaveBeenCalled()
     expect(buildReadAlongCacheKey).not.toHaveBeenCalled()
+  })
+
+  it('targets retry and skip from the segment that failed while loading', async () => {
+    providerContext.synthesize = vi.fn(async (text: string) => {
+      eventLog.push(`synthesize:${text}`)
+      if (text === 'Second sentence.') {
+        throw new Error('second segment failed')
+      }
+      return audioResult(text)
+    })
+    const { result } = setupHook()
+
+    await act(async () => {
+      await result.current.start('full-item')
+    })
+    await completeCurrentAudio()
+
+    await waitFor(() => expect(result.current.state.status).toBe('segment-error'))
+    expect(result.current.state).toMatchObject({
+      activeSegmentId: 'media-1:1:sentence:16:32',
+      activeIndex: 1,
+      error: 'second segment failed'
+    })
+
+    providerContext.synthesize = vi.fn(async (text: string) => {
+      eventLog.push(`synthesize:${text}`)
+      return audioResult(text)
+    })
+    act(() => {
+      result.current.skip()
+    })
+
+    await waitFor(() =>
+      expect(result.current.state.activeSegmentId).toBe('media-1:2:sentence:33:48')
+    )
+  })
+
+  it('reuses an in-flight lookahead request when that segment becomes current', async () => {
+    const pending = new Map<string, DeferredAudio>()
+    providerContext.synthesize = vi.fn((text: string) => {
+      eventLog.push(`synthesize:${text}`)
+      if (text === 'Second sentence.') {
+        const deferred = deferredAudio()
+        pending.set(text, deferred)
+        return deferred.promise
+      }
+      return Promise.resolve(audioResult(text))
+    })
+    const { result } = setupHook()
+
+    await act(async () => {
+      await result.current.start('full-item')
+    })
+    await waitFor(() => expect(pending.has('Second sentence.')).toBe(true))
+    await completeCurrentAudio()
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    const secondCalls = vi
+      .mocked(providerContext.synthesize)
+      .mock.calls
+      .filter(([text]) => text === 'Second sentence.')
+    expect(secondCalls).toHaveLength(1)
+
+    await act(async () => {
+      pending.get('Second sentence.')!.resolve(audioResult('second'))
+    })
+    await waitFor(() =>
+      expect(result.current.state.activeSegmentId).toBe('media-1:1:sentence:16:32')
+    )
+  })
+
+  it('aborts stale lookahead work when retry restarts the current segment', async () => {
+    const lookaheadSignals: AbortSignal[] = []
+    const pending = new Map<string, DeferredAudio>()
+    providerContext.synthesize = vi.fn((text: string, options?: { signal?: AbortSignal }) => {
+      eventLog.push(`synthesize:${text}`)
+      if (text === 'Second sentence.') {
+        if (options?.signal) lookaheadSignals.push(options.signal)
+        const deferred = deferredAudio()
+        pending.set(text, deferred)
+        return deferred.promise
+      }
+      return Promise.resolve(audioResult(text))
+    })
+    const { result } = setupHook()
+
+    await act(async () => {
+      await result.current.start('full-item')
+    })
+    await waitFor(() => expect(pending.has('Second sentence.')).toBe(true))
+
+    act(() => {
+      result.current.retry()
+    })
+
+    expect(lookaheadSignals[0]?.aborted).toBe(true)
+  })
+
+  it('splits over-cap provider requests while keeping the parent segment active', async () => {
+    const longText = Array.from({ length: 900 }, (_, index) => `word${index}`).join(' ')
+    providerContext.synthesize = vi.fn(async (text: string) => {
+      eventLog.push(`synthesize:${text.length}`)
+      return audioResult(text)
+    })
+    const { result } = setupHook({
+      content: longText,
+      displayContent: longText,
+      selection: makeSelection({
+        selectedText: longText,
+        startSegmentId: `media-1:0:sentence:0:${longText.length}`,
+        endSegmentId: `media-1:0:sentence:0:${longText.length}`,
+        sourceStart: 0,
+        sourceEnd: longText.length
+      })
+    })
+
+    await act(async () => {
+      await result.current.start('selection')
+    })
+
+    const synthesizeCalls = vi.mocked(providerContext.synthesize).mock.calls
+    expect(synthesizeCalls.length).toBeGreaterThan(1)
+    expect(synthesizeCalls.every(([text]) => String(text).length <= 4000)).toBe(true)
+    expect(result.current.state).toMatchObject({
+      status: 'playing',
+      activeSegmentId: `media-1:0:sentence:0:${longText.length}`,
+      activeIndex: 0,
+      totalSegments: 1
+    })
+  })
+
+  it('uses session-normalized text for generated synthesis and cache hashing', async () => {
+    providerContext.normalizeText = vi.fn((text: string) => `normalized:${text}`)
+    const { result } = setupHook()
+
+    await act(async () => {
+      await result.current.start('selection')
+    })
+
+    expect(providerContext.normalizeText).toHaveBeenCalledWith('First sentence.')
+    expect(providerContext.synthesize).toHaveBeenCalledWith(
+      'normalized:First sentence.',
+      expect.any(Object)
+    )
+    expect(eventLog).toContain(
+      'cache-text:media-1:0:sentence:0:15:normalized:First sentence.'
+    )
+  })
+
+  it('uses active server identity in generated-audio cache scope without secrets', async () => {
+    const { result } = setupHook()
+
+    await act(async () => {
+      await result.current.start('selection')
+    })
+
+    const scopeEntries = eventLog.filter((entry) => entry.startsWith('cache-scope:'))
+    expect(scopeEntries[0]).toContain('http://127.0.0.1:8000')
+    expect(scopeEntries[0]).not.toContain('secret-api-key')
+    expect(scopeEntries[0]).not.toBe('cache-scope:media-read-along')
   })
 
   it('stop aborts current and lookahead AbortControllers', async () => {
@@ -379,7 +567,8 @@ describe('useMediaReadAlongSession', () => {
       provider: 'browser',
       utterance: 'First sentence.',
       playbackSpeed: 1,
-      supported: true
+      supported: true,
+      normalizeText: (text: string) => text
     }
     const { result } = setupHook()
 
@@ -525,6 +714,7 @@ describe('useMediaReadAlongSession', () => {
       playbackSpeed: 1,
       supported: true,
       formatInfo: { requested: 'mp3', resolved: 'mp3', isFallback: false },
+      normalizeText: (text: string) => text,
       synthesize: firstSynthesize
     }
     const { result } = setupHook()
@@ -538,6 +728,7 @@ describe('useMediaReadAlongSession', () => {
       playbackSpeed: 1,
       supported: true,
       formatInfo: { requested: 'wav', resolved: 'wav', isFallback: false },
+      normalizeText: (text: string) => text,
       synthesize: secondSynthesize
     }
     await completeCurrentAudio()
@@ -562,6 +753,7 @@ describe('useMediaReadAlongSession', () => {
         speed: 1,
         format: 'mp3'
       },
+      normalizeText: (text: string) => text,
       synthesize: vi.fn(async (text: string) => ({
         buffer: new TextEncoder().encode(text).buffer,
         format: 'mp3',
@@ -587,6 +779,7 @@ describe('useMediaReadAlongSession', () => {
         speed: 1,
         format: 'mp3'
       },
+      normalizeText: (text: string) => text,
       synthesize: vi.fn(async (text: string) => ({
         buffer: new TextEncoder().encode(text).buffer,
         format: 'mp3',
@@ -626,7 +819,8 @@ describe('useMediaReadAlongSession', () => {
       provider: 'browser',
       utterance: 'First sentence.',
       playbackSpeed: 1,
-      supported: true
+      supported: true,
+      normalizeText: (text: string) => text
     }
     const spoken: MockSpeechSynthesisUtterance[] = []
     Object.defineProperty(window, 'speechSynthesis', {
@@ -671,7 +865,8 @@ describe('useMediaReadAlongSession', () => {
       provider: 'browser',
       utterance: 'First sentence.',
       playbackSpeed: 1,
-      supported: true
+      supported: true,
+      normalizeText: (text: string) => text
     }
     const spoken: MockSpeechSynthesisUtterance[] = []
     Object.defineProperty(window, 'speechSynthesis', {

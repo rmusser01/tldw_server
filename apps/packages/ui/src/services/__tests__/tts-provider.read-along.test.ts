@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@/services/tts', () => ({
   getOpenAITTSModel: vi.fn(async () => 'tts-1'),
   getOpenAITTSVoice: vi.fn(async () => 'alloy'),
+  getVoice: vi.fn(async () => 'Browser Voice'),
   getElevenLabsApiKey: vi.fn(async () => ''),
   getElevenLabsModel: vi.fn(async () => ''),
   getElevenLabsVoiceId: vi.fn(async () => ''),
@@ -54,7 +55,13 @@ vi.mock('@/services/tldw/TldwApiClient', () => ({
 
 import { tldwClient } from '@/services/tldw/TldwApiClient'
 import { generateOpenAITTS } from '@/services/openai-tts'
-import { getOpenAITTSModel, getOpenAITTSVoice } from '@/services/tts'
+import { markdownToText } from '@/utils/markdown-to-text'
+import {
+  getOpenAITTSModel,
+  getOpenAITTSVoice,
+  getVoice,
+  isSSMLEnabled
+} from '@/services/tts'
 import { resolveTtsProviderContext } from '../tts-provider'
 
 describe('tts provider read-along synthesis', () => {
@@ -104,5 +111,23 @@ describe('tts provider read-along synthesis', () => {
     expect(generateOpenAITTS).toHaveBeenCalledWith(
       expect.objectContaining({ signal })
     )
+  })
+
+  it('captures reusable text normalization at provider resolution time', async () => {
+    vi.mocked(markdownToText).mockImplementation((text: string) => `plain:${text}`)
+
+    const context = await resolveTtsProviderContext('hello', { provider: 'browser' })
+    vi.mocked(isSSMLEnabled).mockResolvedValue(true)
+
+    expect(context.utterance).toBe('plain:hello')
+    expect(context.normalizeText?.('next')).toBe('plain:next')
+  })
+
+  it('captures the configured browser voice name for read-along playback', async () => {
+    vi.mocked(getVoice).mockResolvedValueOnce('Voice A')
+
+    const context = await resolveTtsProviderContext('hello', { provider: 'browser' })
+
+    expect(context.browserVoiceName).toBe('Voice A')
   })
 })
