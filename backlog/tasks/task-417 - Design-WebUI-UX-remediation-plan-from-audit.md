@@ -11,6 +11,7 @@ labels:
 priority: high
 modified_files:
 - Docs/superpowers/specs/2026-05-17-webui-extension-ux-remediation-program-design.md
+- backlog/tasks/task-417 - Design-WebUI-UX-remediation-plan-from-audit.md
 ---
 
 ## Description
@@ -32,7 +33,7 @@ Create a text-only remediation design/spec addressing every issue identified in 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created the WebUI/extension UX remediation program design spec at Docs/superpowers/specs/2026-05-17-webui-extension-ux-remediation-program-design.md. The spec covers 12 work packages, finding coverage for F1-F19, route coverage for all 74 audited root/top-level routes, sequencing, verification gates, and implementation planning rules. Spec-document-reviewer approved on iteration 2 after route/package coverage fixes. Mechanical checks passed for placeholders, ASCII/trailing whitespace, and git diff --check. No product code changes were made.
+Created the WebUI/extension UX remediation program design spec at Docs/superpowers/specs/2026-05-17-webui-extension-ux-remediation-program-design.md. The spec covers 12 work packages, finding coverage for F1-F19, route coverage for all 74 audited root/top-level routes, sequencing, verification gates, and implementation planning rules. Follow-up review tightened the spec by adding an Interaction Before Explanation principle, clarifying WP11 primary ownership for /audiobook-studio, and adding guardrails for child implementation plans, finding/route closure tracking, overloaded package splitting, and structural UX fixes over explanation-only copy. Mechanical checks passed for placeholders, ASCII/trailing whitespace, git diff --check, route matrix coverage, and finding matrix coverage. No product code changes were made.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
