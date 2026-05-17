@@ -467,7 +467,10 @@ vi.mock("@/store/model", () => ({
       jsonMode: false,
       numCtx: 8192,
       updateSetting: vi.fn(),
-      updateSettings: vi.fn()
+      updateSettings: vi.fn(),
+      setActiveSettingsScope: vi.fn(),
+      updateScopedSetting: vi.fn(),
+      getEffectiveSettings: vi.fn(() => ({}))
     }
     return selector ? selector(state) : state
   }

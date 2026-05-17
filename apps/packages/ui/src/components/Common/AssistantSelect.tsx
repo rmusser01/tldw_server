@@ -119,15 +119,23 @@ export const AssistantSelect: React.FC<Props> = ({
     FavoriteCharacter[]
   >("favoriteCharacters", [])
   const searchInputRef = React.useRef<InputRef | null>(null)
+  const triggerButtonRef = React.useRef<HTMLButtonElement | null>(null)
   const returnFocusSelectorRef = React.useRef<string | null>(null)
 
   const restoreReturnFocus = React.useCallback(() => {
     const selector = returnFocusSelectorRef.current
     returnFocusSelectorRef.current = null
-    if (!selector) return
+    if (!selector) {
+      if (variant === "dropdown" && typeof window !== "undefined") {
+        window.requestAnimationFrame(() => {
+          triggerButtonRef.current?.focus()
+        })
+      }
+      return
+    }
 
     scheduleFocusFirstVisibleElement(selector)
-  }, [])
+  }, [variant])
 
   React.useEffect(() => {
     if (selectedAssistant?.kind === "character" || selectedAssistant?.kind === "persona") {
@@ -573,6 +581,7 @@ export const AssistantSelect: React.FC<Props> = ({
     >
       <Tooltip title={buttonLabel}>
         <button
+          ref={triggerButtonRef}
           type="button"
           data-testid="character-select"
           className={`inline-flex items-center gap-2 ${className}`.trim()}
