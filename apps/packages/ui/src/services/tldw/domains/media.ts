@@ -141,15 +141,25 @@ export const mediaMethods = {
     url: string
     max_items?: number
     maxItems?: number
+    timeout_seconds?: number
     timeoutMs?: number
   }): Promise<PlaylistPreflightResult> {
-    const { timeoutMs, maxItems, max_items, ...rest } = payload || {}
-    const body = {
+    const { timeoutMs, maxItems, max_items, timeout_seconds, ...rest } = payload || {}
+    const requestedTimeoutSeconds =
+      typeof timeout_seconds === "number"
+        ? timeout_seconds
+        : typeof timeoutMs === "number"
+          ? Math.ceil(timeoutMs / 1000)
+          : undefined
+    const body: Record<string, unknown> = {
       ...rest,
       max_items: max_items ?? maxItems
     }
     if (typeof body.max_items === "undefined") {
-      delete (body as Record<string, unknown>).max_items
+      delete body.max_items
+    }
+    if (typeof requestedTimeoutSeconds === "number" && Number.isFinite(requestedTimeoutSeconds)) {
+      body.timeout_seconds = Math.min(60, Math.max(1, Math.ceil(requestedTimeoutSeconds)))
     }
     const response = await bgRequest<ApiPlaylistPreflightResponse>({
       path: "/api/v1/media/playlists/preflight",

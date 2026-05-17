@@ -1,5 +1,6 @@
+import asyncio
+
 import pytest
-import time
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -94,22 +95,16 @@ def test_playlist_preflight_endpoint_returns_timeout_status(
 ):
     client, playlist_preflight = playlist_preflight_client
 
-    def slow_preflight_playlist_url(url: str, *, max_items: int):
-        assert url == "https://www.youtube.com/playlist?list=PLtest"
-        assert max_items == 34
-        time.sleep(1.2)
-        return {
-            "source_url": url,
-            "source_kind": "youtube_playlist",
-            "item_count": 0,
-            "selected_count": 0,
-            "duplicate_count": 0,
-        }
+    async def timeout_preflight(payload):
+        assert payload.url == "https://www.youtube.com/playlist?list=PLtest"
+        assert payload.max_items == 34
+        assert payload.timeout_seconds == 1
+        raise asyncio.TimeoutError
 
     monkeypatch.setattr(
         playlist_preflight,
-        "preflight_playlist_url",
-        slow_preflight_playlist_url,
+        "_run_preflight_with_timeout",
+        timeout_preflight,
         raising=True,
     )
 
@@ -125,3 +120,35 @@ def test_playlist_preflight_endpoint_returns_timeout_status(
 
     assert resp.status_code == 504
     assert resp.json()["detail"] == "playlist_preflight_timeout"
+
+
+def test_playlist_preflight_endpoint_maps_invalid_extractor_result_to_bad_gateway(
+    playlist_preflight_client,
+    monkeypatch,
+):
+    client, playlist_preflight = playlist_preflight_client
+
+    async def invalid_preflight_result(payload):
+        return {
+            "source_url": payload.url,
+            "source_kind": "youtube_playlist",
+        }
+
+    monkeypatch.setattr(
+        playlist_preflight,
+        "_run_preflight_with_timeout",
+        invalid_preflight_result,
+        raising=True,
+    )
+
+    resp = client.post(
+        "/api/v1/media/playlists/preflight",
+        json={
+            "url": "https://www.youtube.com/playlist?list=PLtest",
+            "max_items": 34,
+        },
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "playlist_preflight_invalid_result"

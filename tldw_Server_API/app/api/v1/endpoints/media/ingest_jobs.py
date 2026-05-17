@@ -17,7 +17,15 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal, get_request_user, rbac_rate_limit, RequirePermission, User
+from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import try_get_collections_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    check_rate_limit,
+    get_auth_principal,
+    get_request_user,
+    rbac_rate_limit,
+    RequirePermission,
+    User,
+)
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
@@ -164,6 +172,7 @@ def _validate_submit_inputs(
 
 
 def _coerce_form_string_list(value: Any) -> list[str]:
+    """Return trimmed form values from repeated fields, JSON strings, or scalar input."""
     if value is None:
         return []
     raw_values = value if isinstance(value, list) else [value]
@@ -193,11 +202,13 @@ def _coerce_form_string_list(value: Any) -> list[str]:
 
 
 def _coerce_form_string(value: Any) -> str | None:
+    """Return the first normalized form string value, if one is present."""
     values = _coerce_form_string_list(value)
     return values[0] if values else None
 
 
 def _coerce_positive_int(value: Any) -> int | None:
+    """Parse a positive integer identifier from form data, ignoring invalid values."""
     try:
         parsed = int(value)
     except (TypeError, ValueError):
@@ -211,6 +222,7 @@ def _validate_per_url_binding_list(
     values: list[str],
     url_count: int,
 ) -> None:
+    """Ensure optional per-URL binding arrays line up with the submitted URL count."""
     if not values:
         return
     if len(values) == url_count:
@@ -231,6 +243,7 @@ def _resolve_submit_bindings(
     idempotency_key: Any,
     idempotency_keys: Any,
 ) -> tuple[str | None, list[str], list[str]]:
+    """Normalize collection, planned-item, and idempotency bindings for URL jobs."""
     collection_id_value = _coerce_form_string(media_collection_id) or _coerce_form_string(collection_id)
     planned_values = _coerce_form_string_list(planned_item_ids)
     single_planned = _coerce_form_string(media_collection_item_id)
@@ -262,6 +275,7 @@ def _apply_collection_binding_to_payload(
     planned_item_id: str | None,
     idempotency_key: str | None,
 ) -> None:
+    """Attach durable collection binding fields to a job payload when supplied."""
     if collection_id:
         payload["collection_id"] = collection_id
     if planned_item_id:
@@ -271,6 +285,7 @@ def _apply_collection_binding_to_payload(
 
 
 def _submit_failure_message(exc: Exception) -> str:
+    """Return a bounded, user-safe message for collection submit-failure tracking."""
     if isinstance(exc, HTTPException):
         detail = exc.detail
         if isinstance(detail, str):
@@ -281,17 +296,16 @@ def _submit_failure_message(exc: Exception) -> str:
 
 def _mark_collection_item_submit_failed(
     *,
-    user_id: str,
+    collections_db: CollectionsDatabase | None,
     planned_item_id: Any,
     error_summary: str,
 ) -> None:
+    """Mark a planned collection item as submit_failed using the injected DB handle."""
     item_id = _coerce_positive_int(planned_item_id)
-    if item_id is None:
+    if item_id is None or collections_db is None:
         return
 
-    collections_db = None
     try:
-        collections_db = CollectionsDatabase.for_user(user_id=user_id)
         collections_db.update_media_collection_item_status(
             item_id,
             status="submit_failed",
@@ -300,14 +314,10 @@ def _mark_collection_item_submit_failed(
         )
     except Exception as exc:
         logger.warning(
-            "Media collection item submit-failure sync failed for user {}: {}",
-            user_id,
+            "Media collection item submit-failure sync failed for item {}: {}",
+            item_id,
             exc,
         )
-    finally:
-        if collections_db is not None:
-            with contextlib.suppress(Exception):
-                collections_db.close()
 
 
 def _normalize_payload(payload: Any) -> dict[str, Any]:
@@ -412,25 +422,17 @@ def _create_media_ingest_job(
         message = str(exc).strip() or "Invalid media ingest job request"
         normalized = message.lower()
         status_code = (
-            status.HTTP_429_TOO_MANY_REQUESTS
-            if "concurrent job limit" in normalized
-            else status.HTTP_400_BAD_REQUEST
+            status.HTTP_429_TOO_MANY_REQUESTS if "concurrent job limit" in normalized else status.HTTP_400_BAD_REQUEST
         )
         raise HTTPException(status_code=status_code, detail=message) from exc
 
 
 def _principal_has_admin_claims(principal: AuthPrincipal) -> bool:
-    roles = {
-        str(role).strip().lower()
-        for role in (principal.roles or [])
-        if str(role).strip()
-    }
+    roles = {str(role).strip().lower() for role in (principal.roles or []) if str(role).strip()}
     if "admin" in roles:
         return True
     permissions = {
-        str(permission).strip().lower()
-        for permission in (principal.permissions or [])
-        if str(permission).strip()
+        str(permission).strip().lower() for permission in (principal.permissions or []) if str(permission).strip()
     }
     return bool(permissions & _ADMIN_CLAIM_PERMISSIONS)
 
@@ -608,6 +610,7 @@ async def submit_media_ingest_jobs(
     ),
     current_user: User = Depends(get_request_user),
     jm: JobManager = Depends(get_job_manager),
+    collections_db: CollectionsDatabase | None = Depends(try_get_collections_db_for_user),
 ) -> SubmitMediaIngestJobsResponse:
     rid = ensure_request_id(request) if request is not None else None
     tp = ensure_traceparent(request) if request is not None else ""
@@ -673,7 +676,7 @@ async def submit_media_ingest_jobs(
                 raise ValueError(f"Job creation returned no id: {row!r}")
         except Exception as exc:
             _mark_collection_item_submit_failed(
-                user_id=str(current_user.id),
+                collections_db=collections_db,
                 planned_item_id=planned_item_id,
                 error_summary=_submit_failure_message(exc),
             )
@@ -999,10 +1002,13 @@ async def stream_media_ingest_job_events(
 
             if tracked_job_ids:
                 refreshed = [jm.get_job(job_id) for job_id in tracked_job_ids]
-                if all(
-                    (job or {}).get("status") in {"completed", "failed", "cancelled", "quarantined"}
-                    for job in refreshed
-                ) and not rows:
+                if (
+                    all(
+                        (job or {}).get("status") in {"completed", "failed", "cancelled", "quarantined"}
+                        for job in refreshed
+                    )
+                    and not rows
+                ):
                     break
 
             await asyncio.sleep(poll_interval)

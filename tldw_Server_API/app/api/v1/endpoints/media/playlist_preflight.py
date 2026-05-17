@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+from threading import BoundedSemaphore
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
+from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
@@ -25,15 +30,61 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_prefligh
 
 router = APIRouter()
 
+_PLAYLIST_PREFLIGHT_MAX_WORKERS = 2
+_PLAYLIST_PREFLIGHT_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_PLAYLIST_PREFLIGHT_MAX_WORKERS,
+    thread_name_prefix="playlist-preflight",
+)
+_PLAYLIST_PREFLIGHT_CAPACITY = BoundedSemaphore(value=_PLAYLIST_PREFLIGHT_MAX_WORKERS)
+PlaylistPreflightRawResult = PlaylistPreflightResponse | PlaylistPreflightData | Mapping[str, Any]
 
-def _coerce_preflight_response(result) -> PlaylistPreflightResponse:
+
+class PlaylistPreflightResultError(ValueError):
+    """Raised when the preflight extractor returns an invalid response contract."""
+
+
+def _coerce_preflight_response(result: PlaylistPreflightRawResult) -> PlaylistPreflightResponse:
+    """Normalize supported extractor outputs into the public response model."""
     if isinstance(result, PlaylistPreflightResponse):
         return result
-    if isinstance(result, PlaylistPreflightData):
-        return PlaylistPreflightResponse.model_validate(result.to_dict())
-    if isinstance(result, dict):
-        return PlaylistPreflightResponse.model_validate(result)
-    raise ValueError("playlist_preflight_invalid_result")
+    try:
+        if isinstance(result, PlaylistPreflightData):
+            return PlaylistPreflightResponse.model_validate(result.to_dict())
+        if isinstance(result, Mapping):
+            return PlaylistPreflightResponse.model_validate(dict(result))
+    except ValidationError as exc:
+        raise PlaylistPreflightResultError("playlist_preflight_invalid_result") from exc
+    raise PlaylistPreflightResultError("playlist_preflight_invalid_result")
+
+
+def _preflight_playlist_url_with_capacity(url: str, *, max_items: int) -> PlaylistPreflightRawResult:
+    """Run the blocking extractor and release API capacity after actual thread completion."""
+    try:
+        return preflight_playlist_url(url, max_items=max_items)
+    finally:
+        _PLAYLIST_PREFLIGHT_CAPACITY.release()
+
+
+async def _run_preflight_with_timeout(payload: PlaylistPreflightRequest) -> PlaylistPreflightRawResult:
+    """Run playlist extraction in a bounded executor with request-level timeout handling."""
+    if not _PLAYLIST_PREFLIGHT_CAPACITY.acquire(blocking=False):
+        raise HTTPException(status_code=429, detail="playlist_preflight_busy")
+
+    loop = asyncio.get_running_loop()
+    try:
+        extraction = loop.run_in_executor(
+            _PLAYLIST_PREFLIGHT_EXECUTOR,
+            partial(
+                _preflight_playlist_url_with_capacity,
+                payload.url,
+                max_items=payload.max_items,
+            ),
+        )
+    except Exception:
+        _PLAYLIST_PREFLIGHT_CAPACITY.release()
+        raise
+
+    return await asyncio.wait_for(extraction, timeout=payload.timeout_seconds)
 
 
 @router.post(
@@ -50,20 +101,13 @@ async def preflight_playlist(
     payload: PlaylistPreflightRequest,
     _current_user: User = Depends(get_request_user),
 ) -> PlaylistPreflightResponse:
-    loop = asyncio.get_running_loop()
     try:
-        extraction = loop.run_in_executor(
-            None,
-            partial(
-                preflight_playlist_url,
-                payload.url,
-                max_items=payload.max_items,
-            ),
-        )
-        result = await asyncio.wait_for(extraction, timeout=payload.timeout_seconds)
+        result = await _run_preflight_with_timeout(payload)
         return _coerce_preflight_response(result)
     except asyncio.TimeoutError as exc:
         raise HTTPException(status_code=504, detail="playlist_preflight_timeout") from exc
+    except PlaylistPreflightResultError as exc:
+        raise HTTPException(status_code=502, detail="playlist_preflight_invalid_result") from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except HTTPException:

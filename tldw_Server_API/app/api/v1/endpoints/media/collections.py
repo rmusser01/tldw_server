@@ -18,7 +18,7 @@ from tldw_Server_API.app.api.v1.schemas.media_collections import (
     MediaCollectionResponse,
     MediaCollectionUpdateRequest,
 )
-from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE
+from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE, MEDIA_READ
 from tldw_Server_API.app.core.DB_Management.Collections_DB import (
     CollectionsDatabase,
     MediaCollectionItemRow,
@@ -119,6 +119,10 @@ async def create_media_collection(
     response_model=MediaCollectionListResponse,
     summary="List durable media collections",
     tags=["Media Collections"],
+    dependencies=[
+        Depends(RequirePermission(MEDIA_READ)),
+        Depends(rbac_rate_limit("media.read")),
+    ],
 )
 async def list_media_collections(
     kind: str | None = None,
@@ -140,6 +144,10 @@ async def list_media_collections(
     response_model=MediaCollectionResponse,
     summary="Get a durable media collection",
     tags=["Media Collections"],
+    dependencies=[
+        Depends(RequirePermission(MEDIA_READ)),
+        Depends(rbac_rate_limit("media.read")),
+    ],
 )
 async def get_media_collection(
     collection_id: int,

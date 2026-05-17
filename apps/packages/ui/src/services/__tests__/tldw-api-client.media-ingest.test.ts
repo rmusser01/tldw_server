@@ -178,6 +178,30 @@ describe("TldwApiClient media ingest contract", () => {
     )
   })
 
+  it("sends server-side playlist preflight timeout derived from timeoutMs", async () => {
+    mocks.bgRequest.mockResolvedValue({ playlist_id: "PLtest", items: [] })
+
+    const client = new TldwApiClient()
+    await client.preflightPlaylist({
+      url: "https://www.youtube.com/playlist?list=PLtest",
+      maxItems: 34,
+      timeoutMs: 120000
+    })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/playlists/preflight",
+        method: "POST",
+        body: {
+          url: "https://www.youtube.com/playlist?list=PLtest",
+          max_items: 34,
+          timeout_seconds: 60
+        },
+        timeoutMs: 120000
+      })
+    )
+  })
+
   it("uploads character imports using binary payloads", async () => {
     mocks.bgUpload.mockResolvedValue({
       id: 123,

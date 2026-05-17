@@ -417,49 +417,53 @@ def test_submit_media_ingest_jobs_marks_planned_item_submit_failed_on_job_error(
 ):
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
 
-    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+    from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import (
+        try_get_collections_db_for_user,
+    )
     from tldw_Server_API.app.core.Jobs import manager as jobs_manager
 
     status_updates: list[dict] = []
 
     class _FakeCollectionsDatabase:
-        @classmethod
-        def for_user(cls, user_id):  # noqa: ARG003
-            return cls()
-
         def update_media_collection_item_status(self, item_id, **kwargs):
             status_updates.append({"item_id": item_id, **kwargs})
 
-        def close(self):
-            return None
+    async def _collections_db_override():
+        return _FakeCollectionsDatabase()
 
     def fake_create_job(self, **_kwargs):
         raise BadRequestError("queue unavailable")
 
-    monkeypatch.setattr(ingest_jobs, "CollectionsDatabase", _FakeCollectionsDatabase, raising=False)
     monkeypatch.setattr(jobs_manager.JobManager, "create_job", fake_create_job, raising=True)
+    media_ingest_jobs_client.app.dependency_overrides[try_get_collections_db_for_user] = _collections_db_override
 
-    resp = media_ingest_jobs_client.post(
-        "/api/v1/media/ingest/jobs",
-        data={
-            "media_type": "video",
-            "urls": "https://example.com/talk-submit-fails",
-            "media_collection_id": "42",
-            "planned_item_ids": json.dumps(["101"]),
-        },
-        headers={"X-API-KEY": "test-api-key-12345"},
-    )
+    try:
+        resp = media_ingest_jobs_client.post(
+            "/api/v1/media/ingest/jobs",
+            data={
+                "media_type": "video",
+                "urls": "https://example.com/talk-submit-fails",
+                "media_collection_id": "42",
+                "planned_item_ids": json.dumps(["101"]),
+            },
+            headers={"X-API-KEY": "test-api-key-12345"},
+        )
 
-    assert resp.status_code == 400, resp.text
-    assert resp.json()["detail"] == "queue unavailable"
-    assert status_updates == [
-        {
-            "item_id": 101,
-            "status": "submit_failed",
-            "latest_job_id": None,
-            "error_summary": "queue unavailable",
-        }
-    ]
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["detail"] == "queue unavailable"
+        assert status_updates == [
+            {
+                "item_id": 101,
+                "status": "submit_failed",
+                "latest_job_id": None,
+                "error_summary": "queue unavailable",
+            }
+        ]
+    finally:
+        media_ingest_jobs_client.app.dependency_overrides.pop(
+            try_get_collections_db_for_user,
+            None,
+        )
 
 
 def test_submit_media_ingest_jobs_routes_heavy_request_to_default_queue_when_heavy_worker_unavailable(
