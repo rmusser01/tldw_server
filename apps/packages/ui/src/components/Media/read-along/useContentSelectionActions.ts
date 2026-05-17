@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { RefObject } from 'react'
 
 import { getContentSelectionFromDom } from './media-read-along-dom'
@@ -21,6 +21,11 @@ const buildSelectionLocation = (selection: ReadAlongSelection): string | undefin
   return `read-along-segment:${selection.startSegmentId}..${selection.endSegmentId}`
 }
 
+const toActionState = (selection: ReadAlongSelection): ContentSelectionActionState => ({
+  ...selection,
+  location: buildSelectionLocation(selection)
+})
+
 export const useContentSelectionActions = ({
   contentBodyRef,
   onApplyAnnotationSelection
@@ -39,20 +44,40 @@ export const useContentSelectionActions = ({
       return
     }
 
-    setSelectionActionState({
-      ...selection,
-      location: buildSelectionLocation(selection)
-    })
+    setSelectionActionState(toActionState(selection))
   }, [clearSelectionActions, contentBodyRef])
 
   const applyAnnotationSelection = useCallback(() => {
     if (!selectionActionState) return
-    onApplyAnnotationSelection(
-      selectionActionState.selectedText,
-      selectionActionState.location
-    )
+
+    const currentSelection = getContentSelectionFromDom(contentBodyRef.current)
+    if (!currentSelection) {
+      clearSelectionActions()
+      return
+    }
+
+    const currentActionState = toActionState(currentSelection)
+    onApplyAnnotationSelection(currentActionState.selectedText, currentActionState.location)
     clearSelectionActions()
-  }, [clearSelectionActions, onApplyAnnotationSelection, selectionActionState])
+  }, [clearSelectionActions, contentBodyRef, onApplyAnnotationSelection, selectionActionState])
+
+  useEffect(() => {
+    if (!selectionActionState || typeof document === 'undefined') return
+
+    const handleSelectionChange = () => {
+      const selection = getContentSelectionFromDom(contentBodyRef.current)
+      if (!selection) {
+        clearSelectionActions()
+        return
+      }
+      setSelectionActionState(toActionState(selection))
+    }
+
+    document.addEventListener('selectionchange', handleSelectionChange)
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange)
+    }
+  }, [clearSelectionActions, contentBodyRef, selectionActionState])
 
   return {
     selectionActionState,

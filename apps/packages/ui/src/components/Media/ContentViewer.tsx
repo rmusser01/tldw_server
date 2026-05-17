@@ -23,7 +23,7 @@ import {
   User,
   Download
 } from 'lucide-react'
-import React, { useState, Suspense, useMemo, useRef, useCallback } from 'react'
+import React, { useState, Suspense, useMemo, useRef, useCallback, useEffect } from 'react'
 import { Select, Dropdown, Tooltip, message, Spin } from 'antd'
 import { useTranslation } from 'react-i18next'
 import type { MenuProps } from 'antd'
@@ -272,6 +272,16 @@ export function ContentViewer({
     contentBodyRef,
     onApplyAnnotationSelection: modals.captureAnnotationSelection
   })
+
+  useEffect(() => {
+    selectionActions.clearSelectionActions()
+  }, [
+    content,
+    rendering.effectiveRenderMode,
+    selectedMedia?.kind,
+    selectedMediaId,
+    selectionActions.clearSelectionActions
+  ])
 
   // Now we have shouldShowEmbeddedPlayer from modals, re-run rendering with correct value
   // Actually, we need to use the modals result. Let's restructure:

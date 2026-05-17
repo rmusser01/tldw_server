@@ -142,4 +142,37 @@ describe('useContentSelectionActions', () => {
     expect(result.current.selectionActionState?.startSegmentId).toBeUndefined()
     expect(result.current.selectionActionState?.endSegmentId).toBeUndefined()
   })
+
+  it('clears open selection actions when the document selection is cleared', () => {
+    const onApplyAnnotationSelection = vi.fn()
+    const contentBody = document.createElement('div')
+    contentBody.textContent = 'Clearable selected text'
+    document.body.append(contentBody)
+    setSelectionRange(contentBody.firstChild as Text, 0, contentBody.firstChild as Text, 9)
+
+    const ref = { current: contentBody } as React.RefObject<HTMLDivElement | null>
+    const { result } = renderHook(() =>
+      useContentSelectionActions({
+        contentBodyRef: ref,
+        onApplyAnnotationSelection
+      })
+    )
+
+    act(() => {
+      result.current.handleContentSelectionEvent()
+    })
+    expect(result.current.selectionActionState?.selectedText).toBe('Clearable')
+
+    act(() => {
+      window.getSelection()?.removeAllRanges()
+      document.dispatchEvent(new Event('selectionchange'))
+    })
+
+    expect(result.current.selectionActionState).toBeNull()
+
+    act(() => {
+      result.current.applyAnnotationSelection()
+    })
+    expect(onApplyAnnotationSelection).not.toHaveBeenCalled()
+  })
 })

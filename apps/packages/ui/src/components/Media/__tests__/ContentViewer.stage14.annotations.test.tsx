@@ -279,4 +279,61 @@ describe('ContentViewer stage 14 annotations baseline', () => {
       )
     })
   })
+
+  it('clears selection actions when the selected media changes', async () => {
+    mocks.bgRequest.mockImplementation(async (request: { path?: string; method?: string; body?: any }) => {
+      const path = String(request?.path || '')
+      if (path.endsWith('/outline')) return { media_id: 777, has_outline: true, entries: [] }
+      if (path.endsWith('/insights')) return { media_id: 777, insights: [] }
+      if (path.includes('/references')) return { media_id: 777, references: [] }
+      if (path.includes('/figures')) return { media_id: 777, figures: [] }
+      if (path.endsWith('/annotations') && request?.method === 'GET') {
+        return { media_id: 777, annotations: [] }
+      }
+      return {}
+    })
+
+    const { rerender } = render(
+      <ContentViewer
+        selectedMedia={selectedMedia}
+        content={'Original selected body text'}
+        mediaDetail={{ type: 'document' }}
+      />
+    )
+
+    const contentNode = screen.getByText('Original selected body text')
+    const textNode = contentNode.firstChild
+    expect(textNode).not.toBeNull()
+
+    const selection = window.getSelection()
+    expect(selection).not.toBeNull()
+    const range = document.createRange()
+    range.setStart(textNode as Text, 0)
+    range.setEnd(textNode as Text, 'Original selected'.length)
+    selection!.removeAllRanges()
+    selection!.addRange(range)
+
+    fireEvent.mouseUp(contentNode)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('media-selection-actions-popover')).toBeInTheDocument()
+    })
+
+    rerender(
+      <ContentViewer
+        selectedMedia={{
+          ...selectedMedia,
+          id: 778,
+          title: 'Next annotation target'
+        }}
+        content={'Next media body text'}
+        mediaDetail={{ type: 'document' }}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('media-selection-actions-popover')).not.toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('media-annotation-selection-preview')).not.toBeInTheDocument()
+  })
 })
