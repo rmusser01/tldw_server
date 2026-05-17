@@ -1,9 +1,14 @@
 import React from "react"
-import { Alert, Button, Empty, Spin, Tag, Typography } from "antd"
+import { Button, Spin, Tag, Typography } from "antd"
 import { useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 
 import { PageShell } from "@/components/Common/PageShell"
+import {
+  StatePanel,
+  buildCapabilityState,
+  classifyCapabilityError
+} from "@/components/ui/state"
 import { useIngestionSourcesQuery } from "@/hooks/use-ingestion-sources"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { SourcesAvailabilityGate } from "./SourcesAvailabilityGate"
@@ -23,6 +28,41 @@ export const SourcesWorkspacePage: React.FC<SourcesWorkspacePageProps> = ({
     enabled:
       !capabilityState.loading &&
       capabilityState.capabilities?.hasIngestionSources !== false
+  })
+  const sourceFeatureName = t("sources:title", "Sources")
+  const sourceCapabilityName = t(
+    "sources:capability.ingestionSources",
+    "ingestion sources"
+  )
+  const queryError = sourcesQuery.error as
+    | { status?: number; message?: string }
+    | undefined
+  const queryErrorState = queryError
+    ? buildCapabilityState({
+        kind: classifyCapabilityError(queryError),
+        featureName: sourceFeatureName,
+        capabilityName: sourceCapabilityName,
+        method: "GET",
+        endpoint: "/api/v1/sources",
+        status: queryError.status,
+        rawMessage: queryError.message || "Failed to load sources",
+        primaryAction: {
+          label: t("common:actions.retry", "Try again"),
+          onClick: () => {
+            void sourcesQuery.refetch?.()
+          }
+        }
+      })
+    : null
+  const emptyState = buildCapabilityState({
+    kind: "empty",
+    featureName: sourceFeatureName,
+    primaryAction: {
+      label: t("sources:actions.create", "Create source"),
+      onClick: () => {
+        navigate("/sources/new")
+      }
+    }
   })
 
   return (
@@ -58,20 +98,26 @@ export const SourcesWorkspacePage: React.FC<SourcesWorkspacePageProps> = ({
           </div>
         ) : null}
 
-        {!sourcesQuery.isLoading && sourcesQuery.error ? (
-          <Alert
-            type="error"
-            message={String(
-              (sourcesQuery.error as { message?: string } | undefined)
-                ?.message || "Failed to load sources"
-            )}
+        {!sourcesQuery.isLoading && queryErrorState ? (
+          <StatePanel
+            state={queryErrorState.state}
+            title={queryErrorState.title}
+            message={queryErrorState.message}
+            diagnostics={queryErrorState.diagnostics}
+            primaryAction={queryErrorState.primaryAction}
+            role="alert"
           />
         ) : null}
 
         {!sourcesQuery.isLoading &&
         !sourcesQuery.error &&
         (sourcesQuery.data?.total ?? 0) === 0 ? (
-          <Empty description={t("sources:states.empty", "No ingestion sources yet.")} />
+          <StatePanel
+            state={emptyState.state}
+            title={emptyState.title}
+            message={emptyState.message}
+            primaryAction={emptyState.primaryAction}
+          />
         ) : null}
 
         {!sourcesQuery.isLoading &&

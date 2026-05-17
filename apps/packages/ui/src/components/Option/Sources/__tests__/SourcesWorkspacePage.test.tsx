@@ -176,12 +176,59 @@ describe("SourcesWorkspacePage", () => {
 
     renderWorkspace(<SourcesWorkspacePage />)
 
+    expect(screen.getByText("Unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Sources are unavailable")).toBeInTheDocument()
     expect(
-      screen.getByText("This server does not advertise ingestion source support.")
+      screen.getByText("This server does not expose the ingestion sources capability.")
     ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Check server setup" })).toBeInTheDocument()
     expect(hookMocks.useIngestionSourcesQuery).toHaveBeenCalledWith(undefined, {
       enabled: false
     })
+  })
+
+  it("keeps raw source endpoint failures in diagnostics", () => {
+    hookMocks.useIngestionSourcesQuery.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: {
+        status: 404,
+        message: "Not Found (GET /api/v1/sources)"
+      }
+    })
+
+    renderWorkspace(<SourcesWorkspacePage />)
+
+    const heading = screen.getByRole("heading", {
+      name: "Sources are unavailable"
+    })
+    const primaryState = heading.closest("div")
+    const diagnostics = screen.getByLabelText("Diagnostics")
+
+    expect(primaryState).not.toHaveTextContent("/api/v1/sources")
+    expect(diagnostics).toHaveTextContent("/api/v1/sources")
+    expect(diagnostics).toHaveTextContent("404")
+    expect(diagnostics).toHaveTextContent("Not Found (GET /api/v1/sources)")
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument()
+  })
+
+  it("uses a shared empty state with a creation action when there are no sources", () => {
+    hookMocks.useIngestionSourcesQuery.mockReturnValue({
+      data: {
+        sources: [],
+        total: 0
+      },
+      isLoading: false
+    })
+
+    renderWorkspace(<SourcesWorkspacePage />)
+
+    expect(screen.getByText("Empty")).toBeInTheDocument()
+    expect(screen.getByText("No sources yet")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Create source" }))
+
+    expect(routerMocks.navigate).toHaveBeenCalledWith("/sources/new")
   })
 
   it("wires enable disable actions through the update mutation", async () => {
