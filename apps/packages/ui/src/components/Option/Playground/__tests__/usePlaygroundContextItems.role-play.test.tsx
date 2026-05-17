@@ -237,4 +237,151 @@ describe("usePlaygroundContextItems role-play state", () => {
       result.current.find((item) => item.id === "rolePlayContext")?.onClick,
     ).toBeUndefined();
   });
+
+  it("shows included character context when the current request can use character flow", () => {
+    const { result } = renderHook(() =>
+      usePlaygroundContextItems(
+        createDeps({
+          rolePlayCompatibility: {
+            status: "included",
+            reasonCode: "character_flow",
+            messageKey: "playground:composer.rolePlayCompatibility.character_flow",
+          },
+          rolePlayState: {
+            ...baseRolePlayState,
+            identity: {
+              kind: "character",
+              id: "char-mira",
+              name: "Mira",
+            },
+          },
+        }),
+      ),
+    );
+
+    expect(result.current).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "rolePlayCompatibility",
+          label: "Character context",
+          value: "Included",
+          tone: "active",
+        }),
+      ]),
+    );
+  });
+
+  it("shows a warning and cleanup action when custom prompt may override character behavior", () => {
+    const onClearRolePlayBehavior = vi.fn();
+    const { result } = renderHook(() =>
+      usePlaygroundContextItems(
+        createDeps({
+          onClearRolePlayBehavior,
+          rolePlayCompatibility: {
+            status: "override-risk",
+            reasonCode: "custom_prompt",
+            messageKey: "playground:composer.rolePlayCompatibility.custom_prompt",
+          },
+          rolePlayState: {
+            ...baseRolePlayState,
+            identity: {
+              kind: "character",
+              id: "char-mira",
+              name: "Mira",
+            },
+          },
+        }),
+      ),
+    );
+
+    const chip = result.current.find(
+      (item) => item.id === "rolePlayCompatibility",
+    );
+    expect(chip).toEqual(
+      expect.objectContaining({
+        label: "Character context",
+        value: "Prompt override risk",
+        tone: "warning",
+      }),
+    );
+
+    act(() => {
+      chip?.onClick?.();
+    });
+
+    expect(onClearRolePlayBehavior).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows excluded character context with a compare-mode action", () => {
+    const onDisableCompareMode = vi.fn();
+    const { result } = renderHook(() =>
+      usePlaygroundContextItems(
+        createDeps({
+          onDisableCompareMode,
+          rolePlayCompatibility: {
+            status: "excluded",
+            reasonCode: "compare_mode",
+            messageKey: "playground:composer.rolePlayCompatibility.compare_mode",
+          },
+          rolePlayState: {
+            ...baseRolePlayState,
+            identity: {
+              kind: "character",
+              id: "char-mira",
+              name: "Mira",
+            },
+          },
+        }),
+      ),
+    );
+
+    const chip = result.current.find(
+      (item) => item.id === "rolePlayCompatibility",
+    );
+    expect(chip).toEqual(
+      expect.objectContaining({
+        label: "Character context",
+        value: "Excluded in this mode",
+        tone: "warning",
+      }),
+    );
+
+    act(() => {
+      chip?.onClick?.();
+    });
+
+    expect(onDisableCompareMode).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses persona-specific copy for persona compatibility", () => {
+    const { result } = renderHook(() =>
+      usePlaygroundContextItems(
+        createDeps({
+          rolePlayCompatibility: {
+            status: "included",
+            reasonCode: "persona_flow",
+            messageKey: "playground:composer.rolePlayCompatibility.persona_flow",
+          },
+          rolePlayState: {
+            ...baseRolePlayState,
+            identity: {
+              kind: "persona",
+              id: "persona-mentor",
+              name: "Stern Mentor",
+            },
+          },
+        }),
+      ),
+    );
+
+    expect(result.current).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "rolePlayCompatibility",
+          label: "Persona context",
+          value: "Included",
+        }),
+      ]),
+    );
+  });
 });

@@ -3460,6 +3460,7 @@ export const PlaygroundForm = ({
     serverChatState,
     serverChatSource,
     selectedCharacter,
+    hasPersona: selectedAssistant?.kind === "persona",
     messageSteeringMode,
     messageSteeringForceNarrate,
     ragMediaIds,
@@ -3999,9 +4000,12 @@ export const PlaygroundForm = ({
     openSessionInsightsModal,
     updateChatModelSetting,
     rolePlayState,
+    rolePlayCompatibility: rawPreview.rolePlayCompatibility,
     onClearRolePlayIdentity: clearRolePlayIdentity,
     onClearRolePlayBehavior: clearPromptContext,
     onResetRolePlayGenerationStyle: resetRolePlayGenerationStyle,
+    onDisableCompareMode: compareModeActive ? toggleCompareMode : undefined,
+    onOpenRolePlaySetup: () => setRolePlaySetupOpen(true),
     t,
   });
 

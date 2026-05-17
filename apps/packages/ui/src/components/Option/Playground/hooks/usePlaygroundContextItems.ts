@@ -3,6 +3,7 @@ import type { ComposerContextItem } from "../ComposerToolbar";
 import type { KnowledgeTab } from "@/components/Knowledge";
 import { toText } from "./utils";
 import type { RolePlayState } from "../role-play-state";
+import type { RolePlayCompatibility } from "../role-play-compatibility";
 
 export type UsePlaygroundContextItemsDeps = {
   selectedModel: string | null | undefined;
@@ -42,9 +43,12 @@ export type UsePlaygroundContextItemsDeps = {
   openSessionInsightsModal: () => void;
   updateChatModelSetting: (key: string, value: any) => void;
   rolePlayState?: RolePlayState | null;
+  rolePlayCompatibility?: RolePlayCompatibility | null;
   onClearRolePlayIdentity?: () => void;
   onClearRolePlayBehavior?: () => void;
   onResetRolePlayGenerationStyle?: () => void;
+  onDisableCompareMode?: () => void;
+  onOpenRolePlaySetup?: () => void;
   t: (key: string, defaultValueOrOptions?: any, options?: any) => string;
 };
 
@@ -89,9 +93,12 @@ export function usePlaygroundContextItems(
     openSessionInsightsModal,
     updateChatModelSetting,
     rolePlayState,
+    rolePlayCompatibility,
     onClearRolePlayIdentity,
     onClearRolePlayBehavior,
     onResetRolePlayGenerationStyle,
+    onDisableCompareMode,
+    onOpenRolePlaySetup,
     t,
   } = deps;
 
@@ -165,6 +172,74 @@ export function usePlaygroundContextItems(
         value: identityValue,
         tone: "active",
         onClick: onClearRolePlayIdentity ?? (() => setOpenActorSettings(true)),
+      });
+    }
+
+    if (
+      hasRolePlayState &&
+      rolePlayState?.identity &&
+      rolePlayCompatibility &&
+      rolePlayCompatibility.status !== "none"
+    ) {
+      const isPersona = rolePlayState.identity.kind === "persona";
+      const label = isPersona
+        ? toText(
+            t(
+              "playground:composer.context.personaContext",
+              "Persona context",
+            ),
+          )
+        : toText(
+            t(
+              "playground:composer.context.characterContext",
+              "Character context",
+            ),
+          );
+      const valueByStatus: Record<
+        Exclude<RolePlayCompatibility["status"], "none">,
+        string
+      > = {
+        included: toText(
+          t("playground:composer.rolePlayCompatibility.included", "Included"),
+        ),
+        blended: toText(
+          t(
+            "playground:composer.rolePlayCompatibility.blended",
+            "Blended with sources",
+          ),
+        ),
+        excluded: toText(
+          t(
+            "playground:composer.rolePlayCompatibility.excluded",
+            "Excluded in this mode",
+          ),
+        ),
+        "override-risk": toText(
+          t(
+            "playground:composer.rolePlayCompatibility.overrideRisk",
+            "Prompt override risk",
+          ),
+        ),
+      };
+      const actionByReason: Partial<
+        Record<RolePlayCompatibility["reasonCode"], () => void>
+      > = {
+        custom_prompt: onClearRolePlayBehavior,
+        rag_sources: () => openKnowledgePanel("search"),
+        compare_mode: onDisableCompareMode ?? (() => setOpenModelSettings(true)),
+        context_files: openContextWindowModal,
+        documents: openContextWindowModal,
+        image_command: onOpenRolePlaySetup,
+      };
+      items.push({
+        id: "rolePlayCompatibility",
+        label,
+        value: valueByStatus[rolePlayCompatibility.status],
+        tone:
+          rolePlayCompatibility.status === "included" ? "active" : "warning",
+        ...(actionByReason[rolePlayCompatibility.reasonCode]
+          ? { onClick: actionByReason[rolePlayCompatibility.reasonCode] }
+          : {}),
       });
     }
 
@@ -429,6 +504,7 @@ export function usePlaygroundContextItems(
     contextToolsOpen,
     currentPreset,
     rolePlayState,
+    rolePlayCompatibility,
     jsonMode,
     focusConnectionCard,
     handleToggleWebSearch,
@@ -463,5 +539,7 @@ export function usePlaygroundContextItems(
     onClearRolePlayIdentity,
     onClearRolePlayBehavior,
     onResetRolePlayGenerationStyle,
+    onDisableCompareMode,
+    onOpenRolePlaySetup,
   ]);
 }

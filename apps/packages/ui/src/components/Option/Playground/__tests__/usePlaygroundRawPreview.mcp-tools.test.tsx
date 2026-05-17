@@ -254,4 +254,60 @@ describe("usePlaygroundRawPreview MCP tools", () => {
       ]
     })
   })
+
+  it("reports character context as included when raw preview uses the character endpoint", async () => {
+    const { result } = renderHook(() =>
+      usePlaygroundRawPreview(
+        buildDeps({
+          selectedCharacter: {
+            id: "char-mira",
+            name: "Mira"
+          },
+          serverChatId: "chat-1"
+        })
+      )
+    )
+
+    await act(async () => {
+      await result.current.refreshRawRequestSnapshot()
+    })
+
+    expect(result.current.rolePlayCompatibility).toEqual(
+      expect.objectContaining({
+        status: "included",
+        reasonCode: "character_flow"
+      })
+    )
+    expect(result.current.rawRequestSnapshot?.endpoint).toBe(
+      "/api/v1/chats/chat-1/complete-v2"
+    )
+  })
+
+  it("reports character context as excluded when selected knowledge routes away from the character endpoint", async () => {
+    const { result } = renderHook(() =>
+      usePlaygroundRawPreview(
+        buildDeps({
+          selectedCharacter: {
+            id: "char-mira",
+            name: "Mira"
+          },
+          selectedKnowledge: { id: "knowledge-1" }
+        })
+      )
+    )
+
+    await act(async () => {
+      await result.current.refreshRawRequestSnapshot()
+    })
+
+    expect(result.current.rolePlayCompatibility).toEqual(
+      expect.objectContaining({
+        status: "excluded",
+        reasonCode: "rag_sources"
+      })
+    )
+    expect(result.current.rawRequestSnapshot?.endpoint).toBe(
+      "/api/v1/chat/completions"
+    )
+  })
 })

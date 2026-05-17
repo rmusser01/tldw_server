@@ -13,6 +13,10 @@ import type {
 import { parseJsonObject } from "./utils"
 import { formatPinnedResults } from "@/utils/rag-format"
 import { resolveChatToolRequest } from "@/utils/chat-tools"
+import {
+  deriveRolePlayCompatibility,
+  type RolePlayCompatibility
+} from "../role-play-compatibility"
 
 // ---------------------------------------------------------------------------
 // Deps interface
@@ -55,6 +59,7 @@ export interface UsePlaygroundRawPreviewDeps {
   serverChatState: string | null
   serverChatSource: string | null
   selectedCharacter: { id?: string | number; name?: string } | null
+  hasPersona?: boolean
   messageSteeringMode: string | undefined
   messageSteeringForceNarrate: boolean | undefined
   ragMediaIds: number[] | null
@@ -117,6 +122,7 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
     serverChatState,
     serverChatSource,
     selectedCharacter,
+    hasPersona,
     messageSteeringMode,
     messageSteeringForceNarrate,
     ragMediaIds,
@@ -321,8 +327,58 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
     ]
   )
 
+  const buildRolePlayCompatibility = React.useCallback(
+    (intent: { isImageCommand: boolean }): RolePlayCompatibility => {
+      const hasScopedRagMediaIds =
+        Array.isArray(ragMediaIds) && ragMediaIds.length > 0
+      const hasContextFiles =
+        Array.isArray(contextFiles) && contextFiles.length > 0
+      const hasSelectedDocuments =
+        Array.isArray(selectedDocuments) && selectedDocuments.length > 0
+      const hasDocumentContext =
+        Array.isArray(documentContext) && documentContext.length > 0
+      const hasCustomPrompt = String(systemPrompt || "").trim().length > 0
+
+      return deriveRolePlayCompatibility({
+        hasCharacter: Boolean(selectedCharacter?.id),
+        hasPersona: Boolean(hasPersona),
+        compareModeActive,
+        isImageCommand: intent.isImageCommand,
+        hasContextFiles,
+        hasSelectedDocuments,
+        hasDocumentContext,
+        hasSelectedKnowledge: Boolean(selectedKnowledge),
+        fileRetrievalEnabled: Boolean(fileRetrievalEnabled),
+        hasScopedRagMediaIds,
+        ragPinnedResultsLength: Array.isArray(ragPinnedResults)
+          ? ragPinnedResults.length
+          : 0,
+        hasCustomPrompt
+      })
+    },
+    [
+      compareModeActive,
+      contextFiles,
+      documentContext,
+      fileRetrievalEnabled,
+      hasPersona,
+      ragMediaIds,
+      ragPinnedResults,
+      selectedCharacter?.id,
+      selectedDocuments,
+      selectedKnowledge,
+      systemPrompt
+    ]
+  )
+
+  const rolePlayCompatibility = React.useMemo(
+    () => buildRolePlayCompatibility(resolveSubmissionIntent(formMessage || "")),
+    [buildRolePlayCompatibility, formMessage, resolveSubmissionIntent]
+  )
+
   const buildCurrentRawRequestSnapshot = React.useCallback(async () => {
     const intent = resolveSubmissionIntent(formMessage || "")
+    const compatibility = buildRolePlayCompatibility(intent)
     let draftMessage = intent.message.trim()
     // Append pinned source expansion to match submitForm behavior
     if (!intent.isImageCommand && !fileRetrievalEnabled && ragPinnedResults && ragPinnedResults.length > 0) {
@@ -330,21 +386,11 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
       draftMessage = draftMessage ? `${draftMessage}\n\n${pinnedText}` : pinnedText
     }
     const draftImage = intent.isImageCommand ? "" : String(formImage || "")
-    const hasScopedRagMediaIds =
-      Array.isArray(ragMediaIds) && ragMediaIds.length > 0
-    const shouldUseRag =
-      Boolean(selectedKnowledge) || (fileRetrievalEnabled && hasScopedRagMediaIds)
-    const hasContextFiles = Array.isArray(contextFiles) && contextFiles.length > 0
-    const hasDocs =
-      (Array.isArray(selectedDocuments) && selectedDocuments.length > 0) ||
-      (Array.isArray(documentContext) && documentContext.length > 0)
     const isCharacterFlow =
-      !compareModeActive &&
-      !intent.isImageCommand &&
-      !hasContextFiles &&
-      !hasDocs &&
-      !shouldUseRag &&
-      Boolean(selectedCharacter?.id)
+      Boolean(selectedCharacter?.id) &&
+      compatibility.status !== "none" &&
+      compatibility.status !== "excluded" &&
+      compatibility.reasonCode !== "persona_flow"
 
     if (intent.isImageCommand) {
       const backend =
@@ -500,25 +546,21 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
     } satisfies ChatRequestDebugSnapshot
   }, [
     buildNormalPreviewRequest,
+    buildRolePlayCompatibility,
     compareMaxModels,
     compareModeActive,
     compareSelectedModels,
-    contextFiles,
     currentChatModelSettings.apiProvider,
-    documentContext,
     fileRetrievalEnabled,
     formImage,
     formMessage,
     imageBackendDefaultTrimmed,
     messageSteeringForceNarrate,
     messageSteeringMode,
-    ragMediaIds,
     ragPinnedResults,
     resolveSubmissionIntent,
     selectedCharacter?.id,
-    selectedKnowledge,
     selectedModel,
-    selectedDocuments,
     researchContext,
     serverChatId,
     serverChatSource,
@@ -592,6 +634,7 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
     setRawRequestModalOpen,
     rawRequestSnapshot,
     rawRequestJson,
+    rolePlayCompatibility,
     refreshRawRequestSnapshot,
     openRawRequestModal,
     copyRawRequestJson

@@ -871,11 +871,13 @@ Committed with message `feat: save chat role-play setups`.
 - Modify: `apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundRawPreview.ts`
 - Modify: `apps/packages/ui/src/components/Option/Playground/RolePlaySetupDrawer.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundContextItems.ts`
+- Modify: `apps/tldw-frontend/extension/shims/plasmo-storage.ts`
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/role-play-compatibility.test.ts`
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/usePlaygroundRawPreview.mcp-tools.test.tsx`
 - Test as needed: `apps/packages/ui/src/components/Option/Playground/__tests__/compare-interoperability.test.ts`
+- Test: `apps/tldw-frontend/__tests__/extension/plasmo-storage.test.ts`
 
-- [ ] **Step 1: Write compatibility tests**
+- [x] **Step 1: Write compatibility tests**
 
 Create `role-play-compatibility.test.ts`.
 
@@ -894,7 +896,7 @@ Matrix:
 - character plus uploaded docs/context files -> exact current behavior;
 - no character/persona -> `none`.
 
-- [ ] **Step 2: Implement pure compatibility helper**
+- [x] **Step 2: Implement pure compatibility helper**
 
 Create `role-play-compatibility.ts`.
 
@@ -934,14 +936,14 @@ type RolePlayCompatibilityInput = {
 }
 ```
 
-- [ ] **Step 3: Replace duplicate eligibility logic**
+- [x] **Step 3: Replace duplicate eligibility logic**
 
 In `usePlaygroundRawPreview.ts`:
 - keep request behavior unchanged unless tests prove current behavior is wrong;
 - use the helper to derive status that the UI can display;
 - avoid changing endpoint selection as part of this task unless the UI currently lies.
 
-- [ ] **Step 4: Show actionable notices**
+- [x] **Step 4: Show actionable notices**
 
 In setup drawer and/or active context chips:
 - show `Character context included`;
@@ -955,7 +957,7 @@ Each notice needs a resolution action when possible:
 - turn off compare mode;
 - open Role-play setup.
 
-- [ ] **Step 5: Run compatibility tests**
+- [x] **Step 5: Run compatibility tests**
 
 Run:
 ```bash
@@ -968,7 +970,7 @@ bunx vitest run \
 
 Expected: pass.
 
-- [ ] **Step 6: Browser verify compatibility states**
+- [x] **Step 6: Browser verify compatibility states**
 
 On `/chat`, verify at least:
 - character-only says included;
@@ -977,19 +979,31 @@ On `/chat`, verify at least:
 - character plus compare mode says the actual request behavior;
 - persona path has its own status and does not inherit character-only copy.
 
-- [ ] **Step 7: Commit Stage 6**
+CDP verification used a dedicated port (`9333`) so it did not touch the existing user-owned Chrome CDP browser on `9222`.
+
+CDP verification covered:
+- character-only renders `Character context` / `Included`;
+- character plus pinned source renders `Blended with sources`;
+- character plus compare mode renders `Excluded in this mode`;
+- persona selection renders `Persona context` / `Included`.
+
+Focused tests cover the custom-prompt override-risk state and action. During browser verification, the web Plasmo storage shim was found to ignore storage `area`; sync cleanup removed local `selectedAssistant` and made role-play identity state unstable in `/chat`. Stage 6 therefore adds a small web-shim guardrail so local and sync storage no longer clobber each other.
+
+- [x] **Step 7: Commit Stage 6**
 
 ```bash
 git add \
+  Docs/superpowers/plans/2026-05-17-main-chat-role-play-preset-remediation-implementation-plan.md \
+  "backlog/tasks/task-407.6 - Add-role-play-compatibility-and-request-inclusion-guardrails.md" \
+  apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx \
   apps/packages/ui/src/components/Option/Playground/role-play-compatibility.ts \
-  apps/packages/ui/src/components/Option/Playground/role-play-state.ts \
   apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundRawPreview.ts \
-  apps/packages/ui/src/components/Option/Playground/RolePlaySetupDrawer.tsx \
   apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundContextItems.ts \
   apps/packages/ui/src/components/Option/Playground/__tests__/role-play-compatibility.test.ts \
-  apps/packages/ui/src/components/Option/Playground/__tests__/role-play-state.test.ts \
+  apps/packages/ui/src/components/Option/Playground/__tests__/usePlaygroundContextItems.role-play.test.tsx \
   apps/packages/ui/src/components/Option/Playground/__tests__/usePlaygroundRawPreview.mcp-tools.test.tsx \
-  apps/packages/ui/src/components/Option/Playground/__tests__/compare-interoperability.test.ts
+  apps/tldw-frontend/__tests__/extension/plasmo-storage.test.ts \
+  apps/tldw-frontend/extension/shims/plasmo-storage.ts
 git commit -m "feat: clarify chat role-play context inclusion"
 ```
 
