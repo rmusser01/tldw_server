@@ -1543,25 +1543,33 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     }
   }, [hasSelectedSources, showAdvancedRagSettings])
 
+  const applyComposerModels = React.useCallback(
+    (models: ChatComposerModel[]) => {
+      modelsFetchedRef.current = models.length > 0
+      setComposerModels(models)
+    },
+    []
+  )
+
   React.useEffect(() => {
     if (modelsFetchedRef.current) return
-    modelsFetchedRef.current = true
 
     let isMounted = true
     void fetchChatModels({ returnEmpty: true })
       .then((models) => {
         if (!isMounted) return
-        setComposerModels(Array.isArray(models) ? models : [])
+        applyComposerModels(models)
       })
       .catch(() => {
         if (!isMounted) return
+        modelsFetchedRef.current = false
         setComposerModels([])
       })
 
     return () => {
       isMounted = false
     }
-  }, [])
+  }, [applyComposerModels])
 
   React.useEffect(() => {
     selectedSourceIdsRef.current = selectedSourceIds
@@ -2274,6 +2282,17 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
     setSubmitError(null)
     await checkConnectionOnce()
+    modelsFetchedRef.current = false
+    try {
+      const models = await fetchChatModels({
+        returnEmpty: true,
+        forceRefresh: true
+      })
+      applyComposerModels(models)
+    } catch {
+      modelsFetchedRef.current = false
+      setComposerModels([])
+    }
   }
 
   const handleCitationSourceClick = React.useCallback(

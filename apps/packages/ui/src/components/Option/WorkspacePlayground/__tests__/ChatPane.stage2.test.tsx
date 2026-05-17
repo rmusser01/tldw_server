@@ -610,6 +610,43 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
     expect(screen.getByText("Open model settings")).toBeInTheDocument()
   })
 
+  it("retries chat model loading after an empty startup fetch", async () => {
+    connectionStoreState.state.phase = ConnectionPhase.ERROR
+    connectionStoreState.state.lastError = "offline"
+    hoistedMocks.getModels.mockRejectedValue(new Error("legacy models unused"))
+    hoistedMocks.fetchChatModels
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          model: "tldw:openai/gpt-4o",
+          name: "tldw:openai/gpt-4o",
+          nickname: "GPT-4o",
+          provider: "openai"
+        }
+      ])
+
+    renderChatPane()
+
+    await waitFor(() => {
+      expect(hoistedMocks.fetchChatModels).toHaveBeenCalledWith({
+        returnEmpty: true
+      })
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+
+    await waitFor(() => {
+      expect(hoistedMocks.fetchChatModels).toHaveBeenLastCalledWith({
+        returnEmpty: true,
+        forceRefresh: true
+      })
+    })
+    expect(mockCheckConnectionOnce).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByTestId("model-selector"))
+    expect(await screen.findByText("GPT-4o")).toBeInTheDocument()
+  })
+
   it("keeps the legacy model client unused", async () => {
     hoistedMocks.getModels.mockResolvedValue([
       {

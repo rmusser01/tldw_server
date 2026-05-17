@@ -17,6 +17,9 @@ modified_files:
 - apps/packages/ui/src/components/Option/WorkspacePlayground/__tests__/AddSourceModal.stage2.intake.test.tsx
 - apps/packages/ui/src/components/Option/Playground/ChatModelSelectorDropdown.tsx
 - apps/packages/ui/src/components/Option/WorkspacePlayground/ChatPane/index.tsx
+- apps/packages/ui/src/components/Option/WorkspacePlayground/__tests__/ChatPane.stage2.test.tsx
+- backlog/tasks/task-413 - Fix-Workspace-Playground-collapsed-sidebar-restore-affordances.md
+- backlog/tasks/task-414 - Keep-Workspace-Playground-chat-composer-in-view.md
 ---
 
 ## Description
@@ -42,7 +45,7 @@ Added My Media search/content-type/keyword/sort controls in Workspace Playground
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Verification: AddSourceModal.stage2.intake.test.tsx passed 15 tests; ChatPane.stage2.test.tsx passed 17 tests; focused Workspace Playground suite passed 7 files / 90 tests; git diff --check passed. Package-wide tsc still fails on unrelated baseline errors, but filtered output for touched files is clean. Bandit skipped because this change only touches TypeScript/React and docs/backlog metadata.
+Verification: AddSourceModal.stage2.intake.test.tsx passed 15 tests; ChatPane.stage2.test.tsx passed 18 tests after adding model-load retry coverage; focused Workspace Playground suite passed 7 files / 91 tests; git diff --check passed. Package-wide tsc still fails on unrelated baseline errors, but filtered output for touched files is clean. Bandit skipped because this change only touches TypeScript/React and docs/backlog metadata. Follow-up also cleaned redundant Backlog section markers in TASK-413 and TASK-414 per PR review.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
