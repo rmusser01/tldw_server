@@ -42,26 +42,52 @@ from tldw_Server_API.app.core.Persona.visual_starter_recipe_taxonomy import (
 pytestmark = pytest.mark.unit
 
 _BASIC_STARTER_PACK_IDS = {
-    "research-buddy-basic",
+    "search-lens-basic",
+    "index-card-basic",
+    "archive-cube-basic",
+    "paperclip-basic",
     "migu-marker-basic",
-    "minimal-helper-basic",
+    "terminal-tile-basic",
+}
+_BASIC_REACTION_STARTER_PACK_IDS = {
+    "search-lens-basic",
+    "index-card-basic",
+    "archive-cube-basic",
+    "paperclip-basic",
+    "migu-marker-basic",
+    "terminal-tile-basic",
 }
 _REQUIRED_BUDDY_STATES = {"idle", "listening", "thinking", "speaking", "error"}
 _BASIC_PRODUCTION_GUIDANCE_EXPECTATIONS = {
-    "research-buddy-basic": {
-        "identity": ("monitor", "antenna"),
-        "neutral": ("rounded screen", "compact body"),
-        "state_delta": ("mouth", "accent marks"),
+    "search-lens-basic": {
+        "identity": ("magnifying-glass", "teal-blue lens"),
+        "neutral": ("round lens", "two short legs"),
+        "state_delta": ("lens tilt", "same legs"),
+    },
+    "index-card-basic": {
+        "identity": ("index card", "tabbed top"),
+        "neutral": ("ruled card", "two short legs"),
+        "state_delta": ("page tilt", "paper lines"),
+    },
+    "archive-cube-basic": {
+        "identity": ("archive cube", "drawer panel"),
+        "neutral": ("cube body", "two short legs"),
+        "state_delta": ("cube tilt", "alert corner"),
+    },
+    "paperclip-basic": {
+        "identity": ("paperclip", "wire body"),
+        "neutral": ("looped clip", "two short legs"),
+        "state_delta": ("clip tilt", "wire loop"),
     },
     "migu-marker-basic": {
         "identity": ("marker-line", "cyan twin tails"),
         "neutral": ("cream oval face", "gray body"),
         "state_delta": ("hair bob", "teal"),
     },
-    "minimal-helper-basic": {
-        "identity": ("geometric", "green diamond"),
-        "neutral": ("centered diamond", "stub limbs"),
-        "state_delta": ("signal icons", "red error"),
+    "terminal-tile-basic": {
+        "identity": ("terminal-window", "mint cursor"),
+        "neutral": ("charcoal tile", "two short legs"),
+        "state_delta": ("cursor face", "same tile"),
     },
 }
 
@@ -160,7 +186,7 @@ def test_starter_catalog_lists_bundled_packs_with_basic_tier_art_ready(
     assert [starter["id"] for starter in starters] == list(DEFAULT_PERSONA_VISUAL_STARTER_PACK_IDS)
     assert LEGACY_PERSONA_VISUAL_STARTER_PACK_ID not in {starter["id"] for starter in starters}
     starter = starters[0]
-    assert starter["title"] == "Research Buddy Basic"
+    assert starter["title"] == "Search Lens Basic"
     assert starter["renderer_type"] == "sprite_frames"
     assert starter["manifest_version"] == 1
     assert starter["asset_count"] >= 1
@@ -213,7 +239,7 @@ def test_get_starter_pack_returns_isolated_manifest_preview(
     ),
     (
         (
-            "research-buddy-basic",
+            "search-lens-basic",
             "basic",
             "art_ready",
             "required_state_loops",
@@ -270,7 +296,8 @@ def test_basic_starter_packs_use_reviewed_multi_frame_state_assets(
     asset_by_key = {asset.asset_key: asset for asset in fixture.assets}
 
     assert detail["production_status"] == "art_ready"
-    assert detail["asset_count"] == 12
+    expected_asset_count = 13 if starter_pack_id in _BASIC_REACTION_STARTER_PACK_IDS else 12
+    assert detail["asset_count"] == expected_asset_count
     assert {asset["asset_role"] for asset in detail["assets"]} == {
         "frame",
         "preview",
@@ -284,10 +311,19 @@ def test_basic_starter_packs_use_reviewed_multi_frame_state_assets(
         assert len(frames) == 2
         assert all(str(frame["asset_id"]).startswith(f"{state}-") for frame in frames)
 
+    required_frame_asset_ids = {
+        str(frame["asset_id"])
+        for state in _REQUIRED_BUDDY_STATES
+        for frame in detail["manifest"]["animations"][detail["manifest"]["states"][state]["animation_id"]]["frames"]
+    }
     frame_asset_ids = _manifest_frame_asset_ids(detail["manifest"])
-    assert len(frame_asset_ids) == 10
+    assert len(required_frame_asset_ids) == 10
+    assert required_frame_asset_ids <= frame_asset_ids
     assert "neutral-anchor" not in frame_asset_ids
     assert "preview" not in frame_asset_ids
+    if starter_pack_id in _BASIC_REACTION_STARTER_PACK_IDS:
+        assert detail["manifest"]["states"]["reaction.success"]["animation_id"] == "reaction-success-loop"
+        assert "reaction-success-1" in frame_asset_ids
 
     for asset in fixture.assets:
         image = Image.open(BytesIO(asset.content))
@@ -540,7 +576,7 @@ def test_get_starter_pack_accepts_legacy_research_buddy_alias(
     detail = service.get_starter_pack(LEGACY_PERSONA_VISUAL_STARTER_PACK_ID)
 
     assert detail["id"] == DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID
-    assert detail["title"] == "Research Buddy Basic"
+    assert detail["title"] == "Search Lens Basic"
 
 
 @pytest.mark.parametrize(
@@ -597,7 +633,7 @@ def test_copy_starter_pack_to_persona_creates_inactive_user_owned_draft(
     assert copied["status"] == "draft"
     assert copied["persona_id"] == persona_id
     assert copied["user_id"] == user_id
-    assert copied["title"] == "Research Buddy Basic"
+    assert copied["title"] == "Search Lens Basic"
     assert copied["provenance"] == "imported"
     assert copied["active_at"] is None
     assert (
@@ -614,14 +650,14 @@ def test_copy_starter_pack_to_persona_creates_inactive_user_owned_draft(
         user_id=user_id,
     )
     assert copied["assets"] == copied_assets
-    assert len(copied_assets) == 12
+    assert len(copied_assets) == 13
     assert {asset["provenance"] for asset in copied_assets} == {"imported"}
     assert (visual_storage_root / persona_id / copied["id"]).is_dir()
 
     copied_asset_ids = {str(asset["id"]) for asset in copied_assets}
     referenced_asset_ids = collect_visual_manifest_asset_ids(copied["manifest"])
     assert referenced_asset_ids < copied_asset_ids
-    assert len(referenced_asset_ids) == 10
+    assert len(referenced_asset_ids) == 11
     assert "neutral" not in str(copied["manifest"])
 
 
@@ -655,7 +691,8 @@ def test_copy_every_default_scaffold_creates_inactive_user_owned_draft(
     referenced_asset_ids = collect_visual_manifest_asset_ids(copied["manifest"])
     if starter_pack_id in _BASIC_STARTER_PACK_IDS:
         assert referenced_asset_ids < copied_asset_ids
-        assert len(referenced_asset_ids) == 10
+        expected_referenced_assets = 11 if starter_pack_id in _BASIC_REACTION_STARTER_PACK_IDS else 10
+        assert len(referenced_asset_ids) == expected_referenced_assets
     else:
         assert referenced_asset_ids == copied_asset_ids
     frame_asset_ids = _manifest_frame_asset_ids(copied["manifest"])
@@ -677,7 +714,7 @@ def test_copy_legacy_research_buddy_alias_creates_default_draft(
     )
 
     assert copied["status"] == "draft"
-    assert copied["title"] == "Research Buddy Basic"
+    assert copied["title"] == "Search Lens Basic"
 
 
 def test_copy_starter_pack_rejects_malformed_fixture_manifest(

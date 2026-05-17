@@ -9,18 +9,22 @@ catalog scaffolds until their final reviewed animation assets are authored.
 
 from __future__ import annotations
 
+from importlib import resources
 import struct
 import zlib
 from dataclasses import dataclass, field
 from typing import Any
 
 
-DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID = "research-buddy-basic"
+DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID = "search-lens-basic"
 LEGACY_PERSONA_VISUAL_STARTER_PACK_ID = "research-buddy-starter"
 DEFAULT_PERSONA_VISUAL_STARTER_PACK_IDS: tuple[str, ...] = (
-    "research-buddy-basic",
+    "search-lens-basic",
+    "index-card-basic",
+    "archive-cube-basic",
+    "paperclip-basic",
+    "terminal-tile-basic",
     "migu-marker-basic",
-    "minimal-helper-basic",
     "study-desk-intermediate",
     "tool-helper-intermediate",
     "object-creature-intermediate",
@@ -450,6 +454,32 @@ def _basic_art_manifest() -> dict[str, Any]:
     }
 
 
+def _success_reaction_art_manifest(success_description: str) -> dict[str, Any]:
+    """Create a basic-tier manifest with required loops and success reaction."""
+    manifest = _basic_art_manifest()
+    manifest["state_catalog"] = {
+        "reaction.success": {
+            "label": "Success reaction",
+            "kind": "reaction",
+            "description": success_description,
+            "tags": ["reaction"],
+        }
+    }
+    manifest["states"]["reaction.success"] = {"animation_id": "reaction-success-loop"}
+    manifest["fallbacks"] = {"reaction.success": ["speaking", "idle"]}
+    manifest["animations"]["reaction-success-loop"] = {
+        "frames": [{"asset_id": "reaction-success-1", "duration_ms": 700}],
+        "frame_rate": 1,
+        "preview_asset_id": "reaction-success-1",
+    }
+    return manifest
+
+
+def _search_lens_art_manifest() -> dict[str, Any]:
+    """Create the Search Lens manifest with required loops and success reaction."""
+    return _success_reaction_art_manifest("Single celebratory pose derived from the Search Lens source sheet.")
+
+
 def _buddy_state_variant(state: str, frame_index: int) -> dict[str, bool | int | str]:
     """Return deterministic pose/expression controls for one basic state frame."""
     bounce = 1 if frame_index % 2 else 0
@@ -747,6 +777,427 @@ def _basic_art_asset(
         mime_type="image/png",
         content=_basic_art_png(style, state, frame_index),
         asset_role=role,
+    )
+
+
+_SEARCH_LENS_FRAME_FILES: tuple[tuple[str, str, str], ...] = (
+    ("neutral-anchor", "00_neutral_anchor.png", "still_pose"),
+    ("preview", "00_neutral_anchor.png", "preview"),
+    ("idle-1", "01_idle_a.png", "frame"),
+    ("idle-2", "02_idle_b.png", "frame"),
+    ("listening-1", "03_listening_a.png", "frame"),
+    ("listening-2", "04_listening_b.png", "frame"),
+    ("thinking-1", "05_thinking_a.png", "frame"),
+    ("thinking-2", "06_thinking_b.png", "frame"),
+    ("speaking-1", "07_speaking_a.png", "frame"),
+    ("speaking-2", "08_speaking_b.png", "frame"),
+    ("reaction-success-1", "09_success.png", "frame"),
+    ("error-1", "10_error_a.png", "frame"),
+    ("error-2", "11_error_b.png", "frame"),
+)
+
+_INDEX_CARD_FRAME_FILES: tuple[tuple[str, str, str], ...] = (
+    ("neutral-anchor", "00_neutral_anchor.png", "still_pose"),
+    ("preview", "00_neutral_anchor.png", "preview"),
+    ("idle-1", "01_idle_a.png", "frame"),
+    ("idle-2", "02_idle_b.png", "frame"),
+    ("listening-1", "03_listening_a.png", "frame"),
+    ("listening-2", "04_listening_b.png", "frame"),
+    ("thinking-1", "05_thinking_a.png", "frame"),
+    ("thinking-2", "06_thinking_b.png", "frame"),
+    ("speaking-1", "07_speaking_a.png", "frame"),
+    ("speaking-2", "08_speaking_b.png", "frame"),
+    ("reaction-success-1", "09_success.png", "frame"),
+    ("error-1", "10_error_a.png", "frame"),
+    ("error-2", "11_error_b.png", "frame"),
+)
+
+_ARCHIVE_CUBE_FRAME_FILES: tuple[tuple[str, str, str], ...] = (
+    ("neutral-anchor", "00_neutral_anchor.png", "still_pose"),
+    ("preview", "00_neutral_anchor.png", "preview"),
+    ("idle-1", "01_idle_a.png", "frame"),
+    ("idle-2", "02_idle_b.png", "frame"),
+    ("listening-1", "03_listening_a.png", "frame"),
+    ("listening-2", "04_listening_b.png", "frame"),
+    ("thinking-1", "05_thinking_a.png", "frame"),
+    ("thinking-2", "06_thinking_b.png", "frame"),
+    ("speaking-1", "07_speaking_a.png", "frame"),
+    ("speaking-2", "08_speaking_b.png", "frame"),
+    ("reaction-success-1", "09_success.png", "frame"),
+    ("error-1", "10_error_a.png", "frame"),
+    ("error-2", "11_error_b.png", "frame"),
+)
+
+_PAPERCLIP_FRAME_FILES: tuple[tuple[str, str, str], ...] = (
+    ("neutral-anchor", "00_neutral_anchor.png", "still_pose"),
+    ("preview", "00_neutral_anchor.png", "preview"),
+    ("idle-1", "01_idle_a.png", "frame"),
+    ("idle-2", "02_idle_b.png", "frame"),
+    ("listening-1", "03_listening_a.png", "frame"),
+    ("listening-2", "04_listening_b.png", "frame"),
+    ("thinking-1", "05_thinking_a.png", "frame"),
+    ("thinking-2", "06_thinking_b.png", "frame"),
+    ("speaking-1", "07_speaking_a.png", "frame"),
+    ("speaking-2", "08_speaking_b.png", "frame"),
+    ("reaction-success-1", "09_success.png", "frame"),
+    ("error-1", "10_error_a.png", "frame"),
+    ("error-2", "11_error_b.png", "frame"),
+)
+
+_TERMINAL_TILE_FRAME_FILES: tuple[tuple[str, str, str], ...] = (
+    ("neutral-anchor", "00_neutral_anchor.png", "still_pose"),
+    ("preview", "00_neutral_anchor.png", "preview"),
+    ("idle-1", "01_idle_a.png", "frame"),
+    ("idle-2", "02_idle_b.png", "frame"),
+    ("listening-1", "03_listening_a.png", "frame"),
+    ("listening-2", "04_listening_b.png", "frame"),
+    ("thinking-1", "05_thinking_a.png", "frame"),
+    ("thinking-2", "06_thinking_b.png", "frame"),
+    ("speaking-1", "07_speaking_a.png", "frame"),
+    ("speaking-2", "08_speaking_b.png", "frame"),
+    ("reaction-success-1", "09_success.png", "frame"),
+    ("error-1", "10_error_a.png", "frame"),
+    ("error-2", "11_error_b.png", "frame"),
+)
+
+_MIGU_MARKER_FRAME_FILES: tuple[tuple[str, str, str], ...] = (
+    ("neutral-anchor", "00_neutral_anchor.png", "still_pose"),
+    ("preview", "00_neutral_anchor.png", "preview"),
+    ("idle-1", "01_idle_a.png", "frame"),
+    ("idle-2", "02_idle_b.png", "frame"),
+    ("listening-1", "03_listening_a.png", "frame"),
+    ("listening-2", "04_listening_b.png", "frame"),
+    ("thinking-1", "05_thinking_a.png", "frame"),
+    ("thinking-2", "06_thinking_b.png", "frame"),
+    ("speaking-1", "07_speaking_a.png", "frame"),
+    ("speaking-2", "08_speaking_b.png", "frame"),
+    ("reaction-success-1", "09_success.png", "frame"),
+    ("error-1", "10_error_a.png", "frame"),
+    ("error-2", "11_error_b.png", "frame"),
+)
+
+
+def _starter_resource_bytes(starter_id: str, filename: str) -> bytes:
+    """Load one bundled starter PNG from package resources."""
+    return (
+        resources.files(__package__)
+        .joinpath("assets", "starter_packs", starter_id, "frames", filename)
+        .read_bytes()
+    )
+
+
+def _resource_png_asset(
+    starter_id: str,
+    key: str,
+    filename: str,
+    *,
+    role: str,
+) -> PersonaVisualStarterAsset:
+    """Create one starter asset backed by a reviewed package PNG resource."""
+    return PersonaVisualStarterAsset(
+        asset_key=key,
+        filename=f"{starter_id}-{key}.png",
+        mime_type="image/png",
+        content=_starter_resource_bytes(starter_id, filename),
+        asset_role=role,
+    )
+
+
+def _search_lens_basic_pack() -> PersonaVisualStarterPack:
+    """Create the reviewed Search Lens low-complexity starter."""
+    starter_id = "search-lens-basic"
+    return PersonaVisualStarterPack(
+        id=starter_id,
+        title="Search Lens Basic",
+        description=(
+            "Bundled art-ready basic Buddy default: friendly magnifying-glass "
+            "research helper with approved 3x4 source-sheet frames."
+        ),
+        renderer_type="sprite_frames",
+        manifest=_search_lens_art_manifest(),
+        assets=tuple(
+            _resource_png_asset(starter_id, key, filename, role=role)
+            for key, filename, role in _SEARCH_LENS_FRAME_FILES
+        ),
+        tags=(
+            "starter",
+            "sprite_frames",
+            "catalog:art-ready",
+            "tier:basic",
+            "search",
+            "research",
+            "object-buddy",
+        ),
+        complexity_tier="basic",
+        production_status="art_ready",
+        neutral_anchor_required=True,
+        expected_asset_groups=_BASIC_EXPECTED_ASSET_GROUPS,
+        animation_coverage_notes=_BASIC_ANIMATION_NOTES,
+        production_recipe=_production_recipe(
+            identity_brief=(
+                "Friendly magnifying-glass buddy with a teal-blue lens face, "
+                "charcoal rim, short handle body, tiny arms, and two short legs."
+            ),
+            neutral_anchor=(
+                "Neutral anchor: mostly front-facing round lens, charcoal rim, "
+                "handle body, dot eyes, smile, arms at sides, and two short legs."
+            ),
+            static_sheet=(
+                "Recreate state loops from the neutral lens pose by changing lens "
+                "tilt, arm gesture, mouth shape, and accents while preserving the same legs."
+            ),
+            animation_outputs=("required_state_loops",),
+        ),
+    )
+
+
+def _index_card_basic_pack() -> PersonaVisualStarterPack:
+    """Create the reviewed Index Card low-complexity starter."""
+    starter_id = "index-card-basic"
+    return PersonaVisualStarterPack(
+        id=starter_id,
+        title="Index Card Basic",
+        description=(
+            "Bundled art-ready basic Buddy default: animated tabbed index-card "
+            "research helper with approved 3x4 source-sheet frames."
+        ),
+        renderer_type="sprite_frames",
+        manifest=_success_reaction_art_manifest(
+            "Single celebratory pose derived from the Index Card source sheet."
+        ),
+        assets=tuple(
+            _resource_png_asset(starter_id, key, filename, role=role)
+            for key, filename, role in _INDEX_CARD_FRAME_FILES
+        ),
+        tags=(
+            "starter",
+            "sprite_frames",
+            "catalog:art-ready",
+            "tier:basic",
+            "index-card",
+            "notes",
+            "paper-buddy",
+        ),
+        complexity_tier="basic",
+        production_status="art_ready",
+        neutral_anchor_required=True,
+        expected_asset_groups=_BASIC_EXPECTED_ASSET_GROUPS,
+        animation_coverage_notes=_BASIC_ANIMATION_NOTES,
+        production_recipe=_production_recipe(
+            identity_brief=(
+                "Friendly index card buddy with a cream ruled-card body, tabbed top, "
+                "paper lines, dot eyes, smile, tiny arms, and two short legs."
+            ),
+            neutral_anchor=(
+                "Neutral anchor: front-facing ruled card with tabbed top, dot eyes, "
+                "small smile, tiny arms, and two short legs on a transparent canvas."
+            ),
+            static_sheet=(
+                "Recreate state loops from the neutral card by changing page tilt, "
+                "mouth shape, paper lines, tab motion, and small accent marks."
+            ),
+            animation_outputs=("required_state_loops",),
+        ),
+    )
+
+
+def _archive_cube_basic_pack() -> PersonaVisualStarterPack:
+    """Create the reviewed Archive Cube low-complexity starter."""
+    starter_id = "archive-cube-basic"
+    return PersonaVisualStarterPack(
+        id=starter_id,
+        title="Archive Cube Basic",
+        description=(
+            "Bundled art-ready basic Buddy default: compact archive cube "
+            "helper with approved 3x4 source-sheet frames."
+        ),
+        renderer_type="sprite_frames",
+        manifest=_success_reaction_art_manifest(
+            "Single celebratory pose derived from the Archive Cube source sheet."
+        ),
+        assets=tuple(
+            _resource_png_asset(starter_id, key, filename, role=role)
+            for key, filename, role in _ARCHIVE_CUBE_FRAME_FILES
+        ),
+        tags=(
+            "starter",
+            "sprite_frames",
+            "catalog:art-ready",
+            "tier:basic",
+            "archive",
+            "storage",
+            "object-buddy",
+        ),
+        complexity_tier="basic",
+        production_status="art_ready",
+        neutral_anchor_required=True,
+        expected_asset_groups=_BASIC_EXPECTED_ASSET_GROUPS,
+        animation_coverage_notes=_BASIC_ANIMATION_NOTES,
+        production_recipe=_production_recipe(
+            identity_brief=(
+                "Friendly archive cube buddy with muted teal-blue sides, a cream "
+                "drawer panel, tab slot, dot eyes, simple mouth, tiny arms, and two short legs."
+            ),
+            neutral_anchor=(
+                "Neutral anchor: front-facing cube body with cream drawer panel, "
+                "small label slot, dot eyes, relaxed arms, and two short legs."
+            ),
+            static_sheet=(
+                "Recreate state loops from the neutral cube by changing cube tilt, "
+                "mouth shape, drawer-panel emphasis, arm gesture, and alert corner marks."
+            ),
+            animation_outputs=("required_state_loops",),
+        ),
+    )
+
+
+def _paperclip_basic_pack() -> PersonaVisualStarterPack:
+    """Create the reviewed Paperclip low-complexity starter."""
+    starter_id = "paperclip-basic"
+    return PersonaVisualStarterPack(
+        id=starter_id,
+        title="Paperclip Basic",
+        description=(
+            "Bundled art-ready basic Buddy default: expressive paperclip "
+            "helper with approved 3x4 source-sheet frames."
+        ),
+        renderer_type="sprite_frames",
+        manifest=_success_reaction_art_manifest(
+            "Single celebratory pose derived from the Paperclip source sheet."
+        ),
+        assets=tuple(
+            _resource_png_asset(starter_id, key, filename, role=role)
+            for key, filename, role in _PAPERCLIP_FRAME_FILES
+        ),
+        tags=(
+            "starter",
+            "sprite_frames",
+            "catalog:art-ready",
+            "tier:basic",
+            "paperclip",
+            "office",
+            "object-buddy",
+        ),
+        complexity_tier="basic",
+        production_status="art_ready",
+        neutral_anchor_required=True,
+        expected_asset_groups=_BASIC_EXPECTED_ASSET_GROUPS,
+        animation_coverage_notes=_BASIC_ANIMATION_NOTES,
+        production_recipe=_production_recipe(
+            identity_brief=(
+                "Friendly paperclip buddy with a looped wire body, pale metal linework, "
+                "small face, tiny arms, and two short legs."
+            ),
+            neutral_anchor=(
+                "Neutral anchor: front-facing looped clip silhouette, simple face, "
+                "relaxed arms, and two short legs on a transparent canvas."
+            ),
+            static_sheet=(
+                "Recreate state loops from the neutral clip by changing clip tilt, "
+                "wire loop squash, mouth shape, arm gesture, and small alert marks."
+            ),
+            animation_outputs=("required_state_loops",),
+        ),
+    )
+
+
+def _terminal_tile_basic_pack() -> PersonaVisualStarterPack:
+    """Create the reviewed Terminal Tile low-complexity starter."""
+    starter_id = "terminal-tile-basic"
+    return PersonaVisualStarterPack(
+        id=starter_id,
+        title="Terminal Tile Basic",
+        description=(
+            "Bundled art-ready basic Buddy default: compact terminal-window "
+            "tile helper with approved 3x4 source-sheet frames."
+        ),
+        renderer_type="sprite_frames",
+        manifest=_success_reaction_art_manifest(
+            "Single celebratory pose derived from the Terminal Tile source sheet."
+        ),
+        assets=tuple(
+            _resource_png_asset(starter_id, key, filename, role=role)
+            for key, filename, role in _TERMINAL_TILE_FRAME_FILES
+        ),
+        tags=(
+            "starter",
+            "sprite_frames",
+            "catalog:art-ready",
+            "tier:basic",
+            "terminal",
+            "cli",
+            "object-buddy",
+        ),
+        complexity_tier="basic",
+        production_status="art_ready",
+        neutral_anchor_required=True,
+        expected_asset_groups=_BASIC_EXPECTED_ASSET_GROUPS,
+        animation_coverage_notes=_BASIC_ANIMATION_NOTES,
+        production_recipe=_production_recipe(
+            identity_brief=(
+                "Friendly terminal-window tile buddy with a charcoal rounded-square "
+                "body, subtle title bar, mint cursor-face accents, tiny arms, and two short legs."
+            ),
+            neutral_anchor=(
+                "Neutral anchor: front-facing charcoal tile with a subtle "
+                "top bar, mint cursor-like face, relaxed arms, and two short legs."
+            ),
+            static_sheet=(
+                "Recreate state loops from the neutral terminal tile by changing "
+                "cursor face expression, arm gesture, tiny bounce, and mint accent marks "
+                "while preserving the same tile body and legs."
+            ),
+            animation_outputs=("required_state_loops",),
+        ),
+    )
+
+
+def _migu_marker_basic_pack() -> PersonaVisualStarterPack:
+    """Create the reviewed Migu Marker low-complexity starter."""
+    starter_id = "migu-marker-basic"
+    return PersonaVisualStarterPack(
+        id=starter_id,
+        title="Migu Marker Basic",
+        description=(
+            "Bundled art-ready basic Buddy default: playful marker-line Migu "
+            "helper with approved 3x4 source-sheet frames."
+        ),
+        renderer_type="sprite_frames",
+        manifest=_success_reaction_art_manifest(
+            "Single celebratory pose derived from the Migu Marker source sheet."
+        ),
+        assets=tuple(
+            _resource_png_asset(starter_id, key, filename, role=role)
+            for key, filename, role in _MIGU_MARKER_FRAME_FILES
+        ),
+        tags=(
+            "starter",
+            "sprite_frames",
+            "catalog:art-ready",
+            "tier:basic",
+            "user-art",
+            "marker",
+        ),
+        complexity_tier="basic",
+        production_status="art_ready",
+        neutral_anchor_required=True,
+        expected_asset_groups=_BASIC_EXPECTED_ASSET_GROUPS,
+        animation_coverage_notes=_BASIC_ANIMATION_NOTES,
+        production_recipe=_production_recipe(
+            identity_brief=(
+                "Playful marker-line Migu with tiny gray body, cream oval face, "
+                "cyan twin tails, magenta ties, headset mic, split shirt line, and sketchy charm."
+            ),
+            neutral_anchor=(
+                "Neutral anchor: front-facing chibi pose with cream oval face, gray body, "
+                "black marker limbs, headset mic, split shirt line, and wide twin-tail silhouette."
+            ),
+            static_sheet=(
+                "Recreate state loops from neutral by preserving rough asymmetry; hair bob, "
+                "mouth changes, headset position, and teal marks carry animation."
+            ),
+            animation_outputs=("required_state_loops",),
+        ),
     )
 
 
@@ -1049,63 +1500,12 @@ def _atlas_pack(
 
 
 DEFAULT_PERSONA_VISUAL_STARTER_PACKS: tuple[PersonaVisualStarterPack, ...] = (
-    _basic_pack(
-        starter_id="research-buddy-basic",
-        title="Research Buddy Basic",
-        description=("Clean assistant mascot starter with readable required-state coverage."),
-        style="research",
-        tags=("research", "mascot"),
-        identity_brief=(
-            "Clean monitor-headed assistant mascot with rounded display, compact blue body, "
-            "antenna glow, and calm readable face."
-        ),
-        neutral_anchor=(
-            "Neutral anchor: front-facing rounded screen above compact body, centered "
-            "antenna dot, relaxed arms and feet."
-        ),
-        static_sheet=(
-            "Recreate state loops from neutral by keeping silhouette fixed; mouth, "
-            "eye focus, bounce, and accent marks carry expression."
-        ),
-    ),
-    _basic_pack(
-        starter_id="migu-marker-basic",
-        title="Migu Marker Basic",
-        description=("Rough marker-line inspired starter that keeps a playful user-art feel."),
-        style="migu",
-        tags=("user-art", "marker"),
-        identity_brief=(
-            "Playful marker-line Migu with tiny gray body, cream oval face, cyan twin tails, "
-            "magenta ties, and sketchy charm."
-        ),
-        neutral_anchor=(
-            "Neutral anchor: front-facing chibi pose with cream oval face, gray body, "
-            "black marker limbs, and wide twin-tail silhouette."
-        ),
-        static_sheet=(
-            "Recreate state loops from neutral by preserving rough asymmetry; hair bob, "
-            "mouth changes, and teal marks carry animation."
-        ),
-    ),
-    _basic_pack(
-        starter_id="minimal-helper-basic",
-        title="Minimal Helper Basic",
-        description=("Geometric low-complexity starter for quick custom Buddy setup."),
-        style="minimal",
-        tags=("minimal", "geometric"),
-        identity_brief=(
-            "Simple geometric helper with green diamond body, lime face panel, stub limbs, "
-            "blue signal icons, and crisp readable silhouette."
-        ),
-        neutral_anchor=(
-            "Neutral anchor: centered diamond body and face panel, stub limbs, dot eyes, "
-            "and small smile on transparent canvas."
-        ),
-        static_sheet=(
-            "Recreate state loops from neutral by changing bounce, mouth, signal icons, "
-            "thought diamonds, and red error mark only."
-        ),
-    ),
+    _search_lens_basic_pack(),
+    _index_card_basic_pack(),
+    _archive_cube_basic_pack(),
+    _paperclip_basic_pack(),
+    _terminal_tile_basic_pack(),
+    _migu_marker_basic_pack(),
     _multi_asset_pack(
         starter_id="study-desk-intermediate",
         title="Study Desk Intermediate",

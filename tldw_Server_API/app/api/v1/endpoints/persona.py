@@ -303,6 +303,10 @@ _PERSONA_WAKE_DEACTIVATION_REASONS = {
 }
 _PERSONA_VISUAL_TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled", "quarantined"}
 _PERSONA_VISUAL_PACK_UPLOAD_CHUNK_SIZE_BYTES = 1024 * 1024
+_PERSONA_VISUAL_IMPORT_PREVIEW_ARCHIVE_EXTENSIONS = {
+    PERSONA_VISUAL_PACK_EXTENSION,
+    ".zip",
+}
 _PERSONA_CONNECTION_MEMORY_TYPE = "persona_connection"
 _PERSONA_CONNECTION_ALLOWED_AUTH_TYPES = {"none", "bearer", "api_key", "basic", "custom_header"}
 _PERSONA_CONNECTION_TEST_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}
@@ -2481,7 +2485,7 @@ def _validated_persona_visual_import_preview_archive_path(user_id: str, archive_
             status_code=status.HTTP_403_FORBIDDEN,
             detail="import_preview_archive_outside_user_root",
         ) from exc
-    if path.suffix != PERSONA_VISUAL_PACK_EXTENSION:
+    if path.suffix.casefold() not in _PERSONA_VISUAL_IMPORT_PREVIEW_ARCHIVE_EXTENSIONS:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid_import_preview_archive_type")
     return path
 
@@ -5101,7 +5105,8 @@ async def start_persona_visual_pack_import_preview(
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     filename = str(archive.filename or "")
-    if Path(filename).suffix != PERSONA_VISUAL_PACK_EXTENSION:
+    archive_suffix = Path(filename).suffix.casefold()
+    if archive_suffix not in _PERSONA_VISUAL_IMPORT_PREVIEW_ARCHIVE_EXTENSIONS:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_archive_type")
     try:
         await _get_persona_profile_or_404(
@@ -5112,7 +5117,7 @@ async def start_persona_visual_pack_import_preview(
         )
         request_id = uuid.uuid4().hex
         archive_root = _persona_visual_pack_import_preview_staging_root(user_id)
-        archive_path = archive_root / f"{request_id}{PERSONA_VISUAL_PACK_EXTENSION}"
+        archive_path = archive_root / f"{request_id}{archive_suffix}"
         uploaded_bytes = await _save_persona_visual_import_preview_archive(archive, archive_path)
         repo = await _run_persona_db_call(_persona_visual_portability_repo, db)
         preview = await _run_persona_db_call(
