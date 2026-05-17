@@ -43,6 +43,7 @@ The plan should stay grounded in the current `/chat` implementation:
 - Generation style: `ParameterPresets.tsx`.
 - Startup bundle persistence candidate: `startup-template-bundles.ts` and `usePromptTemplates.ts`.
 - Request inclusion and character-flow eligibility: `usePlaygroundRawPreview.ts`.
+- User-facing labels: existing i18n locale files under `apps/packages/ui/src/public/_locales/` and `apps/packages/ui/src/assets/locale/`.
 
 ## Non-Goals
 
@@ -53,6 +54,7 @@ The plan should stay grounded in the current `/chat` implementation:
 - No backend/API changes unless existing frontend/API contracts cannot truthfully represent role-play state or request inclusion.
 - No new persistence model unless existing startup template bundles cannot support saved role-play setups.
 - No new route for role-play chat.
+- No deliberate extension sidepanel parity work in this design. Shared component changes must not break the extension, but extension-specific UX follow-up belongs in a separate task.
 
 ## Coordination Constraints
 
@@ -98,7 +100,8 @@ Avoid using `Actor` as the primary runtime label. It may remain internal or seco
 
 **Scope:**
 
-- Fix the `Chat as a character` starter path crash observed when selecting `Default Assistant`.
+- Reproduce the `Chat as a character` starter path and picker-selection crash in the current branch before changing behavior. If the crash no longer reproduces, keep the regression test and record the current behavior.
+- Fix the `Chat as a character` starter path crash observed when selecting `Default Assistant` or the current equivalent default entry.
 - Add regression coverage for opening the character/persona picker from the empty-state starter and selecting an entry.
 - Ensure the current custom system prompt can always be edited or cleared, even when the prompt library is empty.
 - Add useful accessible names to compact parameter preset controls.
@@ -141,6 +144,7 @@ Avoid using `Actor` as the primary runtime label. It may remain internal or seco
   - `Templates` should become `System prompts` or `Behavior templates`.
   - `Character mode` should not open scene settings without making the scene mapping explicit.
   - `Preset` should not be used ambiguously for both generation parameters and saved setups.
+- Update locale keys or fallbacks for user-facing terminology changes instead of hard-coding English labels.
 
 **Success Criteria:**
 
@@ -164,6 +168,7 @@ Avoid using `Actor` as the primary runtime label. It may remain internal or seco
 **Scope:**
 
 - Add role-play behavior templates and generation style to mobile composer overflow or a compact mobile role-play entry.
+- Prefer stable entry points that Stage 4 can reuse. Avoid mobile-only controls that will be deleted immediately when the Role-play setup surface lands.
 - Ensure active role-play chips wrap cleanly on narrow screens.
 - Preserve first-message usability; do not bury the send box under a large setup panel.
 - Validate that picker, template modal, and recovery controls are reachable by keyboard/touch on mobile widths.
@@ -228,6 +233,7 @@ Surface placement:
 - Returning users can open the setup surface, see current state, change one piece, and close.
 - Existing advanced controls remain available but no longer carry the primary role-play path.
 - The setup surface is a thin orchestration layer, not a second state system.
+- Stage 3 mobile access remains valid after this surface ships, either by opening the setup surface or by keeping equivalent overflow entries.
 
 **Likely touched areas:**
 
