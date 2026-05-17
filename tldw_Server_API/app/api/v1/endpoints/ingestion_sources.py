@@ -33,6 +33,9 @@ from tldw_Server_API.app.core.Ingestion_Sources.git_repository import (
 )
 from tldw_Server_API.app.core.Ingestion_Sources.jobs import enqueue_ingestion_source_job
 from tldw_Server_API.app.core.Ingestion_Sources.local_directory import validate_local_directory_source
+from tldw_Server_API.app.core.Ingestion_Sources.access_policy import (
+    can_create_local_directory_ingestion_source,
+)
 from tldw_Server_API.app.core.Ingestion_Sources.service import (
     create_source_snapshot,
     create_source,
@@ -173,6 +176,14 @@ def _prepare_patch_payload(
     return patch
 
 
+def _requires_local_directory_entitlement(
+    *,
+    source_type: str | None,
+    config_changed: bool = True,
+) -> bool:
+    return config_changed and str(source_type or "").strip().lower() == "local_directory"
+
+
 @router.post(
     "/",
     response_model=IngestionSourceResponse,
@@ -187,6 +198,14 @@ async def create_ingestion_source(
         prepared_payload = _prepare_create_payload(payload)
     except IngestionSourceValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if (
+        prepared_payload.get("source_type") == "local_directory"
+        and not can_create_local_directory_ingestion_source(current_user)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Local directory ingestion sources are not enabled for this user",
+        )
     db_pool = await get_db_pool()
     async with db_pool.transaction() as db:
         await ensure_ingestion_sources_schema(db)
@@ -202,6 +221,14 @@ async def list_ingestion_sources(current_user: User = Depends(get_request_user))
         await ensure_ingestion_sources_schema(db)
         rows = await list_sources_by_user(db, user_id=int(current_user.id))
     return rows
+
+
+@router.get("/capabilities")
+async def get_ingestion_source_capabilities(current_user: User = Depends(get_request_user)):
+    """Return ingestion-source capabilities for the authenticated user."""
+    return {
+        "can_create_local_directory": can_create_local_directory_ingestion_source(current_user),
+    }
 
 
 @router.get("/{source_id}", response_model=IngestionSourceResponse)
@@ -229,6 +256,20 @@ async def patch_ingestion_source(
         existing = await get_source_by_id(db, source_id=source_id, user_id=int(current_user.id))
         if not existing:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingestion source not found")
+        requested_patch = payload.model_dump(exclude_unset=True)
+        effective_source_type = (
+            requested_patch.get("source_type")
+            if requested_patch.get("source_type") is not None
+            else existing.get("source_type")
+        )
+        if _requires_local_directory_entitlement(
+            source_type=effective_source_type,
+            config_changed=any(key in requested_patch for key in ("source_type", "config")),
+        ) and not can_create_local_directory_ingestion_source(current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Local directory ingestion sources are not enabled for this user",
+            )
         try:
             patch = _prepare_patch_payload(existing=existing, payload=payload)
             row = await update_source(
