@@ -4,7 +4,8 @@
 param(
     [string]$HostAddress,
     [int]$Port,
-    [switch]$SkipInstall
+    [switch]$SkipInstall,
+    [switch]$ForceInstall
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,18 +22,39 @@ function Invoke-CheckedNative {
     }
 }
 
+function Resolve-QuickLaunchPort {
+    param(
+        [bool]$HasPortParameter,
+        [int]$PortParameter
+    )
+
+    if ($HasPortParameter) {
+        return $PortParameter
+    }
+
+    if ($env:TLDW_PORT) {
+        if ($env:TLDW_PORT -match '^\d+$') {
+            return [int]$env:TLDW_PORT
+        }
+
+        Write-Warning "[quick-launch] Ignoring invalid TLDW_PORT='$($env:TLDW_PORT)'; using 8000."
+    }
+
+    return 8000
+}
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ScriptDir
 
 if (-not $HostAddress) {
     $HostAddress = if ($env:TLDW_HOST) { $env:TLDW_HOST } else { "127.0.0.1" }
 }
-if (-not $PSBoundParameters.ContainsKey("Port")) {
-    $Port = if ($env:TLDW_PORT) { [int]$env:TLDW_PORT } else { 8000 }
-}
+$HasPortParameter = $PSBoundParameters.ContainsKey("Port")
+$Port = Resolve-QuickLaunchPort -HasPortParameter $HasPortParameter -PortParameter $Port
 
 $VenvDir = if ($env:TLDW_VENV_DIR) { $env:TLDW_VENV_DIR } else { ".venv" }
 $VenvPython = Join-Path $VenvDir "Scripts/python.exe"
+$InstallMarker = Join-Path $VenvDir ".initialized"
 $EnvFile = if ($env:TLDW_ENV_FILE) { $env:TLDW_ENV_FILE } else { "tldw_Server_API/Config_Files/.env" }
 
 if ($env:TLDW_PYTHON) {
@@ -51,17 +73,26 @@ Write-Host ""
 
 Invoke-CheckedNative -FilePath $PythonExe -Arguments ($PythonArgs + @("-c", "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"))
 
+$VenvCreated = $false
 if (-not (Test-Path $VenvPython)) {
     Write-Host "[quick-launch] Creating virtualenv at $VenvDir"
     Invoke-CheckedNative -FilePath $PythonExe -Arguments ($PythonArgs + @("-m", "venv", $VenvDir))
+    $VenvCreated = $true
 }
 
-if (-not $SkipInstall -and $env:TLDW_SKIP_INSTALL -ne "1") {
+if (
+    -not $SkipInstall `
+    -and $env:TLDW_SKIP_INSTALL -ne "1" `
+    -and ($ForceInstall -or $env:TLDW_FORCE_INSTALL -eq "1" -or $VenvCreated -or -not (Test-Path $InstallMarker))
+) {
     Write-Host "[quick-launch] Installing/updating local Python dependencies..."
     Invoke-CheckedNative -FilePath $VenvPython -Arguments @("-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel")
     Invoke-CheckedNative -FilePath $VenvPython -Arguments @("-m", "pip", "install", "-e", ".")
-} else {
+    New-Item -Path $InstallMarker -ItemType File -Force | Out-Null
+} elseif ($SkipInstall -or $env:TLDW_SKIP_INSTALL -eq "1") {
     Write-Host "[quick-launch] Skipping dependency install"
+} else {
+    Write-Host "[quick-launch] Dependency setup already completed; set TLDW_FORCE_INSTALL=1 or pass -ForceInstall to reinstall/update."
 }
 
 Write-Host "[quick-launch] Configuring local single-user profile..."

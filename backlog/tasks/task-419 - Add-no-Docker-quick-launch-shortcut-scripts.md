@@ -56,7 +56,7 @@ Docs/superpowers/plans/2026-05-17-quick-launch-scripts-implementation-plan.md
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added Linux/macOS, macOS Finder, and Windows PowerShell quick-launch scripts for the local single-user no-Docker path. The scripts create/update .venv, run the existing local-single setup wizard, start uvicorn at 127.0.0.1:8000, avoid printing API keys by default, and are documented in README plus Getting Started local profile docs. Verification: focused onboarding/script pytest suite passed; bash syntax check passed; Bandit found no issues in touched Python tests. PowerShell syntax execution was not run because pwsh/powershell is unavailable on this host. Draft PR: https://github.com/rmusser01/tldw_server/pull/1817
+Addressed the actionable PR #1817 review comments for quick-launch scripts. Verification: focused review regression suite passed (17 tests), related onboarding/launcher contract suites passed (33 tests), `bash -n quick-launch.sh quick-launch.command` passed, Bandit reported 0 findings for touched Python tests, and `git diff --check` passed. PowerShell parser execution was not available on this host.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

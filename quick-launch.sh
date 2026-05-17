@@ -8,10 +8,29 @@ cd "$SCRIPT_DIR"
 
 PYTHON_CMD="${TLDW_PYTHON:-python3}"
 VENV_DIR="${TLDW_VENV_DIR:-.venv}"
-VENV_PYTHON="$VENV_DIR/bin/python"
+INSTALL_MARKER="$VENV_DIR/.initialized"
 ENV_FILE="${TLDW_ENV_FILE:-tldw_Server_API/Config_Files/.env}"
 HOST="${TLDW_HOST:-127.0.0.1}"
 PORT="${TLDW_PORT:-8000}"
+
+resolve_venv_python() {
+    if [ -x "$VENV_DIR/bin/python" ]; then
+        printf '%s\n' "$VENV_DIR/bin/python"
+        return 0
+    fi
+
+    if [ -x "$VENV_DIR/Scripts/python" ]; then
+        printf '%s\n' "$VENV_DIR/Scripts/python"
+        return 0
+    fi
+
+    if [ -x "$VENV_DIR/Scripts/python.exe" ]; then
+        printf '%s\n' "$VENV_DIR/Scripts/python.exe"
+        return 0
+    fi
+
+    return 1
+}
 
 echo "=== tldw_server quick launch ==="
 echo ""
@@ -26,15 +45,26 @@ fi
     exit 1
 }
 
-if [ ! -x "$VENV_PYTHON" ]; then
+VENV_CREATED=0
+if ! VENV_PYTHON="$(resolve_venv_python)"; then
     echo "[quick-launch] Creating virtualenv at $VENV_DIR"
     "$PYTHON_CMD" -m venv "$VENV_DIR"
+    VENV_CREATED=1
+    if ! VENV_PYTHON="$(resolve_venv_python)"; then
+        echo "[quick-launch] Could not find Python in $VENV_DIR after creating the virtualenv." >&2
+        exit 1
+    fi
 fi
 
 if [ "${TLDW_SKIP_INSTALL:-0}" != "1" ]; then
-    echo "[quick-launch] Installing/updating local Python dependencies..."
-    "$VENV_PYTHON" -m pip install --upgrade pip setuptools wheel
-    "$VENV_PYTHON" -m pip install -e .
+    if [ "${TLDW_FORCE_INSTALL:-0}" = "1" ] || [ "$VENV_CREATED" = "1" ] || [ ! -f "$INSTALL_MARKER" ]; then
+        echo "[quick-launch] Installing/updating local Python dependencies..."
+        "$VENV_PYTHON" -m pip install --upgrade pip setuptools wheel
+        "$VENV_PYTHON" -m pip install -e .
+        touch "$INSTALL_MARKER"
+    else
+        echo "[quick-launch] Dependency setup already completed; set TLDW_FORCE_INSTALL=1 to reinstall/update."
+    fi
 else
     echo "[quick-launch] Skipping dependency install because TLDW_SKIP_INSTALL=1"
 fi

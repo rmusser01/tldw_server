@@ -68,6 +68,39 @@ def test_macos_command_delegates_to_shell_launcher() -> None:
     _require("exec" in text, "quick-launch.command should replace itself with the shell launcher")
 
 
+def test_shell_launcher_supports_git_bash_venv_layout() -> None:
+    """Shell launcher should work when a venv exposes Windows Scripts/python."""
+    text = _read("quick-launch.sh")
+
+    _require("resolve_venv_python" in text, "quick-launch.sh should resolve venv Python dynamically")
+    _require("$VENV_DIR/Scripts/python" in text, "quick-launch.sh should support Windows venv layout")
+    _require("$VENV_DIR/bin/python" in text, "quick-launch.sh should support POSIX venv layout")
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "quick-launch.sh",
+        "quick-launch.ps1",
+    ],
+)
+def test_quick_launch_scripts_skip_reinstall_after_initial_setup(path: str) -> None:
+    """Quick launch should not force networked pip install on every run."""
+    text = _read(path)
+
+    _require(".initialized" in text, f"{path} should record completed local dependency setup")
+    _require("TLDW_FORCE_INSTALL" in text, f"{path} should allow explicit reinstall/update")
+
+
+def test_powershell_launcher_validates_env_port() -> None:
+    """PowerShell launcher should validate TLDW_PORT before casting to int."""
+    text = _read("quick-launch.ps1")
+
+    _require("Resolve-QuickLaunchPort" in text, "quick-launch.ps1 should use a port parsing helper")
+    _require("-match" in text and "\\d+" in text, "quick-launch.ps1 should validate numeric ports")
+    _require("TLDW_PORT" in text, "quick-launch.ps1 should keep env override support")
+
+
 @pytest.mark.parametrize(
     "path",
     [
