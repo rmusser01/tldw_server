@@ -265,6 +265,20 @@ const buildLargeReadAlongContent = () => {
   }
 }
 
+const buildLargeTimestampedTranscript = () => {
+  const lines = Array.from({ length: 1_500 }, (_value, index) => {
+    const minutes = String(Math.floor(index / 60)).padStart(2, '0')
+    const seconds = String(index % 60).padStart(2, '0')
+    const label = `Line ${String(index).padStart(4, '0')}`
+    const text = `${label} ${'transcript text '.repeat(5)}.`
+    return `${minutes}:${seconds} ${text}`
+  })
+  return {
+    content: lines.join('\n'),
+    target: 'Line 0340 transcript text transcript text transcript text transcript text transcript text .'
+  }
+}
+
 const selectText = (node: HTMLElement, selectedText: string) => {
   const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT)
   let textNode: Node | null = node.firstChild
@@ -486,7 +500,44 @@ describe('ContentViewer read-along integration', () => {
     const status = screen.getByTestId('large-content-window-status')
     const visibleChars = Number(status.getAttribute('data-visible-chars'))
     expect(visibleChars).toBeGreaterThan(LARGE_PLAIN_CONTENT_CHUNK_CHARS)
+    expect(visibleChars).toBe(LARGE_PLAIN_CONTENT_CHUNK_CHARS * 2)
     expect(visibleChars).toBeLessThan(content.length)
+  })
+
+  it('keeps read-along wrappers available through the visible hidden-timing transcript window', async () => {
+    const { content, target } = buildLargeTimestampedTranscript()
+
+    renderViewer({
+      selectedMedia: {
+        ...videoMedia,
+        meta: {
+          type: 'audio'
+        }
+      },
+      mediaDetail: {
+        type: 'audio',
+        has_original_file: true
+      },
+      content,
+      contentDisplayMode: 'plain'
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('large-content-window-status')).toHaveAttribute(
+        'data-visible-chars',
+        String(LARGE_PLAIN_CONTENT_CHUNK_CHARS)
+      )
+    })
+
+    selectTextInside(target)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('media-selection-actions-popover')).toBeInTheDocument()
+    })
+    expect(screen.getByTestId('media-selection-action-read-from-here')).toBeInTheDocument()
+    expect(
+      screen.getByTestId('media-selection-action-read-current-section')
+    ).toBeInTheDocument()
   })
 
   it('clamps selection popover and transport to the provided viewport and exposes polite live status', () => {
@@ -524,8 +575,21 @@ describe('ContentViewer read-along integration', () => {
     expect(
       Number(screen.getByTestId('media-selection-actions-popover').style.left.replace('px', ''))
     ).toBeLessThanOrEqual(108)
+    const popover = screen.getByTestId('media-selection-actions-popover')
+    const popoverLeft = Number(popover.style.left.replace('px', ''))
+    const popoverMaxWidth = Number(popover.style.maxWidth.replace('px', ''))
+    expect(popover.style.maxWidth).toMatch(/px$/)
+    expect(popoverMaxWidth).toBeGreaterThan(0)
+    expect(popoverMaxWidth).toBeLessThanOrEqual(
+      viewportRect.right - popoverLeft - 8
+    )
     const transport = screen.getByTestId('media-read-along-transport')
-    expect(Number(transport.style.left.replace('px', ''))).toBeLessThanOrEqual(252)
+    const transportLeft = Number(transport.style.left.replace('px', ''))
+    const transportMaxWidth = Number(transport.style.maxWidth.replace('px', ''))
+    expect(transport.style.maxWidth).toMatch(/px$/)
+    expect(transportMaxWidth).toBeGreaterThan(0)
+    expect(transportLeft).toBeLessThanOrEqual(252)
+    expect(transportMaxWidth).toBeLessThanOrEqual(520 - transportLeft - 8)
     expect(Number(transport.style.top.replace('px', ''))).toBeLessThanOrEqual(288)
     expect(screen.getByTestId('media-read-along-progress')).toHaveAttribute(
       'role',

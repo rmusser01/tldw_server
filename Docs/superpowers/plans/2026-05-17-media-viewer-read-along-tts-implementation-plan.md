@@ -717,6 +717,8 @@ git commit -m "feat: add media read-along playback session"
 
 ## Task 6: ContentViewer UI Integration
 
+**Status:** Complete
+
 **Files:**
 - Create: `apps/packages/ui/src/components/Media/read-along/MediaReadAlongPopover.tsx`
 - Create: `apps/packages/ui/src/components/Media/read-along/MediaReadAlongTransport.tsx`
@@ -726,7 +728,7 @@ git commit -m "feat: add media read-along playback session"
 - Test: `apps/packages/ui/src/components/Media/__tests__/ContentViewer.stage12.performance.test.tsx`
 - Test: `apps/packages/ui/src/components/Media/__tests__/ContentViewer.stage10.findBar.test.tsx`
 
-- [ ] **Step 1: Write failing UI tests**
+- [x] **Step 1: Write failing UI tests**
 
 Create `ContentViewer.read-along.test.tsx`.
 
@@ -740,7 +742,7 @@ Cover:
 - embedded audio/video preview is paused when generated playback starts
 - markdown/html fallback starts playback without unsafe HTML mutation
 
-- [ ] **Step 2: Run UI tests red**
+- [x] **Step 2: Run UI tests red**
 
 Run:
 
@@ -750,7 +752,7 @@ cd apps/packages/ui && bunx vitest run src/components/Media/__tests__/ContentVie
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement popover**
+- [x] **Step 3: Implement popover**
 
 Use real buttons. Test IDs:
 
@@ -763,7 +765,7 @@ Use real buttons. Test IDs:
 
 Keep labels short and use `t()` fallbacks. Do not add a page-level button.
 
-- [ ] **Step 4: Implement inline transport**
+- [x] **Step 4: Implement inline transport**
 
 Use compact icon buttons from lucide-react where available:
 
@@ -783,7 +785,7 @@ Test IDs:
 
 The transport should be anchored near the selection/active segment and clamp to the content viewport. On narrow widths, keep it compact near the active segment; do not add a sticky bottom player.
 
-- [ ] **Step 5: Wrap plain/transcript segments**
+- [x] **Step 5: Wrap plain/transcript segments**
 
 For plain and transcript-line rendering, render segment wrappers with:
 
@@ -799,11 +801,11 @@ For plain and transcript-line rendering, render segment wrappers with:
 
 Do not break existing find highlighting. If find highlighting is active, prefer find markup and skip exact read-along wrappers until the query is cleared.
 
-- [ ] **Step 6: Keep large-content rendering lazy**
+- [x] **Step 6: Keep large-content rendering lazy**
 
 Use full content for queue construction inside the session hook, but only wrap the visible plain content window in the DOM. Do not force `visiblePlainContentChars = content.length` when `Read full item` starts.
 
-- [ ] **Step 7: Run UI/performance/find tests green**
+- [x] **Step 7: Run UI/performance/find tests green**
 
 Run:
 
@@ -818,7 +820,7 @@ cd apps/packages/ui && bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Media/read-along/MediaReadAlongPopover.tsx \

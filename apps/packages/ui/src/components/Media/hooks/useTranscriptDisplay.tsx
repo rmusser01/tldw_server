@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import type { MediaResultItem } from '../types'
 import { buildReadAlongSegments } from '../read-along/media-read-along-segments'
 import type { ReadAlongSegment } from '../read-along/types'
+import { parseLeadingTranscriptTiming } from '@/utils/media-transcript-display'
 
 export const LARGE_PLAIN_CONTENT_THRESHOLD_CHARS = 120_000
 export const LARGE_PLAIN_CONTENT_CHUNK_CHARS = 32_000
@@ -181,6 +182,93 @@ const getReadAlongSegmentEndOffset = (
   return Number.isFinite(endOffset) && endOffset >= 0 ? endOffset : null
 }
 
+const normalizeTranscriptSource = (value: string): string => value.replace(/\r\n/g, '\n')
+
+const getVisibleTranscriptLine = (line: string): string => {
+  const parsed = parseLeadingTranscriptTiming(line)
+  return parsed ? `${parsed.leadingWhitespace}${parsed.text}` : line
+}
+
+const getDisplayOffsetForSourceOffset = (
+  sourceContent: string,
+  displayContent: string,
+  sourceOffset: number
+): number => {
+  if (!Number.isFinite(sourceOffset) || sourceOffset <= 0) return 0
+  const normalizedSource = normalizeTranscriptSource(sourceContent)
+  if (normalizedSource === displayContent) {
+    return Math.min(displayContent.length, sourceOffset)
+  }
+  if (sourceOffset >= normalizedSource.length) return displayContent.length
+
+  const lines = normalizedSource.split('\n')
+  let currentSourceOffset = 0
+  let currentDisplayOffset = 0
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+    const hasLineBreak = index < lines.length - 1
+    const sourceLineLength = line.length + (hasLineBreak ? 1 : 0)
+    const displayLineLength =
+      getVisibleTranscriptLine(line).length + (hasLineBreak ? 1 : 0)
+    const nextSourceOffset = currentSourceOffset + sourceLineLength
+    const nextDisplayOffset = currentDisplayOffset + displayLineLength
+
+    if (sourceOffset <= nextSourceOffset) {
+      return Math.min(displayContent.length, nextDisplayOffset)
+    }
+
+    currentSourceOffset = nextSourceOffset
+    currentDisplayOffset = nextDisplayOffset
+  }
+
+  return displayContent.length
+}
+
+const getChunkBoundaryEnd = (requiredEnd: number, totalLength: number): number => {
+  const boundedEnd = Math.max(0, Math.min(totalLength, requiredEnd))
+  if (boundedEnd <= 0) return 0
+  return Math.min(
+    totalLength,
+    Math.ceil(boundedEnd / LARGE_PLAIN_CONTENT_CHUNK_CHARS) *
+      LARGE_PLAIN_CONTENT_CHUNK_CHARS
+  )
+}
+
+const getSourceWindowForDisplayWindow = (
+  sourceContent: string,
+  displayContent: string,
+  displayWindowLength: number
+): string => {
+  const normalizedSource = normalizeTranscriptSource(sourceContent)
+  const targetDisplayLength = Math.max(
+    0,
+    Math.min(displayContent.length, displayWindowLength)
+  )
+
+  if (targetDisplayLength >= displayContent.length) return normalizedSource
+  if (normalizedSource === displayContent) {
+    return normalizedSource.slice(0, targetDisplayLength)
+  }
+
+  const lines = normalizedSource.split('\n')
+  let sourceEnd = 0
+  let displayEnd = 0
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+    const hasLineBreak = index < lines.length - 1
+    sourceEnd += line.length + (hasLineBreak ? 1 : 0)
+    displayEnd += getVisibleTranscriptLine(line).length + (hasLineBreak ? 1 : 0)
+
+    if (displayEnd >= targetDisplayLength) {
+      return normalizedSource.slice(0, sourceEnd)
+    }
+  }
+
+  return normalizedSource
+}
+
 export function useTranscriptDisplay(deps: UseTranscriptDisplayDeps) {
   const {
     displayContent,
@@ -238,24 +326,40 @@ export function useTranscriptDisplay(deps: UseTranscriptDisplayDeps) {
 
   useEffect(() => {
     if (!shouldUseChunkedPlainRendering) return
-    const activeEndOffset = getReadAlongSegmentEndOffset(activeReadAlongSegmentId)
-    if (activeEndOffset == null) return
+    const activeSourceEndOffset = getReadAlongSegmentEndOffset(activeReadAlongSegmentId)
+    if (activeSourceEndOffset == null) return
+    const activeDisplayEndOffset = getDisplayOffsetForSourceOffset(
+      content,
+      displayContent,
+      activeSourceEndOffset
+    )
+    const nextVisibleEnd = getChunkBoundaryEnd(activeDisplayEndOffset, displayContent.length)
 
     setVisiblePlainContentChars((prev) => {
-      const next = Math.min(displayContent.length, Math.max(prev, activeEndOffset))
+      const next = Math.min(displayContent.length, Math.max(prev, nextVisibleEnd))
       return next > prev ? next : prev
     })
   }, [
     activeReadAlongSegmentId,
+    content,
     displayContent.length,
+    displayContent,
     shouldUseChunkedPlainRendering
   ])
 
   const readAlongContentWindow = useMemo(() => {
     if (!shouldUseChunkedPlainRendering) return content
-    const end = Math.max(0, Math.min(content.length, visiblePlainContentChars))
-    return content.slice(0, end)
-  }, [content, shouldUseChunkedPlainRendering, visiblePlainContentChars])
+    return getSourceWindowForDisplayWindow(
+      content,
+      displayContent,
+      visiblePlainContentChars
+    )
+  }, [
+    content,
+    displayContent,
+    shouldUseChunkedPlainRendering,
+    visiblePlainContentChars
+  ])
 
   const readAlongDisplayContentWindow = shouldUseChunkedPlainRendering
     ? visiblePlainContent

@@ -25,6 +25,7 @@ modified_files:
 - apps/packages/ui/src/components/Media/ContentViewer.tsx
 - apps/packages/ui/src/components/Media/hooks/useTranscriptDisplay.tsx
 - apps/packages/ui/src/components/Media/__tests__/ContentViewer.read-along.test.tsx
+- Docs/superpowers/plans/2026-05-17-media-viewer-read-along-tts-implementation-plan.md
 ---
 
 ## Description

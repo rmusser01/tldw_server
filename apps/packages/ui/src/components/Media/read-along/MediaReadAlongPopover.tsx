@@ -51,7 +51,7 @@ const getViewportRect = (viewportRect?: DOMRect | null): DOMRect => {
 const getPopoverPosition = (
   anchorRect: DOMRect,
   viewportRect?: DOMRect | null
-): { left: number; top: number } => {
+): { left: number; maxWidth: number; top: number } => {
   const viewport = getViewportRect(viewportRect)
   const viewportWidth = Math.max(0, viewport.right - viewport.left)
   const viewportHeight = Math.max(0, viewport.bottom - viewport.top)
@@ -68,8 +68,11 @@ const getPopoverPosition = (
   const minTop = viewport.top + EDGE_MARGIN_PX
   const maxTop = Math.max(minTop, viewport.bottom - popoverHeight - EDGE_MARGIN_PX)
 
+  const left = clamp(anchorRect.left, minLeft, maxLeft)
+
   return {
-    left: clamp(anchorRect.left, minLeft, maxLeft),
+    left,
+    maxWidth: Math.max(0, viewport.right - left - EDGE_MARGIN_PX),
     top: clamp(anchorRect.top - ESTIMATED_POPOVER_HEIGHT_PX, minTop, maxTop)
   }
 }
@@ -137,9 +140,10 @@ export function MediaReadAlongPopover({
 
   return (
     <div
-      className="fixed z-50 flex max-w-[min(92vw,560px)] flex-wrap items-center gap-1 rounded border border-border bg-surface px-2 py-1 shadow-lg"
+      className="fixed z-50 flex flex-wrap items-center gap-1 rounded border border-border bg-surface px-2 py-1 shadow-lg"
       style={{
         left: position.left,
+        maxWidth: position.maxWidth,
         top: position.top
       }}
       data-testid="media-selection-actions-popover"

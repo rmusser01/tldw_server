@@ -58,21 +58,28 @@ const getViewportRect = (viewportRect?: DOMRect | null): DOMRect => {
 const getTransportPosition = (
   anchorRect: DOMRect | null,
   viewportRect?: DOMRect | null
-): { left: number; top: number } => {
+): { left: number; maxWidth: number; top: number } => {
   const viewport = getViewportRect(viewportRect)
+  const viewportWidth = Math.max(0, viewport.right - viewport.left)
+  const transportWidth = Math.min(
+    ESTIMATED_TRANSPORT_WIDTH_PX,
+    Math.max(0, viewportWidth - EDGE_MARGIN_PX * 2)
+  )
   const minLeft = viewport.left + EDGE_MARGIN_PX
   const maxLeft = Math.max(
     minLeft,
-    viewport.right - ESTIMATED_TRANSPORT_WIDTH_PX - EDGE_MARGIN_PX
+    viewport.right - transportWidth - EDGE_MARGIN_PX
   )
   const minTop = viewport.top + EDGE_MARGIN_PX
   const maxTop = Math.max(
     minTop,
     viewport.bottom - ESTIMATED_TRANSPORT_HEIGHT_PX - EDGE_MARGIN_PX
   )
+  const left = clamp(anchorRect?.left ?? minLeft, minLeft, maxLeft)
 
   return {
-    left: clamp(anchorRect?.left ?? minLeft, minLeft, maxLeft),
+    left,
+    maxWidth: Math.max(0, viewport.right - left - EDGE_MARGIN_PX),
     top: clamp((anchorRect?.bottom ?? minTop + 72) + EDGE_MARGIN_PX, minTop, maxTop)
   }
 }
@@ -102,9 +109,10 @@ export function MediaReadAlongTransport({
 
   return (
     <div
-      className="fixed z-40 inline-flex max-w-[calc(100vw-16px)] items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-xs text-text shadow-lg"
+      className="fixed z-40 flex flex-wrap items-center gap-1 overflow-hidden rounded border border-border bg-surface px-2 py-1 text-xs text-text shadow-lg"
       style={{
         left: position.left,
+        maxWidth: position.maxWidth,
         top: position.top
       }}
       data-testid="media-read-along-transport"
