@@ -11,6 +11,7 @@ labels:
 priority: medium
 references:
 - Docs/superpowers/specs/2026-05-15-main-chat-cockpit-maturity-roadmap-design.md
+- https://github.com/rmusser01/tldw_server/pull/1811
 documentation:
 - Docs/superpowers/plans/2026-05-17-chat-cockpit-mobile-cockpit-plan.md
 modified_files:
@@ -54,6 +55,7 @@ Implemented the mobile /chat cockpit slice strictly inside the main WebUI chat s
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Completed the main /chat mobile cockpit slice. Mobile context/runtime panels now have stable accessible tab/tabpanel semantics, inactive panels remain mounted but hidden, and mobile users can return from the panel area to focus chat via a keyboard-reachable in-panel control. Expanded unit coverage for tab semantics, focus return, and keyboard activation; expanded real-server Playwright proof for mobile context/runtime/focus/active conversation states and explicit no-bottom-control assertions. Verification: focused Vitest 26/26 passed; adjacent cockpit Vitest 53/53 passed with existing mocked-client stderr; git diff --check passed; real-server Playwright mobile grep passed 2/2 against http://127.0.0.1:8000. Bandit not applicable because this slice touched TS/TSX/E2E/Markdown only. Screenshot evidence captured under apps/tldw-frontend/test-results for chat-cockpit-mobile-context.png, chat-cockpit-mobile-runtime.png, chat-cockpit-mobile-active-draft.png, chat-cockpit-mobile-focus.png, and chat-cockpit-mobile-conversation.png.
+Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1811. The PR remains draft pending human-owned Change summary and review.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
