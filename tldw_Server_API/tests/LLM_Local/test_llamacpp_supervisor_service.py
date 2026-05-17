@@ -149,6 +149,12 @@ class FakeRunner:
         self.runtime = self.runtime.model_copy(update={"state": LlamaCppRuntimeState.STOPPED, "pid": None})
 
 
+class StopFailingRunner(FakeRunner):
+    async def stop(self) -> LlamaCppRuntime:
+        self.stop_calls += 1
+        raise RuntimeError(f"stop failed for {self.profile_id}")
+
+
 class FakeRunnerFactory:
     def __init__(self):
         self.calls: dict[str, int] = {}
@@ -156,6 +162,16 @@ class FakeRunnerFactory:
 
     def __call__(self, config: LlamaCppConfig, profile_id: str) -> FakeRunner:
         runner = FakeRunner(profile_id, self.calls)
+        self.runners[profile_id] = runner
+        return runner
+
+
+class StopFailingRunnerFactory(FakeRunnerFactory):
+    def __call__(self, config: LlamaCppConfig, profile_id: str) -> FakeRunner:
+        if profile_id == "one":
+            runner = StopFailingRunner(profile_id, self.calls)
+        else:
+            runner = FakeRunner(profile_id, self.calls)
         self.runners[profile_id] = runner
         return runner
 
@@ -200,6 +216,28 @@ def make_supervisor(tmp_path: Path) -> tuple[LlamaCppSupervisor, LlamaCppConfig,
     factory = FakeRunnerFactory()
     supervisor = LlamaCppSupervisor(config=config, store=store, runner_factory=factory)
     return supervisor, config, factory
+
+
+def test_runtime_from_last_failure_prefers_persisted_model_path(tmp_path: Path) -> None:
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    resolved_model = make_model(config, "resolved.gguf")
+    failed_profile = LlamaCppProfile(
+        profile_id="model-id-only",
+        name="Model ID Only",
+        model_id="gguf:model-id-only",
+        model_path=None,
+        last_runtime_failure={
+            "state": "failed",
+            "last_error": "boom",
+            "model_path": str(resolved_model),
+            "restart_count": 1,
+        },
+    )
+
+    runtime = supervisor.runtime_from_last_failure(failed_profile)
+
+    assert runtime.state == LlamaCppRuntimeState.FAILED
+    assert runtime.model_path == str(resolved_model)
 
 
 def configure_supervisor_assets(
@@ -550,6 +588,30 @@ async def test_supervisor_stop_pause_resume_and_cleanup(tmp_path: Path):
     assert resumed.state == LlamaCppRuntimeState.RUNNING
     assert factory.calls == {"one": 2}
     assert factory.runners["one"].cleaned is True
+
+
+@pytest.mark.asyncio
+async def test_supervisor_shutdown_attempts_all_runners_before_reporting_failure(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    store = JsonLlamaCppProfileStore(tmp_path / "profiles.json")
+    factory = StopFailingRunnerFactory()
+    supervisor = LlamaCppSupervisor(config=config, store=store, runner_factory=factory)
+    first_model = make_model(config, "one.gguf")
+    second_model = make_model(config, "two.gguf")
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(first_model), port=8181)
+    )
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="two", name="Two", model_path=str(second_model), port=8182)
+    )
+    await supervisor.start_profile("one")
+    await supervisor.start_profile("two")
+
+    with pytest.raises(RuntimeError, match="one"):
+        await supervisor.shutdown()
+
+    assert factory.runners["one"].stop_calls == 1
+    assert factory.runners["two"].stop_calls == 1
 
 
 @pytest.mark.asyncio

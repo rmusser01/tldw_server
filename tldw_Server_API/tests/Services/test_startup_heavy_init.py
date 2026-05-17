@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+from collections.abc import Callable
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -170,19 +171,19 @@ async def test_init_local_llm_manager_runs_llamacpp_runtime_reconciler(
     supervisor = object()
 
     class _Manager:
-        def __init__(self, _config):
+        def __init__(self, _config: object) -> None:
             self.llamacpp_supervisor = supervisor
 
     class _Reconciler:
-        def __init__(self, observed_supervisor):
+        def __init__(self, observed_supervisor: object) -> None:
             assert observed_supervisor is supervisor
             calls.append("created")
 
-        async def reconcile_startup(self):
+        async def reconcile_startup(self) -> list[object]:
             calls.append("reconcile")
             return []
 
-    async def _fake_to_thread(fn, *args, **kwargs):
+    async def _fake_to_thread(fn: Callable[..., object], *args: object, **kwargs: object) -> object:
         return fn(*args, **kwargs)
 
     from tldw_Server_API.app.core import Local_LLM as local_llm_package

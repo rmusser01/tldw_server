@@ -16,6 +16,7 @@ modified_files:
 - tldw_Server_API/app/services/startup_heavy_init.py
 - tldw_Server_API/app/services/shutdown_resource_cleanup.py
 - tldw_Server_API/tests/LLM_Local/test_llamacpp_runtime_reconciler.py
+- tldw_Server_API/tests/LLM_Local/test_llamacpp_supervisor_service.py
 - tldw_Server_API/tests/Services/test_startup_heavy_init.py
 - tldw_Server_API/tests/Services/test_shutdown_resource_cleanup.py
 ---
@@ -50,7 +51,7 @@ Used the existing supervisor/store boundary rather than adding a parallel proces
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented Task 1 from the llama.cpp managed runtime closeout plan. Added a thin LlamaCppRuntimeReconciler for autostart reconciliation, max restart suppression, pause-aware skips, and shutdown delegation. Added bounded durable last_runtime_failure metadata to profiles with supervisor helpers to record, clear, and expose failed runtime status after process restart. Wired reconciliation into local LLM startup and shutdown helpers. Verification: llama.cpp local focused suite 51 passed; service lifecycle suite 13 passed; runtime API suite 11 passed; git diff --check passed; ASCII scan found no non-ASCII in touched code; Bandit on touched app paths reported errors=0 and results=0.
+Addressed PR #1816 review feedback. Reconciler shutdown is isolated from local LLM manager cleanup, supervisor shutdown now attempts every owned runner before reporting stop failures, reconstructed FAILED runtime state prefers the persisted resolved failure model_path, new helper functions have explicit docstrings, and startup/shutdown test helpers now have type hints. Verification: supervisor/reconciler focused suite 27 passed; service lifecycle focused suite 14 passed; broader llama.cpp local/API suite 64 passed; shutdown resource cleanup suite 9 passed after final signature cleanup; git diff --check passed; ASCII scan found no non-ASCII in touched code; Bandit on touched app paths reported errors=0 and results=0.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

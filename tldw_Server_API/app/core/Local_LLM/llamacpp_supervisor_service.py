@@ -285,7 +285,7 @@ class LlamaCppSupervisor:
             port=profile.port,
             endpoint=f"http://{profile.host}:{profile.port}" if profile.host and profile.port else None,
             model_id=profile.model_id,
-            model_path=profile.model_path,
+            model_path=_str_or_none(failure.get("model_path")) or profile.model_path,
             stopped_at=_str_or_none(failure.get("stopped_at")),
             restart_count=_non_negative_int(failure.get("restart_count")),
             exit_code=_optional_int(failure.get("exit_code")),
@@ -302,11 +302,18 @@ class LlamaCppSupervisor:
         return runner.tail_logs(lines)
 
     async def shutdown(self) -> None:
+        failures: list[tuple[str, BaseException]] = []
         for profile_id in list(self._runners):
-            async with self._lock_for(profile_id):
-                runner = self._runners.get(profile_id)
-                if runner is not None:
-                    await runner.stop()
+            try:
+                async with self._lock_for(profile_id):
+                    runner = self._runners.get(profile_id)
+                    if runner is not None:
+                        await runner.stop()
+            except Exception as exc:  # noqa: BLE001 - shutdown should attempt every owned runner.
+                failures.append((profile_id, exc))
+        if failures:
+            failed_ids = ", ".join(profile_id for profile_id, _exc in failures)
+            raise RuntimeError(f"Failed to stop llama.cpp runner(s): {failed_ids}") from failures[0][1]
 
     def cleanup_sync(self) -> None:
         for runner in list(self._runners.values()):
@@ -569,6 +576,7 @@ __all__ = ["LlamaCppSupervisor"]
 
 
 def _non_negative_int(value: object) -> int:
+    """Coerce a value to a non-negative integer, defaulting invalid values to zero."""
     try:
         parsed = int(value) if value is not None else 0
     except (TypeError, ValueError):
@@ -577,6 +585,7 @@ def _non_negative_int(value: object) -> int:
 
 
 def _optional_int(value: object) -> int | None:
+    """Coerce a value to int when possible, preserving missing or invalid values as None."""
     if value is None:
         return None
     try:
@@ -586,6 +595,7 @@ def _optional_int(value: object) -> int | None:
 
 
 def _str_or_none(value: object) -> str | None:
+    """Coerce a non-empty value to string while keeping missing values as None."""
     if value in (None, ""):
         return None
     return str(value)

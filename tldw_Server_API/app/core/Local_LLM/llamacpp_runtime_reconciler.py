@@ -88,6 +88,7 @@ class LlamaCppRuntimeReconciler:
 
 
 def _restart_count(profile: LlamaCppProfile) -> int:
+    """Return persisted restart attempts, treating missing or invalid metadata as zero."""
     try:
         return max(0, int(profile.last_runtime_failure.get("restart_count") or 0))
     except (TypeError, ValueError):
@@ -95,6 +96,7 @@ def _restart_count(profile: LlamaCppProfile) -> int:
 
 
 def _max_restarts(profile: LlamaCppProfile) -> int:
+    """Return the non-negative restart limit configured on a profile."""
     try:
         return max(0, int(profile.restart_policy.get("max_restarts") or 0))
     except (TypeError, ValueError):
