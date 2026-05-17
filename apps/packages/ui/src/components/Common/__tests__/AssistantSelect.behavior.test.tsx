@@ -154,6 +154,22 @@ describe("AssistantSelect behavior", () => {
     expect(screen.queryByRole("button", { name: "Alpha" })).toBeNull()
   })
 
+  it("uses solid design-token backgrounds for the selector panel", async () => {
+    const user = userEvent.setup()
+    renderAssistantSelect()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Select character or persona" })
+    )
+
+    const panel = await screen.findByTestId("assistant-select-panel")
+    expect(panel).toHaveClass("bg-surface")
+    expect(panel).not.toHaveClass("bg-background")
+    expect(await screen.findByRole("button", { name: "Alpha" })).toHaveClass(
+      "bg-bg"
+    )
+  })
+
   it("does not select a character when its favorite star is clicked", async () => {
     const user = userEvent.setup()
     renderAssistantSelect()
