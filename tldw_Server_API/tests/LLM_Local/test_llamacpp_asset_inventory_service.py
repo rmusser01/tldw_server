@@ -107,6 +107,33 @@ def test_preview_import_asset_folder_summarizes_assets_without_persisting(monkey
 
 
 @pytest.mark.unit
+def test_preview_import_asset_folder_deduplicates_resolved_asset_ids(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+
+    models_dir = tmp_path / "models"
+    imported = tmp_path / "imported"
+    models_dir.mkdir()
+    imported.mkdir()
+    model_path = imported / "chat.Q4_K_M.gguf"
+    model_path.write_text("base")
+    symlink_path = imported / "chat-link.Q4_K_M.gguf"
+    try:
+        symlink_path.symlink_to(model_path)
+    except OSError as exc:
+        pytest.skip(f"Symlinks are unavailable in this environment: {exc}")
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(models_dir, allowed_paths=str(imported)),
+    )
+
+    preview = llamacpp_inventory_service.preview_import_asset_folder(imported, limit=500)
+
+    assert [asset.kind for asset in preview.assets] == ["gguf"]
+    assert preview.asset_counts == {"gguf": 1}
+
+
+@pytest.mark.unit
 def test_preview_import_asset_folder_fails_for_file_path(monkeypatch, tmp_path: Path):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
     from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError

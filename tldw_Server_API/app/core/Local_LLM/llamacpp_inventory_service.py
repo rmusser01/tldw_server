@@ -309,29 +309,30 @@ def preview_import_asset_folder(path: Path, *, limit: int = 500) -> LlamaCppAsse
     if not canonical.is_dir():
         raise ServerError("Imported asset path is not a folder.")
 
-    saved_config = _read_saved_config()
-    allowed_bases = _allowed_bases_for_config(saved_config)
-    if not allowed_bases or not handler_utils.is_path_allowed(canonical, allowed_bases):
-        raise ServerError("Imported asset folder is outside allowed llama.cpp paths.")
+    allowed_bases = _allowed_bases_for_config(_read_saved_config())
+    _validate_allowed_asset_path(canonical, allowed_bases, "Imported asset folder")
 
     warnings: list[str] = []
     assets: list[LlamaCppAsset] = []
+    seen_ids: set[str] = set()
     scan_limited = False
-    asset_limit = max(int(limit), 0)
+    asset_limit = max(limit, 0)
     folder_asset = _folder_asset_for_path(canonical, allowed_bases=allowed_bases)
 
     for candidate in _iter_asset_files(canonical, warnings, max(asset_limit + 1, 1)):
-        if len(assets) >= asset_limit:
-            scan_limited = True
-            break
         asset = _asset_for_path(
             candidate,
             source="imported_folder",
             allowed_bases=allowed_bases,
             warnings=warnings,
         )
-        if asset is not None:
-            assets.append(asset)
+        if asset is None or asset.asset_id in seen_ids:
+            continue
+        if len(assets) >= asset_limit:
+            scan_limited = True
+            break
+        seen_ids.add(asset.asset_id)
+        assets.append(asset)
 
     _attach_mmproj_candidates(assets)
     assets.sort(

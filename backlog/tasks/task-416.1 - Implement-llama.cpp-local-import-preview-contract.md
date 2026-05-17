@@ -43,13 +43,13 @@ Docs/superpowers/plans/2026-05-16-llamacpp-model-acquisition-import-workflows-pl
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Added `LlamaCppAssetImportPreviewResponse` plus `preview_import_asset_folder()` using the existing canonicalization, config safety, allowlist, asset classification, mmproj pairing, warning, and bounded scan helpers. Added `POST /api/v1/llamacpp/assets/import-folder/preview` as an admin-only, rate-limited endpoint that runs inventory work in the threadpool and maps `ServerError` to HTTP 400. Added service/API/AuthNZ coverage for non-mutating preview behavior, fail-closed path handling, endpoint auth, and threadpool offload.
+Added `LlamaCppAssetImportPreviewResponse` plus `preview_import_asset_folder()` using the existing canonicalization, config safety, allowlist, asset classification, mmproj pairing, warning, and bounded scan helpers. Added `POST /api/v1/llamacpp/assets/import-folder/preview` as an admin-only, rate-limited endpoint that runs inventory work in the threadpool and maps `ServerError` to HTTP 400. Added service/API/AuthNZ coverage for non-mutating preview behavior, fail-closed path handling, endpoint auth, and threadpool offload. Review follow-up reused `_validate_allowed_asset_path()`, removed the redundant limit cast and unused endpoint parameter, added the endpoint docstring/style cleanup, and deduplicated preview assets by `asset_id`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the local asset-folder import preview contract for llama.cpp without changing the existing persistent import path. Verification: focused pytest set passed (60 passed); git diff --check passed; Bandit on touched production Python scope passed with zero findings. Known skips/blockers: none.
+Implemented the local asset-folder import preview contract for llama.cpp and addressed PR #1826 review comments. Review follow-up added endpoint docstring/style cleanup, reused the existing allowed-path validator, removed the redundant limit cast and unused endpoint parameter, and deduplicated preview assets by resolved asset_id. Verification: focused pytest set passed (61 passed); git diff --check passed; Bandit on touched production Python scope passed with zero findings. Known skips/blockers: none.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

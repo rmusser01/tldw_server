@@ -427,15 +427,21 @@ async def import_llamacpp_asset_folder_endpoint(
     "/llamacpp/assets/import-folder/preview",
     summary="Preview a llama.cpp Asset Folder Import",
     response_model=LlamaCppAssetImportPreviewResponse,
-    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+    dependencies=[
+        Depends(check_rate_limit),
+        Depends(RequireRole("admin")),
+        Depends(_resolve_llm_manager),
+    ],
 )
 async def preview_llamacpp_asset_folder_endpoint(
     payload: LlamaCppImportAssetFolderRequest,
-    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
 ) -> LlamaCppAssetImportPreviewResponse:
-    _ = llm_manager
+    """Preview an allowlisted local asset folder without persisting config changes."""
     try:
-        return await run_in_threadpool(llamacpp_inventory_service.preview_import_asset_folder, Path(payload.path))
+        return await run_in_threadpool(
+            llamacpp_inventory_service.preview_import_asset_folder,
+            Path(payload.path),
+        )
     except ServerError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
