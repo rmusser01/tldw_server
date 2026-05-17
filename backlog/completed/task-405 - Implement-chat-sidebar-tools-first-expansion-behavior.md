@@ -1,7 +1,7 @@
 ---
 id: TASK-405
 title: Implement chat sidebar tools-first expansion behavior
-status: In Progress
+status: Done
 labels:
 - webui
 - extension
@@ -49,7 +49,7 @@ Implement the shared ChatSidebar tools-first expansion behavior: shortcuts expan
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Follow-up fixed the apparent detached-sidebar screenshot issue by adding CHAT_PATH to VIEWPORT_CONSTRAINED_PATHS so /chat uses the same h-screen/min-h-0 layout path as other viewport-bound workspaces. Added route-paths viewport contract coverage. Fresh verification passed: route-paths.viewport red/green test, package UI focused sidebar/layout suite (5 files, 15 tests), WebLayout suite (1 file, 4 tests), and Playwright geometry/disclosure check against http://127.0.0.1:3000/chat. Browser geometry after forced scroll attempt: scrollY=0, html/body scrollHeight=900, sidebar top=0, sidebar width=260, Shortcuts aria-expanded=true, Recent conversations aria-expanded=false. Corrected expanded screenshot artifact: output/playwright/chat-sidebar-tools-first-viewport-constrained.png. Bandit skipped: frontend TS/TSX route contract plus Backlog markdown only. Pending human visual approval of the corrected screenshot.
+Implementation and verification are complete with human visual approval received on 2026-05-17. The shared ChatSidebar now resets to tools-first on mount, collapsed-to-expanded transitions, and explicit open reset signals; Recent conversations gates search, tabs, server controls, coordinator visibility, and history fetching behind recentHistoryVisible. WebUI and shared layouts pass open reset signals, and /chat is viewport-constrained via CHAT_PATH in VIEWPORT_CONSTRAINED_PATHS so the sidebar remains attached to the top. Fresh verification passed: route-paths.viewport red/green test, package UI focused sidebar/layout suite (5 files, 15 tests), WebLayout suite (1 file, 4 tests), and Playwright geometry/disclosure check against http://127.0.0.1:3000/chat. Browser geometry after forced scroll attempt: scrollY=0, html/body scrollHeight=900, sidebar top=0, sidebar width=260, Shortcuts aria-expanded=true, Recent conversations aria-expanded=false. Corrected expanded screenshot artifact approved by user: output/playwright/chat-sidebar-tools-first-viewport-constrained.png. Bandit skipped: frontend TS/TSX route contract plus Backlog markdown only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
