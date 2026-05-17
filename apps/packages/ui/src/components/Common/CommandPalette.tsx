@@ -35,7 +35,7 @@ import {
 } from "@/hooks/useKeyboardShortcuts"
 import { useShortcutConfig } from "@/hooks/keyboard/useShortcutConfig"
 import type { KeyboardShortcut as ConfiguredKeyboardShortcut } from "@/hooks/keyboard/useKeyboardShortcuts"
-import { WORKSPACE_PLAYGROUND_PATH } from "@/routes/route-paths"
+import { CHAT_PATH, WORKSPACE_PLAYGROUND_PATH } from "@/routes/route-paths"
 import { searchSettings } from "@/data/settings-index"
 import { cn } from "@/libs/utils"
 
@@ -187,8 +187,8 @@ export function CommandPalette({
         id: "nav-chat",
         label: t("common:commandPalette.goToChat", "Go to Chat"),
         icon: <MessageSquare className="size-4" />,
-        action: () => { navigate("/"); setOpen(false) },
-        targetPath: "/",
+        action: () => { navigate(CHAT_PATH); setOpen(false) },
+        targetPath: CHAT_PATH,
         category: "navigation",
         keywords: ["playground", "conversation"],
       },
@@ -742,7 +742,9 @@ export function CommandPalette({
                           key={cmd.id}
                           onClick={() => executeCommand(cmd)}
                           onMouseEnter={() => setSelectedIndex(currentIndex)}
+                          data-command-id={cmd.id}
                           data-selected={isSelected}
+                          data-target-path={cmd.targetPath}
                           className={cn(
                             "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
                             focusRingClasses,

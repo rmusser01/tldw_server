@@ -2,6 +2,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { test, expect, seedAuth } from './smoke.setup';
 import { waitForAppShell } from '../utils/helpers';
+import { PAGES } from './page-inventory';
+import {
+  getRouteMetadata,
+  ROUTE_METADATA,
+} from '../../../packages/ui/src/routes/route-metadata';
 
 const LOAD_TIMEOUT = 30_000;
 const OUTPUT_DATE = process.env.TLDW_STAGE2_OUTPUT_DATE;
@@ -97,6 +102,46 @@ const ROUTE_CONTRACTS: RouteContract[] = [
     expectedUi: 'real',
   },
 ];
+
+test.describe('Route metadata smoke inventory contract', () => {
+  const pageEntryByPath = new Map(PAGES.map((entry) => [entry.path, entry]));
+
+  test('keeps included smoke routes in the page inventory', () => {
+    const missingIncludedRoutes = ROUTE_METADATA
+      .filter((metadata) => metadata.availability.includes('web'))
+      .filter((metadata) => metadata.smoke === 'include')
+      .filter((metadata) => !pageEntryByPath.has(metadata.path))
+      .map((metadata) => metadata.path);
+
+    expect(missingIncludedRoutes).toEqual([]);
+  });
+
+  test('does not treat internal QA/debug metadata as normal product pages', () => {
+    const activeDebugPages = ROUTE_METADATA
+      .filter((metadata) => metadata.surface === 'internal_qa_debug')
+      .filter((metadata) => {
+        const pageEntry = pageEntryByPath.get(metadata.path);
+
+        return pageEntry && !pageEntry.skip;
+      })
+      .map((metadata) => metadata.path);
+
+    expect(activeDebugPages).toEqual([]);
+  });
+
+  test('keeps inventory aliases tied to canonical metadata rows', () => {
+    const aliasesWithoutCanonicalMetadata = PAGES
+      .map((entry) => ({
+        entry,
+        metadata: getRouteMetadata(entry.path),
+      }))
+      .filter(({ metadata }) => metadata && metadata.canonicalPath !== metadata.path)
+      .filter(({ metadata }) => !getRouteMetadata(metadata?.canonicalPath ?? ''))
+      .map(({ entry }) => entry.path);
+
+    expect(aliasesWithoutCanonicalMetadata).toEqual([]);
+  });
+});
 
 test.describe('Stage 2 route contracts', () => {
   test('routes render their intended surface and do not misroute', async ({ page }, testInfo) => {
