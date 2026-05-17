@@ -86,6 +86,14 @@ Task 4 completed:
 - Green verification: `cd apps/packages/ui && bunx vitest run src/components/Media/read-along/__tests__/useContentSelectionActions.test.tsx src/components/Media/__tests__/ContentViewer.stage14.annotations.test.tsx src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx --maxWorkers=1` passed 3 files / 9 tests.
 - `git diff --check` passed for the Task 4 files.
 - Bandit skipped for Task 4 because the touched slice is TypeScript/React frontend code only.
+
+Task 5 completed:
+- Added `useMediaReadAlongSession` with session-token guarded async state, frozen TTS provider context/signature, generated-audio cache read/write, browser SpeechSynthesis fallback, current/lookahead abort controllers, media-preview pause, object URL cleanup, stop/retry/skip/pause/resume controls, and media/content-change stale completion suppression.
+- Added focused renderHook coverage for cached selection playback, full-content from-here queueing beyond rendered windows, bounded 4-segment lookahead, browser provider no-cache behavior, abort/cancel stop behavior, stale completion suppression, frozen settings, audio.play errors, and embedded media pause.
+- Red verification: `cd apps/packages/ui && bunx vitest run src/components/Media/read-along/__tests__/useMediaReadAlongSession.test.tsx --maxWorkers=1` failed before implementation because `../useMediaReadAlongSession` did not exist.
+- Green verification: `cd apps/packages/ui && bunx vitest run src/components/Media/read-along/__tests__/useMediaReadAlongSession.test.tsx src/components/Media/read-along/__tests__/media-read-along-segments.test.ts src/components/Media/read-along/__tests__/media-read-along-cache.test.ts --maxWorkers=1` passed 3 files / 23 tests.
+- `git diff --check` passed.
+- Bandit skipped for Task 5 because the touched slice is TypeScript/React frontend code only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

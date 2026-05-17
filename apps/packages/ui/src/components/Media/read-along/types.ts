@@ -10,6 +10,14 @@ export type ReadAlongScope =
   | 'current-section'
   | 'full-item'
 
+export type ReadAlongSessionStatus =
+  | 'idle'
+  | 'preparing'
+  | 'playing'
+  | 'paused'
+  | 'segment-error'
+  | 'stopped'
+
 export interface ReadAlongSegment {
   id: string
   index: number
@@ -31,6 +39,16 @@ export interface ReadAlongSelection {
   sourceStart?: number
   sourceEnd?: number
   mappingConfidence: 'exact' | 'nearest' | 'text-only'
+}
+
+export interface ReadAlongSessionState {
+  status: ReadAlongSessionStatus
+  scope: ReadAlongScope | null
+  activeSegmentId: string | null
+  activeIndex: number
+  totalSegments: number
+  error: string | null
+  cacheDisabled: boolean
 }
 
 export interface BuildReadAlongSegmentsInput {
