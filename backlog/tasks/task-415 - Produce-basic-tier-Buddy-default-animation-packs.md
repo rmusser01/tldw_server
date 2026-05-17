@@ -215,7 +215,7 @@ Completed the six-pack basic Buddy default slice. The catalog now exposes Search
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
 
-## Implementation Notes
+## Checkpoint Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Current checkpoint wires the approved Search Lens Buddy v2 frame packet into the starter catalog. Remaining work is the next approved basic buddies: index card, archive cube, paperclip, terminal tile, then Migu review against the six-basic-pack direction.
@@ -231,6 +231,23 @@ Verification:
 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python package resource/image validation script -> validated search-lens-basic and index-card-basic package resources and manifests.
 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m py_compile tldw_Server_API/app/core/Persona/visual_starter_fixtures.py -> passed.
 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Persona/visual_starter_fixtures.py -f json -o /tmp/bandit_basic_buddy_defaults.json -> 0 findings.
+- git diff --check -> passed.
+
+PR review follow-up:
+- Removed the duplicate task heading by renaming this section to `Checkpoint Notes`.
+- Simplified ZIP member-name handling to use `ZipInfo.filename` for Codex/native import preview member maps.
+- Added Codex pet loader diagnostic logs for archive load, member validation, manifest resolution, sprite dimensions, manifest validation, and successful load.
+- Hardened Codex pet import commit so asset/manifest failures clean up the newly created draft pack and assets before replacement handling.
+- Hardened no-target Codex pet preview choices so imports without a source persona require `select_existing_persona`.
+- Left the Codex pet double-open review item unchanged as a non-blocking performance tradeoff: validation and content loading stay separate, and archive/member sizes are already bounded.
+
+PR review follow-up verification:
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_portability.py -q -> 20 passed, 5 warnings.
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_service.py -q -> 14 passed, 5 warnings.
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py -q -> 76 passed, 5 warnings.
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q -> 64 passed, 5 warnings.
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m py_compile tldw_Server_API/app/core/Persona/visual_portability/codex_pet.py tldw_Server_API/app/core/Persona/visual_portability/preview.py tldw_Server_API/app/core/Persona/visual_portability/importer.py tldw_Server_API/tests/Persona/test_persona_visual_portability.py -> passed.
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Persona/visual_portability/codex_pet.py tldw_Server_API/app/core/Persona/visual_portability/preview.py tldw_Server_API/app/core/Persona/visual_portability/importer.py -f json -o /tmp/bandit_basic_buddy_pr_review.json -> 0 findings, 0 errors.
 - git diff --check -> passed.
 Archive Cube processed-frame review checkpoint:
 - User approved the Archive Cube 3x4 source sheet.

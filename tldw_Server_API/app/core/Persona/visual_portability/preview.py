@@ -241,7 +241,7 @@ class PersonaVisualPackImportPreviewer:
         if replaceable_pack_ids:
             target_modes.append("replace_draft")
         required_choices = _required_choices(
-            source_persona_id="",
+            source_persona_id=None,
             target_persona_id=target_persona_id,
             conflicts=conflicts,
             replaceable_pack_ids=replaceable_pack_ids,
@@ -312,7 +312,7 @@ class PersonaVisualPackImportPreviewer:
 def _archive_members_by_normalized_name(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
     members: dict[str, zipfile.ZipInfo] = {}
     for info in archive.infolist():
-        members[normalize_member_name(getattr(info, "orig_filename", info.filename))] = info
+        members[normalize_member_name(info.filename)] = info
     return members
 
 
@@ -577,7 +577,7 @@ def _replaceable_pack_ids(conflicts: Sequence[Mapping[str, Any]]) -> list[str]:
 
 def _required_choices(
     *,
-    source_persona_id: str,
+    source_persona_id: str | None,
     target_persona_id: str | None,
     conflicts: Sequence[Mapping[str, Any]],
     replaceable_pack_ids: Sequence[str],
@@ -599,13 +599,19 @@ def _required_choices(
                 }
             )
         return choices
+    source_persona_id_value = str(source_persona_id or "").strip()
+    allowed_actions = ["select_existing_persona"]
+    default_action = "select_existing_persona"
+    if source_persona_id_value:
+        allowed_actions.insert(0, "import_to_source_persona")
+        default_action = "import_to_source_persona"
     choices.append(
         {
             "choice_id": "target_persona",
             "resource": "persona",
-            "source_persona_id": source_persona_id or None,
-            "allowed_actions": ["import_to_source_persona", "select_existing_persona"],
-            "default_action": "import_to_source_persona",
+            "source_persona_id": source_persona_id_value or None,
+            "allowed_actions": allowed_actions,
+            "default_action": default_action,
             "required": True,
         }
     )

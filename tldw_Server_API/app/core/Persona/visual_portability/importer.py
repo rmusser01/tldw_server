@@ -273,46 +273,56 @@ class PersonaVisualPackImporter:
 
         id_maps: dict[str, Any] = {"assets": {}, "packs": {}}
         imported_assets = []
-        for asset in assets:
-            asset_path = normalize_member_name(str(asset.get("asset_path") or ""))
-            if asset_path not in payload.asset_files:
-                raise ValueError(f"missing_asset_file: {asset_path}")
-            imported = self.service.create_asset_from_upload(
+        try:
+            for asset in assets:
+                asset_path = normalize_member_name(str(asset.get("asset_path") or ""))
+                if asset_path not in payload.asset_files:
+                    raise ValueError(f"missing_asset_file: {asset_path}")
+                imported = self.service.create_asset_from_upload(
+                    persona_id=target_persona_id,
+                    user_id=self.user_id,
+                    pack_id=str(created_pack["id"]),
+                    content=payload.asset_files[asset_path],
+                    mime_type=str(asset.get("mime_type") or "application/octet-stream"),
+                    original_filename=asset.get("original_filename"),
+                    asset_role=str(asset.get("asset_role") or "frame"),
+                    provenance="imported",
+                )
+                source_asset_id = str(asset.get("source_asset_id") or "")
+                if source_asset_id:
+                    id_maps["assets"][source_asset_id] = str(imported["id"])
+                imported_assets.append(imported)
+
+            visual_manifest = pack.get("visual_manifest") if isinstance(
+                pack.get("visual_manifest"),
+                dict,
+            ) else {}
+            remapped_manifest = remap_visual_manifest_assets(visual_manifest, id_maps["assets"])
+            asset_ids = {str(asset["id"]) for asset in imported_assets}
+            asset_dimensions = {
+                str(asset["id"]): (int(asset["width"]), int(asset["height"]))
+                for asset in imported_assets
+                if asset.get("width") is not None and asset.get("height") is not None
+            }
+            validation = validate_visual_manifest(
+                remapped_manifest,
+                available_asset_ids=asset_ids,
+                available_asset_dimensions=asset_dimensions,
+                require_activatable=False,
+            )
+            updated_pack = self.db.update_persona_visual_pack_manifest(
+                pack_id=str(created_pack["id"]),
                 persona_id=target_persona_id,
                 user_id=self.user_id,
-                pack_id=str(created_pack["id"]),
-                content=payload.asset_files[asset_path],
-                mime_type=str(asset.get("mime_type") or "application/octet-stream"),
-                original_filename=asset.get("original_filename"),
-                asset_role=str(asset.get("asset_role") or "frame"),
-                provenance="imported",
+                manifest=validation.manifest,
+                expected_version=int(created_pack["version"]),
             )
-            source_asset_id = str(asset.get("source_asset_id") or "")
-            if source_asset_id:
-                id_maps["assets"][source_asset_id] = str(imported["id"])
-            imported_assets.append(imported)
-
-        visual_manifest = pack.get("visual_manifest") if isinstance(pack.get("visual_manifest"), dict) else {}
-        remapped_manifest = remap_visual_manifest_assets(visual_manifest, id_maps["assets"])
-        asset_ids = {str(asset["id"]) for asset in imported_assets}
-        asset_dimensions = {
-            str(asset["id"]): (int(asset["width"]), int(asset["height"]))
-            for asset in imported_assets
-            if asset.get("width") is not None and asset.get("height") is not None
-        }
-        validation = validate_visual_manifest(
-            remapped_manifest,
-            available_asset_ids=asset_ids,
-            available_asset_dimensions=asset_dimensions,
-            require_activatable=False,
-        )
-        updated_pack = self.db.update_persona_visual_pack_manifest(
-            pack_id=str(created_pack["id"]),
-            persona_id=target_persona_id,
-            user_id=self.user_id,
-            manifest=validation.manifest,
-            expected_version=int(created_pack["version"]),
-        )
+        except Exception:
+            self._cleanup_created_pack(
+                pack_id=str(created_pack["id"]),
+                target_persona_id=target_persona_id,
+            )
+            raise
         replaced_pack_id = None
         if replacement_pack is not None:
             replaced_pack_id = str(replacement_pack["id"])

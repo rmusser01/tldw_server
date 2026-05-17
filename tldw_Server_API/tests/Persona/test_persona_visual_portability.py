@@ -845,6 +845,26 @@ def test_import_preview_accepts_codex_pet_archive_as_atlas_pack(tmp_path: Path) 
     assert asset["manifest_referenced"] is True  # nosec B101
 
 
+def test_import_preview_codex_pet_without_target_requires_target_selection(tmp_path: Path) -> None:
+    archive_path = _codex_pet_archive(tmp_path)
+
+    preview = PersonaVisualPackImportPreviewer().create_preview(
+        archive_path=archive_path,
+        owner_user_id="user-1",
+    )
+
+    assert preview["required_choices"] == [  # nosec B101
+        {
+            "choice_id": "target_persona",
+            "resource": "persona",
+            "source_persona_id": None,
+            "allowed_actions": ["select_existing_persona"],
+            "default_action": "select_existing_persona",
+            "required": True,
+        }
+    ]
+
+
 def test_import_preview_accepts_petdex_petjson_manifest_alias(tmp_path: Path) -> None:
     archive_path = _petdex_alias_archive(tmp_path)
 
@@ -937,6 +957,88 @@ def test_import_commit_accepts_codex_pet_archive_as_inactive_draft(
     assert pack["manifest"]["states"]["moving_left"]["animation_id"] == "codex-moving-left-loop"  # nosec B101
     assert "moving_right" in pack["manifest"]["state_catalog"]  # nosec B101
     assert "moving_left" in pack["manifest"]["state_catalog"]  # nosec B101
+
+
+def test_import_commit_codex_pet_cleans_up_failed_manifest_update(
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_portability.importer import (
+        PersonaVisualPackImporter,
+    )
+
+    _patch_visuals_dir(monkeypatch, tmp_path / "visuals")
+    persona_id = db_instance.create_persona_profile(
+        {"user_id": "user-1", "name": "Codex Pet Target"}
+    )
+    archive_path = _codex_pet_archive(tmp_path)
+    preview_result = PersonaVisualPackImportPreviewer().create_preview(
+        archive_path=archive_path,
+        owner_user_id="user-1",
+        target_persona_id=persona_id,
+    )
+    repo = PersonaVisualPortabilityRepository.initialized(db_instance)
+    preview = repo.create_import_preview(
+        owner_user_id="user-1",
+        job_id="job-preview-codex-pet-cleanup",
+        status="completed",
+        stage="completed",
+        archive_path=str(archive_path),
+        archive_sha256=preview_result["archive_sha256"],
+        canonical_payload_fingerprint=preview_result["canonical_payload_fingerprint"],
+        schema_version=preview_result["schema_version"],
+        target_persona_id=persona_id,
+        bundle_summary=preview_result["bundle_summary"],
+        proposed_plan=preview_result["proposed_plan"],
+        required_choices=preview_result["required_choices"],
+    )
+    original_update = db_instance.update_persona_visual_pack_manifest
+
+    def fail_manifest_update(*args: object, **kwargs: object) -> object:
+        if kwargs.get("persona_id") == persona_id:
+            raise RuntimeError("injected manifest failure")
+        return original_update(*args, **kwargs)
+
+    monkeypatch.setattr(db_instance, "update_persona_visual_pack_manifest", fail_manifest_update)
+
+    with pytest.raises(RuntimeError, match="injected manifest failure"):
+        PersonaVisualPackImporter(
+            db=db_instance,
+            repo=repo,
+            user_id="user-1",
+        ).import_preview(
+            preview_id=str(preview["id"]),
+            target_persona_id=persona_id,
+            trust_mode="untrusted_import",
+        )
+
+    active_packs = db_instance.list_persona_visual_packs(
+        persona_id=persona_id,
+        user_id="user-1",
+    )
+    deleted_packs = db_instance.list_persona_visual_packs(
+        persona_id=persona_id,
+        user_id="user-1",
+        include_deleted=True,
+    )
+    asset_rows = db_instance.execute_query(
+        """
+        SELECT deleted
+          FROM persona_visual_assets
+         WHERE persona_id = ?
+           AND user_id = ?
+        """,
+        (persona_id, "user-1"),
+    ).fetchall()
+    assert active_packs == []  # nosec B101
+    assert len(deleted_packs) == 1  # nosec B101
+    assert deleted_packs[0]["deleted"] is True  # nosec B101
+    assert len(asset_rows) == 1  # nosec B101
+    assert bool(asset_rows[0]["deleted"]) is True  # nosec B101
 
 
 def test_import_preview_reports_v2_live2d_renderer_diagnostics_without_activation(

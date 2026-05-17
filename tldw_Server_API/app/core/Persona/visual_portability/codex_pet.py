@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from loguru import logger
 from PIL import Image, UnidentifiedImageError
 
 from tldw_Server_API.app.core.Persona.visuals import validate_visual_manifest
@@ -77,9 +78,7 @@ def is_codex_pet_archive(archive_path: Path) -> bool:
         with zipfile.ZipFile(archive_path, "r") as archive:
             return any(
                 not info.is_dir()
-                and PurePosixPath(
-                    normalize_member_name(getattr(info, "orig_filename", info.filename))
-                ).name
+                and PurePosixPath(normalize_member_name(info.filename)).name
                 in _MANIFEST_FILENAMES
                 for info in archive.infolist()
             )
@@ -90,10 +89,13 @@ def is_codex_pet_archive(archive_path: Path) -> bool:
 def load_codex_pet_archive(archive_path: Path) -> CodexPetArchivePayload:
     """Validate and translate one Codex pet archive into Persona Visual records."""
     archive_path = Path(archive_path)
+    logger.debug("Loading Codex pet archive: {}", archive_path)
     validate_codex_pet_archive_members(archive_path)
+    logger.debug("Validated Codex pet archive member constraints: {}", archive_path)
     with zipfile.ZipFile(archive_path, "r") as archive:
         members = _archive_members_by_normalized_name(archive)
         pet_manifest_path = _codex_pet_manifest_path(members)
+        logger.debug("Resolved Codex pet manifest path: {}", pet_manifest_path)
         pet_payload = _read_json_member(
             archive,
             members[pet_manifest_path],
@@ -107,6 +109,12 @@ def load_codex_pet_archive(archive_path: Path) -> CodexPetArchivePayload:
             members=members,
             pet_payload=pet_payload,
             pet_manifest_path=pet_manifest_path,
+        )
+        logger.debug(
+            "Resolved Codex pet sprite {} ({}x{})",
+            sprite.path,
+            sprite.width,
+            sprite.height,
         )
 
     title = _codex_pet_pack_title(pet_payload)
@@ -124,6 +132,7 @@ def load_codex_pet_archive(archive_path: Path) -> CodexPetArchivePayload:
         },
         require_activatable=False,
     )
+    logger.debug("Validated Codex pet visual manifest for pet_id={}", pet_id)
     pack = {
         "title": title,
         "renderer_type": "sprite_frames",
@@ -142,6 +151,7 @@ def load_codex_pet_archive(archive_path: Path) -> CodexPetArchivePayload:
         "height": sprite.height,
         "original_filename": PurePosixPath(sprite.path).name,
     }
+    logger.info("Loaded Codex pet archive '{}' ({})", title, pet_id)
     return CodexPetArchivePayload(
         manifest={
             "schema_version": CODEX_PET_SCHEMA_VERSION,
@@ -168,7 +178,7 @@ def validate_codex_pet_archive_members(
     try:
         with zipfile.ZipFile(archive_path, "r") as archive:
             for info in archive.infolist():
-                raw_member_name = getattr(info, "orig_filename", info.filename)
+                raw_member_name = info.filename
                 if info.is_dir():
                     _validate_directory_member_name(raw_member_name)
                     continue
@@ -203,7 +213,7 @@ def _archive_members_by_normalized_name(archive: zipfile.ZipFile) -> dict[str, z
     for info in archive.infolist():
         if info.is_dir():
             continue
-        members[normalize_member_name(getattr(info, "orig_filename", info.filename))] = info
+        members[normalize_member_name(info.filename)] = info
     return members
 
 
