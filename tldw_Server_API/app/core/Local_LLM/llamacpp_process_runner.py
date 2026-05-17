@@ -39,6 +39,17 @@ _PATH_ARG_KEYS = {
     "mmproj",
     "model_draft",
 }
+_CORE_SERVER_ARG_KEYS = {
+    "threads",
+    "t",
+    "ctx_size",
+    "c",
+    "n_ctx",
+    "n_gpu_layers",
+    "ngl",
+    "gpu_layers",
+}
+_RESERVED_STRUCTURED_ARG_KEYS = {"host", "port", "model", "m"}
 
 
 async def wait_for_http_ready(*args: Any, **kwargs: Any) -> bool:
@@ -204,6 +215,99 @@ def _server_arg_formatters() -> dict[str, Callable[[Any], list[str]]]:
     }
 
 
+def validate_profile_server_args(
+    config: LlamaCppConfig,
+    profile: LlamaCppProfile,
+    *,
+    allowed_structured_args: set[str] | None = None,
+) -> None:
+    """Validate user-supplied llama-server args before persistence or launch."""
+    args = _clean_server_args(profile.server_args)
+    try:
+        handler_utils.check_denylist(
+            args,
+            allow_secrets=getattr(config, "allow_cli_secrets", False),
+        )
+    except ValueError as exc:
+        raise ServerError(str(exc)) from exc
+
+    allowed_structured_args = allowed_structured_args or set()
+    reserved = sorted(
+        key
+        for key in args
+        if key in _RESERVED_STRUCTURED_ARG_KEYS and key not in allowed_structured_args
+    )
+    if reserved:
+        raise ServerError(
+            "Reserved llama.cpp server args must be set through profile fields, "
+            f"not server_args: {reserved}"
+        )
+
+    formatters = _server_arg_formatters()
+    core_keys = _CORE_SERVER_ARG_KEYS | allowed_structured_args
+    invalid = [key for key in args if key not in formatters and key not in core_keys]
+    if invalid and not getattr(config, "allow_unvalidated_args", False):
+        raise ServerError(f"Unsupported llama.cpp server args: {sorted(invalid)}")
+
+    for key, value in args.items():
+        if key in allowed_structured_args:
+            continue
+        formatter = formatters.get(key)
+        if formatter is not None:
+            _validate_config_arg_path(config, key, value)
+            try:
+                formatter(value)
+            except (IndexError, TypeError, ValueError) as exc:
+                raise ServerError(f"Invalid value for llama.cpp server arg '{key}'.") from exc
+            continue
+        if key in core_keys:
+            continue
+
+
+def _clean_server_args(server_args: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in server_args.items() if value is not None and value != ""}
+
+
+def _is_config_path_allowed(config: LlamaCppConfig, path: Path) -> bool:
+    allowed_paths = handler_utils.build_allowed_paths(
+        Path(config.models_dir),
+        getattr(config, "allowed_paths", None),
+    )
+    return handler_utils.is_path_allowed(path, allowed_paths)
+
+
+def _validate_config_arg_path(config: LlamaCppConfig, key: str, value: Any) -> None:
+    if key in _PATH_ARG_KEYS and not _is_config_path_allowed(config, _coerce_path_arg(key, value)):
+        raise ServerError(f"File path for '{key}' must be under allowed directories.")
+    if key == "lora":
+        values = value if isinstance(value, (list, tuple)) else [value]
+        for item in values:
+            if not _is_config_path_allowed(config, _coerce_path_arg(key, item)):
+                raise ServerError("LoRA path must be under allowed directories.")
+    if key == "lora_scaled":
+        paths = _lora_scaled_path_values(value)
+        for item in paths:
+            if item is not None and not _is_config_path_allowed(config, _coerce_path_arg(key, item)):
+                raise ServerError("LoRA path must be under allowed directories.")
+
+
+def _lora_scaled_path_values(value: Any) -> list[Any]:
+    if isinstance(value, (list, tuple)):
+        if len(value) != 2:
+            raise ServerError("lora_scaled must be a path/scale pair.")
+        return [value[0]]
+    return [value]
+
+
+def _coerce_path_arg(key: str, value: Any) -> Path:
+    if not isinstance(value, (str, os.PathLike)):
+        raise ServerError(f"File path for '{key}' must be a string or path-like value.")
+    try:
+        return Path(value)
+    except (TypeError, ValueError) as exc:
+        raise ServerError(f"File path for '{key}' could not be resolved.") from exc
+
+
 class LlamaCppProcessRunner:
     """Owns one llama.cpp server process for one managed profile."""
 
@@ -235,11 +339,7 @@ class LlamaCppProcessRunner:
         return handler_utils.is_port_free(host, port)
 
     def _is_path_allowed(self, path: Path) -> bool:
-        allowed_paths = handler_utils.build_allowed_paths(
-            self.models_dir,
-            getattr(self.config, "allowed_paths", None),
-        )
-        return handler_utils.is_path_allowed(path, allowed_paths)
+        return _is_config_path_allowed(self.config, path)
 
     async def start(self, model_path: Path, profile: LlamaCppProfile) -> LlamaCppRuntime:
         """Start this runner's process for the supplied profile and model."""
@@ -251,7 +351,7 @@ class LlamaCppProcessRunner:
         if not executable_path.is_file():
             raise ServerError(f"Llama.cpp server executable not found at {self.config.executable_path}")
 
-        args = {key: value for key, value in profile.server_args.items() if value is not None and value != ""}
+        args = _clean_server_args(profile.server_args)
         self._check_denylist(args)
         host = handler_utils.strip_host_brackets(profile.host or self.config.default_host or "127.0.0.1")
         port = self._resolve_port(host, profile)
@@ -540,7 +640,7 @@ class LlamaCppProcessRunner:
         if threads is not None:
             command.extend(["-t", str(int(threads))])
 
-        core_keys = {"port", "host", "threads", "t", "ctx_size", "c", "n_ctx", "n_gpu_layers", "ngl", "gpu_layers"}
+        core_keys = {"port", "host", *_CORE_SERVER_ARG_KEYS}
         formatters = _server_arg_formatters()
         invalid = [key for key in args if key not in formatters and key not in core_keys]
         if invalid and not getattr(self.config, "allow_unvalidated_args", False):
@@ -587,27 +687,11 @@ class LlamaCppProcessRunner:
             raise ServerError(f"{label} must be an integer.") from exc
 
     def _validate_arg_path(self, key: str, value: Any) -> None:
-        if key in _PATH_ARG_KEYS and not self._is_path_allowed(self._coerce_path_arg(key, value)):
-            raise ServerError(f"File path for '{key}' must be under allowed directories.")
-        if key == "lora":
-            values = value if isinstance(value, (list, tuple)) else [value]
-            for item in values:
-                if not self._is_path_allowed(self._coerce_path_arg(key, item)):
-                    raise ServerError("LoRA path must be under allowed directories.")
-        if key == "lora_scaled":
-            paths = [value[0]] if isinstance(value, (list, tuple)) and value else [value]
-            for item in paths:
-                if item is not None and not self._is_path_allowed(self._coerce_path_arg(key, item)):
-                    raise ServerError("LoRA path must be under allowed directories.")
+        _validate_config_arg_path(self.config, key, value)
 
     @staticmethod
     def _coerce_path_arg(key: str, value: Any) -> Path:
-        if not isinstance(value, (str, os.PathLike)):
-            raise ServerError(f"File path for '{key}' must be a string or path-like value.")
-        try:
-            return Path(value)
-        except (TypeError, ValueError) as exc:
-            raise ServerError(f"File path for '{key}' could not be resolved.") from exc
+        return _coerce_path_arg(key, value)
 
     def _open_log_targets(self) -> tuple[Any, Any, Any | None, Path | None]:
         log_file = getattr(self.config, "log_output_file", None)

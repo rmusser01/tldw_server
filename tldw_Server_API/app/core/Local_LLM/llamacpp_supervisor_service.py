@@ -13,8 +13,14 @@ from uuid import uuid4
 from tldw_Server_API.app.core.Local_LLM import handler_utils, llamacpp_inventory_service
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
-from tldw_Server_API.app.core.Local_LLM.llamacpp_process_runner import LlamaCppProcessRunner
-from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_capabilities import resolve_profile_launch
+from tldw_Server_API.app.core.Local_LLM.llamacpp_process_runner import (
+    LlamaCppProcessRunner,
+    validate_profile_server_args,
+)
+from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_capabilities import (
+    LlamaCppResolvedProfileLaunch,
+    resolve_profile_launch,
+)
 from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_store import (
     DEFAULT_PROFILE_ID,
     DEFAULT_PROFILE_NAME,
@@ -133,6 +139,7 @@ class LlamaCppSupervisor:
             provider_alias=request.provider_alias,
             tags=list(request.tags),
         )
+        self._validate_profile_launch_definition(profile)
         self._validate_runtime_port_available(profile)
         return await self._store_upsert(profile)
 
@@ -154,6 +161,7 @@ class LlamaCppSupervisor:
         if "tags" in updates and updates["tags"] is not None:
             updates["tags"] = list(updates["tags"])
         profile = LlamaCppProfile.model_validate(existing.model_dump(mode="python") | updates)
+        self._validate_profile_launch_definition(profile)
         self._validate_runtime_port_available(profile)
         return await self._store_upsert(profile)
 
@@ -186,11 +194,7 @@ class LlamaCppSupervisor:
                     return status
                 await runner.stop()
             self._validate_runtime_port_available(profile)
-            resolution_profile = self._profile_for_launch_resolution(profile)
-            resolved = resolve_profile_launch(
-                resolution_profile,
-                path_resolver=self._resolve_launch_asset_path,
-            )
+            resolved = self._validate_profile_launch_definition(profile)
             launch_profile = profile.model_copy(update={"server_args": resolved.server_args})
             runtime = await runner.start(resolved.model_path, launch_profile)
             if profile.last_runtime_failure:
@@ -359,6 +363,7 @@ class LlamaCppSupervisor:
                     "server_args": dict(server_args),
                 }
             )
+        self._validate_profile_launch_definition(profile)
         self._validate_runtime_port_available(profile)
         return await self._store_upsert(profile)
 
@@ -414,6 +419,7 @@ class LlamaCppSupervisor:
                     "server_args": dict(server_args),
                 }
             )
+        self._validate_profile_launch_definition(profile)
         self._validate_runtime_port_available(profile)
         return await self._store_upsert(profile)
 
@@ -509,6 +515,25 @@ class LlamaCppSupervisor:
         if profile.profile_id == DEFAULT_PROFILE_ID and profile.model_path:
             return profile.model_copy(update={"model_id": None})
         return profile
+
+    def _validate_profile_launch_definition(self, profile: LlamaCppProfile) -> LlamaCppResolvedProfileLaunch:
+        """Resolve and validate launch assets and server args for a profile."""
+        resolved = resolve_profile_launch(
+            self._profile_for_launch_resolution(profile),
+            path_resolver=self._resolve_launch_asset_path,
+        )
+        validate_profile_server_args(
+            self.config,
+            profile.model_copy(update={"server_args": resolved.server_args}),
+            allowed_structured_args=self._allowed_structured_server_args(profile),
+        )
+        return resolved
+
+    @staticmethod
+    def _allowed_structured_server_args(profile: LlamaCppProfile) -> set[str]:
+        if profile.profile_id == DEFAULT_PROFILE_ID:
+            return {"host", "port"}
+        return set()
 
     def _resolve_launch_asset_path(self, raw_path: str | Path, expected_kind: str, label: str) -> Path:
         """Resolve a launch asset path using the inventory service contract.
