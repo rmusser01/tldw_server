@@ -15,6 +15,8 @@ documentation:
 modified_files:
 - apps/packages/ui/src/components/Common/ChatSidebar.tsx
 - apps/packages/ui/src/components/Common/ChatSidebar/__tests__/ChatSidebar.tools-first.test.tsx
+- apps/packages/ui/src/components/Common/ChatSidebar/__tests__/ChatSidebar.lazy-history.test.tsx
+- apps/packages/ui/src/components/Common/__tests__/ChatSidebar.coordinator.test.tsx
 ---
 
 ## Description
@@ -41,7 +43,7 @@ Implement the shared ChatSidebar tools-first expansion behavior: shortcuts expan
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 2 follow-up completed: preserved active search visibility across tools-first reset by deriving recent-history visibility from the raw search input while keeping ServerChatList on the debounced query. Strengthened ChatSidebar.tools-first coverage with a stale-debounce regression case. Focused verification passed: bunx vitest run src/components/Common/ChatSidebar/__tests__/ChatSidebar.tools-first.test.tsx src/components/Common/ChatSidebar/__tests__/ChatSidebar.lazy-history.test.tsx src/components/Common/__tests__/ChatSidebar.coordinator.test.tsx (3 files, 8 tests).
+Task 3 completed: kept server history overview loading behind the Recent conversations disclosure while preserving active-search reset behavior and debounced ServerChatList query flow. Focused verification passed: bunx vitest run src/components/Common/ChatSidebar/__tests__/ChatSidebar.tools-first.test.tsx src/components/Common/ChatSidebar/__tests__/ChatSidebar.lazy-history.test.tsx src/components/Common/__tests__/ChatSidebar.coordinator.test.tsx (3 files, 11 tests). git diff --check passed for Task 3 touched files. Bandit skipped: frontend-only TS/TSX change.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
