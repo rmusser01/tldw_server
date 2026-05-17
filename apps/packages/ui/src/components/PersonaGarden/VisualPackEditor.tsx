@@ -100,7 +100,14 @@ import {
   getStarterProductionStatusLabel,
   VisualBuddySetupChoiceCard
 } from "./VisualBuddySetupChoiceCard"
+import { BuddyGuidedBuilder } from "./BuddyGuidedBuilder"
 import { VisualPackReusePanel } from "./VisualPackReusePanel"
+import {
+  BUDDY_IMPORT_ARCHIVE_ACCEPT,
+  getBuddyImportArchiveFileError,
+  NATIVE_PERSONA_VISUAL_PACK_EXTENSION
+} from "./buddyBuilderArchive"
+import type { BuddyBuilderSource } from "./buddyBuilderState"
 
 type VisualPackEditorProps = {
   selectedPersonaId: string
@@ -498,13 +505,7 @@ const TRIGGER_SOURCES: PersonaVisualAuthoredTrigger["source"][] = [
   "mcp_runtime"
 ]
 
-const PORTABLE_VISUAL_PACK_EXTENSION = ".tldw-persona-vpack"
-const PORTABLE_VISUAL_PACK_MIME_TYPES = new Set([
-  "application/octet-stream",
-  "application/vnd.tldw.persona.visual-pack+zip",
-  "application/x-zip-compressed",
-  "application/zip"
-])
+const PORTABLE_VISUAL_PACK_EXTENSION = NATIVE_PERSONA_VISUAL_PACK_EXTENSION
 const IMPORT_COMMIT_TERMINAL_STATUSES = new Set([
   "completed",
   "failed",
@@ -520,34 +521,10 @@ const IMPORT_PREVIEW_TERMINAL_STATUSES = new Set([
   "quarantined"
 ])
 
-const hasPortableVisualPackExtension = (file: File | null): boolean =>
-  !file || file.name.toLowerCase().endsWith(PORTABLE_VISUAL_PACK_EXTENSION)
-
-const hasSupportedPortableVisualPackMediaType = (file: File | null): boolean => {
-  if (!file) return true
-  const mediaType = file.type.trim().toLowerCase()
-  return !mediaType || PORTABLE_VISUAL_PACK_MIME_TYPES.has(mediaType)
-}
-
-const isPortableVisualPackFile = (file: File | null): boolean =>
-  hasPortableVisualPackExtension(file) && hasSupportedPortableVisualPackMediaType(file)
-
 const getImportPreviewFileError = (
   file: File | null,
   t: VisualPackTranslate
-): string | null => {
-  if (isPortableVisualPackFile(file)) return null
-  if (!hasPortableVisualPackExtension(file)) {
-    return t("sidepanel:personaGarden.visuals.importPreviewUnsupportedExtension", {
-      extension: PORTABLE_VISUAL_PACK_EXTENSION,
-      defaultValue: `Choose a ${PORTABLE_VISUAL_PACK_EXTENSION} archive exported from Persona Visual Packs.`
-    })
-  }
-  return t("sidepanel:personaGarden.visuals.importPreviewUnsupportedMimeType", {
-    defaultValue:
-      "Choose a Persona Visual pack archive with a supported zip media type."
-  })
-}
+): string | null => getBuddyImportArchiveFileError(file, t)
 
 type ImportPreviewStatus =
   | PersonaVisualImportPreviewStartResponse
@@ -1200,6 +1177,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     React.useState<string | null>(null)
   const [copyingStarterId, setCopyingStarterId] = React.useState("")
   const [starterPickerOpen, setStarterPickerOpen] = React.useState(false)
+  const [builderSourceRequest, setBuilderSourceRequest] = React.useState<{
+    source: BuddyBuilderSource
+    requestId: number
+  } | null>(null)
   const [previewingImport, setPreviewingImport] = React.useState(false)
   const [refreshingImportPreview, setRefreshingImportPreview] = React.useState(false)
   const [committingImport, setCommittingImport] = React.useState(false)
@@ -1232,6 +1213,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const draftTitleInputRef = React.useRef<HTMLInputElement | null>(null)
   const duplicateTargetSelectRef = React.useRef<HTMLSelectElement | null>(null)
   const libraryPanelRef = React.useRef<HTMLDivElement | null>(null)
+  const activationControlsRef = React.useRef<HTMLDivElement | null>(null)
   const generationReadinessRequestIdRef = React.useRef(0)
   const duplicateTargetsRequestIdRef = React.useRef(0)
   const libraryRequestIdRef = React.useRef(0)
@@ -1304,6 +1286,14 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     [duplicateTargets]
   )
   const assets = React.useMemo(() => getPackAssets(selectedPack), [selectedPack])
+  const assetsById = React.useMemo(
+    () =>
+      assets.reduce<Record<string, PersonaVisualAsset>>((next, asset) => {
+        next[asset.id] = asset
+        return next
+      }, {}),
+    [assets]
+  )
   const animationIds = React.useMemo(
     () => getAnimationIds(draftManifest),
     [draftManifest]
@@ -1785,15 +1775,31 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     libraryPanelRef.current?.focus()
   }, [])
 
-  const openImportArchivePicker = React.useCallback(() => {
+  const focusImportPreviewInput = React.useCallback(() => {
     importPreviewInputRef.current?.scrollIntoView?.({ block: "center" })
     importPreviewInputRef.current?.click()
     importPreviewInputRef.current?.focus()
   }, [])
 
+  const openImportArchivePicker = React.useCallback(() => {
+    setBuilderSourceRequest((current) => ({
+      source: "native_import",
+      requestId: (current?.requestId ?? 0) + 1
+    }))
+    globalThis.setTimeout(focusImportPreviewInput, 0)
+  }, [focusImportPreviewInput])
+
   const focusDuplicateControls = React.useCallback(() => {
     duplicateTargetSelectRef.current?.scrollIntoView?.({ block: "center" })
     duplicateTargetSelectRef.current?.focus()
+  }, [])
+
+  const focusActivationControls = React.useCallback(() => {
+    activationControlsRef.current?.scrollIntoView?.({ block: "center" })
+    const activateButton = activationControlsRef.current?.querySelector<
+      HTMLButtonElement
+    >('[data-testid="persona-visual-activate-button"]')
+    activateButton?.focus()
   }, [])
 
   const handleCreateDraft = async () => {
@@ -3005,6 +3011,12 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     !hasActiveVisual &&
     !importPreview &&
     !importCommitJob
+  const showGuidedBuilder =
+    isActive &&
+    Boolean(selectedPersonaId) &&
+    packStateMatchesSelectedPersona &&
+    packsLoaded &&
+    !loading
   const showManagementHeader =
     isActive &&
     Boolean(selectedPersonaId) &&
@@ -3012,6 +3024,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     packsLoaded &&
     !showSetupChoices
   const recommendedStarter = starterPacks[0] ?? null
+  const activePackTitle =
+    selectedActivePack?.title ||
+    visiblePacks.find((pack) => pack.status === "active")?.title ||
+    null
   const importPreviewPanel = (
     <div className="rounded border border-border bg-bg p-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -3023,7 +3039,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           ref={importPreviewInputRef}
           data-testid="persona-visual-import-preview-input"
           type="file"
-          accept={`${PORTABLE_VISUAL_PACK_EXTENSION},application/zip,application/octet-stream`}
+          accept={BUDDY_IMPORT_ARCHIVE_ACCEPT}
           className="text-xs text-text"
           onChange={(event) =>
             setSelectedImportPreviewFile(event.target.files?.[0] ?? null)
@@ -3431,7 +3447,37 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
 
   return (
     <div className="space-y-3" data-testid="persona-visual-pack-editor">
-      {showSetupChoices ? (
+      {showGuidedBuilder ? (
+        <BuddyGuidedBuilder
+          selectedPersonaId={selectedPersonaId}
+          selectedPersonaName={selectedPersonaName || selectedPersonaId}
+          hasActiveVisual={hasActiveVisual}
+          packCount={visiblePacks.length}
+          activePackTitle={activePackTitle}
+          starterPacks={starterPacks}
+          starterCatalogLoading={starterCatalogLoading}
+          starterCatalogError={starterCatalogError}
+          copyingStarterId={copyingStarterId}
+          requestedSource={builderSourceRequest?.source ?? null}
+          requestedSourceRequestId={builderSourceRequest?.requestId ?? 0}
+          importPreviewPanel={importPreviewPanel}
+          draftManifest={selectedPack ? draftManifest : null}
+          assetsById={assetsById}
+          importPreview={fullImportPreview}
+          activationBlockers={validationErrors}
+          savingManifest={saving}
+          onCopyStarterPack={(starterPackId) =>
+            void handleCopyStarterPack(starterPackId)
+          }
+          onStartBlank={focusDraftTitleInput}
+          onOpenLibrary={focusLibraryPanel}
+          onOpenDuplicate={focusDuplicateControls}
+          onContinueToActivation={focusActivationControls}
+          onSaveManifest={() => void handleSaveManifest()}
+        />
+      ) : null}
+
+      {showSetupChoices && !showGuidedBuilder ? (
         <VisualBuddySetupChoiceCard
           selectedPersonaId={selectedPersonaId}
           selectedPersonaName={selectedPersonaName || selectedPersonaId}
@@ -3744,7 +3790,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         </div>
       ) : null}
 
-      {!selectedPack ? firstRunImportPanel : null}
+      {!showGuidedBuilder && !selectedPack ? firstRunImportPanel : null}
 
       <div
         ref={libraryPanelRef}
@@ -3991,7 +4037,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 )}
               </div>
 
-              {importPreviewPanel}
+              {!showGuidedBuilder ? importPreviewPanel : null}
             </div>
           </div>
 
@@ -4408,7 +4454,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                   </div>
                 )}
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div ref={activationControlsRef} className="flex flex-wrap gap-2">
                 <Button
                   data-testid="persona-visual-save-manifest"
                   size="small"

@@ -54,6 +54,9 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
     : null
   const canMountVisualRenderer =
     !isDormant && Boolean(visualPack?.manifest && visualRenderer)
+  const showVisualDiagnostic =
+    Boolean(visualDiagnostic) &&
+    (isOpen || visualDiagnostic?.severity !== "info")
 
   return (
     <div
@@ -106,7 +109,7 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
         </div>
       </button>
 
-      {visualDiagnostic ? (
+      {showVisualDiagnostic && visualDiagnostic ? (
         <div
           data-testid="persona-buddy-visual-diagnostic"
           data-severity={visualDiagnostic.severity}

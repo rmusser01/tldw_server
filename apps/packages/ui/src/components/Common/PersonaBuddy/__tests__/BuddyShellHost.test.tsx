@@ -135,6 +135,100 @@ const buildVisualPack = (personaId = "persona-1") => ({
   }
 })
 
+const buildMovementVisualPack = (
+  personaId = "persona-1",
+  movementStates: Array<"moving_left" | "moving_right"> = [
+    "moving_left",
+    "moving_right"
+  ]
+) => {
+  const basePack = buildVisualPack(personaId)
+  const movementEntries = Object.fromEntries(
+    movementStates.map((state) => [
+      asPersonaVisualCustomStateId(state),
+      { animation_id: `${state}-animation` }
+    ])
+  )
+  const movementAnimations = Object.fromEntries(
+    movementStates.map((state) => [
+      `${state}-animation`,
+      {
+        frames: [{ asset_id: `${state}-asset`, duration_ms: 100 }]
+      }
+    ])
+  )
+  const movementAssets = Object.fromEntries(
+    movementStates.map((state) => [
+      `${state}-asset`,
+      {
+        id: `${state}-asset`,
+        url: `/assets/${state}.png`,
+        mime_type: "image/png",
+        asset_role: "frame" as const,
+        width: 24,
+        height: 24
+      }
+    ])
+  )
+  const movementCatalog = Object.fromEntries(
+    movementStates.map((state) => [
+      asPersonaVisualCustomStateId(state),
+      {
+        label: state === "moving_left" ? "Moving left" : "Moving right",
+        kind: "live_variant" as const
+      }
+    ])
+  )
+
+  return {
+    ...basePack,
+    manifest: {
+      ...basePack.manifest,
+      state_catalog: movementCatalog,
+      states: {
+        ...basePack.manifest.states,
+        ...movementEntries
+      },
+      animations: {
+        ...basePack.manifest.animations,
+        ...movementAnimations
+      }
+    },
+    assets_by_id: {
+      ...basePack.assets_by_id,
+      ...movementAssets
+    }
+  }
+}
+
+const mockDockRect = () =>
+  vi.spyOn(HTMLDivElement.prototype, "getBoundingClientRect").mockReturnValue({
+    x: 0,
+    y: 0,
+    left: 100,
+    top: 100,
+    right: 300,
+    bottom: 220,
+    width: 200,
+    height: 120,
+    toJSON: () => ({})
+  } as DOMRect)
+
+const dragBuddyBy = async (deltaX: number) => {
+  const dragHandle = await screen.findByTestId("persona-buddy-drag-handle")
+  fireEvent.pointerDown(dragHandle, {
+    button: 0,
+    pointerId: 1,
+    clientX: 140,
+    clientY: 130
+  })
+  fireEvent.pointerMove(window, {
+    pointerId: 1,
+    clientX: 140 + deltaX,
+    clientY: 130
+  })
+}
+
 const renderHost = ({
   root = "web",
   context,
@@ -917,6 +1011,164 @@ describe("BuddyShellHost", () => {
       "src",
       expect.stringContaining("/assets/tool-notes-search.png")
     )
+  })
+
+  it("sets a moving_right runtime override while dragging right when the pack declares it", async () => {
+    const rectSpy = mockDockRect()
+    const visualPack = buildMovementVisualPack("persona-1", ["moving_right"])
+    visualMocks.listPersonaVisualPacks.mockResolvedValue({
+      packs: [visualPack],
+      active_pack: visualPack
+    })
+
+    renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        live_session_id: "session-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        live_voice_state: "idle"
+      },
+      root: "sidepanel"
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+        "data-visual-state",
+        "idle"
+      )
+    })
+    await dragBuddyBy(48)
+
+    expect(usePersonaVisualRuntimeStore.getState().override).toEqual(
+      expect.objectContaining({
+        personaId: "persona-1",
+        sessionId: "session-1",
+        state: "moving_right",
+        reason: "buddy_drag"
+      })
+    )
+    rectSpy.mockRestore()
+  })
+
+  it("sets a moving_left runtime override while dragging left when the pack declares it", async () => {
+    const rectSpy = mockDockRect()
+    const visualPack = buildMovementVisualPack("persona-1", ["moving_left"])
+    visualMocks.listPersonaVisualPacks.mockResolvedValue({
+      packs: [visualPack],
+      active_pack: visualPack
+    })
+
+    renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        live_session_id: null,
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        live_voice_state: "idle"
+      },
+      root: "sidepanel"
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+        "data-visual-state",
+        "idle"
+      )
+    })
+    await dragBuddyBy(-48)
+
+    expect(usePersonaVisualRuntimeStore.getState().override).toEqual(
+      expect.objectContaining({
+        personaId: "persona-1",
+        sessionId: null,
+        state: "moving_left",
+        reason: "buddy_drag"
+      })
+    )
+    rectSpy.mockRestore()
+  })
+
+  it("clears the Buddy drag movement override on pointer release", async () => {
+    const rectSpy = mockDockRect()
+    const visualPack = buildMovementVisualPack("persona-1", ["moving_right"])
+    visualMocks.listPersonaVisualPacks.mockResolvedValue({
+      packs: [visualPack],
+      active_pack: visualPack
+    })
+
+    renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        live_voice_state: "idle"
+      },
+      root: "sidepanel"
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+        "data-visual-state",
+        "idle"
+      )
+    })
+    await dragBuddyBy(48)
+    expect(usePersonaVisualRuntimeStore.getState().override?.state).toBe(
+      "moving_right"
+    )
+
+    fireEvent.pointerUp(window, { pointerId: 1 })
+
+    expect(usePersonaVisualRuntimeStore.getState().override).toBeNull()
+    rectSpy.mockRestore()
+  })
+
+  it("keeps dock dragging without setting a movement override for packs without movement states", async () => {
+    const rectSpy = mockDockRect()
+    const visualPack = buildVisualPack("persona-1")
+    visualMocks.listPersonaVisualPacks.mockResolvedValue({
+      packs: [visualPack],
+      active_pack: visualPack
+    })
+    const initialPosition =
+      usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]
+
+    renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        live_voice_state: "idle"
+      },
+      root: "sidepanel"
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+        "data-visual-state",
+        "idle"
+      )
+    })
+    await dragBuddyBy(48)
+
+    expect(usePersonaVisualRuntimeStore.getState().override).toBeNull()
+    expect(
+      usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]
+    ).not.toEqual(initialPosition)
+    rectSpy.mockRestore()
   })
 
   it("keeps derived buddy text when active visual pack loading fails", async () => {

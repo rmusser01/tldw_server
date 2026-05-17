@@ -33,9 +33,9 @@ vi.mock("react-i18next", () => ({
 import { VisualBuddySetupChoiceCard } from "../VisualBuddySetupChoiceCard"
 
 const starter: PersonaVisualStarterPackSummary = {
-  id: "research-buddy-starter",
-  title: "Research Buddy Starter",
-  description: "Starter sprite pack",
+  id: "search-lens-basic",
+  title: "Search Lens Buddy",
+  description: "Reviewed Basic sprite pack",
   renderer_type: "sprite_frames" as const,
   manifest_version: 1,
   states_offered: ["idle", "thinking"],
@@ -44,10 +44,17 @@ const starter: PersonaVisualStarterPackSummary = {
   tags: ["starter"],
   license_label: "bundled",
   complexity_tier: "basic",
-  production_status: "scaffold",
+  production_status: "art_ready",
   neutral_anchor_required: true,
-  expected_asset_groups: ["neutral_anchor", "required_state_loops"],
-  animation_coverage_notes: ["Scaffold fixture only; replace with authored loops."]
+  expected_asset_groups: [
+    "identity_brief",
+    "neutral_anchor",
+    "preview_image",
+    "required_state_loops"
+  ],
+  animation_coverage_notes: [
+    "Reviewed bundled basic default with neutral-anchor-derived required-state loops."
+  ]
 }
 
 describe("VisualBuddySetupChoiceCard", () => {
@@ -76,8 +83,8 @@ describe("VisualBuddySetupChoiceCard", () => {
     expect(screen.getByRole("button", { name: /start blank/i })).toBeEnabled()
     expect(screen.getByText(/no visual buddy is active/i)).toBeInTheDocument()
     expect(mocks.translate).toHaveBeenCalledWith(
-      "sidepanel:personaGarden.visuals.metadata.productionStatus.scaffold",
-      expect.objectContaining({ defaultValue: "Scaffold" })
+      "sidepanel:personaGarden.visuals.metadata.productionStatus.art_ready",
+      expect.objectContaining({ defaultValue: "Art Ready" })
     )
     expect(mocks.translate).toHaveBeenCalledWith(
       "sidepanel:personaGarden.visuals.metadata.complexityTier.basic",
@@ -101,7 +108,7 @@ describe("VisualBuddySetupChoiceCard", () => {
     )
 
     const setupCard = screen.getByTestId("visual-buddy-setup-choice-card")
-    expect(setupCard).toHaveTextContent(/scaffold/i)
+    expect(setupCard).toHaveTextContent(/art ready/i)
     expect(setupCard).toHaveTextContent(/basic/i)
     expect(setupCard).toHaveTextContent(/neutral anchor/i)
   })
@@ -218,7 +225,7 @@ describe("VisualBuddySetupChoiceCard", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: /set up visual buddy/i }))
+    fireEvent.click(screen.getByRole("button", { name: /open buddy builder/i }))
 
     expect(onOpenVisuals).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole("button", { name: /use default/i })).not.toBeInTheDocument()
@@ -240,6 +247,6 @@ describe("VisualBuddySetupChoiceCard", () => {
       />
     )
 
-    expect(screen.getByRole("button", { name: /set up visual buddy/i })).toBeDisabled()
+    expect(screen.getByRole("button", { name: /open buddy builder/i })).toBeDisabled()
   })
 })

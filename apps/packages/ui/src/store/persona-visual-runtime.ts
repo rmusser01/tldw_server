@@ -32,6 +32,7 @@ type PersonaVisualRuntimeStore = {
   setRuntimeDiagnostics: (
     diagnostics: PersonaVisualRuntimeDiagnostics | null
   ) => void
+  clearOverride: () => void
   clearRuntimeDiagnostics: (sourceId?: string) => void
   clearExpired: (now?: number) => void
   clearForSession: (sessionId: string | null) => void
@@ -43,6 +44,7 @@ export const usePersonaVisualRuntimeStore = create<PersonaVisualRuntimeStore>(
     runtimeDiagnostics: null,
     setOverride: (override) => set({ override }),
     setRuntimeDiagnostics: (runtimeDiagnostics) => set({ runtimeDiagnostics }),
+    clearOverride: () => set({ override: null }),
     clearRuntimeDiagnostics: (sourceId) => {
       const diagnostics = get().runtimeDiagnostics
       if (
