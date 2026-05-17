@@ -240,8 +240,30 @@ def _raw_local_directory_identity_changed(
     if "sink_type" in patch and patch.get("sink_type") not in (None, existing.get("sink_type")):
         return True
     if "config" in patch and patch.get("config") is not None:
-        return dict(patch.get("config") or {}) != dict(existing.get("config") or {})
+        return _raw_local_directory_config_requires_entitlement(
+            existing_config=dict(existing.get("config") or {}),
+            patch_config=dict(patch.get("config") or {}),
+        )
     return False
+
+
+def _raw_local_directory_config_requires_entitlement(
+    *,
+    existing_config: dict[str, Any],
+    patch_config: dict[str, Any],
+) -> bool:
+    if patch_config == existing_config:
+        return False
+    existing_keys = set(existing_config)
+    patch_keys = set(patch_config)
+    if existing_keys != patch_keys or "path" not in existing_keys:
+        return True
+    for key in existing_keys - {"path"}:
+        if patch_config.get(key) != existing_config.get(key):
+            return True
+    return os.path.normpath(str(patch_config.get("path") or "")) != os.path.normpath(
+        str(existing_config.get("path") or "")
+    )
 
 
 @router.post(

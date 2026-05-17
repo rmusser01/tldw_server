@@ -292,6 +292,33 @@ def test_denied_local_directory_patch_does_not_validate_changed_path(
 
 
 @pytest.mark.integration
+def test_patch_existing_local_directory_normalized_equivalent_config_without_entitlement(
+    ingestion_sources_policy_client,
+    monkeypatch,
+):
+    ep = ingestion_sources_policy_client["endpoint_module"]
+    validated_paths: list[dict[str, Any]] = []
+
+    def _normalize_trailing_slash(config):
+        validated_paths.append(dict(config))
+        return str(config["path"]).rstrip("/")
+
+    monkeypatch.setattr(ep, "validate_local_directory_source", _normalize_trailing_slash)
+
+    response = ingestion_sources_policy_client["client"].patch(
+        "/api/v1/ingestion-sources/12",
+        json={"config": {"path": "/allowed/docs/"}},
+    )
+
+    assert response.status_code == 200, response.text
+    assert validated_paths == [{"path": "/allowed/docs/"}]
+    assert response.json()["config"] == {"path": "/allowed/docs"}
+    assert ingestion_sources_policy_client["updated_patches"] == [
+        {"config": {"path": "/allowed/docs"}}
+    ]
+
+
+@pytest.mark.integration
 def test_patch_null_source_type_still_checks_changed_local_directory_config_without_entitlement(
     ingestion_sources_policy_client,
 ):
