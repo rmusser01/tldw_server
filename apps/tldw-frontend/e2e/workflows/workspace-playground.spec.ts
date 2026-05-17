@@ -134,9 +134,24 @@ test.describe("Research Studio Workflow", () => {
     await workspacePage.waitForReady()
 
     await workspacePage.hideSourcesPane()
+    await expect(workspacePage.restoreSourcesButton).toBeVisible()
     await workspacePage.showSourcesPane()
     await workspacePage.hideStudioPane()
+    await expect(workspacePage.restoreStudioButton).toBeVisible()
     await workspacePage.showStudioPane()
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
+  test("keeps the chat composer visible on first load", async ({
+    authedPage,
+    diagnostics
+  }) => {
+    const workspacePage = new WorkspacePlaygroundPage(authedPage)
+    await workspacePage.goto()
+    await workspacePage.waitForReady()
+
+    await workspacePage.expectComposerVisibleWithoutPageScroll()
 
     await assertNoCriticalErrors(diagnostics)
   })

@@ -6,6 +6,8 @@ import {
   AlertTriangle,
   FileText,
   MessageSquare,
+  PanelLeftOpen,
+  PanelRightOpen,
   Sparkles,
   Search,
   Command,
@@ -201,7 +203,6 @@ type WorkspaceStorageUsageState = {
 type WorkspaceRestoreRailButtonProps = {
   side: "left" | "right"
   label: string
-  panelId: string
   testId: string
   onClick: () => void
 }
@@ -209,7 +210,6 @@ type WorkspaceRestoreRailButtonProps = {
 const WorkspaceRestoreRailButton: React.FC<WorkspaceRestoreRailButtonProps> = ({
   side,
   label,
-  panelId,
   testId,
   onClick
 }) => {
@@ -220,16 +220,11 @@ const WorkspaceRestoreRailButton: React.FC<WorkspaceRestoreRailButtonProps> = ({
       type="button"
       data-testid={testId}
       aria-label={label}
-      aria-controls={panelId}
-      aria-expanded={false}
-      title={label}
       onClick={onClick}
-      className="sticky top-2 z-20 hidden min-h-[14rem] w-11 shrink-0 self-stretch flex-col items-center justify-center gap-3 rounded-xl border border-border/80 bg-surface/95 px-0 py-3 text-sm font-medium text-text shadow-card transition hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-bg lg:flex"
+      className="hidden min-h-0 shrink-0 items-center justify-center gap-2 rounded-xl border border-border/80 bg-surface/90 px-3 py-2 text-sm font-medium text-text shadow-card transition hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-bg lg:flex"
     >
-      <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
-      <span className="hidden text-xs font-medium text-muted xl:block xl:rotate-180 xl:[writing-mode:vertical-rl]">
-        {label}
-      </span>
+      <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+      <span className="sr-only 2xl:not-sr-only">{label}</span>
     </button>
   )
 }
@@ -2188,10 +2183,16 @@ const WorkspacePlaygroundBody: React.FC = () => {
 
   const handleRestoreLeftPane = () => {
     setLeftPaneCollapsed(false)
+    window.setTimeout(() => {
+      focusWorkspacePane("sources")
+    }, 0)
   }
 
   const handleRestoreRightPane = () => {
     setRightPaneCollapsed(false)
+    window.setTimeout(() => {
+      focusWorkspacePane("studio")
+    }, 0)
   }
 
   const handleReloadWorkspaceFromSyncWarning = () => {
@@ -2642,6 +2643,14 @@ const WorkspacePlaygroundBody: React.FC = () => {
                 />
               </>
             )}
+            {!leftPaneOpen && (
+              <WorkspaceRestoreRailButton
+                side="left"
+                label={t("playground:workspace.showSources", "Show sources")}
+                testId="workspace-restore-sources"
+                onClick={handleRestoreLeftPane}
+              />
+            )}
 
             <Drawer
               title={
@@ -2709,6 +2718,14 @@ const WorkspacePlaygroundBody: React.FC = () => {
                   })}
                 </aside>
               </>
+            )}
+            {!rightPaneOpen && (
+              <WorkspaceRestoreRailButton
+                side="right"
+                label={t("playground:workspace.showStudio", "Show studio")}
+                testId="workspace-restore-studio"
+                onClick={handleRestoreRightPane}
+              />
             )}
 
             <Drawer
