@@ -296,14 +296,125 @@ async def test_supervisor_starts_vision_profile_with_resolved_mmproj(
 
 
 @pytest.mark.asyncio
+async def test_supervisor_rejects_vision_profile_without_mmproj_before_persisting(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    supervisor, config, factory = make_supervisor(tmp_path)
+    _base_path, _mmproj_path, base_asset_id, _mmproj_asset_id = configure_supervisor_assets(monkeypatch, config)
+
+    with pytest.raises(ServerError, match="mmproj"):
+        await supervisor.create_profile(
+            LlamaCppProfileCreateRequest(
+                profile_id="vision",
+                name="Vision",
+                mode=LlamaCppProfileMode.VISION,
+                model_id=base_asset_id,
+                server_args={"ctx_size": 4096},
+            )
+        )
+
+    assert supervisor.store.get("vision") is None
+    assert "vision" not in factory.runners
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejects_conflicting_mmproj_selection_before_persisting(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    _base_path, _mmproj_path, base_asset_id, mmproj_asset_id = configure_supervisor_assets(monkeypatch, config)
+    other_mmproj_path = config.models_dir / "mmproj-other.gguf"
+    other_mmproj_path.write_text("other projector", encoding="utf-8")
+
+    with pytest.raises(ServerError, match="conflicts"):
+        await supervisor.create_profile(
+            LlamaCppProfileCreateRequest(
+                profile_id="vision",
+                name="Vision",
+                mode=LlamaCppProfileMode.VISION,
+                model_id=base_asset_id,
+                mmproj_model_id=mmproj_asset_id,
+                server_args={"mmproj": str(other_mmproj_path)},
+            )
+        )
+
+    assert supervisor.store.get("vision") is None
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejects_path_arg_outside_allowlist_before_persisting(tmp_path: Path):
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    grammar_path = tmp_path / "outside" / "grammar.gbnf"
+    grammar_path.parent.mkdir()
+    grammar_path.write_text("root ::= \"ok\"", encoding="utf-8")
+
+    with pytest.raises(ServerError, match="grammar_file"):
+        await supervisor.create_profile(
+            LlamaCppProfileCreateRequest(
+                profile_id="grammar",
+                name="Grammar",
+                model_path=str(model_path),
+                server_args={"grammar_file": str(grammar_path)},
+            )
+        )
+
+    assert supervisor.store.get("grammar") is None
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejects_reserved_model_arg_before_persisting_even_when_unvalidated_args_allowed(
+    tmp_path: Path,
+):
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    config.allow_unvalidated_args = True
+    model_path = make_model(config)
+    other_model_path = make_model(config, "other.gguf")
+
+    with pytest.raises(ServerError, match="Reserved"):
+        await supervisor.create_profile(
+            LlamaCppProfileCreateRequest(
+                profile_id="reserved",
+                name="Reserved",
+                model_path=str(model_path),
+                server_args={"model": str(other_model_path)},
+            )
+        )
+
+    assert supervisor.store.get("reserved") is None
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejects_invalid_server_args_update_without_persisting(tmp_path: Path):
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    outside_model = tmp_path / "outside" / "draft.gguf"
+    outside_model.parent.mkdir()
+    outside_model.write_text("draft", encoding="utf-8")
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+
+    with pytest.raises(ServerError, match="model_draft"):
+        await supervisor.update_profile(
+            "one",
+            LlamaCppProfileUpdateRequest(server_args={"model_draft": str(outside_model)}),
+        )
+
+    assert supervisor.store.get("one").server_args == {}
+
+
+@pytest.mark.asyncio
 async def test_supervisor_rejects_vision_profile_without_mmproj_before_runner_spawn(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
     supervisor, config, factory = make_supervisor(tmp_path)
     _base_path, _mmproj_path, base_asset_id, _mmproj_asset_id = configure_supervisor_assets(monkeypatch, config)
-    await supervisor.create_profile(
-        LlamaCppProfileCreateRequest(
+    supervisor.store.upsert(
+        LlamaCppProfile(
             profile_id="vision",
             name="Vision",
             mode=LlamaCppProfileMode.VISION,
@@ -325,8 +436,8 @@ async def test_supervisor_rejects_wrong_kind_mmproj_asset_before_runner_spawn(
 ):
     supervisor, config, factory = make_supervisor(tmp_path)
     _base_path, _mmproj_path, base_asset_id, _mmproj_asset_id = configure_supervisor_assets(monkeypatch, config)
-    await supervisor.create_profile(
-        LlamaCppProfileCreateRequest(
+    supervisor.store.upsert(
+        LlamaCppProfile(
             profile_id="vision",
             name="Vision",
             mode=LlamaCppProfileMode.VISION,
@@ -351,8 +462,8 @@ async def test_supervisor_rejects_manual_mmproj_path_outside_allowlist_before_ru
     outside = tmp_path / "outside" / "mmproj-other.gguf"
     outside.parent.mkdir()
     outside.write_text("outside projector", encoding="utf-8")
-    await supervisor.create_profile(
-        LlamaCppProfileCreateRequest(
+    supervisor.store.upsert(
+        LlamaCppProfile(
             profile_id="vision",
             name="Vision",
             mode=LlamaCppProfileMode.VISION,

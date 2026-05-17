@@ -167,7 +167,7 @@ git commit -m "feat: reconcile llama.cpp runtime profiles"
 - Test: `tldw_Server_API/tests/LLM_Local/test_llamacpp_process_runner.py`
 - Test: `tldw_Server_API/tests/LLM_Local/test_llamacpp_supervisor_service.py`
 
-- [ ] **Step 1: Write failing validation tests**
+- [x] **Step 1: Write failing validation tests**
 
 Cover:
 - duplicate explicit host/port conflicts across enabled profiles, including wildcard host conflicts;
@@ -177,7 +177,7 @@ Cover:
 - raw args cannot override reserved structured flags such as host, port, model, and mmproj unless the backend explicitly allows it;
 - path-like args such as `grammar_file`, `chat_template_file`, `prompt_cache`, and `lora_base` are resolved through the same allowlist policy or rejected.
 
-- [ ] **Step 2: Run validation tests to verify failure**
+- [x] **Step 2: Run validation tests to verify failure**
 
 ```bash
 python -m pytest \
@@ -190,15 +190,15 @@ python -m pytest \
 
 Expected: FAIL for the new cases.
 
-- [ ] **Step 3: Centralize validation**
+- [x] **Step 3: Centralize validation**
 
 Add helper functions near the runtime/profile modules rather than duplicating validation across endpoints and UI. The supervisor should call the helper before persisting and before starting, because persisted state and current asset state can diverge.
 
-- [ ] **Step 4: Preserve advisory warnings**
+- [x] **Step 4: Preserve advisory warnings**
 
 Keep hardware/resource fit warnings in response/runtime warning lists. Only hard-fail unsafe paths, invalid ports, reserved flag conflicts, missing required assets, or incompatible mode/asset combinations.
 
-- [ ] **Step 5: Run focused backend tests**
+- [x] **Step 5: Run focused backend tests**
 
 ```bash
 python -m pytest \
@@ -210,7 +210,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 2**
+- [x] **Step 6: Commit Task 2**
 
 ```bash
 git add \
