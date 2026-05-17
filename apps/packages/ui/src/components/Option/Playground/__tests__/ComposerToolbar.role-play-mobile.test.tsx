@@ -3,7 +3,6 @@ import React from "react"
 import { describe, expect, it, vi } from "vitest"
 
 import { ComposerToolbar } from "../ComposerToolbar"
-import { ComposerToolbarOverflow } from "../ComposerToolbarOverflow"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -169,29 +168,6 @@ const createToolbarProps = (
   ...overrides
 })
 
-const createOverflowProps = (
-  overrides: Partial<React.ComponentProps<typeof ComposerToolbarOverflow>> = {}
-): React.ComponentProps<typeof ComposerToolbarOverflow> => ({
-  isProMode: false,
-  isConnectionReady: true,
-  contextToolsOpen: false,
-  onToggleKnowledgePanel: vi.fn(),
-  webSearch: false,
-  onToggleWebSearch: vi.fn(),
-  hasWebSearch: true,
-  onOpenModelSettings: vi.fn(),
-  hasDictation: false,
-  speechAvailable: false,
-  speechUsesServer: false,
-  isListening: false,
-  isServerDictating: false,
-  voiceChatEnabled: false,
-  onDictationToggle: vi.fn(),
-  temporaryChat: false,
-  onFocusConnectionCard: vi.fn(),
-  ...overrides
-})
-
 describe("ComposerToolbar mobile role-play parity", () => {
   it("exposes system prompts and generation style from the mobile overflow", () => {
     const onTemplateSelect = vi.fn()
@@ -277,14 +253,12 @@ describe("ComposerToolbar mobile role-play parity", () => {
   it("routes mobile role-play setup through a reusable overflow callback", () => {
     const onOpenRolePlaySetup = vi.fn()
     render(
-      <ComposerToolbarOverflow
-        {...createOverflowProps({
+      <ComposerToolbar
+        {...createToolbarProps({
           rolePlayActions: {
-            onOpenSystemPrompts: vi.fn(),
-            onOpenGenerationStyle: vi.fn(),
             onOpenRolePlaySetup
           }
-        } as any)}
+        })}
       />
     )
 

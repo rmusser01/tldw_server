@@ -578,6 +578,45 @@
   "composer_rolePlaySetup": {
     "message": "Role-play setup"
   },
+  "composer_rolePlayPreview": {
+    "message": "Role-play preview"
+  },
+  "composer_rolePlayLayers": {
+    "message": "Role-play layers"
+  },
+  "composer_chooseBehaviorTemplate": {
+    "message": "Choose behavior template"
+  },
+  "composer_clearIdentity": {
+    "message": "Clear identity"
+  },
+  "composer_clearBehavior": {
+    "message": "Clear behavior"
+  },
+  "composer_resetGeneration": {
+    "message": "Reset generation"
+  },
+  "composer_sceneEnabled": {
+    "message": "Scene enabled"
+  },
+  "composer_sceneNotes": {
+    "message": "Scene notes"
+  },
+  "composer_sceneNotesPlaceholder": {
+    "message": "Describe the current scene context."
+  },
+  "composer_sceneActive": {
+    "message": "Scene active"
+  },
+  "composer_sceneInactive": {
+    "message": "No scene draft"
+  },
+  "composer_clearScene": {
+    "message": "Clear scene"
+  },
+  "composer_resetScene": {
+    "message": "Reset scene"
+  },
   "composer_knowledgeSearch": {
     "message": "Search & Context"
   },
