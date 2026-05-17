@@ -9,6 +9,7 @@ from typing import Any
 
 from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
     LlamaCppAsset,
+    LlamaCppAssetImportPreviewResponse,
     LlamaCppAssetMetadata,
     LlamaCppAssetsResponse,
     LlamaCppInventoryItem,
@@ -297,6 +298,58 @@ def import_asset_folder(path: Path) -> LlamaCppAsset:
     saved_config["imported_asset_folders"] = [imported_value]
     allowed_bases = _allowed_bases_for_config(saved_config)
     return _folder_asset_for_path(canonical, allowed_bases=allowed_bases)
+
+
+def preview_import_asset_folder(path: Path, *, limit: int = 500) -> LlamaCppAssetImportPreviewResponse:
+    """Return a bounded, non-mutating preview for an allowlisted asset folder."""
+    canonical = _canonical_path(path, "Imported asset folder")
+    _validate_path_for_config(canonical, "imported_asset_folders", "Imported asset folder")
+    if not canonical.exists():
+        raise ServerError("Imported asset folder does not exist.")
+    if not canonical.is_dir():
+        raise ServerError("Imported asset path is not a folder.")
+
+    allowed_bases = _allowed_bases_for_config(_read_saved_config())
+    _validate_allowed_asset_path(canonical, allowed_bases, "Imported asset folder")
+
+    warnings: list[str] = []
+    assets: list[LlamaCppAsset] = []
+    seen_ids: set[str] = set()
+    scan_limited = False
+    asset_limit = max(limit, 0)
+    folder_asset = _folder_asset_for_path(canonical, allowed_bases=allowed_bases)
+
+    for candidate in _iter_asset_files(canonical, warnings, max(asset_limit + 1, 1)):
+        asset = _asset_for_path(
+            candidate,
+            source="imported_folder",
+            allowed_bases=allowed_bases,
+            warnings=warnings,
+        )
+        if asset is None or asset.asset_id in seen_ids:
+            continue
+        if len(assets) >= asset_limit:
+            scan_limited = True
+            break
+        seen_ids.add(asset.asset_id)
+        assets.append(asset)
+
+    _attach_mmproj_candidates(assets)
+    assets.sort(
+        key=lambda asset: (
+            _ASSET_KIND_ORDER.get(asset.kind, 99),
+            asset.display_name.lower(),
+            asset.resolved_path or asset.path,
+        )
+    )
+    return LlamaCppAssetImportPreviewResponse(
+        folder=folder_asset,
+        assets=assets,
+        asset_counts=_asset_counts(assets),
+        warnings=warnings,
+        scan_limited=scan_limited,
+        will_persist=False,
+    )
 
 
 def _validate_registered_path_for_config(path: Path) -> None:
@@ -642,6 +695,13 @@ def _pairing_tokens(value: str) -> set[str]:
 def _append_unique_warning(warnings: list[str], warning: str) -> None:
     if warning not in warnings:
         warnings.append(warning)
+
+
+def _asset_counts(assets: list[LlamaCppAsset]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for asset in assets:
+        counts[asset.kind] = counts.get(asset.kind, 0) + 1
+    return counts
 
 
 def _item_for_path(

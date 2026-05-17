@@ -148,6 +148,31 @@ def _patch_provider_config_writes(monkeypatch) -> None:  # noqa: ANN001
     )
     monkeypatch.setattr(llamacpp_mod.llamacpp_provider_service, "refresh_config_cache", lambda: None)
     monkeypatch.setattr(llamacpp_mod.llamacpp_provider_service, "llamacpp_config_write_lock", lambda: FakeLock())
+    monkeypatch.setattr(
+        llamacpp_mod.llamacpp_inventory_service,
+        "preview_import_asset_folder",
+        lambda path: {
+            "folder": {
+                "asset_id": "folder:authz",
+                "kind": "folder",
+                "identity_basis": "resolved_path",
+                "path": str(path),
+                "resolved_path": str(path),
+                "display_name": "models",
+                "source": "imported_folder",
+                "metadata": {},
+                "capabilities": ["asset_folder"],
+                "mmproj_asset_ids": [],
+                "base_model_asset_ids": [],
+                "warnings": [],
+            },
+            "assets": [],
+            "asset_counts": {},
+            "warnings": [],
+            "scan_limited": False,
+            "will_persist": False,
+        },
+    )
 
 
 @pytest.mark.unit
@@ -162,6 +187,7 @@ def _patch_provider_config_writes(monkeypatch) -> None:  # noqa: ANN001
         ("get", "/api/v1/llamacpp/metrics", None),
         ("get", "/api/v1/llamacpp/logs/tail", None),
         ("get", "/api/v1/llamacpp/hardware", None),
+        ("post", "/api/v1/llamacpp/assets/import-folder/preview", {"path": "/models"}),
     ],
 )
 def test_llamacpp_lifecycle_401_when_principal_unavailable(
@@ -195,6 +221,7 @@ def test_llamacpp_lifecycle_401_when_principal_unavailable(
         ("get", "/api/v1/llamacpp/metrics", None),
         ("get", "/api/v1/llamacpp/logs/tail", None),
         ("get", "/api/v1/llamacpp/hardware", None),
+        ("post", "/api/v1/llamacpp/assets/import-folder/preview", {"path": "/models"}),
     ],
 )
 def test_llamacpp_lifecycle_403_when_missing_admin_role(
@@ -232,6 +259,7 @@ def test_llamacpp_lifecycle_403_when_missing_admin_role(
         ("get", "/api/v1/llamacpp/metrics", None),
         ("get", "/api/v1/llamacpp/logs/tail", None),
         ("get", "/api/v1/llamacpp/hardware", None),
+        ("post", "/api/v1/llamacpp/assets/import-folder/preview", {"path": "/models"}),
     ],
 )
 def test_llamacpp_lifecycle_200_for_admin_principal(

@@ -176,6 +176,17 @@ class LlamaCppImportAssetFolderRequest(BaseModel):
     path: str = Field(..., min_length=1)
 
 
+class LlamaCppAssetImportPreviewResponse(BaseModel):
+    """Non-mutating preview of an allowlisted local asset folder import."""
+
+    folder: LlamaCppAsset
+    assets: list[LlamaCppAsset] = Field(default_factory=list)
+    asset_counts: dict[str, int] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    scan_limited: bool = False
+    will_persist: bool = False
+
+
 class LlamaCppInventoryItem(BaseModel):
     """A single model inventory entry from models_dir or registered paths."""
 
