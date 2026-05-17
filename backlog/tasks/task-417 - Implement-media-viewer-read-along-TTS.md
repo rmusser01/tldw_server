@@ -64,6 +64,18 @@ Task 2 completed:
 - Red verification: `cd apps/packages/ui && bunx vitest run src/components/Media/read-along/__tests__/media-read-along-segments.test.ts --maxWorkers=1` failed because `../media-read-along-segments` did not exist.
 - Green verification: same command passed with 7 tests after implementation.
 - `git diff --check` passed for the Task 2 files.
+- Spec review found transient fallback segment IDs were too collision-prone; fixed in `be51074a4` by including derived media/source identity or a stable text hash.
+- Task 2 spec and code-quality re-reviews approved after the fix.
+
+Task 3 completed:
+- Added read-along cache-key helpers, Dexie-backed audio cache helpers, Dexie schema/type support, and TTS provider abort-signal surface.
+- Red verification: `cd apps/packages/ui && bunx vitest run src/components/Media/read-along/__tests__/media-read-along-cache-key.test.ts src/components/Media/read-along/__tests__/media-read-along-cache.test.ts src/services/__tests__/tts-provider.read-along.test.ts --maxWorkers=1` failed before implementation because cache modules/signatures were missing and `tldw` synthesis did not forward `signal`.
+- Initial green verification passed 5 files / 18 tests, then code-quality review found two issues: weak fake SHA fallback and oversized cache writes exceeding the cap.
+- Fixed in `31180c28` by making `sha256Hex` fail closed without Web Crypto and skipping oversized cache writes before eviction/write attempts.
+- Final green verification: `cd apps/packages/ui && bunx vitest run src/components/Media/read-along/__tests__/media-read-along-cache-key.test.ts src/components/Media/read-along/__tests__/media-read-along-cache.test.ts src/services/__tests__/tts-provider.read-along.test.ts src/services/__tests__/tts.defaults.test.ts src/db/dexie/__tests__/stt-recordings.test.ts --maxWorkers=1` passed 5 files / 21 tests.
+- `git diff --check` passed for the Task 3 files.
+- Task 3 spec and code-quality re-reviews approved after the fix.
+- Bandit skipped for Task 3 because the touched slice is TypeScript frontend/Dexie code only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
