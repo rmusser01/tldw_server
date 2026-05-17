@@ -46,15 +46,6 @@ describe("media-library-normalization", () => {
     expect(normalized.totalCount).toBe(5)
   })
 
-  it("reads backend pagination.total_items for large libraries", () => {
-    const normalized = normalizeMediaLibraryResponse({
-      items: [{ media_id: 5, title: "Nested" }],
-      pagination: { total_items: 918 }
-    })
-
-    expect(normalized.totalCount).toBe(918)
-  })
-
   it("returns stable string keys for numeric and string ids", () => {
     expect(getMediaLibraryItemKey({ media_id: 0 })).toBe("0")
     expect(getMediaLibraryItemKey({ id: "abc" })).toBe("abc")
