@@ -1055,8 +1055,8 @@ git commit -m "docs: record Buddy builder verification"
 
 ## PR Preparation
 
-- [ ] Confirm `git status --short` is clean after final commit.
-- [ ] Confirm branch is based on latest `origin/dev`; rebase if needed.
-- [ ] Open a PR against `dev`.
-- [ ] In the PR body, include a human-owned `Change summary` placeholder for the requester rather than fabricating it.
-- [ ] Include verification results, known skips, and screenshots or Browser QA notes.
+- [x] Confirm `git status --short` is clean after final commit.
+- [x] Confirm branch is based on latest `origin/dev`; rebase if needed.
+- [x] Open a PR against `dev`: `https://github.com/rmusser01/tldw_server/pull/1821`.
+- [x] In the PR body, include a human-owned `Change summary` placeholder for the requester rather than fabricating it.
+- [x] Include verification results, known skips, and screenshots or Browser QA notes.
