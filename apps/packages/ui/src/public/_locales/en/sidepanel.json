@@ -1363,5 +1363,11 @@
   },
   "persona_unsavedStateBeforeUnloadPrompt": {
     "message": "You have unsaved state-doc changes. Leave this page without saving?"
+  },
+  "personaGarden_visuals_builder_importUnsupportedExtension": {
+    "message": "Choose a .tldw-persona-vpack or Codex/Petdex .zip archive."
+  },
+  "personaGarden_visuals_builder_importUnsupportedMimeType": {
+    "message": "Choose a Persona Visual or Codex/Petdex archive with a supported zip media type."
   }
 }

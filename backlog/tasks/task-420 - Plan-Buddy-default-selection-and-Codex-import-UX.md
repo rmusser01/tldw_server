@@ -17,6 +17,14 @@ references:
 documentation:
 - Docs/superpowers/specs/2026-05-17-buddy-guided-builder-ux-design.md
 - Docs/superpowers/plans/2026-05-17-buddy-guided-builder-ux-implementation-plan.md
+modified_files:
+- apps/packages/ui/src/components/PersonaGarden/buddyBuilderArchive.ts
+- apps/packages/ui/src/components/PersonaGarden/__tests__/buddyBuilderArchive.test.ts
+- apps/packages/ui/src/components/PersonaGarden/VisualPackEditor.tsx
+- apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx
+- apps/packages/ui/src/services/__tests__/persona-visuals.test.ts
+- apps/packages/ui/src/assets/locale/en/sidepanel.json
+- apps/packages/ui/src/public/_locales/en/sidepanel.json
 ---
 
 ## Description
@@ -116,7 +124,7 @@ Verification:
 - Post-plan-review `git diff --check` passed for the implementation-plan
   refinement.
 - Bandit is not applicable yet because this slice is docs/tracker only.
-
+Task 1 implementation completed: added shared Buddy import archive admission helpers, wired VisualPackEditor import preview gating to admit native Persona Visual archives and Codex/Petdex .zip archives, refreshed default starter fixtures to search-lens-basic, and added English builder import error copy. Focused verification passed: `bunx vitest run src/components/PersonaGarden/__tests__/buddyBuilderArchive.test.ts src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx src/services/__tests__/persona-visuals.test.ts src/routes/__tests__/sidepanel-persona-locale-keys.test.ts --testTimeout=30000` (4 files, 76 tests). Bandit is not applicable to this frontend-only TypeScript/JSON slice.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

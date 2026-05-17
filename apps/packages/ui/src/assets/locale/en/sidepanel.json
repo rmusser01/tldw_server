@@ -518,6 +518,10 @@
     "visuals": {
       "importPreviewUnsupportedExtension": "Choose a {{extension}} archive exported from Persona Visual Packs.",
       "importPreviewUnsupportedMimeType": "Choose a Persona Visual pack archive with a supported zip media type.",
+      "builder": {
+        "importUnsupportedExtension": "Choose a .tldw-persona-vpack or Codex/Petdex .zip archive.",
+        "importUnsupportedMimeType": "Choose a Persona Visual or Codex/Petdex archive with a supported zip media type."
+      },
       "importPreviewTerminalStatus": "Import preview {{status}} during {{stage}}.",
       "importPreviewBlocked": "Import preview completed with blockers. Review diagnostics before committing.",
       "importPreviewCompleted": "Import preview completed. Review the draft plan before committing.",

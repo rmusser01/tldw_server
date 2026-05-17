@@ -154,8 +154,8 @@ const mockVisualPackBackgroundGet = (path: string, method: string) => {
 const starterCatalogPayload = {
   starter_packs: [
     {
-      id: "research-buddy-starter",
-      title: "Research Buddy Starter",
+      id: "search-lens-basic",
+      title: "Search Lens Buddy",
       description: "Bundled starter",
       renderer_type: "sprite_frames",
       manifest_version: 1,
@@ -163,7 +163,19 @@ const starterCatalogPayload = {
       asset_count: 1,
       total_bytes: 512,
       tags: ["starter"],
-      license_label: "bundled"
+      license_label: "bundled",
+      complexity_tier: "basic",
+      production_status: "art_ready",
+      neutral_anchor_required: true,
+      expected_asset_groups: [
+        "identity_brief",
+        "neutral_anchor",
+        "preview_image",
+        "required_state_loops"
+      ],
+      animation_coverage_notes: [
+        "Reviewed bundled basic default with neutral-anchor-derived required-state loops."
+      ]
     }
   ]
 }
@@ -243,7 +255,7 @@ describe("VisualPackEditor", () => {
     expect(setupCard).toHaveTextContent(
       "No visual buddy is active for this persona."
     )
-    expect(setupCard).toHaveTextContent("Research Buddy Starter")
+    expect(setupCard).toHaveTextContent("Search Lens Buddy")
   })
 
   it("hides the setup choice card when there is an active pack", async () => {
@@ -830,7 +842,7 @@ describe("VisualPackEditor", () => {
     const calls: string[] = []
     const copiedDraft = makeVisualPack({
       id: "copied-draft",
-      title: "Research Buddy Starter",
+      title: "Search Lens Buddy",
       status: "draft"
     })
     let packsResponse = { packs: [], active_pack: null as any }
@@ -845,7 +857,7 @@ describe("VisualPackEditor", () => {
         return okResponse(starterCatalogPayload)
       }
       if (
-        path === "/api/v1/persona/visual-starter-packs/research-buddy-starter/copy" &&
+        path === "/api/v1/persona/visual-starter-packs/search-lens-basic/copy" &&
         method === "POST"
       ) {
         expect(parseJsonBody(init?.body)).toEqual({ target_persona_id: "persona-1" })
@@ -889,7 +901,7 @@ describe("VisualPackEditor", () => {
     )
     expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent("draft")
     expect(calls).toContain(
-      "POST /api/v1/persona/visual-starter-packs/research-buddy-starter/copy"
+      "POST /api/v1/persona/visual-starter-packs/search-lens-basic/copy"
     )
     expect(calls.some((call) => call.includes("/activate"))).toBe(false)
   })
@@ -919,7 +931,7 @@ describe("VisualPackEditor", () => {
         return okResponse(starterCatalogPayload)
       }
       if (
-        path === "/api/v1/persona/visual-starter-packs/research-buddy-starter/copy" &&
+        path === "/api/v1/persona/visual-starter-packs/search-lens-basic/copy" &&
         method === "POST"
       ) {
         return okResponse(copiedDraft)
@@ -994,7 +1006,7 @@ describe("VisualPackEditor", () => {
         return okResponse(starterCatalogPayload)
       }
       if (
-        path === "/api/v1/persona/visual-starter-packs/research-buddy-starter/copy" &&
+        path === "/api/v1/persona/visual-starter-packs/search-lens-basic/copy" &&
         method === "POST"
       ) {
         return copyDeferred.promise
@@ -1033,7 +1045,7 @@ describe("VisualPackEditor", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Use default" }))
     await waitFor(() =>
       expect(calls).toContain(
-        "POST /api/v1/persona/visual-starter-packs/research-buddy-starter/copy"
+        "POST /api/v1/persona/visual-starter-packs/search-lens-basic/copy"
       )
     )
 
@@ -1313,7 +1325,7 @@ describe("VisualPackEditor", () => {
     expect(calls).toContain(
       "POST /api/v1/persona/visual-starter-packs/alt-starter/copy"
     )
-    expect(calls.some((call) => call.includes("research-buddy-starter/copy"))).toBe(false)
+    expect(calls.some((call) => call.includes("search-lens-basic/copy"))).toBe(false)
   })
 
   it("localizes loading and refresh labels while candidates are loading", async () => {
@@ -1649,7 +1661,7 @@ describe("VisualPackEditor", () => {
     const copiedPack = {
       id: "starter-copy-1",
       persona_id: "persona-1",
-      title: "Research Buddy Starter",
+      title: "Search Lens Buddy",
       renderer_type: "sprite_frames",
       status: "draft",
       manifest: structuredClone(baseManifest),
@@ -1668,8 +1680,8 @@ describe("VisualPackEditor", () => {
         return okResponse({
           starter_packs: [
             {
-              id: "research-buddy-starter",
-              title: "Research Buddy Starter",
+              id: "search-lens-basic",
+              title: "Search Lens Buddy",
               description: "A deterministic sprite-frame starter.",
               renderer_type: "sprite_frames",
               manifest_version: 1,
@@ -1677,13 +1689,25 @@ describe("VisualPackEditor", () => {
               asset_count: 1,
               total_bytes: 92,
               tags: ["starter", "sprite_frames"],
-              license_label: "bundled"
+              license_label: "bundled",
+              complexity_tier: "basic",
+              production_status: "art_ready",
+              neutral_anchor_required: true,
+              expected_asset_groups: [
+                "identity_brief",
+                "neutral_anchor",
+                "preview_image",
+                "required_state_loops"
+              ],
+              animation_coverage_notes: [
+                "Reviewed bundled basic default with neutral-anchor-derived required-state loops."
+              ]
             }
           ]
         })
       }
       if (
-        path === "/api/v1/persona/visual-starter-packs/research-buddy-starter/copy" &&
+        path === "/api/v1/persona/visual-starter-packs/search-lens-basic/copy" &&
         method === "POST"
       ) {
         starterCopied = true
@@ -1732,7 +1756,7 @@ describe("VisualPackEditor", () => {
       )
     )
     const setupCard = await screen.findByTestId("visual-buddy-setup-choice-card")
-    expect(setupCard).toHaveTextContent("Research Buddy Starter")
+    expect(setupCard).toHaveTextContent("Search Lens Buddy")
 
     fireEvent.click(within(setupCard).getByRole("button", { name: "Use default" }))
 
@@ -1751,7 +1775,7 @@ describe("VisualPackEditor", () => {
     const copiedPack = {
       id: "starter-copy-1",
       persona_id: "persona-1",
-      title: "Research Buddy Starter",
+      title: "Search Lens Buddy",
       renderer_type: "sprite_frames",
       status: "draft",
       manifest: structuredClone(baseManifest),
@@ -1778,7 +1802,7 @@ describe("VisualPackEditor", () => {
         return okResponse(starterCatalogPayload)
       }
       if (
-        path === "/api/v1/persona/visual-starter-packs/research-buddy-starter/copy" &&
+        path === "/api/v1/persona/visual-starter-packs/search-lens-basic/copy" &&
         method === "POST"
       ) {
         expect(parseJsonBody(init?.body)).toMatchObject({
@@ -4329,6 +4353,105 @@ describe("VisualPackEditor", () => {
     expect(calls.some((call) => call.includes("/activate"))).toBe(false)
   })
 
+  it("accepts Codex and Petdex zip archives for import preview", async () => {
+    const calls: string[] = []
+    const pack = {
+      id: "pack-1",
+      persona_id: "persona-1",
+      title: "Animated pack",
+      renderer_type: "sprite_frames",
+      status: "draft",
+      manifest: structuredClone(baseManifest),
+      assets: visualAssets,
+      version: 3
+    }
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      calls.push(`${method} ${path}`)
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/import-previews" &&
+        method === "POST"
+      ) {
+        return okResponse({
+          preview_id: "preview-zip",
+          job_id: "preview-job-zip",
+          portability_job_id: "portability-preview-zip",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "queued",
+          stage: "validation"
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-pack-status")).toHaveTextContent(
+        "draft"
+      )
+    )
+    const archive = new File(["codex pet archive"], "pet.zip", {
+      type: "application/octet-stream"
+    })
+    fireEvent.change(screen.getByTestId("persona-visual-import-preview-input"), {
+      target: { files: [archive] }
+    })
+
+    expect(
+      screen.queryByTestId("persona-visual-import-preview-file-error")
+    ).not.toBeInTheDocument()
+    expect(screen.getByTestId("persona-visual-import-preview-button")).toBeEnabled()
+
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-button"))
+
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-preview-status")).toHaveTextContent(
+        "queued"
+      )
+    )
+    expect(calls).toContain(
+      "POST /api/v1/persona/profiles/persona-1/visual-packs/import-previews"
+    )
+  })
+
   it("rejects unsupported visual import archive filenames before upload", async () => {
     const calls: string[] = []
     const pack = {
@@ -4393,8 +4516,8 @@ describe("VisualPackEditor", () => {
         "draft"
       )
     )
-    const archive = new File(["not a portable pack"], "visuals.zip", {
-      type: "application/zip"
+    const archive = new File(["not a portable pack"], "visuals.png", {
+      type: "image/png"
     })
     fireEvent.change(screen.getByTestId("persona-visual-import-preview-input"), {
       target: { files: [archive] }
@@ -4402,7 +4525,7 @@ describe("VisualPackEditor", () => {
 
     expect(
       await screen.findByTestId("persona-visual-import-preview-file-error")
-    ).toHaveTextContent(".tldw-persona-vpack")
+    ).toHaveTextContent("Codex/Petdex .zip")
     expect(screen.getByTestId("persona-visual-import-preview-button")).toBeDisabled()
 
     fireEvent.click(screen.getByTestId("persona-visual-import-preview-button"))

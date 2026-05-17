@@ -90,8 +90,8 @@ describe("persona visuals service", () => {
 
   it("loads bundled starter packs through the starter catalog endpoint", async () => {
     const starterPack = {
-      id: "research-buddy-starter",
-      title: "Research Buddy Starter",
+      id: "search-lens-basic",
+      title: "Search Lens Buddy",
       description: "A deterministic sprite-frame starter.",
       renderer_type: "sprite_frames",
       manifest_version: 1,
@@ -101,10 +101,17 @@ describe("persona visuals service", () => {
       tags: ["starter", "sprite_frames"],
       license_label: "bundled",
       complexity_tier: "basic",
-      production_status: "scaffold",
+      production_status: "art_ready",
       neutral_anchor_required: true,
-      expected_asset_groups: ["neutral_anchor", "required_state_loops"],
-      animation_coverage_notes: ["Scaffold fixture only; replace with authored loops."]
+      expected_asset_groups: [
+        "identity_brief",
+        "neutral_anchor",
+        "preview_image",
+        "required_state_loops"
+      ],
+      animation_coverage_notes: [
+        "Reviewed bundled basic default with neutral-anchor-derived required-state loops."
+      ]
     }
     mocks.fetchWithAuth.mockResolvedValueOnce({
       ok: true,
@@ -146,7 +153,7 @@ describe("persona visuals service", () => {
     const copiedPack = {
       id: "starter-copy-1",
       persona_id: "persona-1",
-      title: "Research Buddy Starter",
+      title: "Search Lens Buddy",
       renderer_type: "sprite_frames",
       status: "draft",
       manifest: {
@@ -164,14 +171,14 @@ describe("persona visuals service", () => {
     })
 
     await expect(
-      copyPersonaVisualStarterPack("research-buddy-starter", {
+      copyPersonaVisualStarterPack("search-lens-basic", {
         target_persona_id: "persona-1",
         title: "Starter copy"
       })
     ).resolves.toEqual(copiedPack)
 
     expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
-      "/api/v1/persona/visual-starter-packs/research-buddy-starter/copy",
+      "/api/v1/persona/visual-starter-packs/search-lens-basic/copy",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
@@ -254,7 +261,7 @@ describe("persona visuals service", () => {
       json: async () => ({
         id: "copied-pack",
         persona_id: "persona-1",
-        title: "Research Buddy Starter",
+        title: "Search Lens Buddy",
         renderer_type: "sprite_frames",
         status: "draft",
         manifest: {

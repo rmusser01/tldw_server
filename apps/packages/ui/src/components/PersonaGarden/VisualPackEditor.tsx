@@ -101,6 +101,11 @@ import {
   VisualBuddySetupChoiceCard
 } from "./VisualBuddySetupChoiceCard"
 import { VisualPackReusePanel } from "./VisualPackReusePanel"
+import {
+  BUDDY_IMPORT_ARCHIVE_ACCEPT,
+  getBuddyImportArchiveFileError,
+  NATIVE_PERSONA_VISUAL_PACK_EXTENSION
+} from "./buddyBuilderArchive"
 
 type VisualPackEditorProps = {
   selectedPersonaId: string
@@ -498,13 +503,7 @@ const TRIGGER_SOURCES: PersonaVisualAuthoredTrigger["source"][] = [
   "mcp_runtime"
 ]
 
-const PORTABLE_VISUAL_PACK_EXTENSION = ".tldw-persona-vpack"
-const PORTABLE_VISUAL_PACK_MIME_TYPES = new Set([
-  "application/octet-stream",
-  "application/vnd.tldw.persona.visual-pack+zip",
-  "application/x-zip-compressed",
-  "application/zip"
-])
+const PORTABLE_VISUAL_PACK_EXTENSION = NATIVE_PERSONA_VISUAL_PACK_EXTENSION
 const IMPORT_COMMIT_TERMINAL_STATUSES = new Set([
   "completed",
   "failed",
@@ -520,34 +519,10 @@ const IMPORT_PREVIEW_TERMINAL_STATUSES = new Set([
   "quarantined"
 ])
 
-const hasPortableVisualPackExtension = (file: File | null): boolean =>
-  !file || file.name.toLowerCase().endsWith(PORTABLE_VISUAL_PACK_EXTENSION)
-
-const hasSupportedPortableVisualPackMediaType = (file: File | null): boolean => {
-  if (!file) return true
-  const mediaType = file.type.trim().toLowerCase()
-  return !mediaType || PORTABLE_VISUAL_PACK_MIME_TYPES.has(mediaType)
-}
-
-const isPortableVisualPackFile = (file: File | null): boolean =>
-  hasPortableVisualPackExtension(file) && hasSupportedPortableVisualPackMediaType(file)
-
 const getImportPreviewFileError = (
   file: File | null,
   t: VisualPackTranslate
-): string | null => {
-  if (isPortableVisualPackFile(file)) return null
-  if (!hasPortableVisualPackExtension(file)) {
-    return t("sidepanel:personaGarden.visuals.importPreviewUnsupportedExtension", {
-      extension: PORTABLE_VISUAL_PACK_EXTENSION,
-      defaultValue: `Choose a ${PORTABLE_VISUAL_PACK_EXTENSION} archive exported from Persona Visual Packs.`
-    })
-  }
-  return t("sidepanel:personaGarden.visuals.importPreviewUnsupportedMimeType", {
-    defaultValue:
-      "Choose a Persona Visual pack archive with a supported zip media type."
-  })
-}
+): string | null => getBuddyImportArchiveFileError(file, t)
 
 type ImportPreviewStatus =
   | PersonaVisualImportPreviewStartResponse
@@ -3023,7 +2998,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           ref={importPreviewInputRef}
           data-testid="persona-visual-import-preview-input"
           type="file"
-          accept={`${PORTABLE_VISUAL_PACK_EXTENSION},application/zip,application/octet-stream`}
+          accept={BUDDY_IMPORT_ARCHIVE_ACCEPT}
           className="text-xs text-text"
           onChange={(event) =>
             setSelectedImportPreviewFile(event.target.files?.[0] ?? null)

@@ -116,9 +116,9 @@ Do not touch:
 - Modify: `apps/packages/ui/src/assets/locale/en/sidepanel.json`
 - Modify: `apps/packages/ui/src/public/_locales/en/sidepanel.json`
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] **Step 1: Write archive admission helper tests**
+- [x] **Step 1: Write archive admission helper tests**
 
 Create `buddyBuilderArchive.test.ts` with cases for native pack, Codex ZIP, generic ZIP MIME, unsupported extension, and unsupported MIME.
 
@@ -172,7 +172,7 @@ describe("buddyBuilderArchive", () => {
 })
 ```
 
-- [ ] **Step 2: Run helper tests and verify they fail**
+- [x] **Step 2: Run helper tests and verify they fail**
 
 Run:
 
@@ -183,7 +183,7 @@ bunx vitest run src/components/PersonaGarden/__tests__/buddyBuilderArchive.test.
 
 Expected: FAIL because `buddyBuilderArchive.ts` does not exist.
 
-- [ ] **Step 3: Implement the archive helper**
+- [x] **Step 3: Implement the archive helper**
 
 Create `buddyBuilderArchive.ts` with shared constants and helpers.
 
@@ -248,7 +248,7 @@ export const getBuddyImportArchiveFileError = (
 }
 ```
 
-- [ ] **Step 4: Wire `VisualPackEditor` to the helper**
+- [x] **Step 4: Wire `VisualPackEditor` to the helper**
 
 Replace the local `PORTABLE_VISUAL_PACK_EXTENSION`, MIME set, `isPortableVisualPackFile`, and `getImportPreviewFileError` logic with imports from `buddyBuilderArchive.ts`. Keep export filename generation using `.tldw-persona-vpack`.
 
@@ -258,7 +258,7 @@ The upload input should use:
 accept={BUDDY_IMPORT_ARCHIVE_ACCEPT}
 ```
 
-- [ ] **Step 5: Add archive admission i18n keys**
+- [x] **Step 5: Add archive admission i18n keys**
 
 Add the new archive error keys used by `getBuddyImportArchiveFileError()` in:
 
@@ -280,11 +280,11 @@ Required keys:
 }
 ```
 
-- [ ] **Step 6: Update stale VisualPackEditor starter fixtures**
+- [x] **Step 6: Update stale VisualPackEditor starter fixtures**
 
 In `VisualPackEditor.test.tsx`, use `search-lens-basic` for default starter tests and expected copy calls. Keep `research-buddy-starter` only where the test name explicitly says it is testing legacy alias compatibility.
 
-- [ ] **Step 7: Run focused tests**
+- [x] **Step 7: Run focused tests**
 
 Run:
 
@@ -295,7 +295,7 @@ bunx vitest run src/components/PersonaGarden/__tests__/buddyBuilderArchive.test.
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit Task 1**
+- [x] **Step 8: Commit Task 1**
 
 ```bash
 git add apps/packages/ui/src/components/PersonaGarden/buddyBuilderArchive.ts apps/packages/ui/src/components/PersonaGarden/__tests__/buddyBuilderArchive.test.ts apps/packages/ui/src/components/PersonaGarden/VisualPackEditor.tsx apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx apps/packages/ui/src/assets/locale/en/sidepanel.json apps/packages/ui/src/public/_locales/en/sidepanel.json
