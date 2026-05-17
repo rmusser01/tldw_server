@@ -129,6 +129,7 @@ def _build_app_with_overrides(
     app.dependency_overrides[auth_deps.get_auth_principal] = _fake_get_auth_principal
     app.dependency_overrides[auth_deps.check_rate_limit] = _fake_check_rate_limit
     app.dependency_overrides[llamacpp_mod.check_rate_limit] = _fake_check_rate_limit
+    app.dependency_overrides[llamacpp_mod.get_job_manager] = lambda: object()
 
     return app
 
@@ -173,6 +174,38 @@ def _patch_provider_config_writes(monkeypatch) -> None:  # noqa: ANN001
             "will_persist": False,
         },
     )
+    acquisition_job = {
+        "job_id": "1",
+        "status": "queued",
+        "operation": "download",
+        "queue": "acquisition",
+        "source_label": "https://example.com/model.gguf",
+        "destination_path": "/models/model.gguf",
+        "asset_id": None,
+        "progress": {},
+        "warnings": [],
+        "error_message": None,
+    }
+    monkeypatch.setattr(
+        llamacpp_mod.llamacpp_acquisition_jobs,
+        "create_download_job",
+        lambda job_manager, payload, *, owner_user_id: acquisition_job,
+    )
+    monkeypatch.setattr(
+        llamacpp_mod.llamacpp_acquisition_jobs,
+        "get_download_job",
+        lambda job_manager, job_id: acquisition_job,
+    )
+    monkeypatch.setattr(
+        llamacpp_mod.llamacpp_acquisition_jobs,
+        "list_download_jobs",
+        lambda job_manager, *, limit=100: {"jobs": [acquisition_job]},
+    )
+    monkeypatch.setattr(
+        llamacpp_mod.llamacpp_acquisition_jobs,
+        "cancel_download_job",
+        lambda job_manager, job_id: acquisition_job | {"status": "cancelled"},
+    )
 
 
 @pytest.mark.unit
@@ -188,6 +221,10 @@ def _patch_provider_config_writes(monkeypatch) -> None:  # noqa: ANN001
         ("get", "/api/v1/llamacpp/logs/tail", None),
         ("get", "/api/v1/llamacpp/hardware", None),
         ("post", "/api/v1/llamacpp/assets/import-folder/preview", {"path": "/models"}),
+        ("post", "/api/v1/llamacpp/assets/downloads", {"url": "https://example.com/model.gguf"}),
+        ("get", "/api/v1/llamacpp/assets/downloads", None),
+        ("get", "/api/v1/llamacpp/assets/downloads/1", None),
+        ("delete", "/api/v1/llamacpp/assets/downloads/1", None),
     ],
 )
 def test_llamacpp_lifecycle_401_when_principal_unavailable(
@@ -202,6 +239,8 @@ def test_llamacpp_lifecycle_401_when_principal_unavailable(
     with TestClient(app) as client:
         if method == "post":
             resp = client.post(path, json=payload or {})
+        elif method == "delete":
+            resp = client.delete(path)
         else:
             resp = client.get(path)
 
@@ -222,6 +261,10 @@ def test_llamacpp_lifecycle_401_when_principal_unavailable(
         ("get", "/api/v1/llamacpp/logs/tail", None),
         ("get", "/api/v1/llamacpp/hardware", None),
         ("post", "/api/v1/llamacpp/assets/import-folder/preview", {"path": "/models"}),
+        ("post", "/api/v1/llamacpp/assets/downloads", {"url": "https://example.com/model.gguf"}),
+        ("get", "/api/v1/llamacpp/assets/downloads", None),
+        ("get", "/api/v1/llamacpp/assets/downloads/1", None),
+        ("delete", "/api/v1/llamacpp/assets/downloads/1", None),
     ],
 )
 def test_llamacpp_lifecycle_403_when_missing_admin_role(
@@ -241,6 +284,8 @@ def test_llamacpp_lifecycle_403_when_missing_admin_role(
     with TestClient(app) as client:
         if method == "post":
             resp = client.post(path, json=payload or {})
+        elif method == "delete":
+            resp = client.delete(path)
         else:
             resp = client.get(path)
 
@@ -260,6 +305,10 @@ def test_llamacpp_lifecycle_403_when_missing_admin_role(
         ("get", "/api/v1/llamacpp/logs/tail", None),
         ("get", "/api/v1/llamacpp/hardware", None),
         ("post", "/api/v1/llamacpp/assets/import-folder/preview", {"path": "/models"}),
+        ("post", "/api/v1/llamacpp/assets/downloads", {"url": "https://example.com/model.gguf"}),
+        ("get", "/api/v1/llamacpp/assets/downloads", None),
+        ("get", "/api/v1/llamacpp/assets/downloads/1", None),
+        ("delete", "/api/v1/llamacpp/assets/downloads/1", None),
     ],
 )
 def test_llamacpp_lifecycle_200_for_admin_principal(
@@ -279,6 +328,8 @@ def test_llamacpp_lifecycle_200_for_admin_principal(
     with TestClient(app) as client:
         if method == "post":
             resp = client.post(path, json=payload or {})
+        elif method == "delete":
+            resp = client.delete(path)
         else:
             resp = client.get(path)
 

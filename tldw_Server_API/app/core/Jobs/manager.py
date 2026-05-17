@@ -254,6 +254,7 @@ class JobManager:
     # Standard queues across domains
     STANDARD_QUEUES = ("default", "high", "low")
     DOMAIN_ALLOWED_QUEUES: ClassVar[dict[str, tuple[str, ...]]] = {
+        "llamacpp": ("acquisition",),
         "reading": ("reading-digest",),
         "vn_assets": ("generation",),
         "persona_visuals": ("generation",),

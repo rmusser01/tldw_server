@@ -187,6 +187,42 @@ class LlamaCppAssetImportPreviewResponse(BaseModel):
     will_persist: bool = False
 
 
+class LlamaCppAssetDownloadRequest(BaseModel):
+    """Request to queue a safe llama.cpp asset download job."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: str
+    destination_dir: str | None = None
+    filename: str | None = None
+    expected_sha256: str | None = None
+    expected_size_bytes: int | None = Field(default=None, ge=1)
+    source_label: str | None = None
+    overwrite: bool = False
+    register_asset: bool = True
+
+
+class LlamaCppAcquisitionJobResponse(BaseModel):
+    """Normalized llama.cpp acquisition job state for admin clients."""
+
+    job_id: str
+    status: str
+    operation: Literal["download"]
+    queue: str
+    source_label: str | None = None
+    destination_path: str | None = None
+    asset_id: str | None = None
+    progress: dict[str, object] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    error_message: str | None = None
+
+
+class LlamaCppAcquisitionJobListResponse(BaseModel):
+    """Recent llama.cpp acquisition jobs."""
+
+    jobs: list[LlamaCppAcquisitionJobResponse] = Field(default_factory=list)
+
+
 class LlamaCppInventoryItem(BaseModel):
     """A single model inventory entry from models_dir or registered paths."""
 
