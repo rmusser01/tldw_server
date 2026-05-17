@@ -218,7 +218,7 @@ git commit -m "chore: track chat role-play preset remediation tasks"
 - Test: `apps/packages/ui/src/components/Common/__tests__/PromptSelect.system-prompt-modal.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/ParameterPresets.guard.test.ts`
 
-- [x] **Step 1: Write the failing starter regression test**
+- [ ] **Step 1: Write the failing starter regression test**
 
 Add `PlaygroundForm.role-play-starter.integration.test.tsx`.
 
@@ -234,7 +234,7 @@ await user.click(screen.getByRole("button", { name: /default assistant|helpful a
 expect(screen.queryByText(/something went wrong/i)).not.toBeInTheDocument()
 ```
 
-- [x] **Step 2: Run the starter test and verify failure or current pass**
+- [ ] **Step 2: Run the starter test and verify failure or current pass**
 
 Run:
 ```bash
@@ -245,7 +245,7 @@ Expected:
 - Fails if the crash or missing test harness is active.
 - If it passes before implementation, record that the browser crash is not currently reproduced by unit coverage and keep the test.
 
-- [x] **Step 3: Fix the starter/picker crash minimally**
+- [ ] **Step 3: Fix the starter/picker crash minimally**
 
 Only change the path that causes the update loop.
 
@@ -256,7 +256,7 @@ Likely fix areas:
 
 Do not add Role-play setup or state adapter in this task.
 
-- [x] **Step 4: Write prompt recovery tests**
+- [ ] **Step 4: Write prompt recovery tests**
 
 Extend `PromptSelect.system-prompt-modal.test.tsx`.
 
@@ -266,7 +266,7 @@ Test cases:
 - Clearing a custom prompt calls `setSystemPrompt("")`.
 - Empty prompt library can still render `No saved prompts` without hiding recovery actions.
 
-- [x] **Step 5: Implement prompt recovery**
+- [ ] **Step 5: Implement prompt recovery**
 
 In `PromptSelect.tsx`:
 - avoid returning early before appending current-prompt recovery actions;
@@ -280,7 +280,7 @@ const recoveryItems = hasCurrentSystemPrompt ? [editCurrentPromptItem, clearCurr
 const menuItems = [...promptItems, ...recoveryItems]
 ```
 
-- [x] **Step 6: Write parameter preset accessibility tests**
+- [ ] **Step 6: Write parameter preset accessibility tests**
 
 Extend `ParameterPresets.guard.test.ts`.
 
@@ -289,14 +289,14 @@ Test cases:
 - Each preset option has an accessible name: Creative, Balanced, Precise, Custom.
 - Tooltip/detail rows still include temperature/top-p/top-k values.
 
-- [x] **Step 7: Implement parameter preset labels**
+- [ ] **Step 7: Implement parameter preset labels**
 
 In `ParameterPresets.tsx`:
 - add `aria-label={t("playground:presets.ariaLabel", "Generation style")}` to the segmented control or wrapper;
 - include visually hidden preset text in compact labels if Ant Design strips accessible names;
 - keep visible labels in non-compact mode.
 
-- [x] **Step 8: Run Stage 1 focused tests**
+- [ ] **Step 8: Run Stage 1 focused tests**
 
 Run:
 ```bash
@@ -309,7 +309,7 @@ bunx vitest run \
 
 Expected: pass.
 
-- [x] **Step 9: Browser verify Stage 1**
+- [ ] **Step 9: Browser verify Stage 1**
 
 Verify on `/chat`:
 - `Chat as a character` opens the selector.
@@ -317,7 +317,7 @@ Verify on `/chat`:
 - an applied custom prompt can be edited/cleared with an empty prompt library.
 - compact generation presets are understandable by keyboard/screen-reader inspection.
 
-- [x] **Step 10: Commit Stage 1**
+- [ ] **Step 10: Commit Stage 1**
 
 ```bash
 git add \
@@ -346,7 +346,7 @@ git commit -m "fix: stabilize chat role-play starter controls"
 - Modify: `apps/packages/ui/src/public/_locales/en/playground.json`
 - Modify: `apps/packages/ui/src/assets/locale/en/playground.json`
 
-- [x] **Step 1: Write role-play state tests**
+- [ ] **Step 1: Write role-play state tests**
 
 Create `role-play-state.test.ts`.
 
@@ -360,7 +360,7 @@ Test cases:
 - clearing generation style resets to `Balanced`;
 - pinned/context state is summarized but does not expose source management actions.
 
-- [x] **Step 2: Implement derived state helper**
+- [ ] **Step 2: Implement derived state helper**
 
 Create `role-play-state.ts`.
 
@@ -385,14 +385,14 @@ Rules:
 - no storage;
 - no API calls.
 
-- [x] **Step 3: Export template lookup metadata**
+- [ ] **Step 3: Export template lookup metadata**
 
 In `SystemPromptTemplates.tsx`:
 - export `PROMPT_TEMPLATES` or add `getPromptTemplateById(id)`;
 - preserve icons as UI-only where practical;
 - expose category/title/content for role-play state and saved setup detection.
 
-- [x] **Step 4: Preserve behavior template identity after apply**
+- [ ] **Step 4: Preserve behavior template identity after apply**
 
 In `PlaygroundForm.tsx`:
 - when `SystemPromptTemplatesModal` applies a template, store template id/title/category alongside `systemPrompt`;
@@ -401,7 +401,7 @@ In `PlaygroundForm.tsx`:
 
 Do not convert this into a backend object.
 
-- [x] **Step 5: Write active chip tests**
+- [ ] **Step 5: Write active chip tests**
 
 Extend or create tests around `usePlaygroundContextItems`.
 
@@ -412,7 +412,7 @@ Test cases:
 - character chip remove calls the existing selected-character clear path;
 - generation style chip clear/reset uses `Balanced`.
 
-- [x] **Step 6: Render role-play chips from adapter**
+- [ ] **Step 6: Render role-play chips from adapter**
 
 In `usePlaygroundContextItems.ts`:
 - accept `rolePlayState` or input fields needed to derive it;
@@ -421,7 +421,7 @@ In `usePlaygroundContextItems.ts`:
 - add safe clear/remove actions where handlers already exist.
 - when clearing generation style, apply `getPresetByKey("balanced")` settings.
 
-- [x] **Step 7: Clarify labels and update i18n**
+- [ ] **Step 7: Clarify labels and update i18n**
 
 Update user-facing copy through locale keys:
 - `Templates` -> `System prompts` or `Behavior templates`;
@@ -434,7 +434,7 @@ apps/packages/ui/src/public/_locales/en/playground.json
 apps/packages/ui/src/assets/locale/en/playground.json
 ```
 
-- [x] **Step 8: Run Stage 2 focused tests**
+- [ ] **Step 8: Run Stage 2 focused tests**
 
 Run:
 ```bash
@@ -446,7 +446,7 @@ bunx vitest run \
 
 Expected: pass.
 
-- [x] **Step 9: Browser verify Stage 2**
+- [ ] **Step 9: Browser verify Stage 2**
 
 On `/chat`:
 - apply `Character Actor`;
@@ -455,11 +455,7 @@ On `/chat`:
 - clear behavior without clearing character;
 - verify changed labels are not hard-coded English in components.
 
-Result:
-- Focused tests, locale parsing, and diff whitespace checks were completed.
-- Browser verification was attempted, but the in-app browser policy blocked `http://127.0.0.1:3001/chat` and explicitly prohibited raw CDP or alternate-browser workarounds for that target.
-
-- [x] **Step 10: Commit Stage 2**
+- [ ] **Step 10: Commit Stage 2**
 
 ```bash
 git add \
@@ -485,7 +481,7 @@ git commit -m "feat: show active chat role-play state"
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/Playground.responsive-parity.guard.test.ts`
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/mobile-composer-layout.test.ts`
 
-- [x] **Step 1: Write mobile parity tests**
+- [ ] **Step 1: Write mobile parity tests**
 
 Create `ComposerToolbar.role-play-mobile.test.tsx`.
 
@@ -495,13 +491,13 @@ Test cases:
 - active role-play chips expose clear/change actions without requiring desktop-only controls;
 - entries use callbacks that Stage 4 can reuse to open Role-play setup.
 
-- [x] **Step 2: Implement reusable mobile entry callbacks**
+- [ ] **Step 2: Implement reusable mobile entry callbacks**
 
 In `ComposerToolbar.tsx`:
 - pass `onOpenSystemPrompts`, `onOpenGenerationStyle`, and future `onOpenRolePlaySetup` callbacks through one shared prop shape;
 - avoid mobile-only state that will be deleted in Stage 4.
 
-- [x] **Step 3: Add role-play entries to overflow**
+- [ ] **Step 3: Add role-play entries to overflow**
 
 In `ComposerToolbarOverflow.tsx`:
 - add `System prompts`/`Behavior templates`;
@@ -509,7 +505,7 @@ In `ComposerToolbarOverflow.tsx`:
 - make both keyboard reachable and labelled;
 - keep composer send box reachable.
 
-- [x] **Step 4: Run mobile tests**
+- [ ] **Step 4: Run mobile tests**
 
 Run:
 ```bash
@@ -521,7 +517,7 @@ bunx vitest run \
 
 Expected: pass.
 
-- [x] **Step 5: Browser verify mobile**
+- [ ] **Step 5: Browser verify mobile**
 
 At 390px wide viewport on `/chat`:
 - find and open system prompts/behavior templates;
@@ -530,11 +526,7 @@ At 390px wide viewport on `/chat`:
 - clear active role-play state;
 - verify composer remains visible.
 
-Result:
-- Focused Stage 3 tests, existing responsive/layout guards, locale parsing, and diff whitespace checks were completed.
-- Browser verification was blocked by the same in-app browser target policy for `http://127.0.0.1:3001/chat`; raw CDP and alternate browser surfaces were not used because the policy explicitly prohibited routing around the blocked target.
-
-- [x] **Step 6: Commit Stage 3**
+- [ ] **Step 6: Commit Stage 3**
 
 ```bash
 git add \
@@ -555,16 +547,13 @@ git commit -m "feat: expose chat role-play presets on mobile"
 - Modify: `apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Playground/ComposerToolbar.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Playground/ComposerToolbarOverflow.tsx`
-- Modify: `apps/packages/ui/src/components/Layouts/ChatHeader.tsx`
 - Modify as needed: `apps/packages/ui/src/components/Option/Playground/role-play-state.ts`
 - Create: `apps/packages/ui/src/components/Option/Playground/role-play-scene.ts`
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/role-play-scene.test.ts`
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/ComposerToolbar.role-play-mobile.test.tsx`
-- Test: `apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx`
-- Test: `apps/packages/ui/src/components/Layouts/__tests__/ChatHeader.test.tsx`
 
-- [x] **Step 1: Write setup drawer tests**
+- [ ] **Step 1: Write setup drawer tests**
 
 Create `RolePlaySetupDrawer.test.tsx`.
 
@@ -582,7 +571,7 @@ Test cases:
 - scene reset restores `createDefaultActorSettings()`;
 - Escape closes and focus returns to trigger.
 
-- [x] **Step 2: Write scene adapter tests**
+- [ ] **Step 2: Write scene adapter tests**
 
 Create `role-play-scene.test.ts`.
 
@@ -594,7 +583,7 @@ Test cases:
 - reset scene returns `createDefaultActorSettings()`;
 - preview text uses `buildActorPrompt(settings)` and token count uses `estimateActorTokens`.
 
-- [x] **Step 3: Implement scene adapter**
+- [ ] **Step 3: Implement scene adapter**
 
 Create `role-play-scene.ts`.
 
@@ -619,7 +608,7 @@ export function clearRolePlayScene(settings: ActorSettings | null): ActorSetting
 export function resetRolePlayScene(): ActorSettings
 ```
 
-- [x] **Step 4: Implement preview component**
+- [ ] **Step 4: Implement preview component**
 
 Create `RolePlaySetupPreview.tsx`.
 
@@ -634,7 +623,7 @@ type RolePlaySetupPreviewProps = {
 
 Keep it presentational. No store access.
 
-- [x] **Step 5: Implement setup drawer**
+- [ ] **Step 5: Implement setup drawer**
 
 Create `RolePlaySetupDrawer.tsx`.
 
@@ -652,7 +641,7 @@ Rules:
 - show preview before apply;
 - do not duplicate source-of-truth state.
 
-- [x] **Step 6: Wire setup drawer into PlaygroundForm**
+- [ ] **Step 6: Wire setup drawer into PlaygroundForm**
 
 In `PlaygroundForm.tsx`:
 - add `rolePlaySetupOpen` local state;
@@ -661,13 +650,13 @@ In `PlaygroundForm.tsx`:
 - apply confirmed changes through existing setters;
 - do not change send behavior.
 
-- [x] **Step 7: Reuse Stage 3 mobile entry**
+- [ ] **Step 7: Reuse Stage 3 mobile entry**
 
 In `ComposerToolbar.tsx` and `ComposerToolbarOverflow.tsx`:
 - `Role-play setup` entry opens the drawer/sheet;
 - Stage 3 mobile template/generation entries either remain equivalent shortcuts or route into the setup surface.
 
-- [x] **Step 8: Run setup tests**
+- [ ] **Step 8: Run setup tests**
 
 Run:
 ```bash
@@ -679,20 +668,10 @@ bunx vitest run \
 
 Expected: pass.
 
-Recorded verification:
-- `bunx vitest run ../packages/ui/src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/role-play-scene.test.ts ../packages/ui/src/components/Option/Playground/__tests__/ComposerToolbar.role-play-mobile.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/ComposerToolbar.test.tsx --reporter=verbose` passed: 4 files, 37 tests.
-- Follow-up CDP regression pass found and fixed a null `documentContext` crash, missing desktop setup trigger, mobile overflow first-click failure, and chat header horizontal overflow. `bunx vitest run ../packages/ui/src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/role-play-scene.test.ts ../packages/ui/src/components/Option/Playground/__tests__/ComposerToolbar.role-play-mobile.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/ComposerToolbar.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx ../packages/ui/src/components/Layouts/__tests__/ChatHeader.test.tsx --reporter=verbose` passed: 6 files, 53 tests.
-- `node -e "JSON.parse(require('fs').readFileSync('../packages/ui/src/assets/locale/en/playground.json','utf8')); JSON.parse(require('fs').readFileSync('../packages/ui/src/public/_locales/en/playground.json','utf8')); console.log('json ok')"` passed.
-- `git diff --check` passed.
-- `bunx tsc --noEmit --pretty false` still fails only on the existing unrelated baseline errors in `EmbeddingsModelSelectionConfig.tsx`, `persona-visuals.ts`, and `lib/api/vnPlay.ts`; no new Stage 4 type errors were reported.
-
-- [x] **Step 9: Browser verify setup flow**
-
-Recorded status: verified through CDP after explicit user override. CDP connected to `Chrome/145.0.7632.6` with `webSocketDebuggerUrl` present and verified `/chat` on `http://127.0.0.1:3001/chat` with seeded single-user API config. Computer Use was not used.
+- [ ] **Step 9: Browser verify setup flow**
 
 Desktop:
-- direct Role-play setup trigger is present;
-- Role-play setup opens the drawer;
+- open Role-play setup;
 - choose character/persona;
 - choose behavior template;
 - add scene context;
@@ -700,14 +679,11 @@ Desktop:
 - preview and apply.
 
 Mobile:
-- More options opens on the first click while the composer textarea is focused;
-- Role-play setup is present in overflow;
-- setup drawer exposes preview, Character, Behavior, Scene, Generation style, Apply, and Cancel;
-- `/chat` at 390px has `scrollWidth` equal to `clientWidth` and no horizontal overflow offenders.
+- open Role-play setup from overflow/chip;
+- verify full-height sheet/drawer does not hide recovery path;
+- apply and clear one layer.
 
-- [x] **Step 10: Commit Stage 4**
-
-Committed with message `feat: add chat role-play setup surface`.
+- [ ] **Step 10: Commit Stage 4**
 
 ```bash
 git add \
@@ -736,7 +712,7 @@ git commit -m "feat: add chat role-play setup surface"
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/saved-role-play-setups.test.ts`
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/startup-template-bundles.integration.test.ts`
 
-- [x] **Step 1: Write saved setup helper tests**
+- [ ] **Step 1: Write saved setup helper tests**
 
 Create `saved-role-play-setups.test.ts`.
 
@@ -748,7 +724,7 @@ Test cases:
 - template name substring alone does not make a bundle relevant;
 - preview includes character, behavior, generation values, and context counts.
 
-- [x] **Step 2: Extend startup bundle metadata minimally**
+- [ ] **Step 2: Extend startup bundle metadata minimally**
 
 In `startup-template-bundles.ts`:
 - add optional source marker such as `source: "startup-template" | "role-play-setup"` if compatible with existing storage;
@@ -783,7 +759,7 @@ In `startup-template-bundles.ts`:
 
 Do not break existing startup template tests.
 
-- [x] **Step 3: Add saved setup panel**
+- [ ] **Step 3: Add saved setup panel**
 
 Create `SavedRolePlaySetupsPanel.tsx`.
 
@@ -795,20 +771,20 @@ MVP actions:
 
 Do not add update-current or duplicate unless existing storage already makes it cheap.
 
-- [x] **Step 4: Wire panel into Role-play setup drawer**
+- [ ] **Step 4: Wire panel into Role-play setup drawer**
 
 In `RolePlaySetupDrawer.tsx`:
 - show saved setups when role-play-relevant bundles exist;
 - keep ordinary startup templates out of this list;
 - use `RolePlaySetupPreview` before apply.
 
-- [x] **Step 5: Update startup template modal preview**
+- [ ] **Step 5: Update startup template modal preview**
 
 In `PlaygroundStartupTemplateModal.tsx`:
 - show exact role-play fields when previewing a role-play-relevant bundle;
 - keep generic startup template preview behavior for other bundles.
 
-- [x] **Step 6: Run saved setup tests**
+- [ ] **Step 6: Run saved setup tests**
 
 Run:
 ```bash
@@ -820,12 +796,7 @@ bunx vitest run \
 
 Expected: pass.
 
-Recorded verification:
-- Red helper test run failed before implementation on missing role-play bundle helpers and metadata, then passed after implementation.
-- `bunx vitest run ../packages/ui/src/components/Option/Playground/__tests__/saved-role-play-setups.test.ts ../packages/ui/src/components/Option/Playground/__tests__/startup-template-bundles.integration.test.ts ../packages/ui/src/components/Option/Playground/__tests__/startup-template-bundles.prompt-mapping.test.ts ../packages/ui/src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx` passed: 4 files, 23 tests.
-- `bunx tsc --noEmit --pretty false` still fails only on existing unrelated baseline errors in `EmbeddingsModelSelectionConfig.tsx`, `persona-visuals.ts`, and `lib/api/vnPlay.ts`; no new Stage 5 type errors were reported.
-
-- [x] **Step 7: Browser verify saved setups**
+- [ ] **Step 7: Browser verify saved setups**
 
 On `/chat`:
 - create a role-play setup with character, behavior, scene, generation style;
@@ -835,17 +806,7 @@ On `/chat`:
 - delete it;
 - verify unrelated startup templates do not appear as role-play setups.
 
-Recorded status: verified through CDP. CDP connected to Chrome on `127.0.0.1:9222` and verified `/chat` at `http://127.0.0.1:3001/chat` with seeded single-user API config. Computer Use was not used.
-
-CDP verification covered:
-- generic startup template remains stored but hidden from the saved role-play setup list;
-- role-play setup saves with `source: "role-play-setup"`;
-- saved setup captures Character Actor behavior, Precise generation, and enabled scene state;
-- preview shows role-play fields;
-- applying from the preview modal persists the saved scene;
-- rename, apply, and delete complete.
-
-- [x] **Step 8: Commit Stage 5**
+- [ ] **Step 8: Commit Stage 5**
 
 ```bash
 git add \
@@ -861,8 +822,6 @@ git add \
 git commit -m "feat: save chat role-play setups"
 ```
 
-Committed with message `feat: save chat role-play setups`.
-
 ## Task 6: Stage 6 Compatibility And Request-Inclusion Guardrails
 
 **Files:**
@@ -871,13 +830,11 @@ Committed with message `feat: save chat role-play setups`.
 - Modify: `apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundRawPreview.ts`
 - Modify: `apps/packages/ui/src/components/Option/Playground/RolePlaySetupDrawer.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundContextItems.ts`
-- Modify: `apps/tldw-frontend/extension/shims/plasmo-storage.ts`
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/role-play-compatibility.test.ts`
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/usePlaygroundRawPreview.mcp-tools.test.tsx`
 - Test as needed: `apps/packages/ui/src/components/Option/Playground/__tests__/compare-interoperability.test.ts`
-- Test: `apps/tldw-frontend/__tests__/extension/plasmo-storage.test.ts`
 
-- [x] **Step 1: Write compatibility tests**
+- [ ] **Step 1: Write compatibility tests**
 
 Create `role-play-compatibility.test.ts`.
 
@@ -896,7 +853,7 @@ Matrix:
 - character plus uploaded docs/context files -> exact current behavior;
 - no character/persona -> `none`.
 
-- [x] **Step 2: Implement pure compatibility helper**
+- [ ] **Step 2: Implement pure compatibility helper**
 
 Create `role-play-compatibility.ts`.
 
@@ -936,14 +893,14 @@ type RolePlayCompatibilityInput = {
 }
 ```
 
-- [x] **Step 3: Replace duplicate eligibility logic**
+- [ ] **Step 3: Replace duplicate eligibility logic**
 
 In `usePlaygroundRawPreview.ts`:
 - keep request behavior unchanged unless tests prove current behavior is wrong;
 - use the helper to derive status that the UI can display;
 - avoid changing endpoint selection as part of this task unless the UI currently lies.
 
-- [x] **Step 4: Show actionable notices**
+- [ ] **Step 4: Show actionable notices**
 
 In setup drawer and/or active context chips:
 - show `Character context included`;
@@ -957,7 +914,7 @@ Each notice needs a resolution action when possible:
 - turn off compare mode;
 - open Role-play setup.
 
-- [x] **Step 5: Run compatibility tests**
+- [ ] **Step 5: Run compatibility tests**
 
 Run:
 ```bash
@@ -970,7 +927,7 @@ bunx vitest run \
 
 Expected: pass.
 
-- [x] **Step 6: Browser verify compatibility states**
+- [ ] **Step 6: Browser verify compatibility states**
 
 On `/chat`, verify at least:
 - character-only says included;
@@ -979,31 +936,19 @@ On `/chat`, verify at least:
 - character plus compare mode says the actual request behavior;
 - persona path has its own status and does not inherit character-only copy.
 
-CDP verification used a dedicated port (`9333`) so it did not touch the existing user-owned Chrome CDP browser on `9222`.
-
-CDP verification covered:
-- character-only renders `Character context` / `Included`;
-- character plus pinned source renders `Blended with sources`;
-- character plus compare mode renders `Excluded in this mode`;
-- persona selection renders `Persona context` / `Included`.
-
-Focused tests cover the custom-prompt override-risk state and action. During browser verification, the web Plasmo storage shim was found to ignore storage `area`; sync cleanup removed local `selectedAssistant` and made role-play identity state unstable in `/chat`. Stage 6 therefore adds a small web-shim guardrail so local and sync storage no longer clobber each other.
-
-- [x] **Step 7: Commit Stage 6**
+- [ ] **Step 7: Commit Stage 6**
 
 ```bash
 git add \
-  Docs/superpowers/plans/2026-05-17-main-chat-role-play-preset-remediation-implementation-plan.md \
-  "backlog/tasks/task-407.6 - Add-role-play-compatibility-and-request-inclusion-guardrails.md" \
-  apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx \
   apps/packages/ui/src/components/Option/Playground/role-play-compatibility.ts \
+  apps/packages/ui/src/components/Option/Playground/role-play-state.ts \
   apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundRawPreview.ts \
+  apps/packages/ui/src/components/Option/Playground/RolePlaySetupDrawer.tsx \
   apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundContextItems.ts \
   apps/packages/ui/src/components/Option/Playground/__tests__/role-play-compatibility.test.ts \
-  apps/packages/ui/src/components/Option/Playground/__tests__/usePlaygroundContextItems.role-play.test.tsx \
+  apps/packages/ui/src/components/Option/Playground/__tests__/role-play-state.test.ts \
   apps/packages/ui/src/components/Option/Playground/__tests__/usePlaygroundRawPreview.mcp-tools.test.tsx \
-  apps/tldw-frontend/__tests__/extension/plasmo-storage.test.ts \
-  apps/tldw-frontend/extension/shims/plasmo-storage.ts
+  apps/packages/ui/src/components/Option/Playground/__tests__/compare-interoperability.test.ts
 git commit -m "feat: clarify chat role-play context inclusion"
 ```
 
@@ -1013,7 +958,7 @@ git commit -m "feat: clarify chat role-play context inclusion"
 - Backlog task updates.
 - No code files unless verification reveals defects.
 
-- [x] **Step 1: Run focused role-play suite**
+- [ ] **Step 1: Run focused role-play suite**
 
 Run:
 ```bash
@@ -1031,9 +976,7 @@ bunx vitest run \
 
 Expected: pass.
 
-Result: passed from `apps/tldw-frontend`: 9 files, 60 tests. The run emitted a non-fatal React key warning from the existing `PromptSelect.system-prompt-modal.test.tsx` Dropdown mock.
-
-- [x] **Step 2: Run broader affected Playground tests**
+- [ ] **Step 2: Run broader affected Playground tests**
 
 Run:
 ```bash
@@ -1047,9 +990,7 @@ bunx vitest run \
 
 Expected: pass.
 
-Result: passed from `apps/tldw-frontend`: 5 files, 35 tests.
-
-- [x] **Step 3: Run frontend lint**
+- [ ] **Step 3: Run frontend lint**
 
 Run:
 ```bash
@@ -1059,9 +1000,7 @@ bun run lint
 
 Expected: pass, or document pre-existing lint failures separately from role-play changes.
 
-Result: `bun run lint` exited 0. ESLint reported 130 warnings in pre-existing unrelated test/e2e/utility files and no errors.
-
-- [x] **Step 4: Run frontend build or compile if feasible**
+- [ ] **Step 4: Run frontend build or compile if feasible**
 
 Run one of:
 ```bash
@@ -1077,9 +1016,7 @@ bun run compile
 
 Expected: pass, or document environment/pre-existing failure.
 
-Result: `bun run compile` failed without `NEXT_PUBLIC_API_URL` because the WebUI networking config requires an absolute browser API URL. Re-run as `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run compile` passed; Next compiled successfully and token sync verified OK.
-
-- [x] **Step 5: Run browser verification**
+- [ ] **Step 5: Run browser verification**
 
 Start frontend:
 ```bash
@@ -1103,14 +1040,7 @@ Mobile verification:
 Compatibility verification:
 - included, blended, excluded, and override-risk states match actual request behavior.
 
-Result: CDP verification only, no Computer Use.
-- `node /private/tmp/cdp-verify-final-role-play-remediation.mjs first-time` passed: setup discoverable, layers visible, saved setup area visible.
-- `node /private/tmp/cdp-verify-final-role-play-remediation.mjs saved` passed: returning user switched character, behavior template and generation style were applied, scene was edited/applied, recovery controls were visible, saved setup source was `role-play-setup`, preview showed role-play fields, delete worked, and generic templates stayed stored but hidden from the role-play list.
-- `node /private/tmp/cdp-verify-final-role-play-remediation.mjs mobile` passed: mobile overflow exposed Generation style and Role-play setup, no horizontal overflow was detected, and the composer textarea remained visible. The verifier measured the textarea at about 87.6px wide on a 390px viewport; this is cramped and should be treated as a broader mobile composer ergonomics risk if that surface is audited separately.
-- `node /private/tmp/cdp-verify-stage6-role-play-compatibility.mjs` passed: character included, pinned-source blended, compare excluded, and persona-specific included states were visible.
-- `node /private/tmp/cdp-verify-final-role-play-remediation.mjs compatibility` passed after splitting the all-in-one verifier into scoped runs: included, blended, excluded, override-risk, and persona-specific compatibility states were all true.
-
-- [x] **Step 6: Security validation**
+- [ ] **Step 6: Security validation**
 
 This plan is frontend TypeScript/React only. Bandit does not apply unless a Python file is touched unexpectedly.
 
@@ -1122,9 +1052,7 @@ python -m bandit -r <touched_python_paths> -f json -o /tmp/bandit_chat_role_play
 
 If no Python files are touched, record Bandit skip in Backlog final summaries.
 
-Result: Bandit skipped because the implementation touched frontend TypeScript/React, locale JSON, plan docs, and Backlog task metadata only.
-
-- [x] **Step 7: Update Backlog tasks**
+- [ ] **Step 7: Update Backlog tasks**
 
 For each implementation child task:
 - mark status;
@@ -1132,15 +1060,11 @@ For each implementation child task:
 - add focused test commands and browser verification notes;
 - add skips/blockers.
 
-Result: child tasks `TASK-407.1` through `TASK-407.6` are already `Done`; final closeout updates are recorded on parent task `TASK-407`.
-
-- [x] **Step 8: Final commit or PR handoff**
+- [ ] **Step 8: Final commit or PR handoff**
 
 If all stages are already committed, create or update the PR. The PR body must preserve the human-owned `Change summary` placeholder required by repo policy.
 
 Do not fabricate the human `Change summary`.
-
-Result: ready for closeout commit and PR handoff. The PR body must keep the human-owned `Change summary` placeholder.
 
 ## Execution Order
 
