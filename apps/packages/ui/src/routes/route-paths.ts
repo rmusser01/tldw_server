@@ -20,6 +20,7 @@ export const SOURCES_DETAIL_PATH = "/sources/:sourceId"
 export const ADMIN_SOURCES_PATH = "/admin/sources"
 
 export const VIEWPORT_CONSTRAINED_PATHS = [
+  CHAT_PATH,
   CHAT_WORKSPACE_PATH,
   DOCUMENT_WORKSPACE_PATH,
   WORKSPACE_PLAYGROUND_PATH,
