@@ -41,7 +41,7 @@ Implement the shared ChatSidebar tools-first expansion behavior: shortcuts expan
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 1 complete and reviewed. Added ChatSidebar tools-first reset tests and minimal local recentCollapsed/recentHistoryVisible implementation. Focused tests passed: bunx vitest run src/components/Common/ChatSidebar/__tests__/ChatSidebar.tools-first.test.tsx src/components/Common/ChatSidebar/__tests__/ChatSidebar.lazy-history.test.tsx src/components/Common/__tests__/ChatSidebar.coordinator.test.tsx. Spec compliance and code quality subagent reviews both approved.
+Task 2 follow-up completed: preserved active search visibility across tools-first reset by deriving recent-history visibility from the raw search input while keeping ServerChatList on the debounced query. Strengthened ChatSidebar.tools-first coverage with a stale-debounce regression case. Focused verification passed: bunx vitest run src/components/Common/ChatSidebar/__tests__/ChatSidebar.tools-first.test.tsx src/components/Common/ChatSidebar/__tests__/ChatSidebar.lazy-history.test.tsx src/components/Common/__tests__/ChatSidebar.coordinator.test.tsx (3 files, 8 tests).
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
