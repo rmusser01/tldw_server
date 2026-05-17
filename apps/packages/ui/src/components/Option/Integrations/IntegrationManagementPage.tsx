@@ -1,6 +1,12 @@
 import React, { useMemo, useState } from "react"
 import { Alert, Button, Card, Col, Row, Skeleton, Space, Tag, Typography, message } from "antd"
 import { useQuery } from "@tanstack/react-query"
+import { useNavigate } from "react-router-dom"
+import {
+  StatePanel,
+  buildCapabilityState,
+  classifyCapabilityError
+} from "@/components/ui/state"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import {
@@ -46,10 +52,34 @@ const sortConnections = (connections: IntegrationConnection[]): IntegrationConne
 const isPersonalProvider = (provider: IntegrationProvider): provider is PersonalIntegrationProvider =>
   provider === "slack" || provider === "discord"
 
-const PERSONAL_INTEGRATIONS_UNSUPPORTED_TITLE = "Personal integrations unavailable"
-const PERSONAL_INTEGRATIONS_UNSUPPORTED_DESCRIPTION =
-  "This server does not expose the personal integrations control-plane yet."
 const PERSONAL_INTEGRATIONS_PATH = "/api/v1/integrations/personal"
+const WORKSPACE_INTEGRATIONS_PATH = "/api/v1/integrations/workspace"
+
+const errorStatus = (error: unknown): number | undefined => {
+  if (!error || typeof error !== "object") {
+    return undefined
+  }
+
+  const status = (error as { status?: unknown; response?: { status?: unknown } }).status ??
+    (error as { response?: { status?: unknown } }).response?.status
+
+  return typeof status === "number" ? status : undefined
+}
+
+const errorMessage = (error: unknown, fallback: string): string => {
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  if (error && typeof error === "object" && "message" in error) {
+    const messageValue = (error as { message?: unknown }).message
+    if (typeof messageValue === "string" && messageValue.trim()) {
+      return messageValue
+    }
+  }
+
+  return typeof error === "string" && error.trim() ? error : fallback
+}
 
 const isUnsupportedOverviewError = (scope: IntegrationScope, error: unknown): boolean => {
   if (scope !== "personal" || !error || typeof error !== "object") {
@@ -78,6 +108,7 @@ export const buildIntegrationQueryKey = (
 }
 
 export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps> = ({ scope }) => {
+  const navigate = useNavigate()
   const { config: connectionConfig, loading: connectionConfigLoading } = useCanonicalConnectionConfig()
   const [activeOrgId, setActiveOrgId] = useState<number | null>(connectionConfig?.orgId ?? null)
   const [selectedConnection, setSelectedConnection] = useState<IntegrationConnection | null>(null)
@@ -182,8 +213,7 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
     queryKey: buildIntegrationQueryKey(scope, activeOrgId, "overview"),
     queryFn: scope === "workspace" ? listWorkspaceIntegrations : listPersonalIntegrations,
     enabled: scope === "workspace" || personalIntegrationsSupported === true,
-    retry: (failureCount, error) =>
-      !isUnsupportedOverviewError(scope, error) && failureCount < 3
+    retry: false
   })
 
   const slackPolicyQuery = useQuery({
@@ -263,6 +293,45 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
     (personalIntegrationsSupported === false || isUnsupportedOverviewError(scope, overviewQuery.error))
   const personalIntegrationsCheckingSupport =
     scope === "personal" && (connectionConfigLoading || personalIntegrationsSupported === null)
+  const overviewPath = scope === "workspace" ? WORKSPACE_INTEGRATIONS_PATH : PERSONAL_INTEGRATIONS_PATH
+  const featureName = isWorkspace ? "Workspace integrations" : "Personal integrations"
+  const capabilityName = isWorkspace ? "workspace integrations" : "personal integrations"
+  const serverUrl = connectionConfig?.serverUrl?.trim()
+  const personalUnsupportedState = buildCapabilityState({
+    kind: "unavailable",
+    featureName: "Personal integrations",
+    capabilityName: "personal integrations",
+    method: "GET",
+    endpoint: PERSONAL_INTEGRATIONS_PATH,
+    serverUrl,
+    primaryAction: {
+      label: "Check server setup",
+      onClick: () => {
+        navigate("/settings/health")
+      }
+    }
+  })
+  const overviewErrorState =
+    overviewQuery.isError && !overviewQuery.data && !personalIntegrationsUnsupported
+      ? buildCapabilityState({
+          kind: classifyCapabilityError(overviewQuery.error),
+          featureName,
+          capabilityName,
+          method: "GET",
+          endpoint: overviewPath,
+          status: errorStatus(overviewQuery.error),
+          rawMessage: errorMessage(
+            overviewQuery.error,
+            "The integrations overview could not be loaded."
+          ),
+          primaryAction: {
+            label: "Try again",
+            onClick: () => {
+              void overviewQuery.refetch()
+            }
+          }
+        })
+      : null
 
   const handlePersonalAction = async (connection: IntegrationConnection, action: string) => {
     if (scope !== "personal" || !isPersonalProvider(connection.provider)) {
@@ -332,19 +401,22 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
         <Skeleton active paragraph={{ rows: 6 }} />
       ) : null}
       {personalIntegrationsUnsupported ? (
-        <Alert
-          type="info"
-          showIcon
-          title={PERSONAL_INTEGRATIONS_UNSUPPORTED_TITLE}
-          description={PERSONAL_INTEGRATIONS_UNSUPPORTED_DESCRIPTION}
+        <StatePanel
+          state={personalUnsupportedState.state}
+          title={personalUnsupportedState.title}
+          message={personalUnsupportedState.message}
+          diagnostics={personalUnsupportedState.diagnostics}
+          primaryAction={personalUnsupportedState.primaryAction}
         />
       ) : null}
-      {overviewQuery.isError && !overviewQuery.data && !personalIntegrationsUnsupported ? (
-        <Alert
-          type="error"
-          showIcon
-          title="Unable to load integrations"
-          description={overviewQuery.error instanceof Error ? overviewQuery.error.message : "The integrations overview could not be loaded."}
+      {overviewErrorState ? (
+        <StatePanel
+          state={overviewErrorState.state}
+          title={overviewErrorState.title}
+          message={overviewErrorState.message}
+          diagnostics={overviewErrorState.diagnostics}
+          primaryAction={overviewErrorState.primaryAction}
+          role="alert"
         />
       ) : null}
 

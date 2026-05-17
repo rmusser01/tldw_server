@@ -4,6 +4,7 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
@@ -66,7 +67,9 @@ const renderWithQueryClient = (ui: React.ReactElement) => {
   })
 
   return render(
-    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={["/integrations"]}>{ui}</MemoryRouter>
+    </QueryClientProvider>
   )
 }
 
@@ -348,11 +351,39 @@ describe("IntegrationManagementPage", () => {
 
     renderWithQueryClient(<IntegrationManagementPage scope="personal" />)
 
-    expect(await screen.findByText("Personal integrations unavailable")).toBeInTheDocument()
+    expect(await screen.findByText("Unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Personal integrations are unavailable")).toBeInTheDocument()
     expect(
-      screen.getByText("This server does not expose the personal integrations control-plane yet.")
+      screen.getByText("This server does not expose the personal integrations capability.")
     ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Check server setup" })).toBeInTheDocument()
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent("/api/v1/integrations/personal")
     expect(mocks.listPersonalIntegrations).not.toHaveBeenCalled()
+  })
+
+  it("keeps integration overview endpoint failures in diagnostics", async () => {
+    mockWorkspaceQueries()
+    mocks.listWorkspaceIntegrations.mockRejectedValue(
+      Object.assign(new Error("Internal Server Error (GET /api/v1/integrations/workspace)"), {
+        status: 500
+      })
+    )
+
+    renderWithQueryClient(<IntegrationManagementPage scope="workspace" />)
+
+    const heading = await screen.findByRole("heading", {
+      name: "Workspace integrations are unavailable"
+    })
+    const primaryState = heading.closest("div")
+    const diagnostics = screen.getByLabelText("Diagnostics")
+
+    expect(primaryState).not.toHaveTextContent("/api/v1/integrations/workspace")
+    expect(diagnostics).toHaveTextContent("/api/v1/integrations/workspace")
+    expect(diagnostics).toHaveTextContent("500")
+    expect(diagnostics).toHaveTextContent(
+      "Internal Server Error (GET /api/v1/integrations/workspace)"
+    )
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument()
   })
 
   it("keys workspace-scoped queries by the active org id", () => {

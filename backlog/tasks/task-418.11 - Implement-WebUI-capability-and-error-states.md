@@ -28,7 +28,7 @@ Implement the first WP2 capability/error-state remediation slice for the WebUI/e
 - [x] #2 A pure capability-state mapping helper is added only if two or more first-adopter routes would otherwise duplicate mapping logic.
 - [x] #3 /sources top-level unavailable/error/empty states use shared user-language state UI, with raw endpoint details only in diagnostics.
 - [x] #4 /scheduled-tasks top-level unavailable/error/degraded states use shared user-language state UI, with raw endpoint details only in diagnostics.
-- [ ] #5 /integrations top-level unsupported/error states use shared user-language state UI, with provider-card details left scoped to cards unless they leak raw route state.
+- [x] #5 /integrations top-level unsupported/error states use shared user-language state UI, with provider-card details left scoped to cards unless they leak raw route state.
 - [ ] #6 Focused Vitest route/component tests pass for changed state primitives and first adopters.
 - [ ] #7 Browser QA or Playwright evidence is recorded for /sources, /scheduled-tasks, and /integrations, with any environment gaps documented.
 - [ ] #8 Later route-family adopters are listed in the task notes instead of silently skipped.
@@ -45,6 +45,8 @@ Shared state foundation: `state-primitives.test.tsx` passed at baseline (7 tests
 /sources adoption: replaced the unsupported capability guard, query error state, and empty state with shared `StatePanel` states generated through `buildCapabilityState`. Raw `GET /api/v1/sources`, status, and raw messages now render only inside the diagnostics region; the primary page copy uses user-language unavailable/empty messaging and gives retry/create/server-health actions. Updated source workspace and route-guard tests, including the router/connection-state test harness. Verification: `bunx vitest run src/components/Option/Sources/__tests__/SourcesWorkspacePage.test.tsx src/routes/__tests__/option-sources-route-guards.test.tsx` passed 11 tests.
 
 /scheduled-tasks adoption: replaced top-level unsupported endpoint, list-query failure, and partial-overview warnings with shared `StatePanel` states. Primary copy now says unavailable/degraded in user terms; `GET /api/v1/scheduled-tasks`, status codes, server URL, and partial raw messages are diagnostics. The existing reminder table/editor workflow remains unchanged. Verification: `bunx vitest run src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx src/routes/__tests__/scheduled-tasks-route.test.tsx` passed 13 tests.
+
+/integrations adoption: replaced top-level personal unsupported and overview-load failures with shared `StatePanel` states. Personal/workspace integration endpoint paths, status codes, server URL, and raw overview errors are diagnostics; provider cards, drawers, and workspace policy panels remain in their existing scoped UI. The overview query now surfaces the shared error state immediately instead of retrying the same route-level failure three times; the retry path is explicit through the state action. Verification: `bunx vitest run src/components/Option/Integrations/__tests__/IntegrationManagementPage.test.tsx src/routes/__tests__/integrations-route.test.tsx` passed 15 tests.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
