@@ -11,7 +11,6 @@ import {
   MessageSquare,
   Clock,
   FileText,
-  StickyNote,
   Edit3,
   ExternalLink,
   Expand,
@@ -59,7 +58,11 @@ import {
   LARGE_PLAIN_CONTENT_THRESHOLD_CHARS,
   LARGE_PLAIN_CONTENT_CHUNK_CHARS
 } from './hooks/useTranscriptDisplay'
+import { MediaReadAlongPopover } from './read-along/MediaReadAlongPopover'
+import { MediaReadAlongTransport } from './read-along/MediaReadAlongTransport'
 import { useContentSelectionActions } from './read-along/useContentSelectionActions'
+import { useMediaReadAlongSession } from './read-along/useMediaReadAlongSession'
+import type { ReadAlongScope } from './read-along/types'
 
 // Re-export for test compatibility
 export {
@@ -126,6 +129,13 @@ const buildContentRevisionHash = (value: string): string => {
     hash = Math.imul(hash, 0x01000193) >>> 0
   }
   return hash.toString(16).padStart(8, '0')
+}
+
+const clearDocumentSelection = (): void => {
+  if (typeof window === 'undefined' || typeof window.getSelection !== 'function') {
+    return
+  }
+  window.getSelection()?.removeAllRanges()
 }
 
 // Metadata helpers moved to useContentMetadata hook
@@ -215,6 +225,7 @@ export function ContentViewer({
   const rootContainerRef = useRef<HTMLDivElement | null>(null)
   const contentBodyRef = useRef<HTMLDivElement | null>(null)
   const contentScrollContainerRef = useRef<HTMLDivElement | null>(null)
+  const readAlongTransportAnchorRef = useRef<DOMRect | null>(null)
   const [versionHistoryMounted, setVersionHistoryMounted] = useState(false)
 
   const selectedMediaId = selectedMedia?.id != null ? String(selectedMedia.id) : null
@@ -298,6 +309,46 @@ export function ContentViewer({
     selectionActions.clearSelectionActions()
   }, [contentSelectionIdentityKey, selectionActions.clearSelectionActions])
 
+  const readAlong = useMediaReadAlongSession({
+    mediaId: selectedMediaId,
+    mediaKind: selectedMedia?.kind || null,
+    content,
+    displayContent: rendering.displayContent,
+    renderMode: rendering.effectiveRenderMode,
+    hideTranscriptTimings: rendering.shouldHideTranscriptTimings,
+    selection: selectionActions.selectionActionState,
+    contentBodyRef,
+    contentScrollContainerRef,
+    embeddedMediaRef: modals.mediaPlayerRef
+  })
+
+  const handleStartReadAlongScope = useCallback(
+    (scope: ReadAlongScope) => {
+      const currentSelection = selectionActions.selectionActionState
+      if (!currentSelection) return
+
+      readAlongTransportAnchorRef.current = currentSelection.anchorRect
+      void readAlong.start(scope)
+      selectionActions.clearSelectionActions()
+      clearDocumentSelection()
+    },
+    [readAlong, selectionActions]
+  )
+
+  const handleStopReadAlong = useCallback(() => {
+    readAlong.stop()
+    selectionActions.clearSelectionActions()
+    clearDocumentSelection()
+  }, [readAlong, selectionActions])
+
+  const handleToggleReadAlong = useCallback(() => {
+    if (readAlong.state.status === 'paused') {
+      readAlong.resume()
+      return
+    }
+    readAlong.pause()
+  }, [readAlong])
+
   // Now we have shouldShowEmbeddedPlayer from modals, re-run rendering with correct value
   // Actually, we need to use the modals result. Let's restructure:
   // The rendering hook needs shouldShowEmbeddedPlayer which comes from modals.
@@ -318,11 +369,44 @@ export function ContentViewer({
     effectiveRenderMode: rendering.effectiveRenderMode,
     shouldHideTranscriptTimings: rendering.shouldHideTranscriptTimings,
     hasClickableTranscriptTimestamps,
+    activeReadAlongSegmentId: readAlong.activeSegmentId,
     contentScrollContainerRef,
     rootContainerRef,
     mediaPlayerRef: modals.mediaPlayerRef,
     t
   })
+
+  const transcriptReadAlongSegments = useMemo(
+    () =>
+      transcript.readAlongSegments.filter(
+        (segment) => segment.kind === 'transcript-line'
+      ),
+    [transcript.readAlongSegments]
+  )
+
+  useEffect(() => {
+    const activeSegmentId = readAlong.activeSegmentId
+    if (!activeSegmentId || transcript.normalizedFindQuery) return
+    const body = contentBodyRef.current
+    if (!body) return
+
+    const activeNode = Array.from(
+      body.querySelectorAll<HTMLElement>('[data-read-along-segment-id]')
+    ).find((node) => node.dataset.readAlongSegmentId === activeSegmentId)
+    if (!activeNode) return
+
+    const container = contentScrollContainerRef.current
+    const nodeRect = activeNode.getBoundingClientRect()
+    const viewportRect = container?.getBoundingClientRect()
+    const isOutside = viewportRect
+      ? nodeRect.top < viewportRect.top || nodeRect.bottom > viewportRect.bottom
+      : nodeRect.top < 0 ||
+        nodeRect.bottom > (typeof window !== 'undefined' ? window.innerHeight : 0)
+
+    if (isOutside && typeof activeNode.scrollIntoView === 'function') {
+      activeNode.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, [readAlong.activeSegmentId, transcript.normalizedFindQuery])
 
   // --- Hook: Reading Progress ---
   const readingProgress = useReadingProgress({
@@ -1214,75 +1298,81 @@ export function ContentViewer({
                   onKeyUp={selectionActions.handleContentSelectionEvent}
                 >
                   {selectionActions.selectionActionState ? (
-                    <div
-                      className="fixed z-50 flex items-center gap-1 rounded border border-border bg-surface px-2 py-1 shadow-lg"
-                      style={{
-                        left: Math.max(
-                          8,
-                          selectionActions.selectionActionState.anchorRect.left
-                        ),
-                        top: Math.max(
-                          8,
-                          selectionActions.selectionActionState.anchorRect.top - 40
-                        )
-                      }}
-                      data-testid="media-selection-actions-popover"
-                    >
-                      <Tooltip
-                        title={t('review:mediaPage.annotateSelection', {
-                          defaultValue: 'Annotate selection'
-                        })}
-                      >
-                        <button
-                          type="button"
-                          className="inline-flex h-7 items-center gap-1 rounded px-2 text-xs font-medium text-text hover:bg-surface2"
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={selectionActions.applyAnnotationSelection}
-                          data-testid="media-selection-action-annotate"
-                        >
-                          <StickyNote className="h-3.5 w-3.5" />
-                          <span>
-                            {t('review:mediaPage.annotate', {
-                              defaultValue: 'Annotate'
-                            })}
-                          </span>
-                        </button>
-                      </Tooltip>
-                    </div>
+                    <MediaReadAlongPopover
+                      anchorRect={selectionActions.selectionActionState.anchorRect}
+                      onReadScope={handleStartReadAlongScope}
+                      onAnnotate={selectionActions.applyAnnotationSelection}
+                      t={t}
+                    />
                   ) : null}
+                  <MediaReadAlongTransport
+                    state={readAlong.state}
+                    anchorRect={readAlongTransportAnchorRef.current}
+                    onToggle={handleToggleReadAlong}
+                    onStop={handleStopReadAlong}
+                    onRetry={readAlong.retry}
+                    onSkip={() => readAlong.skip('next')}
+                    t={t}
+                  />
                   {rendering.effectiveRenderMode === 'plain' ? (
                     transcript.shouldRenderTranscriptTimestampChips ? (
                       <div
                         className={`m-0 space-y-1 whitespace-pre-wrap text-text font-mono ${rendering.contentBodyTypographyClass}`}
                       >
-                        {rendering.transcriptLines.map((line, lineIndex) => {
-                          const parsed = parseLeadingTranscriptTiming(line)
-                          if (!parsed) {
+                        {(() => {
+                          let readAlongSegmentIndex = 0
+                          return rendering.transcriptLines.map((line, lineIndex) => {
+                            const parsed = parseLeadingTranscriptTiming(line)
+                            if (!parsed) {
+                              return (
+                                <div key={`line-${lineIndex}`}>
+                                  {line.length > 0 ? line : '\u00A0'}
+                                </div>
+                              )
+                            }
+                            const timestamp = parsed.timestamp
+                            const readAlongSegment =
+                              parsed.text.trim().length > 0
+                                ? transcriptReadAlongSegments[readAlongSegmentIndex++]
+                                : undefined
+                            const isActive =
+                              readAlongSegment?.id === readAlong.activeSegmentId
                             return (
-                              <div key={`line-${lineIndex}`}>
-                                {line.length > 0 ? line : '\u00A0'}
+                              <div key={`line-${lineIndex}`} className="flex flex-wrap items-start gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => transcript.handleTranscriptTimestampSeek(timestamp)}
+                                  className="rounded border border-border bg-surface px-1.5 py-0.5 text-[11px] text-primary hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                                  aria-label={t('review:mediaPage.seekToTimestamp', {
+                                    defaultValue: 'Seek to {{timestamp}}',
+                                    timestamp
+                                  })}
+                                >
+                                  {timestamp}
+                                </button>
+                                <span className="flex-1 whitespace-pre-wrap break-words">
+                                  {parsed.leadingWhitespace}
+                                  {parsed.separator}
+                                  {readAlongSegment ? (
+                                    <span
+                                      data-read-along-segment-id={readAlongSegment.id}
+                                      data-read-along-active={isActive ? 'true' : undefined}
+                                      className={
+                                        isActive
+                                          ? 'rounded bg-primary/20 px-0.5 text-text'
+                                          : undefined
+                                      }
+                                    >
+                                      {parsed.text}
+                                    </span>
+                                  ) : (
+                                    parsed.text
+                                  )}
+                                </span>
                               </div>
                             )
-                          }
-                          const timestamp = parsed.timestamp
-                          const tail = `${parsed.leadingWhitespace}${parsed.separator}${parsed.text}`
-                          return (
-                            <div key={`line-${lineIndex}`} className="flex flex-wrap items-start gap-2">
-                              <button
-                                type="button"
-                                onClick={() => transcript.handleTranscriptTimestampSeek(timestamp)}
-                                className="rounded border border-border bg-surface px-1.5 py-0.5 text-[11px] text-primary hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                                aria-label={t('review:mediaPage.seekToTimestamp', {
-                                  defaultValue: 'Seek to {{timestamp}}',
-                                  timestamp
-                                })}
-                              >
-                                {timestamp}
-                              </button>
-                              <span className="flex-1 whitespace-pre-wrap break-words">{tail}</span>
-                            </div>
-                          )
-                        })}
+                          })
+                        })()}
                       </div>
                     ) : (
                       <div className="space-y-2">

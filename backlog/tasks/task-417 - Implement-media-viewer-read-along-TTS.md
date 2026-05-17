@@ -20,6 +20,11 @@ modified_files:
 - apps/packages/ui/src/components/Media/read-along/__tests__/media-read-along-cache.test.ts
 - apps/packages/ui/src/components/Media/read-along/useMediaReadAlongSession.ts
 - apps/packages/ui/src/components/Media/read-along/__tests__/useMediaReadAlongSession.test.tsx
+- apps/packages/ui/src/components/Media/read-along/MediaReadAlongPopover.tsx
+- apps/packages/ui/src/components/Media/read-along/MediaReadAlongTransport.tsx
+- apps/packages/ui/src/components/Media/ContentViewer.tsx
+- apps/packages/ui/src/components/Media/hooks/useTranscriptDisplay.tsx
+- apps/packages/ui/src/components/Media/__tests__/ContentViewer.read-along.test.tsx
 ---
 
 ## Description
@@ -116,6 +121,16 @@ Verification:
 - cd apps/packages/ui && bunx vitest run src/components/Media/read-along/__tests__/useMediaReadAlongSession.test.tsx src/services/__tests__/tts-provider.read-along.test.ts --maxWorkers=1 -> passed, 2 files / 27 tests.
 - git diff --check -> passed.
 - Bandit not run because this review-fix slice touched TypeScript frontend files only.
+
+Task 6 completed:
+- Added ContentViewer read-along UI integration with selection popover actions, inline transport, read-along session wiring, and active segment wrappers for plain/timestamped transcript rendering.
+- Preserved mediated annotation selection; Annotate remains explicit, and read-along actions clear the popover/document selection after starting.
+- Markdown/html fallback starts playback through the existing session without mutating rich HTML; full-item playback uses the session hook and does not expand the lazy plain-content window.
+- Red verification: `cd apps/packages/ui && bunx vitest run src/components/Media/__tests__/ContentViewer.read-along.test.tsx --maxWorkers=1` failed before implementation because `media-selection-action-read-selection` was missing.
+- Green verification: same command passed 1 file / 7 tests.
+- Regression verification: `cd apps/packages/ui && bunx vitest run src/components/Media/__tests__/ContentViewer.read-along.test.tsx src/components/Media/__tests__/ContentViewer.stage12.performance.test.tsx src/components/Media/__tests__/ContentViewer.stage10.findBar.test.tsx src/components/Media/__tests__/ContentViewer.stage14.annotations.test.tsx --maxWorkers=1` passed 4 files / 20 tests.
+- `git diff --check` passed.
+- Bandit skipped for Task 6 because the touched slice is TypeScript/React frontend code only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

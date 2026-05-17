@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import type { MediaResultItem } from '../types'
+import { buildReadAlongSegments } from '../read-along/media-read-along-segments'
+import type { ReadAlongSegment } from '../read-along/types'
 
 export const LARGE_PLAIN_CONTENT_THRESHOLD_CHARS = 120_000
 export const LARGE_PLAIN_CONTENT_CHUNK_CHARS = 32_000
@@ -110,10 +112,62 @@ export interface UseTranscriptDisplayDeps {
   effectiveRenderMode: string
   shouldHideTranscriptTimings: boolean
   hasClickableTranscriptTimestamps: boolean
+  activeReadAlongSegmentId?: string | null
   contentScrollContainerRef: React.RefObject<HTMLDivElement | null>
   rootContainerRef: React.RefObject<HTMLDivElement | null>
   mediaPlayerRef: React.RefObject<HTMLMediaElement | null>
   t: (key: string, opts?: Record<string, any>) => string
+}
+
+const renderReadAlongWrappedText = (
+  text: string,
+  segments: ReadAlongSegment[],
+  activeReadAlongSegmentId: string | null | undefined
+): React.ReactNode => {
+  if (!text || segments.length === 0) return text
+
+  const visibleSegments = segments
+    .filter(
+      (segment) =>
+        segment.displayStart != null &&
+        segment.displayEnd != null &&
+        segment.displayStart >= 0 &&
+        segment.displayEnd > segment.displayStart &&
+        segment.displayStart < text.length &&
+        segment.displayEnd <= text.length
+    )
+    .sort((left, right) => left.displayStart! - right.displayStart!)
+
+  if (visibleSegments.length === 0) return text
+
+  const parts: React.ReactNode[] = []
+  let cursor = 0
+  visibleSegments.forEach((segment) => {
+    const start = segment.displayStart!
+    const end = segment.displayEnd!
+    if (start < cursor) return
+    if (start > cursor) {
+      parts.push(text.slice(cursor, start))
+    }
+    const isActive = segment.id === activeReadAlongSegmentId
+    parts.push(
+      <span
+        key={`read-along-segment-${segment.id}`}
+        data-read-along-segment-id={segment.id}
+        data-read-along-active={isActive ? 'true' : undefined}
+        className={isActive ? 'rounded bg-primary/20 px-0.5 text-text' : undefined}
+      >
+        {text.slice(start, end)}
+      </span>
+    )
+    cursor = end
+  })
+
+  if (cursor < text.length) {
+    parts.push(text.slice(cursor))
+  }
+
+  return <>{parts}</>
 }
 
 export function useTranscriptDisplay(deps: UseTranscriptDisplayDeps) {
@@ -124,6 +178,7 @@ export function useTranscriptDisplay(deps: UseTranscriptDisplayDeps) {
     effectiveRenderMode,
     shouldHideTranscriptTimings,
     hasClickableTranscriptTimestamps,
+    activeReadAlongSegmentId,
     contentScrollContainerRef,
     rootContainerRef,
     mediaPlayerRef,
@@ -141,6 +196,24 @@ export function useTranscriptDisplay(deps: UseTranscriptDisplayDeps) {
   const findMatchElementRefs = useRef<Array<HTMLElement | null>>([])
 
   const normalizedFindQuery = useMemo(() => normalizeFindQuery(findQuery), [findQuery])
+
+  const readAlongSegments = useMemo(
+    () =>
+      buildReadAlongSegments({
+        mediaId: selectedMedia?.id != null ? String(selectedMedia.id) : 'unknown-media',
+        content,
+        displayContent,
+        renderMode: effectiveRenderMode,
+        hideTranscriptTimings: shouldHideTranscriptTimings
+      }),
+    [
+      content,
+      displayContent,
+      effectiveRenderMode,
+      selectedMedia?.id,
+      shouldHideTranscriptTimings
+    ]
+  )
 
   const shouldRenderTranscriptTimestampChips =
     hasClickableTranscriptTimestamps &&
@@ -209,8 +282,16 @@ export function useTranscriptDisplay(deps: UseTranscriptDisplayDeps) {
         defaultValue: 'No content available'
       })
     }
-    if (!normalizedFindQuery || findMatchOffsets.length === 0) {
-      return shouldUseChunkedPlainRendering ? visiblePlainContent : displayContent
+    const plainText = shouldUseChunkedPlainRendering ? visiblePlainContent : displayContent
+    if (!normalizedFindQuery) {
+      return renderReadAlongWrappedText(
+        plainText,
+        readAlongSegments,
+        activeReadAlongSegmentId
+      )
+    }
+    if (findMatchOffsets.length === 0) {
+      return plainText
     }
 
     const parts: React.ReactNode[] = []
@@ -250,9 +331,11 @@ export function useTranscriptDisplay(deps: UseTranscriptDisplayDeps) {
     return <>{parts}</>
   }, [
     activeFindMatchIndex,
+    activeReadAlongSegmentId,
     displayContent,
     findMatchOffsets,
     normalizedFindQuery,
+    readAlongSegments,
     shouldUseChunkedPlainRendering,
     t,
     visiblePlainContent
@@ -408,6 +491,7 @@ export function useTranscriptDisplay(deps: UseTranscriptDisplayDeps) {
     shouldUseChunkedPlainRendering,
     visiblePlainContent,
     hasUnrenderedPlainContent,
+    readAlongSegments,
     findMatchCount,
     highlightedPlainContent,
     // Callbacks
