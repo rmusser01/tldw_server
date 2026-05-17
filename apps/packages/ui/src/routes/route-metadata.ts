@@ -50,7 +50,7 @@ export type RouteMetadata = {
 const webAndExtensionOptions: RouteAvailability[] = ["web", "extension_options"]
 const webOnly: RouteAvailability[] = ["web"]
 
-export const ROUTE_METADATA: RouteMetadata[] = [
+const AUDITED_ROUTE_METADATA: RouteMetadata[] = [
   {
     path: "/",
     canonicalPath: "/",
@@ -1001,6 +1001,355 @@ export const ROUTE_METADATA: RouteMetadata[] = [
     nav: "hidden",
     rationale: "Onboarding test route is for verification and should not appear in normal IA."
   }
+]
+
+type RegistryRouteMetadataInput = Pick<
+  RouteMetadata,
+  "path" | "label" | "group" | "rationale"
+> &
+  Partial<Omit<RouteMetadata, "path" | "label" | "group" | "rationale">>
+
+const registryRoute = ({
+  path,
+  canonicalPath = path,
+  label,
+  group,
+  surface = "advanced_self_hosted",
+  availability = webAndExtensionOptions,
+  aliases,
+  redirectsTo,
+  smoke = "include",
+  commandPalette = "show",
+  nav = "secondary",
+  requiresAuth,
+  requiresBackend,
+  rationale
+}: RegistryRouteMetadataInput): RouteMetadata => ({
+  path,
+  canonicalPath,
+  label,
+  group,
+  surface,
+  availability,
+  aliases,
+  redirectsTo,
+  smoke,
+  commandPalette,
+  nav,
+  requiresAuth,
+  requiresBackend,
+  rationale
+})
+
+const settingsRoute = (
+  path: string,
+  label: string,
+  rationale: string,
+  overrides: Partial<
+    Omit<RouteMetadata, "path" | "label" | "group" | "rationale">
+  > = {}
+): RouteMetadata =>
+  registryRoute({
+    path,
+    label,
+    group: "settings",
+    surface: "default_self_hosted",
+    nav: "hidden",
+    requiresBackend: true,
+    rationale,
+    ...overrides
+  })
+
+const adminRoute = (
+  path: string,
+  label: string,
+  rationale: string,
+  overrides: Partial<
+    Omit<RouteMetadata, "path" | "label" | "group" | "rationale">
+  > = {}
+): RouteMetadata =>
+  registryRoute({
+    path,
+    label,
+    group: "operations",
+    surface: "admin_operator",
+    availability: webAndExtensionOptions,
+    nav: "secondary",
+    requiresAuth: true,
+    requiresBackend: true,
+    rationale,
+    ...overrides
+  })
+
+const ROUTE_REGISTRY_METADATA: RouteMetadata[] = [
+  settingsRoute(
+    "/settings/tldw",
+    "TLDW Settings",
+    "Product-level settings are nested under the primary settings route."
+  ),
+  settingsRoute(
+    "/settings/model",
+    "Model Settings",
+    "Provider and model defaults are nested under settings for setup continuity."
+  ),
+  settingsRoute(
+    "/settings/mcp-hub",
+    "MCP Hub Settings",
+    "MCP settings configure the advanced MCP hub surface."
+  ),
+  settingsRoute(
+    "/settings/prompt",
+    "Prompt Settings",
+    "Prompt workspace preferences are nested under settings."
+  ),
+  settingsRoute(
+    "/settings/evaluations",
+    "Evaluation Settings",
+    "Evaluation defaults are nested under settings because they affect advanced workflows."
+  ),
+  settingsRoute(
+    "/settings/chat",
+    "Chat Settings",
+    "Chat defaults are nested under settings and are reachable from chat contexts."
+  ),
+  settingsRoute(
+    "/settings/ui",
+    "UI Settings",
+    "Interface preferences are nested under settings."
+  ),
+  settingsRoute(
+    "/settings/splash",
+    "Splash Settings",
+    "Startup and splash preferences are nested under settings."
+  ),
+  settingsRoute(
+    "/settings/quick-ingest",
+    "Quick Ingest Settings",
+    "Quick ingest preferences are nested under settings for capture workflow configuration."
+  ),
+  settingsRoute(
+    "/settings/speech",
+    "Speech Settings",
+    "Speech defaults are nested under settings and support STT/TTS workflows."
+  ),
+  settingsRoute(
+    "/settings/image-generation",
+    "Image Generation Settings",
+    "Image-generation provider defaults are nested under settings."
+  ),
+  settingsRoute(
+    "/settings/image-gen",
+    "Image Generation Settings Alias",
+    "Legacy image-generation settings route redirects to the canonical settings route.",
+    {
+      canonicalPath: "/settings/image-generation",
+      surface: "redirect",
+      redirectsTo: "/settings/image-generation",
+      smoke: "exclude",
+      commandPalette: "alias_only"
+    }
+  ),
+  settingsRoute(
+    "/settings/share",
+    "Share Settings",
+    "Sharing preferences are nested under settings because they affect publish and recovery flows."
+  ),
+  settingsRoute(
+    "/settings/processed",
+    "Processed Content Settings",
+    "Processed-content settings are nested under settings for library maintenance."
+  ),
+  settingsRoute(
+    "/settings/health",
+    "Health Settings",
+    "Health and connection diagnostics are nested under settings."
+  ),
+  settingsRoute(
+    "/settings/prompt-studio",
+    "Prompt Studio Settings",
+    "Prompt Studio preferences remain under settings after the workspace moved to prompts."
+  ),
+  settingsRoute(
+    "/settings/knowledge",
+    "Knowledge Settings",
+    "Knowledge and retrieval settings are nested under settings."
+  ),
+  settingsRoute(
+    "/settings/chatbooks",
+    "Chatbooks Settings",
+    "Chatbook import/export preferences are nested under settings."
+  ),
+  settingsRoute(
+    "/settings/characters",
+    "Characters Settings",
+    "Character workspace preferences are nested under settings."
+  ),
+  settingsRoute(
+    "/settings/world-books",
+    "World Books Settings",
+    "World book preferences are nested under settings."
+  ),
+  settingsRoute(
+    "/settings/chat-dictionaries",
+    "Dictionary Settings",
+    "Dictionary preferences are nested under settings."
+  ),
+  settingsRoute(
+    "/settings/rag",
+    "RAG Settings",
+    "RAG defaults are nested under settings because they affect chat and knowledge answers."
+  ),
+  settingsRoute(
+    "/settings/about",
+    "About",
+    "About and version details live under settings rather than primary navigation.",
+    {
+      requiresBackend: false
+    }
+  ),
+  settingsRoute(
+    "/settings/family-guardrails",
+    "Family Guardrails",
+    "Family guardrail configuration is capability-gated under settings.",
+    {
+      surface: "advanced_self_hosted",
+      smoke: "manual"
+    }
+  ),
+  settingsRoute(
+    "/settings/guardian",
+    "Guardian Settings",
+    "Guardian settings are capability-gated and should remain nested under settings.",
+    {
+      surface: "advanced_self_hosted",
+      smoke: "manual"
+    }
+  ),
+  adminRoute(
+    "/admin/integrations",
+    "Admin Integrations",
+    "Administrative integration controls are operator-only."
+  ),
+  adminRoute(
+    "/admin/sources",
+    "Admin Sources",
+    "Administrative source controls are operator-only."
+  ),
+  adminRoute(
+    "/admin/server",
+    "Server Admin",
+    "Server runtime controls are operator-only."
+  ),
+  adminRoute(
+    "/admin/llamacpp",
+    "Llama.cpp Admin",
+    "Local llama.cpp server controls are operator-only."
+  ),
+  adminRoute(
+    "/admin/mlx",
+    "MLX Admin",
+    "Local MLX server controls are operator-only."
+  ),
+  adminRoute(
+    "/admin/runtime-config",
+    "Runtime Config Admin",
+    "Runtime configuration controls are operator-only."
+  ),
+  adminRoute(
+    "/admin/monitoring",
+    "Monitoring Admin",
+    "Monitoring is an operator route for service status and diagnostics."
+  ),
+  registryRoute({
+    path: "/sources/new",
+    label: "New Source",
+    group: "knowledge",
+    surface: "default_self_hosted",
+    nav: "hidden",
+    requiresBackend: true,
+    rationale: "Source creation is a task route owned by the sources workflow."
+  }),
+  registryRoute({
+    path: "/companion/conversation",
+    label: "Companion Conversation",
+    group: "chat",
+    surface: "labs_beta",
+    availability: [...webAndExtensionOptions, "extension_sidepanel"],
+    smoke: "manual",
+    requiresBackend: true,
+    rationale: "Companion conversation is a nested sidepanel-capable companion workflow."
+  }),
+  registryRoute({
+    path: "/presentation-studio/new",
+    label: "New Presentation",
+    group: "workspace",
+    surface: "labs_beta",
+    nav: "hidden",
+    rationale: "Presentation creation is a nested task route owned by Presentation Studio."
+  }),
+  registryRoute({
+    path: "/presentation-studio/start",
+    label: "Presentation Studio Start",
+    group: "workspace",
+    surface: "labs_beta",
+    nav: "hidden",
+    rationale: "Presentation startup flow is a nested task route owned by Presentation Studio."
+  }),
+  registryRoute({
+    path: "/moderation",
+    label: "Moderation Review",
+    group: "safety",
+    surface: "advanced_self_hosted",
+    availability: webAndExtensionOptions,
+    requiresBackend: true,
+    rationale: "Moderation review is the canonical review route for safety workflows."
+  }),
+  registryRoute({
+    path: "/moderation/rules",
+    label: "Moderation Rules",
+    group: "safety",
+    surface: "advanced_self_hosted",
+    availability: webAndExtensionOptions,
+    requiresBackend: true,
+    rationale: "Moderation rules own policy, blocklist, override, and testing configuration."
+  }),
+  registryRoute({
+    path: "/prototype-workspaces",
+    label: "Prototype Workspaces",
+    group: "workspace",
+    surface: "labs_beta",
+    smoke: "manual",
+    requiresBackend: true,
+    rationale: "Prototype workspaces are a labs route retained for compatibility."
+  }),
+  registryRoute({
+    path: "/research-studio",
+    label: "Research Studio",
+    group: "workspace",
+    surface: "advanced_self_hosted",
+    availability: webAndExtensionOptions,
+    requiresBackend: true,
+    rationale: "Research Studio is the canonical route for workspace playground behavior in the shared router."
+  }),
+  registryRoute({
+    path: "/workspace-studio",
+    canonicalPath: "/research-studio",
+    label: "Workspace Studio",
+    group: "workspace",
+    surface: "redirect",
+    availability: webAndExtensionOptions,
+    redirectsTo: "/research-studio",
+    smoke: "exclude",
+    commandPalette: "alias_only",
+    nav: "hidden",
+    requiresBackend: true,
+    rationale: "Workspace Studio is a compatibility alias to Research Studio in the shared router."
+  })
+]
+
+export const ROUTE_METADATA: RouteMetadata[] = [
+  ...AUDITED_ROUTE_METADATA,
+  ...ROUTE_REGISTRY_METADATA
 ]
 
 const normalizeRoutePath = (path: string): string => {

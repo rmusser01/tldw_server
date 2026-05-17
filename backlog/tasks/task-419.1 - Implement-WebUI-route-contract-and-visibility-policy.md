@@ -4,7 +4,7 @@ title: Implement WebUI route contract and visibility policy
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-05-17 21:23'
+updated_date: '2026-05-17 21:27'
 labels:
   - ux
   - webui
@@ -31,7 +31,7 @@ Implement the first WP1 slice from the approved WebUI/extension UX remediation p
 <!-- AC:BEGIN -->
 - [x] #1 Route metadata contract types and helpers exist for audited root routes.
 - [x] #2 Initial tests prove all audited root routes have metadata and canonical paths where applicable.
-- [ ] #3 Option route registry validation is wired to metadata without changing route behavior.
+- [x] #3 Option route registry validation is wired to metadata without changing route behavior.
 - [ ] #4 Extension sidepanel and options availability are represented in metadata or tested as an explicit follow-up gap.
 - [ ] #5 Command palette route target mismatch is covered by tests before any behavior change.
 - [ ] #6 Smoke inventory ownership is derived from or checked against route metadata.
@@ -48,6 +48,8 @@ Baseline before route metadata edits: `bunx playwright test e2e/smoke/route-cont
 Task 1 red/green: added `src/routes/__tests__/route-metadata.coverage.test.ts`; first focused Vitest run failed as expected because `../route-metadata` did not exist. Added pure route metadata/types/helpers in `src/routes/route-metadata.ts`; focused run then passed: 5 tests passed.
 
 Additional verification: `bunx tsc --noEmit --pretty false` from `apps/packages/ui` currently fails on existing unrelated TypeScript errors across audio, composer, flashcards, playground, route registry, and service tests. No reported error referenced `src/routes/route-metadata.ts` or `src/routes/__tests__/route-metadata.coverage.test.ts`.
+
+Task 2 red/green: added `src/routes/__tests__/route-registry.visibility.test.ts`. First attempt imported `route-registry.tsx` and failed for the wrong reason by resolving optional OCR dependency `pa-tesseract.js`; corrected the test to inspect registry source text plus pure route-path constants. The corrected red run reported missing metadata for 41 non-dynamic option registry paths. Added registry metadata for settings, admin, nested source, companion, presentation, moderation, prototype workspace, research-studio, and workspace-studio routes. Focused run passed: 4 registry visibility tests passed. Combined metadata plus registry run passed: 9 tests passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
