@@ -835,13 +835,15 @@ git commit -m "feat: wire read-along into media content viewer"
 
 ## Task 7: Accessibility, Route Parity, And Regression Hardening
 
+**Status:** Complete
+
 **Files:**
 - Modify: `apps/packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx`
 - Modify or create: `apps/packages/ui/src/routes/__tests__/option-media-route-guards.test.tsx`
 - Modify: `apps/tldw-frontend/__tests__/extension/entry-shell-performance.test.ts`
 - Optional create: `apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.read-along-parity.test.tsx`
 
-- [ ] **Step 1: Add accessibility tests**
+- [x] **Step 1: Add accessibility tests**
 
 Cover:
 
@@ -851,15 +853,15 @@ Cover:
 - reduced motion disables smooth auto-scroll
 - no essential controls are hover-only
 
-- [ ] **Step 2: Add route/shared import guard**
+- [x] **Step 2: Add route/shared import guard**
 
 The feature must stay in `apps/packages/ui`. Add or extend a guard that proves WebUI and extension media routes both use shared `ViewMediaPage`/`ContentViewer`, with no duplicate read-along implementation under `apps/tldw-frontend/extension`.
 
-- [ ] **Step 3: Add bundle/performance guard**
+- [x] **Step 3: Add bundle/performance guard**
 
 Update the extension entry-shell performance test only if the new read-along modules change the expected static import set. Prefer lazy or local imports if static media entry cost grows unexpectedly.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run:
 
@@ -879,7 +881,7 @@ bunx vitest run apps/tldw-frontend/__tests__/extension/entry-shell-performance.t
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx \

@@ -138,6 +138,15 @@ const clearDocumentSelection = (): void => {
   window.getSelection()?.removeAllRanges()
 }
 
+const getReadAlongScrollBehavior = (): ScrollBehavior => {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return 'smooth'
+  }
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ? 'auto'
+    : 'smooth'
+}
+
 // Metadata helpers moved to useContentMetadata hook
 
 interface ContentViewerProps {
@@ -417,7 +426,10 @@ export function ContentViewer({
         nodeRect.bottom > (typeof window !== 'undefined' ? window.innerHeight : 0)
 
     if (isOutside && typeof activeNode.scrollIntoView === 'function') {
-      activeNode.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      activeNode.scrollIntoView({
+        behavior: getReadAlongScrollBehavior(),
+        block: 'center'
+      })
     }
   }, [
     readAlong.activeSegmentId,
@@ -1311,6 +1323,11 @@ export function ContentViewer({
                   className={`text-sm text-text leading-relaxed ${
                     !modals.contentExpanded && shouldShowExpandToggle ? 'max-h-64 overflow-hidden relative' : ''
                   }`}
+                  tabIndex={0}
+                  role="region"
+                  aria-label={t('review:mediaPage.contentRegion', {
+                    defaultValue: 'Media content'
+                  })}
                   onMouseUp={selectionActions.handleContentSelectionEvent}
                   onKeyUp={selectionActions.handleContentSelectionEvent}
                 >
@@ -1439,8 +1456,6 @@ export function ContentViewer({
                     rendering.displayContent ? (
                       <div
                         className={`${rendering.richTextTypographyClass} break-words dark:prose-invert max-w-none prose-p:leading-relaxed`}
-                        role="region"
-                        aria-label={t('review:mediaPage.contentRegion', { defaultValue: 'Media content' })}
                         dangerouslySetInnerHTML={{
                           __html: rendering.sanitizedRichContent
                         }}
