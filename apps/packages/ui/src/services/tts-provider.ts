@@ -2,6 +2,8 @@ import {
   getElevenLabsApiKey,
   getElevenLabsModel,
   getElevenLabsVoiceId,
+  getOpenAITTSModel,
+  getOpenAITTSVoice,
   getRemoveReasoningTagTTS,
   getSpeechPlaybackSpeed,
   getTTSProvider,
@@ -67,6 +69,15 @@ export type TtsFormatInfo = {
   isFallback: boolean
 }
 
+export type TtsCacheSettings = {
+  provider: string
+  model?: string | null
+  voice?: string | null
+  speed?: number | null
+  format?: string | null
+  language?: string | null
+}
+
 export type TtsProviderContext = {
   provider: string
   utterance: string
@@ -77,6 +88,7 @@ export type TtsProviderContext = {
     options?: TtsSynthesizeOptions
   ) => Promise<TtsSynthesisResult>
   formatInfo?: TtsFormatInfo
+  cacheSettings?: TtsCacheSettings
 }
 
 const SUPPORTED_TTS_PROVIDERS = new Set<TtsProviderKey>(TTS_PROVIDER_VALUES)
@@ -169,6 +181,13 @@ export const resolveTtsProviderContext = async (
       utterance,
       playbackSpeed,
       supported: true,
+      cacheSettings: {
+        provider,
+        model: modelId,
+        voice: voiceId,
+        speed,
+        format: "mp3"
+      },
       synthesize: async (segment: string, _options?: TtsSynthesizeOptions) => ({
         buffer: await generateSpeech(apiKey, segment, voiceId, modelId, speed),
         format: "mp3",
@@ -178,17 +197,30 @@ export const resolveTtsProviderContext = async (
   }
 
   if (provider === "openai") {
+    const baseModel = await getOpenAITTSModel()
+    const baseVoice = await getOpenAITTSVoice()
+    const model = overrides?.openAiModel || baseModel
+    const voice = overrides?.openAiVoice || baseVoice
+    const speed = overrides?.openAiSpeed
+
     return {
       provider,
       utterance,
       playbackSpeed,
       supported: true,
+      cacheSettings: {
+        provider,
+        model,
+        voice,
+        speed,
+        format: "mp3"
+      },
       synthesize: async (segment: string, _options?: TtsSynthesizeOptions) => ({
         buffer: await generateOpenAITTS({
           text: segment,
-          model: overrides?.openAiModel,
-          voice: overrides?.openAiVoice,
-          speed: overrides?.openAiSpeed
+          model,
+          voice,
+          speed
         }),
         format: "mp3",
         mimeType: "audio/mpeg"
@@ -224,6 +256,14 @@ export const resolveTtsProviderContext = async (
     playbackSpeed,
     supported: true,
     formatInfo,
+    cacheSettings: {
+      provider,
+      model,
+      voice,
+      speed,
+      format: responseFormat,
+      language
+    },
     synthesize: async (segment: string, options?: TtsSynthesizeOptions) => ({
       buffer: await tldwClient.synthesizeSpeech(segment, {
         model,

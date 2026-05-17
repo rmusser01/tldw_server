@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/services/tts', () => ({
+  getOpenAITTSModel: vi.fn(async () => 'tts-1'),
+  getOpenAITTSVoice: vi.fn(async () => 'alloy'),
   getElevenLabsApiKey: vi.fn(async () => ''),
   getElevenLabsModel: vi.fn(async () => ''),
   getElevenLabsVoiceId: vi.fn(async () => ''),
@@ -51,6 +53,8 @@ vi.mock('@/services/tldw/TldwApiClient', () => ({
 }))
 
 import { tldwClient } from '@/services/tldw/TldwApiClient'
+import { generateOpenAITTS } from '@/services/openai-tts'
+import { getOpenAITTSModel, getOpenAITTSVoice } from '@/services/tts'
 import { resolveTtsProviderContext } from '../tts-provider'
 
 describe('tts provider read-along synthesis', () => {
@@ -68,5 +72,24 @@ describe('tts provider read-along synthesis', () => {
       'hello',
       expect.objectContaining({ signal })
     )
+  })
+
+  it('captures OpenAI model and voice when provider context is resolved', async () => {
+    vi.mocked(getOpenAITTSModel).mockResolvedValueOnce('model-a')
+    vi.mocked(getOpenAITTSVoice).mockResolvedValueOnce('voice-a')
+    vi.mocked(generateOpenAITTS).mockResolvedValueOnce(new ArrayBuffer(8))
+
+    const context = await resolveTtsProviderContext('hello', { provider: 'openai' })
+    vi.mocked(getOpenAITTSModel).mockResolvedValue('model-b')
+    vi.mocked(getOpenAITTSVoice).mockResolvedValue('voice-b')
+
+    await context.synthesize?.('next segment')
+
+    expect(generateOpenAITTS).toHaveBeenCalledWith({
+      text: 'next segment',
+      model: 'model-a',
+      voice: 'voice-a',
+      speed: undefined
+    })
   })
 })

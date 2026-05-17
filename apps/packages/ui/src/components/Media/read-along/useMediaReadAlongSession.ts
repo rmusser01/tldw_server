@@ -424,8 +424,9 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
       if (!isCurrentSession(token)) return
       const settingsSignature = buildTtsSettingsSignature({
         provider: providerContext.provider,
-        speed: providerContext.playbackSpeed,
-        format: providerContext.formatInfo?.resolved
+        ...providerContext.cacheSettings,
+        speed: providerContext.cacheSettings?.speed ?? providerContext.playbackSpeed,
+        format: providerContext.cacheSettings?.format ?? providerContext.formatInfo?.resolved
       })
       const session: ReadAlongSession = {
         token,

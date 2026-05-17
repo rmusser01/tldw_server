@@ -427,6 +427,66 @@ describe('useMediaReadAlongSession', () => {
     expect(eventLog.some((entry) => entry.includes('tldw|||1|wav|'))).toBe(false)
   })
 
+  it('uses effective model and voice in generated-audio cache signatures', async () => {
+    providerContext = {
+      provider: 'openai',
+      utterance: '',
+      playbackSpeed: 1,
+      supported: true,
+      cacheSettings: {
+        provider: 'openai',
+        model: 'tts-model-a',
+        voice: 'voice-a',
+        speed: 1,
+        format: 'mp3'
+      },
+      synthesize: vi.fn(async (text: string) => ({
+        buffer: new TextEncoder().encode(text).buffer,
+        format: 'mp3',
+        mimeType: 'audio/mpeg'
+      }))
+    }
+    const first = setupHook()
+
+    await act(async () => {
+      await first.result.current.start('selection')
+    })
+    first.unmount()
+
+    providerContext = {
+      provider: 'openai',
+      utterance: '',
+      playbackSpeed: 1,
+      supported: true,
+      cacheSettings: {
+        provider: 'openai',
+        model: 'tts-model-b',
+        voice: 'voice-b',
+        speed: 1,
+        format: 'mp3'
+      },
+      synthesize: vi.fn(async (text: string) => ({
+        buffer: new TextEncoder().encode(text).buffer,
+        format: 'mp3',
+        mimeType: 'audio/mpeg'
+      }))
+    }
+    const second = setupHook()
+
+    await act(async () => {
+      await second.result.current.start('selection')
+    })
+
+    expect(eventLog).toContain('settings:openai|tts-model-a|voice-a|1|mp3|')
+    expect(eventLog).toContain('settings:openai|tts-model-b|voice-b|1|mp3|')
+    expect(eventLog).toContain(
+      'cache-key:media-1:0:sentence:0:15:openai|tts-model-a|voice-a|1|mp3|'
+    )
+    expect(eventLog).toContain(
+      'cache-key:media-1:0:sentence:0:15:openai|tts-model-b|voice-b|1|mp3|'
+    )
+  })
+
   it('audio.play() rejection enters segment-error', async () => {
     playRejects = true
     const { result } = setupHook()
