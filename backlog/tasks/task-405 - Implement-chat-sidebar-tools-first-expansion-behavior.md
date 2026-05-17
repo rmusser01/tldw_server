@@ -17,6 +17,10 @@ modified_files:
 - apps/packages/ui/src/components/Common/ChatSidebar/__tests__/ChatSidebar.tools-first.test.tsx
 - apps/packages/ui/src/components/Common/ChatSidebar/__tests__/ChatSidebar.lazy-history.test.tsx
 - apps/packages/ui/src/components/Common/__tests__/ChatSidebar.coordinator.test.tsx
+- apps/packages/ui/src/components/Layouts/Layout.tsx
+- apps/packages/ui/src/components/Layouts/__tests__/Layout.chat-sidebar-reset-signal.guard.test.ts
+- apps/tldw-frontend/components/layout/WebLayout.tsx
+- apps/tldw-frontend/__tests__/components/layout/WebLayout.chat-scroll-contract.test.tsx
 ---
 
 ## Description
@@ -44,6 +48,8 @@ Implement the shared ChatSidebar tools-first expansion behavior: shortcuts expan
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Task 3 completed: kept server history overview loading behind the Recent conversations disclosure while preserving active-search reset behavior and debounced ServerChatList query flow. Focused verification passed: bunx vitest run src/components/Common/ChatSidebar/__tests__/ChatSidebar.tools-first.test.tsx src/components/Common/ChatSidebar/__tests__/ChatSidebar.lazy-history.test.tsx src/components/Common/__tests__/ChatSidebar.coordinator.test.tsx (3 files, 11 tests). git diff --check passed for Task 3 touched files. Bandit skipped: frontend-only TS/TSX change.
+
+Task 4 completed: added already-expanded openResetKey regression coverage and wired shared Layout plus Next.js WebLayout to maintain a monotonic chatSidebarOpenResetKey for explicit open/foreground actions. Focused verification passed: bunx vitest run src/components/Common/ChatSidebar/__tests__/ChatSidebar.tools-first.test.tsx src/components/Layouts/__tests__/Layout.chat-sidebar-reset-signal.guard.test.ts (2 files, 9 tests) from apps/packages/ui; bunx vitest run __tests__/components/layout/WebLayout.chat-scroll-contract.test.tsx (1 file, 3 tests) from apps/tldw-frontend; git diff --check passed for Task 4 touched files. Bandit skipped: frontend-only TS/TSX changes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -1,4 +1,5 @@
 import React from 'react';
+import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -66,6 +67,12 @@ const connectionState = vi.hoisted(() => ({
 const confirmDangerMock = vi.hoisted(() => vi.fn(async () => false));
 const storageState = vi.hoisted(() => ({
   stickyChatInput: true,
+}));
+const featureFlagState = vi.hoisted(() => ({
+  showChatSidebar: false,
+}));
+const chatSidebarMockState = vi.hoisted(() => ({
+  props: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('antd', () => ({
@@ -205,7 +212,7 @@ vi.mock('@/hooks/useLayoutEffectsOwner', () => ({
 }));
 
 vi.mock('@/hooks/useFeatureFlags', () => ({
-  useChatSidebar: () => [false],
+  useChatSidebar: () => [featureFlagState.showChatSidebar],
 }));
 
 vi.mock('@/hooks/useMediaQuery', () => ({
@@ -230,7 +237,10 @@ vi.mock('@/hooks/useServerOnline', () => ({
 }));
 
 vi.mock('@/components/Common/ChatSidebar', () => ({
-  ChatSidebar: () => null,
+  ChatSidebar: (props: Record<string, unknown>) => {
+    chatSidebarMockState.props.push(props);
+    return <aside data-testid="chat-sidebar" />;
+  },
 }));
 
 vi.mock('@/components/Common/EventHosts', () => ({
@@ -315,6 +325,8 @@ describe('WebLayout /chat scroll contract', () => {
     routerState.location.search = '';
     routerState.location.hash = '';
     storageState.stickyChatInput = true;
+    featureFlagState.showChatSidebar = false;
+    chatSidebarMockState.props = [];
   });
 
   it('marks the /chat route shell as transcript-owned when sticky chat input is active', () => {
@@ -325,5 +337,35 @@ describe('WebLayout /chat scroll contract', () => {
     );
 
     expect(html).toContain('data-chat-scroll-owner="transcript"');
+  });
+
+  it('passes openResetKey when the shared ChatSidebar feature is enabled', () => {
+    featureFlagState.showChatSidebar = true;
+
+    renderToStaticMarkup(
+      <OptionLayout>
+        <div data-testid="chat-route-content">Chat route</div>
+      </OptionLayout>
+    );
+
+    expect(chatSidebarMockState.props).toHaveLength(1);
+    expect(chatSidebarMockState.props[0]).toEqual(
+      expect.objectContaining({
+        collapsed: true,
+        openResetKey: expect.any(Number),
+      })
+    );
+  });
+
+  it('mirrors shared layout reset-key wiring for desktop and mobile mounts', () => {
+    const source = readFileSync('components/layout/WebLayout.tsx', 'utf8');
+
+    expect(source).toContain('chatSidebarOpenResetKey');
+    expect(source.match(/openResetKey=\{chatSidebarOpenResetKey\}/g)).toHaveLength(2);
+    expect(source).toContain('signalChatSidebarOpen');
+    expect(source).toContain('setChatSidebarOpenResetKey((value) => value + 1)');
+    expect(source).toContain('if (!sidebarOpen) signalChatSidebarOpen()');
+    expect(source).toContain('if (chatSidebarCollapsed) signalChatSidebarOpen()');
+    expect(source).toContain("window.addEventListener('tldw:open-chat-sidebar', handler)");
   });
 });
