@@ -101,6 +101,12 @@ Aliases, redirects, hosted-only pages, labs routes, debug previews, extension
 sidepanel routes, and canonical routes must be declared intentionally. Users
 should not discover product structure by trial and error.
 
+### Interaction Before Explanation
+
+Use visible copy to label state, actions, and recovery paths. Do not treat
+paragraph-level in-app explanation as the primary fix for unclear route
+ownership, missing system state, overloaded controls, or weak hierarchy.
+
 ## Work Packages
 
 ### WP1: Canonical Route Contract And Visibility Policy
@@ -442,7 +448,7 @@ F14, F1, F2, F15.
 Routes covered:
 `/knowledge`, `/search`, `/research`, `/workspace-playground`,
 `/chat-workspace`, `/document-workspace`, `/repo2txt`, `/model-playground`,
-`/writing-playground`, `/presentation-studio`, `/audiobook-studio`.
+`/writing-playground`, `/presentation-studio`.
 
 User outcomes:
 Users can choose the right surface without memorizing product history. Experts
@@ -455,7 +461,8 @@ items where existing data supports it.
 
 Dependencies:
 WP1 for route names and aliases. WP4 for responsive behavior. WP6 for chat
-controls where routes include chat.
+controls where routes include chat. WP11 owns `/audiobook-studio`, with WP9
+providing only product-ladder and transform-label alignment.
 
 Out of scope:
 Full research engine redesign or new artifact systems.
@@ -776,9 +783,21 @@ When this spec is converted into an implementation plan:
 - Do not create one giant remediation PR.
 - Use Backlog tasks per reviewable slice.
 - Start with WP1/WP2/WP4 foundations before broad page-local remediation.
+- Convert this program design into multiple implementation plans or a parent
+  plan with child plans; do not force all 12 work packages into one execution
+  plan.
+- Each slice must list the finding IDs and route matrix rows it intends to
+  close, plus the rows intentionally left open.
 - Distinguish foundation-package adoption from route-family primary ownership.
   For example, `/sources` may be owned by the Operations package while adopting
   the shared capability-state package.
+- Split overloaded route-family packages before implementation when one package
+  spans unrelated workflows. WP11 in particular should become separate
+  audio/study/safety/specialized-tool slices unless the actual change is only a
+  shared classification or route-contract update.
+- Do not use explanatory text as a substitute for structural UX fixes. Prefer
+  clearer controls, status states, progressive disclosure, route ownership, and
+  recovery affordances.
 - Keep tests scoped to the changed surfaces and shared contracts.
 - Browser QA is mandatory for changed visual routes.
 - Bandit is required only for touched Python/backend scope.
