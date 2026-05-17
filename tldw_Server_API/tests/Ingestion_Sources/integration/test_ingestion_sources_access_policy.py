@@ -397,12 +397,11 @@ def test_patch_existing_local_directory_same_normalized_config_without_entitleme
 @pytest.mark.parametrize(
     "feature_flags",
     [
-        [_flag(scope="global")],
         [_flag(scope="user", user_id=7)],
         [_flag(scope="org", org_id=42)],
     ],
 )
-def test_capabilities_reports_applicable_user_org_and_global_flags(
+def test_capabilities_reports_applicable_user_and_org_flags(
     ingestion_sources_policy_client,
     feature_flags,
 ):
@@ -412,6 +411,18 @@ def test_capabilities_reports_applicable_user_org_and_global_flags(
 
     assert response.status_code == 200, response.text
     assert response.json() == {"can_create_local_directory": True}
+
+
+@pytest.mark.integration
+def test_capabilities_reports_false_for_global_flag(
+    ingestion_sources_policy_client,
+):
+    ingestion_sources_policy_client["feature_flags"].append(_flag(scope="global"))
+
+    response = ingestion_sources_policy_client["client"].get("/api/v1/ingestion-sources/capabilities")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"can_create_local_directory": False}
 
 
 @pytest.mark.integration

@@ -259,12 +259,12 @@ def _normalize_rollout_percent(value: Any, *, strict: bool) -> int:
     except (TypeError, ValueError):
         if strict:
             raise ValueError("invalid_rollout_percent") from None
-        return 100
+        return 0
     if 0 <= parsed <= 100:
         return parsed
     if strict:
         raise ValueError("invalid_rollout_percent")
-    return 100
+    return 0
 
 
 def _normalize_allowlist_ids(values: list[int] | None) -> list[int]:
