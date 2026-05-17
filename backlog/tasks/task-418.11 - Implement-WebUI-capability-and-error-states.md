@@ -1,7 +1,7 @@
 ---
 id: TASK-418.11
 title: Implement WebUI capability and error states
-status: In Progress
+status: Done
 labels:
 - ux
 - webui
@@ -29,10 +29,10 @@ Implement the first WP2 capability/error-state remediation slice for the WebUI/e
 - [x] #3 /sources top-level unavailable/error/empty states use shared user-language state UI, with raw endpoint details only in diagnostics.
 - [x] #4 /scheduled-tasks top-level unavailable/error/degraded states use shared user-language state UI, with raw endpoint details only in diagnostics.
 - [x] #5 /integrations top-level unsupported/error states use shared user-language state UI, with provider-card details left scoped to cards unless they leak raw route state.
-- [ ] #6 Focused Vitest route/component tests pass for changed state primitives and first adopters.
-- [ ] #7 Browser QA or Playwright evidence is recorded for /sources, /scheduled-tasks, and /integrations, with any environment gaps documented.
-- [ ] #8 Later route-family adopters are listed in the task notes instead of silently skipped.
-- [ ] #9 No backend API changes or broad visual redesign are included.
+- [x] #6 Focused Vitest route/component tests pass for changed state primitives and first adopters.
+- [x] #7 Browser QA or Playwright evidence is recorded for /sources, /scheduled-tasks, and /integrations, with any environment gaps documented.
+- [x] #8 Later route-family adopters are listed in the task notes instead of silently skipped.
+- [x] #9 No backend API changes or broad visual redesign are included.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -50,20 +50,28 @@ Shared state foundation: `state-primitives.test.tsx` passed at baseline (7 tests
 
 Design-system guard follow-up: `bun run verify:design-system-state` initially found one remaining touched-file AntD product-state import in `IntegrationManagementPage.tsx` for the Telegram linked actors warning. Added coverage and migrated that warning to a degraded shared state with diagnostics, then removed stale baseline entries for the migrated `/sources`, `/scheduled-tasks`, and `/integrations` AntD states. Verification: targeted Telegram linked-actor test passed; `bun run verify:design-system-state` passed with only pre-existing allowed legacy exceptions.
 
+Combined verification: `bunx vitest run src/components/ui/state/__tests__/capability-state.test.ts src/components/ui/state/__tests__/state-primitives.test.tsx src/components/Option/Sources/__tests__/SourcesWorkspacePage.test.tsx src/routes/__tests__/option-sources-route-guards.test.tsx src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx src/routes/__tests__/scheduled-tasks-route.test.tsx src/components/Option/Integrations/__tests__/IntegrationManagementPage.test.tsx src/routes/__tests__/integrations-route.test.tsx` passed 8 files / 52 tests. `bun run verify:design-system-state` passed after stale migrated baseline entries were removed. `git diff --check` passed after the final Backlog update. `bunx tsc --noEmit -p tsconfig.json` was attempted and failed on pre-existing package-wide TypeScript errors outside this slice, including evaluations recipe config sample typing, Workspace Studio capability key narrowing, and shortcut config persistence typing.
+
+Browser QA evidence: dev server was started with `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run dev -- -H 127.0.0.1 -p 18002`. Playwright opened `http://127.0.0.1:18002/sources`, `http://127.0.0.1:18002/scheduled-tasks`, and `http://127.0.0.1:18002/integrations`. All three snapshots were blocked at the WebUI readiness/auth state (`Checking server readiness`, disabled `Waiting` button) because the local API on `127.0.0.1:8000` returned 401 for `/openapi.json`, notifications, and `/api/v1/ingestion-sources/capabilities`. Snapshot evidence: `.playwright-cli/page-2026-05-17T23-21-06-988Z.yml`, `.playwright-cli/page-2026-05-17T23-28-25-790Z.yml`, and `.playwright-cli/page-2026-05-17T23-28-36-573Z.yml`. The changed page states are therefore verified through DOM/component tests rather than live authenticated browser observation in this environment.
+
+Later route-family adopters intentionally left for follow-up slices: `/admin`, `/agents`, `/agent-tasks`, `/acp-playground`, `/settings/model`, `/evaluations`, `/mcp-hub`, `/skills`, `/tts`, `/speech`, and `/data-tables`. This slice did not change backend APIs, route names, navigation structure, tables/forms, or broad visual design.
+
+Security verification: Bandit was not run because the touched implementation scope is TypeScript/React UI, JSON baseline metadata, and this Backlog task. No Python backend code or security-sensitive server path was changed.
+
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented the first WP2 capability/error-state remediation slice for `/sources`, `/scheduled-tasks`, and `/integrations`. The branch adds a shared capability-state mapper, adopts the existing design-system `StatePanel` for top-level unavailable/error/degraded/empty states, keeps raw endpoint/status details inside diagnostics, and removes stale design-system baseline exceptions for the migrated pages. Browser QA was attempted for all three target routes but the local authenticated API blocked route entry with 401 responses, so live page-state observation remains an environment gap; focused DOM/component tests cover the changed state behavior.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
