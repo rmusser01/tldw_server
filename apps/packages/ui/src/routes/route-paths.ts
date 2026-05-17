@@ -26,6 +26,12 @@ export const ADMIN_SOURCES_PATH = "/admin/sources"
 export const MEDIA_COLLECTIONS_PATH = "/media-collections"
 export const MEDIA_COLLECTION_REVIEW_PATH = `${MEDIA_COLLECTIONS_PATH}/:collectionId`
 
+export type SourcesNewPreset = "notes-folder-sync"
+
+type BuildSourcesNewPathOptions = {
+  preset?: SourcesNewPreset
+}
+
 export const VIEWPORT_CONSTRAINED_PATHS = [
   CHAT_WORKSPACE_PATH,
   DOCUMENT_WORKSPACE_PATH,
@@ -79,6 +85,17 @@ const setTrimmedSearchParam = (
   if (trimmed) {
     params.set(key, trimmed)
   }
+}
+
+export const buildSourcesNewPath = (
+  options: BuildSourcesNewPathOptions = {}
+): string => {
+  const params = new URLSearchParams()
+  if (options.preset) {
+    params.set("preset", options.preset)
+  }
+  const encoded = params.toString()
+  return encoded ? `${SOURCES_NEW_PATH}?${encoded}` : SOURCES_NEW_PATH
 }
 
 export const buildResearchLaunchPath = (

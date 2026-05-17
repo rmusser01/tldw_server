@@ -7,6 +7,10 @@ const hookMocks = vi.hoisted(() => ({
   useUpdateIngestionSourceMutation: vi.fn()
 }))
 
+const capabilityMocks = vi.hoisted(() => ({
+  useServerCapabilities: vi.fn()
+}))
+
 const routerMocks = vi.hoisted(() => ({
   navigate: vi.fn()
 }))
@@ -41,6 +45,10 @@ vi.mock("@/hooks/use-ingestion-sources", () => ({
     hookMocks.useUpdateIngestionSourceMutation(...args)
 }))
 
+vi.mock("@/hooks/useServerCapabilities", () => ({
+  useServerCapabilities: () => capabilityMocks.useServerCapabilities()
+}))
+
 import { SourceForm } from "@/components/Option/Sources/SourceForm"
 
 describe("SourceForm", () => {
@@ -53,6 +61,111 @@ describe("SourceForm", () => {
     hookMocks.useUpdateIngestionSourceMutation.mockReturnValue({
       mutateAsync: vi.fn(async () => ({ id: "42" })),
       isPending: false
+    })
+    capabilityMocks.useServerCapabilities.mockReturnValue({
+      capabilities: { canCreateLocalDirectoryIngestionSource: true },
+      loading: false,
+      refresh: vi.fn()
+    })
+  })
+
+  it("uses notes folder sync preset defaults when creating a source", async () => {
+    const mutateAsync = vi.fn(async () => ({ id: "42" }))
+    hookMocks.useCreateIngestionSourceMutation.mockReturnValue({
+      mutateAsync,
+      isPending: false
+    })
+
+    render(<SourceForm mode="create" preset="notes-folder-sync" />)
+
+    fireEvent.change(screen.getByLabelText("Server directory path"), {
+      target: { value: "/srv/tldw/notes" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Create source" }))
+
+    await waitFor(() => {
+      expect(mutateAsync).toHaveBeenCalledWith({
+        source_type: "local_directory",
+        sink_type: "notes",
+        policy: "canonical",
+        enabled: true,
+        schedule_enabled: false,
+        schedule: {},
+        config: {
+          path: "/srv/tldw/notes"
+        }
+      })
+    })
+  })
+
+  it("renders a Scheduled rescans switch", () => {
+    render(<SourceForm mode="create" />)
+
+    expect(screen.getByText("Scheduled rescans")).toBeInTheDocument()
+    expect(
+      screen.getByText(/cadence is managed by the server/i)
+    ).toBeInTheDocument()
+  })
+
+  it("sends schedule_enabled true when Scheduled rescans is enabled", async () => {
+    const mutateAsync = vi.fn(async () => ({ id: "42" }))
+    hookMocks.useCreateIngestionSourceMutation.mockReturnValue({
+      mutateAsync,
+      isPending: false
+    })
+
+    render(<SourceForm mode="create" />)
+
+    fireEvent.click(screen.getByRole("switch", { name: "Scheduled rescans" }))
+    fireEvent.change(screen.getByLabelText("Server directory path"), {
+      target: { value: "/srv/tldw/notes" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Create source" }))
+
+    await waitFor(() => {
+      expect(mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          schedule_enabled: true
+        })
+      )
+    })
+  })
+
+  it("disables local-directory create when the server capability is unavailable", async () => {
+    const mutateAsync = vi.fn(async () => ({ id: "42" }))
+    hookMocks.useCreateIngestionSourceMutation.mockReturnValue({
+      mutateAsync,
+      isPending: false
+    })
+    capabilityMocks.useServerCapabilities.mockReturnValue({
+      capabilities: { canCreateLocalDirectoryIngestionSource: false },
+      loading: false,
+      refresh: vi.fn()
+    })
+
+    render(<SourceForm mode="create" />)
+
+    const createButton = screen.getByRole("button", { name: "Create source" })
+    expect(createButton).toBeDisabled()
+    expect(
+      screen.getByText(
+        "The administrator must enable server folder sync before you can create a local directory source."
+      )
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("radio", { name: "Archive snapshot" }))
+
+    await waitFor(() => {
+      expect(createButton).not.toBeDisabled()
+    })
+    fireEvent.click(createButton)
+
+    await waitFor(() => {
+      expect(mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source_type: "archive_snapshot"
+        })
+      )
     })
   })
 
