@@ -614,17 +614,9 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     "playground:composer.groups.mobileRunInput",
     "Mobile run input controls"
   ) as string
-  const proContextPanelLabel = t(
-    "playground:composer.groups.contextSetupControls",
-    "Context setup controls"
-  ) as string
   const proContextPanelHeading = t(
     "playground:composer.groups.contextSetup",
     "Context setup"
-  ) as string
-  const proGenerationPanelLabel = t(
-    "playground:composer.groups.modelToolsRunControls",
-    "Model, tools, and run controls"
   ) as string
   const proGenerationPanelHeading = t(
     "playground:composer.groups.modelToolsRun",
@@ -634,6 +626,10 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     "playground:composer.groups.advancedComposerControls",
     "Advanced composer controls"
   ) as string
+  const casualAdvancedControlsId = "composer-casual-advanced-controls-row"
+  const proAdvancedControlsId = "composer-pro-advanced-controls-row"
+  const proContextHeadingId = "composer-pro-context-heading"
+  const proGenerationHeadingId = "composer-pro-generation-heading"
   const formattingGuideControl = (
     <button
       type="button"
@@ -663,7 +659,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       }
       aria-expanded={casualAdvancedControlsOpen}
       aria-pressed={casualAdvancedControlsOpen}
-      aria-controls="composer-casual-advanced-controls-row"
+      aria-controls={casualAdvancedControlsOpen ? casualAdvancedControlsId : undefined}
       data-testid="composer-casual-advanced-chip"
       className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition hover:bg-surface2 ${advancedChipClass}`}>
       <span>{t("playground:composer.advancedControls", "Advanced controls")}</span>
@@ -748,7 +744,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           type="button"
           onClick={() => setAdvancedControlsOpen(!advancedControlsOpen)}
           aria-expanded={advancedControlsOpen}
-          aria-controls="composer-pro-advanced-controls-row"
+          aria-controls={advancedControlsOpen ? proAdvancedControlsId : undefined}
           data-testid="composer-advanced-toggle"
           className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs font-medium text-text-muted transition hover:bg-surface2 hover:text-text">
           <span>
@@ -763,7 +759,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         </button>
         {advancedControlsOpen && (
           <div
-            id="composer-pro-advanced-controls-row"
+            id={proAdvancedControlsId}
             role="group"
             aria-label={advancedControlsGroupLabel}
             data-playground-toolbar-row="advanced"
@@ -882,12 +878,12 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   const casualAdvancedControlsPanel =
     casualAdvancedControlsOpen && !isMobile && !isProMode ? (
       <div
+        id={casualAdvancedControlsId}
         role="group"
         aria-label={advancedControlsGroupLabel}
         data-playground-toolbar-row="advanced"
         className="rounded-md border border-border/60 bg-surface2/60 p-2">
         <div
-          id="composer-casual-advanced-controls-row"
           data-testid="composer-casual-advanced-controls-row"
           className="flex flex-nowrap items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <ConnectionStatus showLabel={false} className="px-1 py-0.5" />
@@ -907,12 +903,14 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       <div className="grid gap-2 lg:grid-cols-2">
         <section
           role="group"
-          aria-label={proContextPanelLabel}
+          aria-labelledby={proContextHeadingId}
           data-testid="composer-pro-context-panel"
           className="rounded-md border border-border/60 bg-surface2/60 p-2">
-          <div className="mb-2 text-[11px] font-semibold text-text-muted">
+          <h3
+            id={proContextHeadingId}
+            className="mb-2 text-[11px] font-semibold text-text-muted">
             {proContextPanelHeading}
-          </div>
+          </h3>
           <div
             data-playground-toolbar-row="primary"
             className="flex flex-wrap items-center gap-2">
@@ -933,12 +931,14 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         </section>
         <section
           role="group"
-          aria-label={proGenerationPanelLabel}
+          aria-labelledby={proGenerationHeadingId}
           data-testid="composer-pro-generation-panel"
           className="rounded-md border border-border/60 bg-surface2/60 p-2">
-          <div className="mb-2 text-[11px] font-semibold text-text-muted">
+          <h3
+            id={proGenerationHeadingId}
+            className="mb-2 text-[11px] font-semibold text-text-muted">
             {proGenerationPanelHeading}
-          </div>
+          </h3>
           <div className="flex flex-wrap items-center gap-2">
             <ConnectionStatus showLabel={false} className="px-1 py-0.5" />
             {mcpControl}

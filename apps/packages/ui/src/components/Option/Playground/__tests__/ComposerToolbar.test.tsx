@@ -220,6 +220,23 @@ describe("ComposerToolbar web search", () => {
     )
   })
 
+  it("only exposes casual advanced aria-controls when the controlled group is mounted", () => {
+    render(<ComposerToolbar {...createProps()} />)
+
+    const toggle = screen.getByTestId("composer-casual-advanced-chip")
+    expect(toggle).not.toHaveAttribute("aria-controls")
+
+    fireEvent.click(toggle)
+
+    expect(toggle).toHaveAttribute(
+      "aria-controls",
+      "composer-casual-advanced-controls-row"
+    )
+    expect(
+      screen.getByRole("group", { name: "Advanced composer controls" })
+    ).toHaveAttribute("id", "composer-casual-advanced-controls-row")
+  })
+
   it("places token usage in the casual bottom context chip row", () => {
     render(
       <ComposerToolbar
@@ -448,6 +465,23 @@ describe("ComposerToolbar web search", () => {
     ).toBeInTheDocument()
   })
 
+  it("only exposes pro advanced aria-controls when the controlled group is mounted", () => {
+    render(<ComposerToolbar {...createProps({ isProMode: true })} />)
+
+    const toggle = screen.getByTestId("composer-advanced-toggle")
+    expect(toggle).not.toHaveAttribute("aria-controls")
+
+    fireEvent.click(toggle)
+
+    expect(toggle).toHaveAttribute(
+      "aria-controls",
+      "composer-pro-advanced-controls-row"
+    )
+    expect(
+      screen.getByRole("group", { name: "Advanced composer controls" })
+    ).toHaveAttribute("id", "composer-pro-advanced-controls-row")
+  })
+
   it("labels pro cockpit panels by task area without hiding existing controls", () => {
     render(
       <ComposerToolbar
@@ -461,14 +495,18 @@ describe("ComposerToolbar web search", () => {
     )
 
     const contextPanel = screen.getByRole("group", {
-      name: "Context setup controls"
+      name: "Context setup"
     })
     const generationPanel = screen.getByRole("group", {
-      name: "Model, tools, and run controls"
+      name: "Model, tools, and run"
     })
 
-    expect(screen.getByText("Context setup")).toBeInTheDocument()
-    expect(screen.getByText("Model, tools, and run")).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: "Context setup" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: "Model, tools, and run" })
+    ).toBeInTheDocument()
     expect(contextPanel).toContainElement(
       screen.getByRole("button", { name: "Modes" })
     )
