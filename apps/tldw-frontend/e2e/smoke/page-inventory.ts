@@ -84,6 +84,7 @@ export const PAGES: PageEntry[] = [
   { path: "/admin/server", name: "Server Admin", category: "admin" },
   { path: "/admin/llamacpp", name: "LlamaCpp Admin", category: "admin" },
   { path: "/admin/mlx", name: "MLX Admin", category: "admin" },
+  { path: "/admin/integrations", name: "Admin Integrations", category: "admin" },
   { path: "/admin/orgs", name: "Orgs Admin", category: "admin" },
   { path: "/admin/data-ops", name: "Data Ops Admin", category: "admin" },
   { path: "/admin/watchlists-items", name: "Watchlists Items", category: "admin" },
@@ -107,6 +108,8 @@ export const PAGES: PageEntry[] = [
   { path: "/data-tables", name: "Data Tables", category: "workspace" },
   { path: "/content-review", name: "Content Review", category: "workspace" },
   { path: "/claims-review", name: "Claims Review", category: "workspace" },
+  { path: "/integrations", name: "Integrations", category: "workspace" },
+  { path: "/scheduled-tasks", name: "Scheduled Tasks", category: "workspace" },
   { path: "/watchlists", name: "Watchlists", category: "workspace" },
   { path: "/chat-workspace", name: "Chat Workspace", category: "workspace" },
   {
@@ -123,6 +126,7 @@ export const PAGES: PageEntry[] = [
   { path: "/reading", name: "Reading", category: "workspace" },
   { path: "/items", name: "Items", category: "workspace" },
   { path: "/chunking-playground", name: "Chunking Playground", category: "workspace" },
+  { path: "/workspace-playground", name: "Workspace Playground", category: "workspace" },
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Knowledge
@@ -161,12 +165,27 @@ export const PAGES: PageEntry[] = [
   { path: "/profile", name: "Profile", category: "other" },
   { path: "/privileges", name: "Privileges", category: "other" },
   { path: "/quick-chat-popout", name: "Quick Chat Popout", category: "other" },
-  { path: "/onboarding-test", name: "Onboarding Test", category: "other" },
+  {
+    path: "/onboarding-test",
+    name: "Onboarding Test",
+    category: "other",
+    skip: "Internal QA route covered by route metadata contract.",
+  },
   { path: "/for/journalists", name: "For Journalists", category: "other" },
   { path: "/for/osint", name: "For OSINT", category: "other" },
   { path: "/for/researchers", name: "For Researchers", category: "other" },
-  { path: "/__debug__/sidepanel-error-boundary", name: "Debug Error Boundary", category: "other" },
-  { path: "/__debug__/sidepanel-chat", name: "Debug Sidepanel Chat", category: "other" },
+  {
+    path: "/__debug__/sidepanel-error-boundary",
+    name: "Debug Error Boundary",
+    category: "other",
+    skip: "Internal sidepanel QA route covered by route metadata contract.",
+  },
+  {
+    path: "/__debug__/sidepanel-chat",
+    name: "Debug Sidepanel Chat",
+    category: "other",
+    skip: "Internal sidepanel QA route covered by route metadata contract.",
+  },
   { path: "/404", name: "Not Found", category: "other" },
   { path: "/account", name: "Account", category: "other" },
   { path: "/notifications", name: "Notifications", category: "other" },
@@ -183,6 +202,7 @@ export const PAGES: PageEntry[] = [
   { path: "/document-workspace", name: "Document Workspace", category: "workspace" },
   { path: "/model-playground", name: "Model Playground", category: "workspace" },
   { path: "/presentation-studio", name: "Presentation Studio", category: "workspace" },
+  { path: "/presentation-studio/new", name: "New Presentation", category: "workspace" },
   { path: "/repo2txt", name: "Repo2Txt", category: "workspace" },
   { path: "/workflow-editor", name: "Workflow Editor", category: "workspace" },
   { path: "/research-studio", name: "Research Studio", category: "workspace" },
@@ -193,6 +213,9 @@ export const PAGES: PageEntry[] = [
     skip: "Covered in Stage 5 release gate; intermittently trips the global error boundary during full all-pages traversal in CI.",
   },
   { path: "/sources", name: "Sources", category: "workspace" },
+  { path: "/sources/new", name: "New Source", category: "workspace" },
+  { path: "/vn-assets", name: "VN Assets", category: "workspace" },
+  { path: "/vn-play", name: "VN Play", category: "workspace" },
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Chat / Agent (missing)

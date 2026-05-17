@@ -170,9 +170,9 @@ const AUDITED_ROUTE_METADATA: RouteMetadata[] = [
     canonicalPath: "/404",
     label: "Not Found",
     group: "start",
-    surface: "internal_qa_debug",
+    surface: "default_self_hosted",
     availability: webOnly,
-    smoke: "manual",
+    smoke: "include",
     commandPalette: "hide",
     nav: "hidden",
     rationale: "Error-state route is useful for coverage but should not be user navigation."
@@ -1253,7 +1253,10 @@ const ROUTE_REGISTRY_METADATA: RouteMetadata[] = [
   adminRoute(
     "/admin/runtime-config",
     "Runtime Config Admin",
-    "Runtime configuration controls are operator-only."
+    "Runtime configuration controls are operator-only.",
+    {
+      smoke: "manual"
+    }
   ),
   adminRoute(
     "/admin/monitoring",
@@ -1350,6 +1353,7 @@ const ROUTE_REGISTRY_METADATA: RouteMetadata[] = [
     label: "Presentation Studio Start",
     group: "workspace",
     surface: "labs_beta",
+    smoke: "manual",
     nav: "hidden",
     rationale: "Presentation startup flow is a nested task route owned by Presentation Studio."
   }),
