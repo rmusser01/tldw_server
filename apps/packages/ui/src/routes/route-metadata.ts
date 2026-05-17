@@ -1280,6 +1280,64 @@ const ROUTE_REGISTRY_METADATA: RouteMetadata[] = [
     rationale: "Companion conversation is a nested sidepanel-capable companion workflow."
   }),
   registryRoute({
+    path: "/agent",
+    canonicalPath: "/agents",
+    label: "Sidepanel Agent",
+    group: "chat",
+    surface: "extension_sidepanel",
+    availability: ["extension_sidepanel"],
+    smoke: "manual",
+    commandPalette: "hide",
+    nav: "hidden",
+    requiresBackend: true,
+    rationale: "Singular sidepanel agent route is extension-only and maps conceptually to the web Agents surface."
+  }),
+  registryRoute({
+    path: "/clipper",
+    label: "Sidepanel Clipper",
+    group: "knowledge",
+    surface: "extension_sidepanel",
+    availability: ["extension_sidepanel"],
+    smoke: "manual",
+    commandPalette: "hide",
+    nav: "hidden",
+    requiresBackend: true,
+    rationale: "Clipper is a sidepanel-only capture workflow and should not be inferred from web route availability."
+  }),
+  registryRoute({
+    path: "/error-boundary-test",
+    label: "Sidepanel Error Boundary Test",
+    group: "specialized",
+    surface: "internal_qa_debug",
+    availability: ["extension_sidepanel"],
+    smoke: "manual",
+    commandPalette: "hide",
+    nav: "hidden",
+    rationale: "Sidepanel error-boundary route is a development-only QA route."
+  }),
+  registryRoute({
+    path: "/__debug__/sidepanel-chat",
+    label: "Debug Sidepanel Chat",
+    group: "specialized",
+    surface: "internal_qa_debug",
+    availability: webOnly,
+    smoke: "manual",
+    commandPalette: "hide",
+    nav: "hidden",
+    rationale: "Web debug page mounts the sidepanel chat route for QA without exposing it in navigation."
+  }),
+  registryRoute({
+    path: "/__debug__/sidepanel-error-boundary",
+    label: "Debug Sidepanel Error Boundary",
+    group: "specialized",
+    surface: "internal_qa_debug",
+    availability: webOnly,
+    smoke: "manual",
+    commandPalette: "hide",
+    nav: "hidden",
+    rationale: "Web debug page mounts the sidepanel error-boundary route for QA without exposing it in navigation."
+  }),
+  registryRoute({
     path: "/presentation-studio/new",
     label: "New Presentation",
     group: "workspace",

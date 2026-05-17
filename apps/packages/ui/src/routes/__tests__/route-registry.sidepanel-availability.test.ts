@@ -1,0 +1,116 @@
+import { existsSync, readFileSync } from "node:fs"
+import { describe, expect, it } from "vitest"
+
+import {
+  getRouteMetadata,
+  isRouteVisibleForSurface
+} from "../route-metadata"
+
+const readFirstExistingSource = (
+  candidates: string[],
+  label: string
+): string => {
+  const sourcePath = candidates.find((candidate) => existsSync(candidate))
+
+  if (!sourcePath) {
+    throw new Error(`Unable to locate ${label}`)
+  }
+
+  return readFileSync(sourcePath, "utf8")
+}
+
+const sharedSidepanelRegistrySource = readFirstExistingSource(
+  [
+    "src/routes/sidepanel-route-registry.tsx",
+    "../packages/ui/src/routes/sidepanel-route-registry.tsx",
+    "apps/packages/ui/src/routes/sidepanel-route-registry.tsx"
+  ],
+  "shared sidepanel-route-registry.tsx"
+)
+
+const extensionSidepanelRegistrySource = readFirstExistingSource(
+  [
+    "../../tldw-frontend/extension/routes/sidepanel-route-registry.tsx",
+    "apps/tldw-frontend/extension/routes/sidepanel-route-registry.tsx"
+  ],
+  "extension sidepanel-route-registry.tsx"
+)
+
+const extensionOptionRegistrySource = readFirstExistingSource(
+  [
+    "../../tldw-frontend/extension/routes/route-registry.tsx",
+    "apps/tldw-frontend/extension/routes/route-registry.tsx"
+  ],
+  "extension route-registry.tsx"
+)
+
+const extractLiteralRoutePaths = (source: string): string[] =>
+  Array.from(
+    source.matchAll(/path:\s*"([^"]+)"/g),
+    (match) => match[1]
+  )
+
+const uniqueSorted = (values: string[]): string[] =>
+  Array.from(new Set(values)).sort()
+
+const sidepanelRoutePaths = uniqueSorted([
+  ...extractLiteralRoutePaths(sharedSidepanelRegistrySource),
+  ...extractLiteralRoutePaths(extensionSidepanelRegistrySource)
+])
+
+const extensionOptionNavPaths = uniqueSorted(
+  Array.from(
+    extensionOptionRegistrySource.matchAll(
+      /path:\s*"([^"]+)"[\s\S]{0,500}?nav:\s*{/g
+    ),
+    (match) => match[1]
+  ).filter(
+    (routePath) =>
+      !routePath.includes(":") && !sidepanelRoutePaths.includes(routePath)
+  )
+)
+
+describe("sidepanel route availability metadata", () => {
+  it("declares sidepanel availability for every shared or extension sidepanel route", () => {
+    const routesMissingSidepanelAvailability = sidepanelRoutePaths.filter(
+      (routePath) =>
+        !getRouteMetadata(routePath)?.availability.includes("extension_sidepanel")
+    )
+
+    expect(routesMissingSidepanelAvailability).toEqual([])
+  })
+
+  it("defines metadata labels and groups for extension option routes that appear in nav", () => {
+    const routesMissingNavMetadata = extensionOptionNavPaths.filter((routePath) => {
+      const metadata = getRouteMetadata(routePath)
+
+      return !metadata?.label || !metadata.group
+    })
+
+    expect(routesMissingNavMetadata).toEqual([])
+  })
+
+  it("marks sidepanel debug routes as internal QA/debug routes", () => {
+    const debugRoutes = [
+      "/error-boundary-test",
+      "/__debug__/sidepanel-chat",
+      "/__debug__/sidepanel-error-boundary"
+    ]
+
+    for (const routePath of debugRoutes) {
+      const metadata = getRouteMetadata(routePath)
+
+      expect(metadata?.surface, routePath).toBe("internal_qa_debug")
+      expect(metadata?.nav, routePath).toBe("hidden")
+      expect(metadata?.commandPalette, routePath).toBe("hide")
+    }
+  })
+
+  it("does not infer sidepanel availability from web or extension options availability", () => {
+    expect(isRouteVisibleForSurface("/chat", "extension_sidepanel")).toBe(true)
+    expect(isRouteVisibleForSurface("/media", "extension_sidepanel")).toBe(false)
+    expect(isRouteVisibleForSurface("/settings/model", "extension_sidepanel")).toBe(
+      false
+    )
+  })
+})
