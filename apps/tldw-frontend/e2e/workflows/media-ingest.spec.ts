@@ -32,9 +32,49 @@ import {
 import * as path from "path"
 import * as fs from "fs"
 
+const emptyMediaListResponse = {
+  items: [],
+  pagination: {
+    page: 1,
+    results_per_page: 20,
+    total_items: 0,
+    total_pages: 1,
+  },
+}
+
+const stubOfflineMediaReadApis = async (page: Page) => {
+  await page.route(/\/api\/v1\/media\/?(?:\?.*)?$/, async (route, request) => {
+    if (request.method().toUpperCase() !== "GET") {
+      await route.continue()
+      return
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(emptyMediaListResponse),
+    })
+  })
+
+  await page.route(/\/api\/v1\/media\/search(?:\?.*)?$/, async (route, request) => {
+    const method = request.method().toUpperCase()
+    if (method !== "GET" && method !== "POST") {
+      await route.continue()
+      return
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(emptyMediaListResponse),
+    })
+  })
+}
+
 test.describe("Media Ingestion Workflow", () => {
   test.beforeEach(async ({ page }) => {
     await seedAuth(page)
+    await stubOfflineMediaReadApis(page)
   })
 
   test.describe("Media Page Navigation", () => {
@@ -863,7 +903,9 @@ test.describe("Media Ingestion Workflow", () => {
       }
 
       let emptyStateTrigger = authedPage
-        .getByRole("button", { name: /open quick ingest/i })
+        .getByTestId("first-ingest-tutorial")
+        .getByRole("button", { name: /^ingest$/i })
+        .or(authedPage.getByRole("button", { name: /open quick ingest/i }))
         .first()
       if (!(await emptyStateTrigger.isVisible().catch(() => false))) {
         const skipTutorial = authedPage.getByRole("button", { name: /skip for now/i }).first()
@@ -1342,10 +1384,12 @@ test.describe("Media Ingestion Workflow", () => {
     }) => {
       const mediaPage = new MediaPage(authedPage)
       await mediaPage.gotoReview()
-      await authedPage.getByRole("link", { name: /open updated page/i }).click()
-      await expect(authedPage).toHaveURL(/\/media-multi(?:[/?#].*)?$/, {
-        timeout: 20_000
-      })
+      const updatedPageLink = authedPage.getByTestId("route-redirect-open-updated-page")
+      await expect(updatedPageLink).toBeVisible({ timeout: 20_000 })
+      await Promise.all([
+        authedPage.waitForURL(/\/media-multi(?:[/?#].*)?$/, { timeout: 20_000 }),
+        updatedPageLink.evaluate((link) => (link as HTMLAnchorElement).click()),
+      ])
 
       await assertNoCriticalErrors(diagnostics)
     })
