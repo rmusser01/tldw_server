@@ -1962,9 +1962,11 @@ async def unified_search_stream_endpoint(
     media_db: Any = Depends(get_media_db_for_user),
     chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     prompts_db: PromptsDatabase = Depends(get_prompts_db_for_user),
+    collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
 ):
     if not request.enable_generation:
         raise HTTPException(status_code=400, detail="enable_generation must be true for streaming.")
+    request = _apply_media_collection_scope(request, collections_db)
 
     # Streaming search counts as a single RAG query.
     await _log_rag_queries_for_org(request_raw, current_user, units=1)

@@ -1,4 +1,4 @@
-import React, { useCallback } from "react"
+import React, { useCallback, useEffect, useState } from "react"
 import { Input, Typography } from "antd"
 import type {
   ConferenceItemMetadataOverride,
@@ -23,6 +23,7 @@ const getItemDisplay = (item: WizardQueueItem, index: number): string =>
 export const ItemMetadataTable: React.FC = () => {
   const { state, setQueueItems } = useIngestWizard()
   const { queueItems } = state
+  const [tagDrafts, setTagDrafts] = useState<Record<string, string>>({})
 
   const updateOverride = useCallback(
     (
@@ -46,6 +47,29 @@ export const ItemMetadataTable: React.FC = () => {
     },
     [queueItems, setQueueItems]
   )
+
+  const commitTags = useCallback(
+    (itemId: string, rawValue: string) => {
+      updateOverride(itemId, { tags: parseTags(rawValue) })
+      setTagDrafts((prev) => {
+        if (!(itemId in prev)) return prev
+        const next = { ...prev }
+        delete next[itemId]
+        return next
+      })
+    },
+    [updateOverride]
+  )
+
+  useEffect(() => {
+    setTagDrafts((prev) => {
+      const itemIds = new Set(queueItems.map((item) => item.id))
+      const next = Object.fromEntries(
+        Object.entries(prev).filter(([itemId]) => itemIds.has(itemId))
+      )
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next
+    })
+  }, [queueItems])
 
   if (queueItems.length === 0) return null
 
@@ -114,11 +138,20 @@ export const ItemMetadataTable: React.FC = () => {
               <Input
                 size="small"
                 aria-label={`Tags for item ${itemNumber}`}
-                value={stringifyTags(override?.tags)}
+                value={tagDrafts[item.id] ?? stringifyTags(override?.tags)}
                 placeholder="tag, tag"
                 onChange={(event) =>
-                  updateOverride(item.id, { tags: parseTags(event.target.value) })
+                  setTagDrafts((prev) => ({
+                    ...prev,
+                    [item.id]: event.target.value,
+                  }))
                 }
+                onBlur={(event) => commitTags(item.id, event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.currentTarget.blur()
+                  }
+                }}
               />
             </div>
           )

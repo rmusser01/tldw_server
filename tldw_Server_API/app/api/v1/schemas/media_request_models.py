@@ -503,13 +503,15 @@ class AddMediaForm(ChunkingOptions, AudioVideoOptions, PdfOptions):
     embedding_provider: Optional[str] = Field(None, description="Embedding provider (huggingface, openai, etc)")
 
     # --- Durable media collection binding (used by async-job fallback paths) ---
-    media_collection_id: Optional[str] = Field(
+    media_collection_id: Optional[int] = Field(
         None,
-        description="Optional durable media collection id associated with this ingest item",
+        ge=1,
+        description="Optional numeric durable media collection id associated with this ingest item",
     )
-    media_collection_item_id: Optional[str] = Field(
+    media_collection_item_id: Optional[int] = Field(
         None,
-        description="Optional planned durable media collection item id to resolve after ingest",
+        ge=1,
+        description="Optional numeric planned durable media collection item id to resolve after ingest",
     )
     media_ingest_job_id: Optional[str] = Field(
         None,

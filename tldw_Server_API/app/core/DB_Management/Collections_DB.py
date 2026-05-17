@@ -1701,6 +1701,8 @@ class CollectionsDatabase:
             );
             CREATE INDEX IF NOT EXISTS idx_media_collection_items_collection
                 ON media_collection_items(user_id, collection_id, ordinal);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_media_collection_items_collection_ordinal
+                ON media_collection_items(user_id, collection_id, ordinal);
             CREATE INDEX IF NOT EXISTS idx_media_collection_items_source
                 ON media_collection_items(user_id, normalized_source_id);
             CREATE INDEX IF NOT EXISTS idx_media_collection_items_media
@@ -1850,6 +1852,8 @@ class CollectionsDatabase:
                 updated_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_media_collection_items_collection
+                ON media_collection_items(user_id, collection_id, ordinal);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_media_collection_items_collection_ordinal
                 ON media_collection_items(user_id, collection_id, ordinal);
             CREATE INDEX IF NOT EXISTS idx_media_collection_items_source
                 ON media_collection_items(user_id, normalized_source_id);
@@ -2814,6 +2818,36 @@ class CollectionsDatabase:
             return 1
         return int(row.get("next_ordinal") or 1)
 
+    def _ensure_media_collection_ordinal_available(
+        self,
+        *,
+        collection_id: int,
+        ordinal: int,
+        exclude_item_id: int | None = None,
+    ) -> None:
+        if exclude_item_id is None:
+            row = self.backend.execute(
+                """
+                SELECT id
+                FROM media_collection_items
+                WHERE collection_id = ? AND user_id = ? AND ordinal = ?
+                LIMIT 1
+                """,
+                (int(collection_id), self.user_id, int(ordinal)),
+            ).first
+        else:
+            row = self.backend.execute(
+                """
+                SELECT id
+                FROM media_collection_items
+                WHERE collection_id = ? AND user_id = ? AND ordinal = ? AND id != ?
+                LIMIT 1
+                """,
+                (int(collection_id), self.user_id, int(ordinal), int(exclude_item_id)),
+            ).first
+        if row:
+            raise ValueError("media_collection_item_ordinal_duplicate")
+
     def add_media_collection_item(
         self,
         *,
@@ -2850,6 +2884,10 @@ class CollectionsDatabase:
         ordinal_value = int(ordinal) if ordinal is not None else self._next_media_collection_ordinal(collection_id)
         if ordinal_value < 1:
             raise ValueError("media_collection_item_ordinal_invalid")
+        self._ensure_media_collection_ordinal_available(
+            collection_id=collection_id,
+            ordinal=ordinal_value,
+        )
 
         now = _utcnow_iso()
         result = self._execute_insert(
@@ -2950,6 +2988,11 @@ class CollectionsDatabase:
             ordinal_value = int(ordinal)
             if ordinal_value < 1:
                 raise ValueError("media_collection_item_ordinal_invalid")
+            self._ensure_media_collection_ordinal_available(
+                collection_id=existing.collection_id,
+                ordinal=ordinal_value,
+                exclude_item_id=existing.id,
+            )
             add_field("ordinal", ordinal_value)
         if title is not None:
             add_field("title", title.strip() if title.strip() else None)
@@ -3037,6 +3080,8 @@ class CollectionsDatabase:
             content_item_id=content_item_id,
             latest_job_id=latest_job_id,
             latest_run_id=latest_run_id,
+            error_summary="",
+            warnings=[],
         )
 
     def upsert_content_item(

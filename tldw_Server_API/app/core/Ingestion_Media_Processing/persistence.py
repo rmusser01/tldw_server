@@ -2083,8 +2083,10 @@ def sync_media_add_results_to_collections(
             result["collections_item_id"] = item_row.id
             result["collections_origin"] = collections_origin
 
+            result_planned_item_id_raw = result.get("media_collection_item_id") or result.get("planned_item_id")
             planned_item_id_raw = (
-                getattr(form_data, "media_collection_item_id", None)
+                result_planned_item_id_raw
+                or getattr(form_data, "media_collection_item_id", None)
                 or getattr(form_data, "planned_item_id", None)
             )
             try:
@@ -2092,6 +2094,11 @@ def sync_media_add_results_to_collections(
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                 planned_item_id = None
             if planned_item_id is not None and planned_item_id > 0:
+                if len(results) > 1 and result_planned_item_id_raw is None:
+                    _ensure_warnings_list(result).append(
+                        "Skipped collection item resolution: missing per-result planned item id for batch ingest."
+                    )
+                    continue
                 latest_job_id = getattr(form_data, "media_ingest_job_id", None)
                 resolved_status = "completed"
                 status_text = str(result.get("status") or "").strip().lower()

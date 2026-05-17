@@ -17,8 +17,7 @@ def collections_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Collectio
     base_dir = tmp_path / "user_dbs"
     shutil.rmtree(base_dir, ignore_errors=True)
     base_dir.mkdir(parents=True, exist_ok=True)
-    prev_base_dir = settings.get("USER_DB_BASE_DIR")
-    settings.USER_DB_BASE_DIR = str(base_dir)
+    monkeypatch.setattr(settings, "USER_DB_BASE_DIR", str(base_dir), raising=False)
     monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
 
     db = CollectionsDatabase.for_user(user_id=8042)
@@ -26,13 +25,6 @@ def collections_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Collectio
         yield db
     finally:
         db.close()
-        if prev_base_dir is not None:
-            settings.USER_DB_BASE_DIR = prev_base_dir
-        else:
-            try:
-                del settings.USER_DB_BASE_DIR
-            except AttributeError:
-                pass
 
 
 def test_conference_collection_persists_planned_and_resolved_items(
@@ -143,6 +135,73 @@ def test_planned_collection_items_do_not_create_or_overwrite_content_items(
     assert content_after_plans.title == "Resolved media title"
     assert [item.id for item in loaded.items] == [first_planned.id, second_planned.id]
     assert [item.content_item_id for item in loaded.items] == [None, None]
+
+
+def test_collection_item_ordinals_are_unique_within_collection(
+    collections_db: CollectionsDatabase,
+) -> None:
+    collection = collections_db.create_media_collection(
+        name="Conference playlist",
+        kind="conference",
+    )
+    first = collections_db.add_media_collection_item(
+        collection_id=collection.id,
+        source_url="https://example.com/talk-1",
+        ordinal=1,
+        status="planned",
+    )
+    second = collections_db.add_media_collection_item(
+        collection_id=collection.id,
+        source_url="https://example.com/talk-2",
+        ordinal=2,
+        status="planned",
+    )
+
+    with pytest.raises(ValueError, match="media_collection_item_ordinal_duplicate"):
+        collections_db.add_media_collection_item(
+            collection_id=collection.id,
+            source_url="https://example.com/talk-duplicate",
+            ordinal=1,
+            status="planned",
+        )
+
+    with pytest.raises(ValueError, match="media_collection_item_ordinal_duplicate"):
+        collections_db.update_media_collection_item(second.id, ordinal=first.ordinal)
+
+
+def test_resolving_collection_item_clears_stale_failure_metadata(
+    collections_db: CollectionsDatabase,
+) -> None:
+    collection = collections_db.create_media_collection(
+        name="Conference playlist",
+        kind="conference",
+    )
+    planned = collections_db.add_media_collection_item(
+        collection_id=collection.id,
+        source_url="https://example.com/talk-failed-once",
+        ordinal=1,
+        status="planned",
+    )
+    collections_db.update_media_collection_item_status(
+        planned.id,
+        status="failed",
+        error_summary="private video",
+        warnings=["download failed"],
+        latest_job_id="job-failed",
+    )
+
+    resolved = collections_db.resolve_media_collection_item(
+        planned.id,
+        media_id=123,
+        content_item_id=456,
+        status="completed",
+        latest_job_id="job-retry",
+    )
+
+    assert resolved.status == "completed"
+    assert resolved.error_summary is None
+    assert resolved.warnings == []
+    assert resolved.latest_job_id == "job-retry"
 
 
 def test_media_collections_can_be_listed_updated_and_soft_deleted(

@@ -485,14 +485,6 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
     ]
   )
 
-  const handleRemoveSingle = useCallback(
-    (_id: string) => {
-      // Remove is a no-op placeholder; parent will handle via onRetryItems
-      // or a future onRemoveItems callback.
-    },
-    []
-  )
-
   const handleIngestMore = useCallback(() => {
     reset()
   }, [reset])
@@ -689,7 +681,6 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
                   category={errorCategories.get(item.id) ?? classifyError(item.error)}
                   qi={qi}
                   onRetry={getRetryHandlerForItem(item)}
-                  onRemove={handleRemoveSingle}
                 />
               ))}
             </div>
@@ -716,7 +707,6 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
                   category={errorCategories.get(item.id) ?? classifyError(item.error)}
                   qi={qi}
                   onRetry={getRetryHandlerForItem(item)}
-                  onRemove={handleRemoveSingle}
                 />
               ))}
             </div>
@@ -743,7 +733,6 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
                   category={errorCategories.get(item.id) ?? classifyError(item.error)}
                   qi={qi}
                   onRetry={getRetryHandlerForItem(item)}
-                  onRemove={handleRemoveSingle}
                 />
               ))}
             </div>

@@ -68,9 +68,7 @@ def _hostname_matches(hostname: str, allowed_host: str) -> bool:
 
 
 def _is_youtube_host(hostname: str) -> bool:
-    return _hostname_matches(hostname, "youtube.com") or _hostname_matches(
-        hostname, "youtu.be"
-    )
+    return _hostname_matches(hostname, "youtube.com") or _hostname_matches(hostname, "youtu.be")
 
 
 def _first_query_value(query: dict[str, list[str]], key: str) -> str | None:
@@ -210,9 +208,7 @@ def _source_url_from_entry(
 
     extractor = _string_or_none(entry.get("extractor_key") or entry.get("ie_key"))
     entry_id = _string_or_none(entry.get("id") or candidate)
-    if entry_id and (
-        assume_youtube or (extractor and extractor.lower().startswith("youtube"))
-    ):
+    if entry_id and (assume_youtube or (extractor and extractor.lower().startswith("youtube"))):
         return canonical_youtube_video_url(entry_id)
     return candidate
 
@@ -238,9 +234,10 @@ def normalize_preflight_items(raw_items: list[dict[str, Any]]) -> list[PlaylistP
             except ValueError:
                 normalized_source_id = normalized_source_id or f"url:{source_url}"
 
+        has_source = bool(source_url)
         dedupe_key = normalized_source_id or source_url
         duplicate_of = seen.get(dedupe_key)
-        duplicate_status = "duplicate_in_batch" if duplicate_of is not None else "new"
+        duplicate_status = "unknown" if not has_source else "duplicate_in_batch" if duplicate_of is not None else "new"
         if duplicate_of is None and dedupe_key:
             seen[dedupe_key] = ordinal
 
@@ -251,15 +248,13 @@ def normalize_preflight_items(raw_items: list[dict[str, Any]]) -> list[PlaylistP
                 normalized_source_id=normalized_source_id,
                 source_kind=source_kind,
                 title=_string_or_none(raw.get("title")),
-                speaker=_string_or_none(
-                    raw.get("speaker") or raw.get("channel") or raw.get("uploader")
-                ),
+                speaker=_string_or_none(raw.get("speaker") or raw.get("channel") or raw.get("uploader")),
                 duration_seconds=_coerce_duration(raw.get("duration") or raw.get("duration_seconds")),
                 published_at=_string_or_none(raw.get("published_at") or raw.get("upload_date")),
                 thumbnail_url=_string_or_none(raw.get("thumbnail") or raw.get("thumbnail_url")),
                 duplicate_status=duplicate_status,
                 duplicate_of_ordinal=duplicate_of,
-                selected=duplicate_status == "new",
+                selected=duplicate_status == "new" and has_source,
             )
         )
 
@@ -348,10 +343,13 @@ def extract_playlist_preflight(
     for index, entry in enumerate(limited_entries, start=1):
         raw_item = dict(entry)
         raw_item["ordinal"] = index
-        raw_item["source_url"] = _source_url_from_entry(
+        source_url = _source_url_from_entry(
             entry,
             assume_youtube=assume_youtube_entries,
         )
+        if not source_url:
+            warnings.append(f"Playlist entry {index} has no source URL.")
+        raw_item["source_url"] = source_url
         raw_items.append(raw_item)
 
     items = normalize_preflight_items(raw_items)

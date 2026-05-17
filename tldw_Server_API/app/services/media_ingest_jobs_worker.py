@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import os
+import re
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -33,6 +34,13 @@ from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 
 _MEDIA_DOMAIN = "media_ingest"
 _MEDIA_JOB_TYPE = "media_ingest_item"
+_SECRET_QUERY_RE = re.compile(r"(?i)([?&](?:token|apikey|api_key|access_key|signature|sig|password|key)=)[^&\s,;]+")
+_SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)\b((?:bearer|token|api[_-]?key|access[_-]?key|password|secret)\s*[:=]\s*)[^\s,;]+"
+)
+_LONG_HEX_RE = re.compile(r"\b[0-9a-fA-F]{32,}\b")
+_POSIX_PATH_RE = re.compile(r"(?<!\w)/(?:Users|private|tmp|var|Volumes|home|opt|etc|mnt)/[^\s,;]+")
+_WINDOWS_PATH_RE = re.compile(r"\b[A-Za-z]:\\[^\s,;]+")
 _MARK_PROCESSED_CONFLICT_RETRIES = 3
 _MARK_PROCESSED_CONFLICT_BACKOFF_SECONDS = 0.05
 
@@ -135,15 +143,19 @@ def _coerce_positive_int(value: Any) -> int | None:
 
 
 def _planned_collection_item_id(payload: dict[str, Any]) -> int | None:
-    return _coerce_positive_int(
-        payload.get("planned_item_id") or payload.get("media_collection_item_id")
-    )
+    return _coerce_positive_int(payload.get("planned_item_id") or payload.get("media_collection_item_id"))
 
 
 def _truncate_collection_error(value: Any) -> str | None:
     text = str(value or "").strip()
     if not text:
         return None
+    text = _SECRET_QUERY_RE.sub(r"\1[redacted]", text)
+    text = _SECRET_ASSIGNMENT_RE.sub(r"\1[redacted]", text)
+    text = _LONG_HEX_RE.sub("[redacted-hex]", text)
+    text = _POSIX_PATH_RE.sub("[redacted-path]", text)
+    text = _WINDOWS_PATH_RE.sub("[redacted-path]", text)
+    text = " ".join(text.split())
     return text[:1000]
 
 

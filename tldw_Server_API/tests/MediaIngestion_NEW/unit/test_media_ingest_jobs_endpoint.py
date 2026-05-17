@@ -466,6 +466,82 @@ def test_submit_media_ingest_jobs_marks_planned_item_submit_failed_on_job_error(
         )
 
 
+def test_submit_media_ingest_jobs_keeps_created_url_jobs_when_later_url_fails(
+    media_ingest_jobs_client,
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+
+    from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import (
+        try_get_collections_db_for_user,
+    )
+    from tldw_Server_API.app.core.Jobs import manager as jobs_manager
+
+    captured_payloads: list[dict] = []
+    status_updates: list[dict] = []
+
+    class _FakeCollectionsDatabase:
+        def update_media_collection_item_status(self, item_id, **kwargs):
+            status_updates.append({"item_id": item_id, **kwargs})
+
+    async def _collections_db_override():
+        return _FakeCollectionsDatabase()
+
+    def fake_create_job(self, *, payload, **_kwargs):
+        captured_payloads.append(payload)
+        if payload["source"].endswith("talk-2"):
+            raise BadRequestError("queue unavailable")
+        return {"id": len(captured_payloads), "uuid": f"u{len(captured_payloads)}", "status": "queued"}
+
+    monkeypatch.setattr(jobs_manager.JobManager, "create_job", fake_create_job, raising=True)
+    media_ingest_jobs_client.app.dependency_overrides[try_get_collections_db_for_user] = _collections_db_override
+
+    try:
+        resp = media_ingest_jobs_client.post(
+            "/api/v1/media/ingest/jobs",
+            data={
+                "media_type": "video",
+                "urls": [
+                    "https://example.com/talk-1",
+                    "https://example.com/talk-2",
+                ],
+                "media_collection_id": "42",
+                "planned_item_ids": json.dumps(["101", "102"]),
+            },
+            headers={"X-API-KEY": "test-api-key-12345"},
+        )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["jobs"] == [
+            {
+                "id": 1,
+                "uuid": "u1",
+                "source": "https://example.com/talk-1",
+                "source_kind": "url",
+                "status": "queued",
+                "collection_id": "42",
+                "planned_item_id": "101",
+                "idempotency_key": None,
+            }
+        ]
+        assert body["errors"] == ["https://example.com/talk-2: queue unavailable"]
+        assert status_updates == [
+            {
+                "item_id": 102,
+                "status": "submit_failed",
+                "latest_job_id": None,
+                "error_summary": "queue unavailable",
+            }
+        ]
+    finally:
+        media_ingest_jobs_client.app.dependency_overrides.pop(
+            try_get_collections_db_for_user,
+            None,
+        )
+
+
 def test_submit_media_ingest_jobs_routes_heavy_request_to_default_queue_when_heavy_worker_unavailable(
     media_ingest_jobs_client,
     monkeypatch,

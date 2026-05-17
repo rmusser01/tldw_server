@@ -166,6 +166,109 @@ def test_sync_media_add_results_resolves_planned_collection_item(monkeypatch):
     ]
 
 
+def test_sync_media_add_results_uses_per_result_planned_item_ids_for_batch(monkeypatch):
+    _FakeCollectionsDatabase.reset()
+    monkeypatch.setattr(
+        collections_db_module,
+        "CollectionsDatabase",
+        _FakeCollectionsDatabase,
+    )
+
+    results = [
+        {
+            "status": "Success",
+            "db_id": "456",
+            "input_ref": "https://example.com/conf-talk-1",
+            "processing_source": "https://example.com/conf-talk-1",
+            "media_type": "video",
+            "planned_item_id": "88",
+        },
+        {
+            "status": "Success",
+            "db_id": "789",
+            "input_ref": "https://example.com/conf-talk-2",
+            "processing_source": "https://example.com/conf-talk-2",
+            "media_type": "video",
+            "media_collection_item_id": "89",
+        },
+    ]
+
+    persistence.sync_media_add_results_to_collections(
+        results=results,
+        form_data=SimpleNamespace(
+            media_type="video",
+            keywords=[],
+            media_ingest_job_id="1234",
+        ),
+        current_user=SimpleNamespace(id=42),
+        db=SimpleNamespace(backend=object()),
+    )
+
+    instance = _FakeCollectionsDatabase.last_instance
+    assert instance is not None
+    assert instance.resolve_calls == [
+        {
+            "item_id": 88,
+            "media_id": 456,
+            "status": "completed",
+            "latest_job_id": "1234",
+        },
+        {
+            "item_id": 89,
+            "media_id": 789,
+            "status": "completed",
+            "latest_job_id": "1234",
+        },
+    ]
+
+
+def test_sync_media_add_results_does_not_reuse_form_planned_item_id_for_batch(monkeypatch):
+    _FakeCollectionsDatabase.reset()
+    monkeypatch.setattr(
+        collections_db_module,
+        "CollectionsDatabase",
+        _FakeCollectionsDatabase,
+    )
+
+    results = [
+        {
+            "status": "Success",
+            "db_id": "456",
+            "input_ref": "https://example.com/conf-talk-1",
+            "processing_source": "https://example.com/conf-talk-1",
+            "media_type": "video",
+        },
+        {
+            "status": "Success",
+            "db_id": "789",
+            "input_ref": "https://example.com/conf-talk-2",
+            "processing_source": "https://example.com/conf-talk-2",
+            "media_type": "video",
+        },
+    ]
+
+    persistence.sync_media_add_results_to_collections(
+        results=results,
+        form_data=SimpleNamespace(
+            media_type="video",
+            keywords=[],
+            media_collection_item_id="88",
+            media_ingest_job_id="1234",
+        ),
+        current_user=SimpleNamespace(id=42),
+        db=SimpleNamespace(backend=object()),
+    )
+
+    instance = _FakeCollectionsDatabase.last_instance
+    assert instance is not None
+    assert instance.resolve_calls == []
+    assert all(
+        "Skipped collection item resolution: missing per-result planned item id for batch ingest."
+        in result.get("warnings", [])
+        for result in results
+    )
+
+
 def test_sync_media_add_results_to_collections_adds_warning_on_failure(monkeypatch):
     _FakeCollectionsDatabase.reset()
     _FakeCollectionsDatabase.should_raise = True

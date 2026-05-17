@@ -548,6 +548,8 @@ test.describe("Media Ingestion Workflow", () => {
           capabilities: {
             hasMediaPlaylistPreflight: true,
             hasMediaIngestJobs: true,
+            hasMediaIngestJobEvents: true,
+            hasMediaIngestWorker: true,
             hasDurableMediaCollections: true,
             hasKnowledgeQaMediaScope: true,
           },
@@ -1262,6 +1264,8 @@ test.describe("Media Ingestion Workflow", () => {
       await authedPage.addInitScript(() => {
         localStorage.removeItem("tldw-quick-ingest-session")
         localStorage.removeItem("__tldwServerCapabilitiesCacheV3")
+        sessionStorage.removeItem("tldw-quick-ingest-session")
+        sessionStorage.removeItem("__tldwServerCapabilitiesCacheV3")
       })
       const bulkApis = await mockBulkConferenceApis(authedPage)
 
@@ -1329,6 +1333,8 @@ test.describe("Media Ingestion Workflow", () => {
       await authedPage.addInitScript(() => {
         localStorage.removeItem("tldw-quick-ingest-session")
         localStorage.removeItem("__tldwServerCapabilitiesCacheV3")
+        sessionStorage.removeItem("tldw-quick-ingest-session")
+        sessionStorage.removeItem("__tldwServerCapabilitiesCacheV3")
       })
       await mockBulkConferenceApis(authedPage)
 

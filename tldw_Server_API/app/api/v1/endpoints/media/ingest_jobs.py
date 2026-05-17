@@ -629,10 +629,13 @@ async def submit_media_ingest_jobs(
     batch_id = str(uuid4())
     jobs: list[MediaIngestJobItem] = []
     errors: list[str] = []
+    first_url_submit_exception: Exception | None = None
+    url_failure_count = 0
 
     url_list = form_data.urls or []
+    valid_url_count = len([url for url in url_list if url and str(url).strip()])
     collection_id_value, planned_item_values, idempotency_key_values = _resolve_submit_bindings(
-        url_count=len([url for url in url_list if url and str(url).strip()]),
+        url_count=valid_url_count,
         media_collection_id=media_collection_id,
         collection_id=collection_id,
         media_collection_item_id=media_collection_item_id,
@@ -675,12 +678,18 @@ async def submit_media_ingest_jobs(
             if row_id is None:
                 raise ValueError(f"Job creation returned no id: {row!r}")
         except Exception as exc:
+            url_failure_count += 1
+            if first_url_submit_exception is None:
+                first_url_submit_exception = exc
+            error_message = _submit_failure_message(exc)
             _mark_collection_item_submit_failed(
                 collections_db=collections_db,
                 planned_item_id=planned_item_id,
-                error_summary=_submit_failure_message(exc),
+                error_summary=error_message,
             )
-            raise
+            errors.append(f"{payload['source']}: {error_message}")
+            url_index += 1
+            continue
         jobs.append(
             MediaIngestJobItem(
                 id=int(row_id),
@@ -766,6 +775,8 @@ async def submit_media_ingest_jobs(
                     _cleanup_dir(temp_dir_path)
 
     if not jobs:
+        if first_url_submit_exception is not None and valid_url_count == 1 and url_failure_count == 1 and not files:
+            raise first_url_submit_exception
         if errors:
             return JSONResponse(
                 status_code=status.HTTP_207_MULTI_STATUS,

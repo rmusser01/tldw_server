@@ -109,7 +109,8 @@ async def preflight_playlist(
     except PlaylistPreflightResultError as exc:
         raise HTTPException(status_code=502, detail="playlist_preflight_invalid_result") from exc
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        logger.warning("Playlist preflight validation failed for {}: {}", payload.url, exc)
+        raise HTTPException(status_code=422, detail="playlist_preflight_invalid_request") from exc
     except HTTPException:
         raise
     except Exception as exc:

@@ -1254,8 +1254,11 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   const finalizeFailure = useCallback(
     (message: string, outcome: "failed" | "cancelled") => {
+      const trackedEligibleItems = trackedQueueItems.filter(
+        (item) => item.validation.valid && item.conferenceOverride?.selected !== false
+      )
       const fallbackItems =
-        trackedQueueItems.length > 0 ? trackedQueueItems : validQueueItems
+        trackedEligibleItems.length > 0 ? trackedEligibleItems : validQueueItems
       const existingResultIds = new Set(
         resultsRef.current
           .map((result) => String(result.id || "").trim())

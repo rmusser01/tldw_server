@@ -2,6 +2,7 @@ import { lazy } from "react"
 import { Navigate } from "react-router-dom"
 
 import type { RouteDefinition } from "./route-registry"
+import { MEDIA_COLLECTION_REVIEW_PATH } from "./route-paths"
 
 import OptionMediaMulti from "./option-media-multi"
 
@@ -21,7 +22,7 @@ export const optionMediaReviewRoutes: RouteDefinition[] = [
   },
   {
     kind: "options",
-    path: "/media-collections/:collectionId",
+    path: MEDIA_COLLECTION_REVIEW_PATH,
     element: <OptionMediaCollection />,
   },
   {

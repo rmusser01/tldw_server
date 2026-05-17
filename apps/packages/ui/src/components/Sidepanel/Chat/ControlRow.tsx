@@ -300,7 +300,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   const openQuickIngest = async () => {
     const detail =
       playlistImportEnabled
-        ? activePlaylistDetail ?? (await resolveActivePlaylistDetail())
+        ? (await resolveActivePlaylistDetail()) ?? activePlaylistDetail
         : null
     requestQuickIngestOpen(detail ?? undefined)
     setMoreOpen(false)

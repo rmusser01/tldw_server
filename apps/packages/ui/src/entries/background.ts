@@ -1964,61 +1964,77 @@ export default defineBackground({
         );
         if (selectedEntries.length === 0) return;
 
-        const collectionResp = (await handleTldwRequest({
-          path: "/api/v1/media/collections",
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: buildConferenceCollectionCreatePayload(
-            conferenceBatchMetadata,
-            getConferenceFallbackName(),
-          ),
-          timeoutMs: ingestTimeoutMs,
-        })) as
-          | { ok: boolean; error?: string; status?: number; data?: any }
-          | undefined;
-        if (!collectionResp?.ok) {
-          throw new Error(
-            collectionResp?.error ||
-              `Collection creation failed: ${collectionResp?.status}`,
-          );
-        }
-        const collectionId = Number(collectionResp.data?.id);
-        if (!Number.isFinite(collectionId) || collectionId <= 0) {
-          throw new Error("Collection creation returned no collection id.");
-        }
-
-        for (const entry of selectedEntries) {
-          const itemResp = (await handleTldwRequest({
-            path: `/api/v1/media/collections/${encodeURIComponent(
-              String(collectionId),
-            )}/items`,
+        let collectionId: number | null = null;
+        try {
+          const collectionResp = (await handleTldwRequest({
+            path: "/api/v1/media/collections",
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: buildConferenceCollectionItemPayload(conferenceBatchMetadata, {
-              id: String(entry.id || ""),
-              url: String(entry.url || ""),
-              playlist: entry.playlist,
-              conferenceOverride: entry.conferenceOverride,
-            }),
+            body: buildConferenceCollectionCreatePayload(
+              conferenceBatchMetadata,
+              getConferenceFallbackName(),
+            ),
             timeoutMs: ingestTimeoutMs,
           })) as
             | { ok: boolean; error?: string; status?: number; data?: any }
             | undefined;
-          if (!itemResp?.ok) {
+          if (!collectionResp?.ok) {
             throw new Error(
-              itemResp?.error || `Collection item failed: ${itemResp?.status}`,
+              collectionResp?.error ||
+                `Collection creation failed: ${collectionResp?.status}`,
             );
           }
-          const itemId = Number(itemResp.data?.id);
-          if (Number.isFinite(itemId) && itemId > 0) {
-            plannedConferenceItems.set(String(entry.id || ""), {
-              collectionId,
-              itemId,
-              idempotencyKey:
-                typeof itemResp.data?.idempotency_key === "string"
-                  ? itemResp.data.idempotency_key
-                  : null,
-            });
+          const parsedCollectionId = Number(collectionResp.data?.id);
+          if (!Number.isFinite(parsedCollectionId) || parsedCollectionId <= 0) {
+            throw new Error("Collection creation returned no collection id.");
+          }
+          collectionId = parsedCollectionId;
+        } catch (error) {
+          console.debug("[tldw] conference collection planning failed", error);
+          return;
+        }
+        if (collectionId === null) return;
+
+        for (const entry of selectedEntries) {
+          try {
+            const itemResp = (await handleTldwRequest({
+              path: `/api/v1/media/collections/${encodeURIComponent(
+                String(collectionId),
+              )}/items`,
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: buildConferenceCollectionItemPayload(conferenceBatchMetadata, {
+                id: String(entry.id || ""),
+                url: String(entry.url || ""),
+                playlist: entry.playlist,
+                conferenceOverride: entry.conferenceOverride,
+              }),
+              timeoutMs: ingestTimeoutMs,
+            })) as
+              | { ok: boolean; error?: string; status?: number; data?: any }
+              | undefined;
+            if (!itemResp?.ok) {
+              throw new Error(
+                itemResp?.error || `Collection item failed: ${itemResp?.status}`,
+              );
+            }
+            const itemId = Number(itemResp.data?.id);
+            if (Number.isFinite(itemId) && itemId > 0) {
+              plannedConferenceItems.set(String(entry.id || ""), {
+                collectionId,
+                itemId,
+                idempotencyKey:
+                  typeof itemResp.data?.idempotency_key === "string"
+                    ? itemResp.data.idempotency_key
+                    : null,
+              });
+            }
+          } catch (error) {
+            console.debug(
+              "[tldw] conference collection item planning failed",
+              { collectionId, entryId: entry?.id },
+              error,
+            );
           }
         }
       };

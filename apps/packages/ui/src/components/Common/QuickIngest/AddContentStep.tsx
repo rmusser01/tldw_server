@@ -520,11 +520,15 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   }, [setQueueItems])
 
   const hasItems = queueItems.length > 0
-  const validItemCount = useMemo(
-    () => queueItems.filter((item) => item.validation.valid).length,
+  const selectedItems = useMemo(
+    () => queueItems.filter((item) => item.conferenceOverride?.selected !== false),
     [queueItems]
   )
-  const invalidItemCount = queueItems.length - validItemCount
+  const validItemCount = useMemo(
+    () => selectedItems.filter((item) => item.validation.valid).length,
+    [selectedItems]
+  )
+  const invalidItemCount = selectedItems.length - validItemCount
   const canProceed = validItemCount > 0
   const canStartProcessing = canProceed && isOnlineForIngest && !isCheckingConnection
 

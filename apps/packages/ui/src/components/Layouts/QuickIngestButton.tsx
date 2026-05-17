@@ -41,14 +41,11 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
   )
   const quickIngestReadyRef = useRef(false)
   const pendingQuickIngestIntroRef = useRef(false)
-  const { session, createDraftSession, upsertSession, showSession, hideSession } =
-    useQuickIngestSessionStore((s) => ({
-      session: s.session,
-      createDraftSession: s.createDraftSession,
-      upsertSession: s.upsertSession,
-      showSession: s.showSession,
-      hideSession: s.hideSession,
-    }))
+  const session = useQuickIngestSessionStore((s) => s.session)
+  const createDraftSession = useQuickIngestSessionStore((s) => s.createDraftSession)
+  const upsertSession = useQuickIngestSessionStore((s) => s.upsertSession)
+  const showSession = useQuickIngestSessionStore((s) => s.showSession)
+  const hideSession = useQuickIngestSessionStore((s) => s.hideSession)
   const quickIngestOpen = session?.visibility === "visible"
   const hasQuickIngestSession = Boolean(session)
 

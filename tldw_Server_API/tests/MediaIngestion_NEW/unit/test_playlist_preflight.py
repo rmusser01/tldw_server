@@ -12,9 +12,7 @@ pytestmark = pytest.mark.unit
 
 
 def test_youtube_watch_list_url_detects_playlist_context():
-    parsed = classify_playlist_url(
-        "https://www.youtube.com/watch?v=PrNmmN6qBiw&list=PL0065D9B288E6804B"
-    )
+    parsed = classify_playlist_url("https://www.youtube.com/watch?v=PrNmmN6qBiw&list=PL0065D9B288E6804B")
 
     assert parsed.source_kind == "youtube_watch_playlist"
     assert parsed.playlist_id == "PL0065D9B288E6804B"
@@ -50,6 +48,21 @@ def test_generic_entry_id_is_not_assumed_to_be_youtube_video():
 
     assert items[0].source_url == "generic-entry-123"
     assert items[0].normalized_source_id == "url:generic-entry-123"
+
+
+def test_preflight_item_without_source_is_not_selected():
+    items = normalize_preflight_items(
+        [
+            {
+                "ordinal": 1,
+                "title": "Private unavailable talk",
+            }
+        ]
+    )
+
+    assert items[0].source_url == ""
+    assert items[0].duplicate_status == "unknown"
+    assert items[0].selected is False
 
 
 def test_extract_playlist_preflight_rejects_single_video_url():
@@ -161,6 +174,41 @@ def test_extract_playlist_preflight_truncates_large_playlist():
     assert result.item_count == 2
     assert result.selected_count == 2
     assert result.warnings == ["Playlist truncated to 2 items."]
+
+
+def test_extract_playlist_preflight_warns_and_deselects_entry_without_source():
+    class FakeYoutubeDL:
+        def __init__(self, _opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def extract_info(self, _url, *, download):
+            assert download is False
+            return {
+                "id": "PLtest",
+                "title": "Conference 2010",
+                "entries": [
+                    {"title": "Private unavailable talk"},
+                ],
+            }
+
+    result = extract_playlist_preflight(
+        "https://www.youtube.com/playlist?list=PLtest",
+        max_items=10,
+        youtube_dl_cls=FakeYoutubeDL,
+    )
+
+    assert result.item_count == 1
+    assert result.selected_count == 0
+    assert result.duplicate_count == 1
+    assert result.warnings == ["Playlist entry 1 has no source URL."]
+    assert result.items[0].duplicate_status == "unknown"
+    assert result.items[0].selected is False
 
 
 @pytest.mark.parametrize(

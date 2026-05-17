@@ -70,7 +70,7 @@ const normalizeDuplicateStatus = (value: unknown): PlaylistDuplicateStatus => {
   ) {
     return value
   }
-  return "unknown"
+  return "new"
 }
 
 const nullableString = (value: unknown): string | null => {

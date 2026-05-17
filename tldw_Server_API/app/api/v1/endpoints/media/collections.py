@@ -130,12 +130,14 @@ async def list_media_collections(
     size: int = 20,
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
 ) -> MediaCollectionListResponse:
-    rows, total = db.list_media_collections(kind=kind, page=page, size=size)
+    page_clean = max(1, int(page or 1))
+    size_clean = min(100, max(1, int(size or 20)))
+    rows, total = db.list_media_collections(kind=kind, page=page_clean, size=size_clean)
     return MediaCollectionListResponse(
         items=[_collection_response(row) for row in rows],
         total=total,
-        page=max(1, int(page or 1)),
-        size=min(100, max(1, int(size or 20))),
+        page=page_clean,
+        size=size_clean,
     )
 
 

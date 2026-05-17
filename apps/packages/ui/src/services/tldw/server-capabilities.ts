@@ -115,6 +115,7 @@ const fallbackSpec = {
       "/api/v1/media/playlists/preflight",
       "/api/v1/media/ingest/jobs",
       "/api/v1/media/ingest/jobs/events/stream",
+      "/api/v1/media/collections",
       "/api/v1/media/add",
       "/api/v1/media/",
       "/api/v1/media/process-videos",
@@ -522,6 +523,7 @@ const computeCapabilities = (
     hasMedia:
       hasMediaPlaylistPreflight ||
       hasMediaIngestJobs ||
+      hasDurableMediaCollections ||
       has("/api/v1/media/add") ||
       has("/api/v1/media/") ||
       has("/api/v1/media/process-videos") ||

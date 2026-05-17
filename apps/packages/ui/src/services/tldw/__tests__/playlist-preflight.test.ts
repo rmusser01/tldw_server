@@ -34,6 +34,14 @@ describe("playlist preflight normalizers", () => {
           duplicate_status: "duplicate_in_batch",
           duplicate_of_ordinal: 1,
           selected: false
+        },
+        {
+          ordinal: 3,
+          source_url: "https://www.youtube.com/watch?v=def456",
+          normalized_source_id: "youtube:video:def456",
+          source_kind: "youtube_video",
+          title: "Unknown status talk",
+          duplicate_status: "server_future_status"
         }
       ]
     })
@@ -45,6 +53,10 @@ describe("playlist preflight normalizers", () => {
       selected: true
     })
     expect(normalized.items[1].selected).toBe(false)
+    expect(normalized.items[2]).toMatchObject({
+      duplicateStatus: "new",
+      selected: true
+    })
     expect(normalized.duplicateCount).toBe(1)
     expect(isPlaylistPreflightDuplicate(normalized.items[1])).toBe(true)
   })

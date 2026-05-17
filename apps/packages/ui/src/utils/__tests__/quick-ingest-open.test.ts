@@ -30,9 +30,10 @@ describe("quick ingest open handoff", () => {
 
   it("stores typed detail on the pending request and dispatches it in the event", () => {
     const events: unknown[] = []
-    window.addEventListener("tldw:open-quick-ingest", (event) => {
+    const listener = (event: Event) => {
       events.push((event as CustomEvent).detail)
-    })
+    }
+    window.addEventListener("tldw:open-quick-ingest", listener)
 
     const detail = {
       source: "extension_active_tab" as const,
@@ -41,10 +42,14 @@ describe("quick ingest open handoff", () => {
       action: "playlist_preflight" as const,
     }
 
-    const request = requestQuickIngestOpen(detail)
+    try {
+      const request = requestQuickIngestOpen(detail)
 
-    expect(request?.detail).toEqual(detail)
-    expect(events).toEqual([detail])
+      expect(request?.detail).toEqual(detail)
+      expect(events).toEqual([detail])
+    } finally {
+      window.removeEventListener("tldw:open-quick-ingest", listener)
+    }
   })
 
   it("creates a wizard session seed that starts playlist preflight", () => {

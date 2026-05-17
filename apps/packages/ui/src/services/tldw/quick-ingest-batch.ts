@@ -700,9 +700,14 @@ const runDirectQuickIngestBatch = async (
     String(input.__quickIngestSessionId || "").trim() || undefined;
 
   const out: QuickIngestBatchResult[] = [];
-  const conferencePlan = shouldStoreRemote
-    ? await createPlannedConferenceCollection(input, entries)
-    : null;
+  let conferencePlan: PlannedConferenceCollection | null = null;
+  if (shouldStoreRemote) {
+    try {
+      conferencePlan = await createPlannedConferenceCollection(input, entries);
+    } catch (error) {
+      console.warn("[tldw] Conference collection planning failed", error);
+    }
+  }
 
   const pollIngestJobStatus = async (
     jobId: number,
@@ -766,6 +771,7 @@ const runDirectQuickIngestBatch = async (
         entry.conferenceOverride?.duplicatePolicy,
       );
       let jobSubmitted = false;
+      let localProcessingAttempted = false;
       let latestJobId: number | undefined;
       try {
         if (
@@ -891,6 +897,7 @@ const runDirectQuickIngestBatch = async (
             if (typeof latestJobId === "number") {
               fields.media_ingest_job_id = String(latestJobId);
             }
+            localProcessingAttempted = true;
             data = await submitPersistentAdd({ fields });
             const fallbackDuplicate = completedIngestJobIndicatesSkipped(data);
             if (fallbackDuplicate) {
@@ -905,6 +912,7 @@ const runDirectQuickIngestBatch = async (
             });
           }
         } else if (resolvedType === "html") {
+          localProcessingAttempted = true;
           data = await processWebScrape({
             url,
             entry,
@@ -928,6 +936,7 @@ const runDirectQuickIngestBatch = async (
             persist: false,
           });
           fields.urls = [url];
+          localProcessingAttempted = true;
           data = await bgUpload<any>({
             path: getProcessPathForType(resolvedType),
             method: "POST",
@@ -951,7 +960,8 @@ const runDirectQuickIngestBatch = async (
           idempotencyKey: plannedConferenceItem?.idempotencyKey ?? null,
         });
       } catch (error) {
-        const outcome = jobSubmitted ? "failed" : "submit_failed";
+        const outcome =
+          jobSubmitted || localProcessingAttempted ? "failed" : "submit_failed";
         await patchConferenceCollectionItem(plannedConferenceItem, {
           status: outcome,
           latest_job_id:

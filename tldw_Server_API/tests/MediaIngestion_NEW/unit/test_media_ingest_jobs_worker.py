@@ -30,6 +30,27 @@ def _install_fake_collections_db(monkeypatch, worker, recorder: _CollectionUpdat
     monkeypatch.setattr(worker, "CollectionsDatabase", _FakeCollectionsDatabase, raising=False)
 
 
+def test_truncate_collection_error_redacts_sensitive_details():
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+
+    raw = (
+        "failed token=super-secret at /private/tmp/video.mp4 "
+        "url=https://example.com/watch?api_key=secret-value "
+        "hash=0123456789abcdef0123456789abcdef"
+    )
+
+    sanitized = worker._truncate_collection_error(raw)
+
+    assert sanitized is not None
+    assert "super-secret" not in sanitized
+    assert "secret-value" not in sanitized
+    assert "/private/tmp/video.mp4" not in sanitized
+    assert "0123456789abcdef0123456789abcdef" not in sanitized
+    assert "[redacted]" in sanitized
+    assert "[redacted-path]" in sanitized
+    assert "[redacted-hex]" in sanitized
+
+
 @pytest.mark.asyncio
 async def test_media_ingest_worker_honors_cancel_before_processing(monkeypatch, tmp_path):
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
