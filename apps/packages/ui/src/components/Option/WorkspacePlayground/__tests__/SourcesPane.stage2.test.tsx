@@ -128,7 +128,7 @@ describe("SourcesPane Stage 2 source highlighting", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Add Sources" }))
 
-    expect(mockOpenAddSourceModal).toHaveBeenCalledTimes(1)
+    expect(mockOpenAddSourceModal).toHaveBeenCalledWith("existing")
   })
 
   it("scrolls to and highlights a focused source target", () => {

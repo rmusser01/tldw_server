@@ -1,67 +1,51 @@
 import { ProviderIcons } from "@/components/Common/ProviderIcon"
-import { Dropdown, Tooltip } from "antd"
-import type { MenuProps } from "antd"
+import { Dropdown, Input, Select, Tooltip } from "antd"
 import { ArrowRight, HelpCircle } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
+import type { ModelSortMode } from "@/hooks/playground"
 
 type ChatModelSelectorDropdownProps = {
-  activeModelKey?: string | null
   apiModelLabel: string
-  catalogControls: React.ReactNode
   connectionStatusLabel: string
   connectionStatusWarning?: boolean
-  modelDropdownMenuItems: MenuProps["items"]
+  modelDropdownMenuItems: any[]
   modelDropdownOpen: boolean
+  modelSearchQuery: string
   modelSelectorWarning?: boolean
-  modelUsabilityLabel?: string | null
-  modelUsabilityTitle?: string | null
-  modelUsabilityWarning?: boolean
-  onBeforeOpen?: () => void
+  modelSortMode: ModelSortMode
   placement?: "topLeft" | "bottomLeft"
   resolvedProviderKey: string
+  selectedModel: string | null | undefined
   setModelDropdownOpen: (open: boolean) => void
   setModelSearchQuery: (query: string) => void
+  setModelSortMode: (mode: ModelSortMode) => void
 }
 
 export const ChatModelSelectorDropdown = React.memo(
   function ChatModelSelectorDropdown({
-    activeModelKey,
     apiModelLabel,
-    catalogControls,
     connectionStatusLabel,
     connectionStatusWarning = false,
     modelDropdownMenuItems,
     modelDropdownOpen,
+    modelSearchQuery,
     modelSelectorWarning = false,
-    modelUsabilityLabel = null,
-    modelUsabilityTitle = null,
-    modelUsabilityWarning = false,
-    onBeforeOpen,
+    modelSortMode,
     placement = "topLeft",
     resolvedProviderKey,
+    selectedModel,
     setModelDropdownOpen,
-    setModelSearchQuery
+    setModelSearchQuery,
+    setModelSortMode
   }: ChatModelSelectorDropdownProps) {
     const { t } = useTranslation(["playground", "common"])
-    const trimmedModelUsabilityLabel = modelUsabilityLabel?.trim() || null
-    const hasModelUsabilityOverride = Boolean(trimmedModelUsabilityLabel)
-    const selectorLabel = hasModelUsabilityOverride
-      ? `${apiModelLabel} - ${trimmedModelUsabilityLabel}`
-      : apiModelLabel
-    const selectorTitle = hasModelUsabilityOverride
-      ? modelUsabilityTitle?.trim() || selectorLabel
-      : apiModelLabel
-    const selectorWarning = modelSelectorWarning || modelUsabilityWarning
 
     return (
       <Dropdown
         open={modelDropdownOpen}
         onOpenChange={(open) => {
-          if (open) {
-            onBeforeOpen?.()
-          }
           setModelDropdownOpen(open)
           if (!open) {
             setModelSearchQuery("")
@@ -70,11 +54,55 @@ export const ChatModelSelectorDropdown = React.memo(
         menu={{
           items: modelDropdownMenuItems,
           className: "no-scrollbar",
-          activeKey: activeModelKey ?? undefined
+          activeKey: selectedModel ?? undefined
         }}
         popupRender={(menu) => (
           <div className="rounded-lg border border-border bg-surface shadow-lg">
-            {catalogControls}
+            <div className="flex items-center gap-2 border-b border-border p-2">
+              <Input
+                size="small"
+                placeholder={t(
+                  "playground:composer.modelSearchPlaceholder",
+                  "Search models"
+                )}
+                value={modelSearchQuery}
+                allowClear
+                className="flex-1"
+                onChange={(event) => setModelSearchQuery(event.target.value)}
+                onKeyDown={(event) => event.stopPropagation()}
+              />
+              <Select
+                size="small"
+                value={modelSortMode}
+                onChange={(value) => setModelSortMode(value as ModelSortMode)}
+                options={[
+                  {
+                    value: "favorites",
+                    label: t(
+                      "playground:composer.sort.favorites",
+                      "Favorites"
+                    )
+                  },
+                  {
+                    value: "az",
+                    label: t("playground:composer.sort.az", "A-Z")
+                  },
+                  {
+                    value: "provider",
+                    label: t("playground:composer.sort.provider", "Provider")
+                  },
+                  {
+                    value: "localFirst",
+                    label: t(
+                      "playground:composer.sort.localFirst",
+                      "Local-first"
+                    )
+                  }
+                ]}
+                className="min-w-[120px]"
+                onKeyDown={(event) => event.stopPropagation()}
+              />
+            </div>
             <div className="no-scrollbar max-h-[400px] overflow-y-auto">
               {menu}
             </div>
@@ -101,9 +129,7 @@ export const ChatModelSelectorDropdown = React.memo(
       >
         <Tooltip
           title={
-            hasModelUsabilityOverride
-              ? selectorTitle
-              : modelSelectorWarning
+            modelSelectorWarning
               ? t(
                   "playground:composer.selectModelTooltip",
                   "Click to select a model"
@@ -114,13 +140,13 @@ export const ChatModelSelectorDropdown = React.memo(
         >
           <button
             type="button"
-            title={selectorTitle}
-            aria-label={selectorTitle}
+            title={apiModelLabel}
+            aria-label={apiModelLabel}
             aria-haspopup="listbox"
             aria-expanded={modelDropdownOpen}
             data-testid="model-selector"
             className={`inline-flex min-h-[44px] min-w-0 cursor-pointer items-center gap-1 rounded-full border px-2 text-[10px] transition-colors ${
-              selectorWarning
+              modelSelectorWarning
                 ? "border-warn/50 bg-warn/10 text-warn hover:bg-warn/20"
                 : "border-border bg-surface hover:bg-surface-hover"
             }`}
@@ -128,27 +154,25 @@ export const ChatModelSelectorDropdown = React.memo(
             <ProviderIcons
               provider={resolvedProviderKey}
               className={`h-3 w-3 ${
-                selectorWarning ? "text-warn" : "text-text-subtle"
+                modelSelectorWarning ? "text-warn" : "text-text-subtle"
               }`}
             />
-            <span className="max-w-[120px] truncate">{selectorLabel}</span>
-            {!hasModelUsabilityOverride && (
-              <span
-                className={`rounded-full px-1.5 py-0.5 text-[9px] ${
-                  connectionStatusWarning
-                    ? "bg-warn/10 text-warn"
-                    : "bg-success/10 text-success"
-                }`}
-                title={
-                  t(
-                    "playground:composer.providerStatusTooltip",
-                    "Provider status"
-                  ) as string
-                }
-              >
-                {connectionStatusLabel}
-              </span>
-            )}
+            <span className="max-w-[120px] truncate">{apiModelLabel}</span>
+            <span
+              className={`rounded-full px-1.5 py-0.5 text-[9px] ${
+                connectionStatusWarning
+                  ? "bg-warn/10 text-warn"
+                  : "bg-success/10 text-success"
+              }`}
+              title={
+                t(
+                  "playground:composer.providerStatusTooltip",
+                  "Provider status"
+                ) as string
+              }
+            >
+              {connectionStatusLabel}
+            </span>
           </button>
         </Tooltip>
       </Dropdown>
