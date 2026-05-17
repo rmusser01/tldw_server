@@ -94,6 +94,10 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   const isLayoutEffectsOwner = useLayoutEffectsOwner({ prefer: true });
   useStorageMigrations(isLayoutEffectsOwner);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [chatSidebarOpenResetKey, setChatSidebarOpenResetKey] = useState(0);
+  const signalChatSidebarOpen = useCallback(() => {
+    setChatSidebarOpenResetKey((value) => value + 1);
+  }, []);
   const chatSidebarCollapsed = useLayoutUiStore((state) => state.chatSidebarCollapsed);
   const setChatSidebarCollapsed = useLayoutUiStore((state) => state.setChatSidebarCollapsed);
   const { t } = useTranslation(['option', 'common', 'settings']);
@@ -235,9 +239,11 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     if (hideSidebar) return;
     if (showChatSidebar && !hideHeader) {
       if (isMobileViewport) {
+        if (!sidebarOpen) signalChatSidebarOpen();
         setSidebarOpen((prev) => !prev);
         return;
       }
+      if (chatSidebarCollapsed) signalChatSidebarOpen();
       setChatSidebarCollapsed((prev) => !prev);
       return;
     }
@@ -261,6 +267,33 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     }
     mobileSidebarPathRef.current = location.pathname;
   }, [isMobileViewport, showChatSidebar, sidebarOpen, location.pathname]);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = () => {
+      if (hideSidebar) return;
+      if (showChatSidebar) {
+        signalChatSidebarOpen();
+        if (isMobileViewport) {
+          setSidebarOpen(true);
+          return;
+        }
+        setChatSidebarCollapsed(false);
+        return;
+      }
+      setSidebarOpen(true);
+    };
+    window.addEventListener('tldw:open-chat-sidebar', handler);
+    return () => {
+      window.removeEventListener('tldw:open-chat-sidebar', handler);
+    };
+  }, [
+    hideSidebar,
+    isMobileViewport,
+    setChatSidebarCollapsed,
+    showChatSidebar,
+    signalChatSidebarOpen,
+  ]);
 
   const handleIngestPage = () => {
     if (typeof window !== 'undefined') {
@@ -355,7 +388,11 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
         {showChatSidebar && !hideHeader && !hideSidebar && !isMobileViewport && (
           <ChatSidebar
             collapsed={chatSidebarCollapsed}
-            onToggleCollapse={() => setChatSidebarCollapsed((prev) => !prev)}
+            openResetKey={chatSidebarOpenResetKey}
+            onToggleCollapse={() => {
+              if (chatSidebarCollapsed) signalChatSidebarOpen();
+              setChatSidebarCollapsed((prev) => !prev);
+            }}
             className="sticky top-0 shrink-0 border-r border-border"
           />
         )}
@@ -430,7 +467,11 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
               onClose={() => setSidebarOpen(false)}
               open={sidebarOpen}
             >
-              <ChatSidebar collapsed={false} onToggleCollapse={() => setSidebarOpen(false)} />
+              <ChatSidebar
+                collapsed={false}
+                openResetKey={chatSidebarOpenResetKey}
+                onToggleCollapse={() => setSidebarOpen(false)}
+              />
             </Drawer>
           )}
           {/* Legacy Drawer sidebar - only shown when new ChatSidebar feature is disabled */}
