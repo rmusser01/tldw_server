@@ -9,7 +9,9 @@ import {
   Sparkles,
   Search,
   Command,
-  Loader2
+  Loader2,
+  PanelLeftOpen,
+  PanelRightOpen
 } from "lucide-react"
 import { createWorkspaceStorage, useWorkspaceStore } from "@/store/workspace"
 import { useTutorialStore } from "@/store/tutorials"
@@ -194,6 +196,42 @@ type WorkspaceStorageUsageState = {
   originQuotaBytes: number | null
   accountUsedBytes: number | null
   accountQuotaBytes: number | null
+}
+
+type WorkspaceRestoreRailButtonProps = {
+  side: "left" | "right"
+  label: string
+  panelId: string
+  testId: string
+  onClick: () => void
+}
+
+const WorkspaceRestoreRailButton: React.FC<WorkspaceRestoreRailButtonProps> = ({
+  side,
+  label,
+  panelId,
+  testId,
+  onClick
+}) => {
+  const Icon = side === "left" ? PanelLeftOpen : PanelRightOpen
+
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      aria-label={label}
+      aria-controls={panelId}
+      aria-expanded={false}
+      title={label}
+      onClick={onClick}
+      className="sticky top-2 z-20 hidden min-h-[14rem] w-11 shrink-0 self-stretch flex-col items-center justify-center gap-3 rounded-xl border border-border/80 bg-surface/95 px-0 py-3 text-sm font-medium text-text shadow-card transition hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-bg lg:flex"
+    >
+      <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
+      <span className="hidden text-xs font-medium text-muted xl:block xl:rotate-180 xl:[writing-mode:vertical-rl]">
+        {label}
+      </span>
+    </button>
+  )
 }
 
 const parseNoteKeyword = (
@@ -2148,6 +2186,14 @@ const WorkspacePlaygroundBody: React.FC = () => {
     }
   }
 
+  const handleRestoreLeftPane = () => {
+    setLeftPaneCollapsed(false)
+  }
+
+  const handleRestoreRightPane = () => {
+    setRightPaneCollapsed(false)
+  }
+
   const handleReloadWorkspaceFromSyncWarning = () => {
     if (statusGuardrailsEnabled) {
       const refreshAttempt = recordWorkspaceRefreshLoopAttempt()
@@ -2565,6 +2611,16 @@ const WorkspacePlaygroundBody: React.FC = () => {
           {tutorialPromptBanner}
 
           <div className="flex min-h-0 flex-1 gap-2 px-2 py-2">
+            {!leftPaneOpen && (
+              <WorkspaceRestoreRailButton
+                side="left"
+                label={t("playground:workspace.showSources", "Show sources")}
+                panelId="workspace-sources-panel"
+                testId="workspace-restore-sources"
+                onClick={handleRestoreLeftPane}
+              />
+            )}
+
             {leftPaneOpen && (
               <>
                 <aside
@@ -2622,6 +2678,16 @@ const WorkspacePlaygroundBody: React.FC = () => {
                 }
               />
             </main>
+
+            {!rightPaneOpen && (
+              <WorkspaceRestoreRailButton
+                side="right"
+                label={t("playground:workspace.showStudio", "Show studio")}
+                panelId="workspace-studio-panel"
+                testId="workspace-restore-studio"
+                onClick={handleRestoreRightPane}
+              />
+            )}
 
             {rightPaneOpen && (
               <>

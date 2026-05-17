@@ -8,7 +8,6 @@ import { BetaTag } from "@/components/Common/Beta";
 // getImageBackendConfigs, normalizeImageBackendConfig, resolveImageBackendConfig moved to usePlaygroundImageGen
 import { CharacterSelect } from "@/components/Common/CharacterSelect";
 import { ChatQueuePanel } from "@/components/Common/ChatQueuePanel";
-import { ProviderIcons } from "@/components/Common/ProviderIcon";
 import { type KnowledgeTab } from "@/components/Knowledge";
 import type { SlashCommandItem } from "@/components/Sidepanel/Chat/SlashCommandMenu";
 import { isFirefoxTarget } from "@/config/platform";
@@ -134,11 +133,9 @@ import {
   Tooltip,
 } from "antd";
 import {
-  ArrowRight,
   ChevronRight,
   CornerUpLeft,
   Headphones,
-  HelpCircle,
   ImageIcon,
   X,
 } from "lucide-react";
@@ -155,6 +152,7 @@ import { useWebUI } from "~/store/webui";
 
 import { AttachedResearchContextChip } from "./AttachedResearchContextChip";
 import { AttachmentsSummary } from "./AttachmentsSummary";
+import { ChatModelSelectorDropdown } from "./ChatModelSelectorDropdown";
 // ContextFootprintPanel moved to PlaygroundContextWindowModal
 import { CompareToggle } from "./CompareToggle";
 import { ComposerTextarea } from "./ComposerTextarea";
@@ -1980,110 +1978,32 @@ export const PlaygroundForm = ({
   } = useImageBackend({ imageModels });
 
   const modelSelectButton = (
-    <Dropdown
-      open={modelDropdownOpen}
-      onOpenChange={(open) => {
-        if (open) {
-          closeComposerPopoversExcept("model");
-        }
-        setModelDropdownOpen(open);
-        if (!open) {
-          setModelSearchQuery("");
-        }
-      }}
-      menu={{
-        items: modelDropdownMenuItems,
-        className: "no-scrollbar",
-        activeKey: selectedModelKey ?? selectedModel ?? undefined,
-      }}
-      popupRender={(menu) => (
-        <div className="bg-surface rounded-lg shadow-lg border border-border">
-          <PlaygroundModelCatalogControls
-            t={t}
-            modelListScope={modelListScope}
-            setModelListScope={setModelListScope}
-            modelSearchQuery={modelSearchQuery}
-            setModelSearchQuery={setModelSearchQuery}
-            modelSortMode={modelSortMode}
-            setModelSortMode={setModelSortMode}
-          />
-          <div className="max-h-[400px] overflow-y-auto no-scrollbar">
-            {menu}
-          </div>
-          <div className="p-2 border-t border-border">
-            <Link
-              to="/docs/models"
-              className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 transition-colors"
-              onClick={() => setModelDropdownOpen(false)}
-            >
-              <HelpCircle className="h-3.5 w-3.5" />
-              <span>
-                {t(
-                  "playground:composer.helpMeChoose",
-                  "Help me choose a model",
-                )}
-              </span>
-              <ArrowRight className="h-3 w-3" />
-            </Link>
-          </div>
-        </div>
-      )}
-      trigger={["click"]}
-      placement="topLeft"
-    >
-      <Tooltip
-        title={
-          modelSelectorWarning
-            ? t(
-                "playground:composer.selectModelTooltip",
-                "Click to select a model",
-              )
-            : apiModelLabel
-        }
-        placement="top"
-      >
-        <button
-          type="button"
-          title={apiModelLabel}
-          aria-label={apiModelLabel}
-          aria-haspopup="listbox"
-          aria-expanded={modelDropdownOpen}
-          data-testid="model-selector"
-          onClick={() => {
-            if (!modelDropdownOpen) {
-              closeComposerPopoversExcept("model");
-              setModelDropdownOpen(true);
-            }
-          }}
-          className={`inline-flex min-w-0 items-center gap-1 rounded-full border px-2 min-h-[44px] text-[10px] cursor-pointer transition-colors ${
-            modelSelectorWarning
-              ? "border-warn/50 bg-warn/10 text-warn hover:bg-warn/20"
-              : "border-border bg-surface hover:bg-surface-hover"
-          }`}
-        >
-          <ProviderIcons
-            provider={resolvedProviderKey}
-            className={`h-3 w-3 ${modelSelectorWarning ? "text-warn" : "text-text-subtle"}`}
-          />
-          <span className="truncate max-w-[120px]">{apiModelLabel}</span>
-          <span
-            className={`rounded-full px-1.5 py-0.5 text-[9px] ${
-              !isConnectionReady || connectionUxState === "connected_degraded"
-                ? "bg-warn/10 text-warn"
-                : "bg-success/10 text-success"
-            }`}
-            title={
-              t(
-                "playground:composer.providerStatusTooltip",
-                "Provider status",
-              ) as string
-            }
-          >
-            {connectionStatusLabel}
-          </span>
-        </button>
-      </Tooltip>
-    </Dropdown>
+    <ChatModelSelectorDropdown
+      activeModelKey={selectedModelKey ?? selectedModel}
+      apiModelLabel={apiModelLabel}
+      catalogControls={
+        <PlaygroundModelCatalogControls
+          t={t}
+          modelListScope={modelListScope}
+          setModelListScope={setModelListScope}
+          modelSearchQuery={modelSearchQuery}
+          setModelSearchQuery={setModelSearchQuery}
+          modelSortMode={modelSortMode}
+          setModelSortMode={setModelSortMode}
+        />
+      }
+      connectionStatusLabel={connectionStatusLabel}
+      connectionStatusWarning={
+        !isConnectionReady || connectionUxState === "connected_degraded"
+      }
+      modelDropdownMenuItems={modelDropdownMenuItems}
+      modelDropdownOpen={modelDropdownOpen}
+      modelSelectorWarning={modelSelectorWarning}
+      onBeforeOpen={() => closeComposerPopoversExcept("model")}
+      resolvedProviderKey={resolvedProviderKey}
+      setModelDropdownOpen={setModelDropdownOpen}
+      setModelSearchQuery={setModelSearchQuery}
+    />
   );
 
   const modelUsageBadge = wrapComposerProfile(

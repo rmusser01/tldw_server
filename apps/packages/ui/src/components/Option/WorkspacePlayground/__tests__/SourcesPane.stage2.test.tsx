@@ -123,6 +123,14 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     })
   })
 
+  it("opens Add Sources directly on My Media", () => {
+    render(<SourcesPane />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Sources" }))
+
+    expect(mockOpenAddSourceModal).toHaveBeenCalledWith("existing")
+  })
+
   it("scrolls to and highlights a focused source target", () => {
     vi.useFakeTimers()
     const scrollSpy = vi.fn()
