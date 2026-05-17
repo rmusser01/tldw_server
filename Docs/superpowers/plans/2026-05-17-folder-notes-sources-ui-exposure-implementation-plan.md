@@ -1,6 +1,6 @@
 # Folder Notes Sources UI Exposure Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Expose the existing Sources local-directory-to-Notes workflow in the shared WebUI/extension, with a real Sources shortcut and a server-owned single-user/admin-enabled multi-user permission gate.
 
@@ -114,7 +114,7 @@ Header launcher:
 - Test: `tldw_Server_API/tests/Ingestion_Sources/unit/test_access_policy.py`
 - Test: `tldw_Server_API/tests/Ingestion_Sources/integration/test_ingestion_sources_access_policy.py`
 
-- [x] **Step 1: Write access policy unit tests**
+- [ ] **Step 1: Write access policy unit tests**
 
 Test the policy helper before touching endpoints.
 
@@ -146,7 +146,7 @@ python -m pytest tldw_Server_API/tests/Ingestion_Sources/unit/test_access_policy
 
 Expected: fails because `access_policy.py` does not exist yet.
 
-- [x] **Step 2: Implement `access_policy.py`**
+- [ ] **Step 2: Implement `access_policy.py`**
 
 Use this shape:
 
@@ -178,7 +178,7 @@ def can_create_local_directory_ingestion_source(current_user: Any) -> bool:
 
 Keep the helper deterministic and side-effect free. If rollout percent exists, hash `f"{flag_key}:{user_id}"` with SHA-256 and bucket into 0-99.
 
-- [x] **Step 3: Run unit tests**
+- [ ] **Step 3: Run unit tests**
 
 Run:
 
@@ -189,7 +189,7 @@ python -m pytest tldw_Server_API/tests/Ingestion_Sources/unit/test_access_policy
 
 Expected: pass.
 
-- [x] **Step 4: Write endpoint enforcement tests**
+- [ ] **Step 4: Write endpoint enforcement tests**
 
 Add tests that exercise the FastAPI endpoint dependency path:
 - `POST /api/v1/ingestion-sources/` with `source_type="local_directory"` returns `403` in multi-user mode without the flag.
@@ -209,7 +209,7 @@ python -m pytest tldw_Server_API/tests/Ingestion_Sources/integration/test_ingest
 
 Expected: fails because endpoint enforcement is not implemented.
 
-- [x] **Step 5: Enforce in `ingestion_sources.py`**
+- [ ] **Step 5: Enforce in `ingestion_sources.py`**
 
 Add a small endpoint-local guard:
 
@@ -234,7 +234,7 @@ if prepared_payload.get("source_type") == "local_directory" and not can_create_l
 
 In `patch_ingestion_source`, enforce only when `source_type` or `config` changes and the effective type is `local_directory`. Do not block changing enabled/policy/schedule on an existing local-directory source.
 
-- [x] **Step 6: Add authenticated capabilities endpoint**
+- [ ] **Step 6: Add authenticated capabilities endpoint**
 
 Add before `@router.get("/{source_id}")`:
 
@@ -248,7 +248,7 @@ async def get_ingestion_source_capabilities(current_user: User = Depends(get_req
 
 Use auth because this is a current-user entitlement. Do not put this in unauthenticated `/config/docs-info`.
 
-- [x] **Step 7: Run backend tests**
+- [ ] **Step 7: Run backend tests**
 
 Run:
 
@@ -259,7 +259,7 @@ python -m pytest tldw_Server_API/tests/Ingestion_Sources/unit/test_access_policy
 
 Expected: pass.
 
-- [x] **Step 8: Commit backend slice**
+- [ ] **Step 8: Commit backend slice**
 
 ```bash
 git add tldw_Server_API/app/core/Ingestion_Sources/access_policy.py tldw_Server_API/app/api/v1/endpoints/ingestion_sources.py tldw_Server_API/tests/Ingestion_Sources/unit/test_access_policy.py tldw_Server_API/tests/Ingestion_Sources/integration/test_ingestion_sources_access_policy.py
@@ -272,7 +272,7 @@ git commit -m "feat: gate local directory ingestion sources"
 - Modify: `apps/packages/ui/src/services/tldw/server-capabilities.ts`
 - Modify: `apps/packages/ui/src/services/__tests__/server-capabilities.test.ts`
 
-- [x] **Step 1: Write capability merge tests**
+- [ ] **Step 1: Write capability merge tests**
 
 Add cases:
 - OpenAPI advertises ingestion sources, `/ingestion-sources/capabilities` returns `{ can_create_local_directory: true }`, and `getServerCapabilities()` returns `canCreateLocalDirectoryIngestionSource: true`.
@@ -287,7 +287,7 @@ bunx vitest run apps/packages/ui/src/services/__tests__/server-capabilities.test
 
 Expected: fails because the field and fetch do not exist yet.
 
-- [x] **Step 2: Add capability field and default**
+- [ ] **Step 2: Add capability field and default**
 
 In `ServerCapabilities`, add:
 
@@ -297,7 +297,7 @@ canCreateLocalDirectoryIngestionSource: boolean
 
 Default to `false`.
 
-- [x] **Step 3: Fetch authenticated ingestion source capabilities**
+- [ ] **Step 3: Fetch authenticated ingestion source capabilities**
 
 In `fetchCapabilitiesFromServer`, after computing route capabilities, conditionally call:
 
@@ -310,7 +310,7 @@ bgRequest<{ can_create_local_directory?: unknown }, any>({
 
 Do not pass `noAuth: true`. Parse only boolean-like values. Failure should be non-fatal and should not disable the generic Sources page.
 
-- [x] **Step 4: Fix the capabilities cache scope**
+- [ ] **Step 4: Fix the capabilities cache scope**
 
 Update `getCapabilitiesCacheKey()` to reuse:
 
@@ -326,7 +326,7 @@ const CAPABILITIES_STORAGE_KEY = "__tldwServerCapabilitiesCacheV4"
 
 This prevents one multi-user account's entitlement from being reused by another account in the same browser profile.
 
-- [x] **Step 5: Run capability tests**
+- [ ] **Step 5: Run capability tests**
 
 Run:
 
@@ -336,7 +336,7 @@ bunx vitest run apps/packages/ui/src/services/__tests__/server-capabilities.test
 
 Expected: pass.
 
-- [x] **Step 6: Commit frontend capability slice**
+- [ ] **Step 6: Commit frontend capability slice**
 
 ```bash
 git add apps/packages/ui/src/services/tldw/server-capabilities.ts apps/packages/ui/src/services/__tests__/server-capabilities.test.ts
@@ -351,7 +351,7 @@ git commit -m "feat: expose local directory source capability"
 - Modify: `apps/packages/ui/src/components/Option/Sources/SourceForm.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Sources/__tests__/SourceForm.test.tsx`
 
-- [x] **Step 1: Write route builder and SourceForm tests**
+- [ ] **Step 1: Write route builder and SourceForm tests**
 
 Add tests:
 - `buildSourcesNewPath({ preset: "notes-folder-sync" })` returns `/sources/new?preset=notes-folder-sync`.
@@ -373,7 +373,7 @@ bunx vitest run apps/packages/ui/src/components/Option/Sources/__tests__/SourceF
 
 Expected: fails.
 
-- [x] **Step 2: Add preset path builder**
+- [ ] **Step 2: Add preset path builder**
 
 In `route-paths.ts`:
 
@@ -388,7 +388,7 @@ export const buildSourcesNewPath = (options: { preset?: SourcesNewPreset } = {})
 }
 ```
 
-- [x] **Step 3: Thread preset into `SourceForm`**
+- [ ] **Step 3: Thread preset into `SourceForm`**
 
 In `option-sources-new.tsx`, use `useSearchParams()` and pass:
 
@@ -398,7 +398,7 @@ In `option-sources-new.tsx`, use `useSearchParams()` and pass:
 
 Update `SourceFormProps` with `preset?: "notes-folder-sync"`.
 
-- [x] **Step 4: Render schedule switch**
+- [ ] **Step 4: Render schedule switch**
 
 Add a visible switch near `Enabled`:
 
@@ -415,7 +415,7 @@ Add a visible switch near `Enabled`:
 
 Do not add cadence controls.
 
-- [x] **Step 5: Capability-gate local-directory create**
+- [ ] **Step 5: Capability-gate local-directory create**
 
 Use `useServerCapabilities()` in `SourceForm` or pass capability from the route. For `mode="create"` and effective `source_type === "local_directory"`, disable submit when:
 
@@ -425,7 +425,7 @@ capsLoading || capabilities?.canCreateLocalDirectoryIngestionSource !== true
 
 Keep archive and git creation available when the generic Sources feature exists.
 
-- [x] **Step 6: Run SourceForm tests**
+- [ ] **Step 6: Run SourceForm tests**
 
 Run:
 
@@ -435,7 +435,7 @@ bunx vitest run apps/packages/ui/src/components/Option/Sources/__tests__/SourceF
 
 Expected: pass.
 
-- [x] **Step 7: Commit Sources form slice**
+- [ ] **Step 7: Commit Sources form slice**
 
 ```bash
 git add apps/packages/ui/src/routes/route-paths.ts apps/packages/ui/src/routes/option-sources-new.tsx apps/packages/ui/src/components/Option/Sources/SourceForm.tsx apps/packages/ui/src/components/Option/Sources/__tests__/SourceForm.test.tsx
@@ -451,7 +451,7 @@ git commit -m "feat: add notes folder sync source preset"
 - Test: `apps/packages/ui/src/components/Notes/__tests__/NotesListPanel.sources-sync.test.tsx`
 - Test: `apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.sources-sync-entry.test.tsx`
 
-- [x] **Step 1: Write NotesListPanel tests**
+- [ ] **Step 1: Write NotesListPanel tests**
 
 Test active view rendering and disabled states:
 - Online, active Notes view, Notes supported, Sources supported, local-directory entitlement true: button is enabled.
@@ -468,7 +468,7 @@ bunx vitest run apps/packages/ui/src/components/Notes/__tests__/NotesListPanel.s
 
 Expected: fails.
 
-- [x] **Step 2: Add NotesListPanel props and button**
+- [ ] **Step 2: Add NotesListPanel props and button**
 
 Add props:
 
@@ -499,11 +499,11 @@ Render a small text button beside Import:
 
 Do not use hero copy or explanatory in-app text. Keep detail in tooltip only.
 
-- [x] **Step 3: Thread the action through NotesSidebar**
+- [ ] **Step 3: Thread the action through NotesSidebar**
 
 Add `onSyncFolder: () => void` to `NotesSidebarProps`, pass it to `NotesListPanel`.
 
-- [x] **Step 4: Add NotesManager navigation test**
+- [ ] **Step 4: Add NotesManager navigation test**
 
 Mock `useNavigate`, set capabilities with:
 
@@ -521,7 +521,7 @@ Click "Sync folder" and assert:
 expect(navigate).toHaveBeenCalledWith("/sources/new?preset=notes-folder-sync")
 ```
 
-- [x] **Step 5: Implement NotesManager navigation**
+- [ ] **Step 5: Implement NotesManager navigation**
 
 Import `buildSourcesNewPath` and pass:
 
@@ -529,7 +529,7 @@ Import `buildSourcesNewPath` and pass:
 onSyncFolder={() => navigate(buildSourcesNewPath({ preset: "notes-folder-sync" }))}
 ```
 
-- [x] **Step 6: Run Notes tests**
+- [ ] **Step 6: Run Notes tests**
 
 Run:
 
@@ -539,7 +539,7 @@ bunx vitest run apps/packages/ui/src/components/Notes/__tests__/NotesListPanel.s
 
 Expected: pass.
 
-- [x] **Step 7: Commit Notes entry slice**
+- [ ] **Step 7: Commit Notes entry slice**
 
 ```bash
 git add apps/packages/ui/src/components/Notes/NotesManagerPage.tsx apps/packages/ui/src/components/Notes/NotesSidebar.tsx apps/packages/ui/src/components/Notes/NotesListPanel.tsx apps/packages/ui/src/components/Notes/__tests__/NotesListPanel.sources-sync.test.tsx apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.sources-sync-entry.test.tsx
@@ -556,7 +556,7 @@ git commit -m "feat: expose folder sync from notes"
 - Test: `apps/packages/ui/src/hooks/keyboard/__tests__/useShortcutConfig.test.ts`
 - Test: `apps/packages/ui/src/hooks/keyboard/__tests__/useModeNavigationShortcuts.test.tsx`
 
-- [x] **Step 1: Write shortcut config tests**
+- [ ] **Step 1: Write shortcut config tests**
 
 Add tests for:
 - `defaultShortcuts.modeSources` is `Alt+2`.
@@ -571,7 +571,7 @@ bunx vitest run apps/packages/ui/src/hooks/keyboard/__tests__/useShortcutConfig.
 
 Expected: fails.
 
-- [x] **Step 2: Add merge helper and `modeSources`**
+- [ ] **Step 2: Add merge helper and `modeSources`**
 
 In `useShortcutConfig.ts`, add the interface key and default:
 
@@ -597,7 +597,7 @@ export const mergeShortcutConfig = (
 
 Return `shortcuts: mergeShortcutConfig(shortcuts)` from the hook, and make `updateShortcut`/`resetShortcut` preserve unknown future keys by merging against previous values.
 
-- [x] **Step 3: Write navigation shortcut hook tests**
+- [ ] **Step 3: Write navigation shortcut hook tests**
 
 Use React Testing Library `renderHook` or a tiny component. Assert pressing:
 - `Alt+2` calls navigation to `/sources`.
@@ -612,7 +612,7 @@ bunx vitest run apps/packages/ui/src/hooks/keyboard/__tests__/useModeNavigationS
 
 Expected: fails.
 
-- [x] **Step 4: Implement `useModeNavigationShortcuts`**
+- [ ] **Step 4: Implement `useModeNavigationShortcuts`**
 
 In `useKeyboardShortcuts.ts`, add:
 
@@ -647,7 +647,7 @@ Use this path map:
 - `modeDictionaries`: `/dictionaries`
 - `modeCharacters`: `/characters`
 
-- [x] **Step 5: Initialize in both layouts**
+- [ ] **Step 5: Initialize in both layouts**
 
 In `Layout.tsx`, import `useNavigate` if needed and initialize:
 
@@ -661,7 +661,7 @@ In `WebLayout.tsx`, reuse existing `navigate`:
 useModeNavigationShortcuts(navigate, !hideHeader)
 ```
 
-- [x] **Step 6: Run shortcut tests**
+- [ ] **Step 6: Run shortcut tests**
 
 Run:
 
@@ -671,7 +671,7 @@ bunx vitest run apps/packages/ui/src/hooks/keyboard/__tests__/useShortcutConfig.
 
 Expected: pass.
 
-- [x] **Step 7: Commit shortcut hook slice**
+- [ ] **Step 7: Commit shortcut hook slice**
 
 ```bash
 git add apps/packages/ui/src/hooks/keyboard/useShortcutConfig.ts apps/packages/ui/src/hooks/keyboard/useKeyboardShortcuts.ts apps/packages/ui/src/components/Layouts/Layout.tsx apps/tldw-frontend/components/layout/WebLayout.tsx apps/packages/ui/src/hooks/keyboard/__tests__/useShortcutConfig.test.ts apps/packages/ui/src/hooks/keyboard/__tests__/useModeNavigationShortcuts.test.tsx
@@ -691,7 +691,7 @@ git commit -m "feat: wire mode navigation shortcuts"
 - Modify if needed: `apps/packages/ui/src/components/Layouts/__tests__/HeaderShortcuts.test.tsx`
 - Modify if needed: `apps/packages/ui/src/components/Layouts/__tests__/persona-shortcut-defaults.test.ts`
 
-- [x] **Step 1: Write modal tests**
+- [ ] **Step 1: Write modal tests**
 
 Update the existing KeyboardShortcutsModal mock default shortcuts to include `modeSources`. Assert "Go to Sources" appears with `Alt + 2`.
 
@@ -705,7 +705,7 @@ bunx vitest run apps/packages/ui/src/components/Common/__tests__/KeyboardShortcu
 
 Expected: fails.
 
-- [x] **Step 2: Add Sources rows**
+- [ ] **Step 2: Add Sources rows**
 
 Add Navigation rows to both modal components immediately after Playground:
 
@@ -716,7 +716,7 @@ Add Navigation rows to both modal components immediately after Playground:
 }
 ```
 
-- [x] **Step 3: Write header launcher tests**
+- [ ] **Step 3: Write header launcher tests**
 
 In `ui-settings.header-shortcuts.test.ts`, add:
 - default selection contains `sources`.
@@ -731,7 +731,7 @@ bunx vitest run apps/packages/ui/src/services/__tests__/ui-settings.header-short
 
 Expected: fails.
 
-- [x] **Step 4: Add `sources` header shortcut id**
+- [ ] **Step 4: Add `sources` header shortcut id**
 
 Add `"sources"` near `"media"`/`"notes"` in `HEADER_SHORTCUT_IDS`.
 
@@ -742,7 +742,7 @@ Implement legacy full-default detection in `coerceHeaderShortcutSelection`:
 
 Keep existing `REQUIRED_HEADER_SHORTCUT_IDS` behavior.
 
-- [x] **Step 5: Add Sources launcher item**
+- [ ] **Step 5: Add Sources launcher item**
 
 In `header-shortcut-items.ts`, import `SOURCES_PATH` and add this to the Library group near Media/Notes:
 
@@ -760,7 +760,7 @@ In `header-shortcut-items.ts`, import `SOURCES_PATH` and add this to the Library
 
 Do not assign a `shortcutIndex`; launcher number shortcuts are already occupied.
 
-- [x] **Step 6: Run modal and header tests**
+- [ ] **Step 6: Run modal and header tests**
 
 Run:
 
@@ -770,7 +770,7 @@ bunx vitest run apps/packages/ui/src/components/Common/__tests__/KeyboardShortcu
 
 Expected: pass, or update only tests directly affected by adding `sources`.
 
-- [x] **Step 7: Commit discoverability slice**
+- [ ] **Step 7: Commit discoverability slice**
 
 ```bash
 git add apps/packages/ui/src/components/Common/KeyboardShortcutsModal.tsx apps/packages/ui/src/components/Common/PageHelpModal.tsx apps/packages/ui/src/components/Common/__tests__/KeyboardShortcutsModal.focus.test.tsx apps/packages/ui/src/components/Common/__tests__/PageHelpModal.shortcuts.test.tsx apps/packages/ui/src/services/settings/ui-settings.ts apps/packages/ui/src/services/__tests__/ui-settings.header-shortcuts.test.ts apps/packages/ui/src/components/Layouts/header-shortcut-items.ts apps/packages/ui/src/components/Layouts/__tests__/HeaderShortcuts.test.tsx apps/packages/ui/src/components/Layouts/__tests__/persona-shortcut-defaults.test.ts
@@ -782,7 +782,7 @@ git commit -m "feat: surface sources in shortcuts"
 **Files:**
 - No new files expected, but update tests if verification exposes legitimate regressions.
 
-- [x] **Step 1: Run focused backend tests**
+- [ ] **Step 1: Run focused backend tests**
 
 ```bash
 source .venv/bin/activate
@@ -791,7 +791,7 @@ python -m pytest tldw_Server_API/tests/Ingestion_Sources/unit/test_access_policy
 
 Expected: pass.
 
-- [x] **Step 2: Run focused frontend tests**
+- [ ] **Step 2: Run focused frontend tests**
 
 ```bash
 bunx vitest run apps/packages/ui/src/services/__tests__/server-capabilities.test.ts apps/packages/ui/src/components/Option/Sources/__tests__/SourceForm.test.tsx apps/packages/ui/src/components/Notes/__tests__/NotesListPanel.sources-sync.test.tsx apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.sources-sync-entry.test.tsx apps/packages/ui/src/hooks/keyboard/__tests__/useShortcutConfig.test.ts apps/packages/ui/src/hooks/keyboard/__tests__/useModeNavigationShortcuts.test.tsx apps/packages/ui/src/components/Common/__tests__/KeyboardShortcutsModal.focus.test.tsx apps/packages/ui/src/components/Common/__tests__/PageHelpModal.shortcuts.test.tsx apps/packages/ui/src/services/__tests__/ui-settings.header-shortcuts.test.ts
@@ -799,7 +799,7 @@ bunx vitest run apps/packages/ui/src/services/__tests__/server-capabilities.test
 
 Expected: pass.
 
-- [x] **Step 3: Run Bandit on touched backend scope**
+- [ ] **Step 3: Run Bandit on touched backend scope**
 
 ```bash
 source .venv/bin/activate
@@ -808,7 +808,7 @@ python -m bandit -r tldw_Server_API/app/core/Ingestion_Sources/access_policy.py 
 
 Expected: no new high or medium findings in touched code.
 
-- [x] **Step 4: Browser verify shared UI**
+- [ ] **Step 4: Browser verify shared UI**
 
 Start the WebUI if it is not already running:
 
@@ -825,7 +825,7 @@ Use the in-app browser or Playwright to verify:
 - Pressing `Alt+2` navigates to `/sources`.
 - Mobile width does not overflow the Notes action row; if it does, move Sync folder into a compact overflow menu rather than wrapping badly.
 
-- [x] **Step 5: Check worktree scope**
+- [ ] **Step 5: Check worktree scope**
 
 Run:
 
@@ -836,7 +836,7 @@ git diff --stat
 
 Expected: only files from this plan and related Backlog task updates are changed by this work. Unrelated pre-existing dirty files should not be staged or reverted.
 
-- [x] **Step 6: Final commit**
+- [ ] **Step 6: Final commit**
 
 If verification required fixes, commit them:
 
@@ -849,13 +849,13 @@ If no fixes were needed, do not create an empty commit.
 
 ## Completion Checklist
 
-- [x] Backend denies local-directory source creation in multi-user mode unless the admin flag applies.
-- [x] Single-user mode can create local-directory sources without extra admin configuration.
-- [x] Generic `/sources` remains discoverable when `hasIngestionSources` is true.
-- [x] Notes "Sync folder" only enables when the current user can create local-directory sources.
-- [x] The preset route defaults to local-directory -> notes, canonical, enabled, unscheduled.
-- [x] Scheduled rescans switch is visible and maps to `schedule_enabled`.
-- [x] `Alt+2` actually navigates to `/sources` in both WebUI and extension layouts.
-- [x] Shortcut modal and help modal include "Go to Sources".
-- [x] Header shortcut migration preserves custom user selections.
-- [x] Focused pytest, Vitest, Bandit, and browser QA have been run and recorded in the implementation Backlog task.
+- [ ] Backend denies local-directory source creation in multi-user mode unless the admin flag applies.
+- [ ] Single-user mode can create local-directory sources without extra admin configuration.
+- [ ] Generic `/sources` remains discoverable when `hasIngestionSources` is true.
+- [ ] Notes "Sync folder" only enables when the current user can create local-directory sources.
+- [ ] The preset route defaults to local-directory -> notes, canonical, enabled, unscheduled.
+- [ ] Scheduled rescans switch is visible and maps to `schedule_enabled`.
+- [ ] `Alt+2` actually navigates to `/sources` in both WebUI and extension layouts.
+- [ ] Shortcut modal and help modal include "Go to Sources".
+- [ ] Header shortcut migration preserves custom user selections.
+- [ ] Focused pytest, Vitest, Bandit, and browser QA have been run and recorded in the implementation Backlog task.
