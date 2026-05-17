@@ -47,6 +47,7 @@ type DragState = {
   offsetX: number
   offsetY: number
   lastClientX: number
+  accumulatedDeltaX: number
 }
 
 type BuddyMovementState = "moving_left" | "moving_right"
@@ -64,7 +65,7 @@ type ResolvedPersonaShellState = {
   buddySummary: PersonaBuddySummary | null
 }
 
-const BUDDY_DRAG_MOVEMENT_THRESHOLD_PX = 8
+const BUDDY_DRAG_MOVEMENT_THRESHOLD_PX = 2
 const BUDDY_DRAG_MOVEMENT_OVERRIDE_MS = 300
 
 const hasVisualMovementState = (
@@ -280,11 +281,18 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
 
       const deltaX = event.clientX - dragStateRef.current.lastClientX
       dragStateRef.current.lastClientX = event.clientX
-      if (Math.abs(deltaX) >= BUDDY_DRAG_MOVEMENT_THRESHOLD_PX) {
+      dragStateRef.current.accumulatedDeltaX += deltaX
+      if (
+        Math.abs(dragStateRef.current.accumulatedDeltaX) >=
+        BUDDY_DRAG_MOVEMENT_THRESHOLD_PX
+      ) {
         setBuddyDragMovementOverride(
           movementContextRef.current,
-          deltaX > 0 ? "moving_right" : "moving_left"
+          dragStateRef.current.accumulatedDeltaX > 0
+            ? "moving_right"
+            : "moving_left"
         )
+        dragStateRef.current.accumulatedDeltaX = 0
       }
 
       setPosition(positionBucket, nextPosition)
@@ -351,7 +359,8 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       dragStateRef.current = {
         offsetX: event.clientX - rect.left,
         offsetY: event.clientY - rect.top,
-        lastClientX: event.clientX
+        lastClientX: event.clientX,
+        accumulatedDeltaX: 0
       }
       event.currentTarget.setPointerCapture?.(event.pointerId)
       event.preventDefault()

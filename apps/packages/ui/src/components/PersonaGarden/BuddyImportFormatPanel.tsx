@@ -4,6 +4,10 @@ import { FileArchive, PackageOpen } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import type { BuddyBuilderSource } from "./buddyBuilderState"
+import {
+  CODEX_PET_ARCHIVE_EXTENSION,
+  NATIVE_PERSONA_VISUAL_PACK_EXTENSION
+} from "./buddyBuilderArchive"
 
 export type BuddyImportFormatPanelProps = {
   source: BuddyBuilderSource | null
@@ -52,7 +56,11 @@ export const BuddyImportFormatPanel: React.FC<BuddyImportFormatPanelProps> = ({
           </div>
           <div className="mt-1 text-xs leading-5 text-text-muted">{detail}</div>
         </div>
-        <Tag>{isCodex ? ".zip" : ".tldw-persona-vpack"}</Tag>
+        <Tag>
+          {isCodex
+            ? CODEX_PET_ARCHIVE_EXTENSION
+            : NATIVE_PERSONA_VISUAL_PACK_EXTENSION}
+        </Tag>
       </div>
       <div className="mt-3">{importPreviewPanel}</div>
     </section>

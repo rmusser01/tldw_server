@@ -3,6 +3,10 @@ import { Tag } from "antd"
 import { Box, CopyPlus, FolderOpen, PackageOpen, PenLine, Upload } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import {
+  CODEX_PET_ARCHIVE_EXTENSION,
+  NATIVE_PERSONA_VISUAL_PACK_EXTENSION
+} from "./buddyBuilderArchive"
 import type { BuddyBuilderSource } from "./buddyBuilderState"
 
 export type BuddySourcePickerProps = {
@@ -52,7 +56,7 @@ export const BuddySourcePicker: React.FC<BuddySourcePickerProps> = ({
         defaultValue: "Reuse a Codex-compatible pet archive."
       }),
       icon: <Upload className="h-4 w-4" />,
-      tag: ".zip"
+      tag: CODEX_PET_ARCHIVE_EXTENSION
     },
     {
       source: "native_import",
@@ -63,7 +67,7 @@ export const BuddySourcePicker: React.FC<BuddySourcePickerProps> = ({
         defaultValue: "Restore or move a native Persona Visual archive."
       }),
       icon: <Upload className="h-4 w-4" />,
-      tag: ".tldw-persona-vpack"
+      tag: NATIVE_PERSONA_VISUAL_PACK_EXTENSION
     },
     {
       source: "library",
@@ -120,6 +124,7 @@ export const BuddySourcePicker: React.FC<BuddySourcePickerProps> = ({
               type="button"
               key={option.source}
               aria-label={option.label}
+              aria-pressed={isSelected}
               className={`min-h-[4.5rem] rounded-md border px-3 py-2 text-left transition-colors hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
                 isSelected ? "border-primary bg-primary/10" : "border-border bg-bg"
               }`}

@@ -11,8 +11,11 @@ import { BUDDY_CORE_STATE_ORDER } from "../buddyBuilderState"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, options?: { defaultValue?: string }) =>
-      options?.defaultValue ?? _key
+    t: (_key: string, options?: { defaultValue?: string; state?: string }) =>
+      (options?.defaultValue ?? _key).replace(
+        "{{state}}",
+        String(options?.state ?? "")
+      )
   })
 }))
 

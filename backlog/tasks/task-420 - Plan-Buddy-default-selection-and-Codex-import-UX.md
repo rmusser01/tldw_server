@@ -1,7 +1,7 @@
 ---
 id: TASK-420
 title: Plan Buddy default selection and Codex import UX
-status: In Progress
+status: Done
 labels:
 - persona
 - buddy

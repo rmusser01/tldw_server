@@ -9,8 +9,15 @@ import { BuddyGuidedBuilder } from "../BuddyGuidedBuilder"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, options?: { defaultValue?: string }) =>
-      options?.defaultValue ?? _key
+    t: (_key: string, options?: Record<string, unknown>) => {
+      let value = String(options?.defaultValue ?? _key)
+      for (const [name, replacement] of Object.entries(options ?? {})) {
+        if (name !== "defaultValue") {
+          value = value.replaceAll(`{{${name}}}`, String(replacement))
+        }
+      }
+      return value
+    }
   })
 }))
 
@@ -95,6 +102,10 @@ describe("BuddyGuidedBuilder", () => {
     expect(stepper).toHaveTextContent("Activate")
 
     expect(screen.getByRole("button", { name: "Bundled Buddy" })).toBeVisible()
+    expect(screen.getByRole("button", { name: "Bundled Buddy" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
     expect(
       screen.getByRole("button", { name: "Import Codex/Petdex pet" })
     ).toBeVisible()
@@ -142,6 +153,9 @@ describe("BuddyGuidedBuilder", () => {
     renderBuilder()
 
     fireEvent.click(screen.getByRole("button", { name: "Import Codex/Petdex pet" }))
+    expect(
+      screen.getByRole("button", { name: "Import Codex/Petdex pet" })
+    ).toHaveAttribute("aria-pressed", "true")
     expect(screen.getByTestId("buddy-builder-import-panel")).toHaveTextContent(
       "Codex/Petdex pet"
     )

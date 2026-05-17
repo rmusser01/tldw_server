@@ -33,6 +33,8 @@ export type BuddyGuidedBuilderProps = {
   starterCatalogLoading?: boolean
   starterCatalogError?: string | null
   copyingStarterId?: string | null
+  requestedSource?: BuddyBuilderSource | null
+  requestedSourceRequestId?: number
   importPreviewPanel: React.ReactNode
   draftManifest?: PersonaVisualManifest | null
   assetsById?: Record<string, PersonaVisualAsset>
@@ -43,6 +45,7 @@ export type BuddyGuidedBuilderProps = {
   onStartBlank?: () => void
   onOpenLibrary?: () => void
   onOpenDuplicate?: () => void
+  onContinueToActivation?: () => void
   onSaveManifest?: () => void
 }
 
@@ -84,6 +87,17 @@ const getStepLabel = (
   })
 }
 
+const formatTemplate = (
+  template: string,
+  values: Record<string, string | number>
+): string => {
+  let formatted = template
+  for (const [key, value] of Object.entries(values)) {
+    formatted = formatted.replaceAll(`{{${key}}}`, String(value))
+  }
+  return formatted
+}
+
 export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
   selectedPersonaId,
   selectedPersonaName,
@@ -94,6 +108,8 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
   starterCatalogLoading = false,
   starterCatalogError = null,
   copyingStarterId = null,
+  requestedSource = null,
+  requestedSourceRequestId = 0,
   importPreviewPanel,
   draftManifest = null,
   assetsById = {},
@@ -104,6 +120,7 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
   onStartBlank,
   onOpenLibrary,
   onOpenDuplicate,
+  onContinueToActivation,
   onSaveManifest
 }) => {
   const { t } = useTranslation(["sidepanel", "common"])
@@ -114,12 +131,35 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
     setBuilderState((current) => resetBuddyBuilderForSource(current, source))
   }, [])
 
+  React.useEffect(() => {
+    if (!requestedSource) return
+    setBuilderState((current) => resetBuddyBuilderForSource(current, requestedSource))
+  }, [requestedSource, requestedSourceRequestId])
+
   const selectedSource = builderState.source
   const displayActivePackTitle =
     activePackTitle ||
     t("sidepanel:personaGarden.visuals.builder.activePackFallback", {
       defaultValue: "Active visual buddy"
     })
+  const descriptionText = formatTemplate(
+    t("sidepanel:personaGarden.visuals.builder.description", {
+      defaultValue:
+        "Choose, import, review, configure, and activate a visual buddy for {{persona}}."
+    }),
+    { persona: selectedPersonaName }
+  )
+  const packCountText =
+    packCount === 1
+      ? t("sidepanel:personaGarden.visuals.builder.packCountOne", {
+          defaultValue: "1 pack"
+        })
+      : formatTemplate(
+          t("sidepanel:personaGarden.visuals.builder.packCount", {
+            defaultValue: "{{count}} packs"
+          }),
+          { count: packCount }
+        )
 
   return (
     <section
@@ -140,11 +180,7 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
             })}
           </h2>
           <div className="mt-1 text-xs leading-5 text-text-muted">
-            {t("sidepanel:personaGarden.visuals.builder.description", {
-              persona: selectedPersonaName,
-              defaultValue:
-                "Choose, import, review, configure, and activate a visual buddy for {{persona}}."
-            })}
+            {descriptionText}
           </div>
         </div>
         {hasActiveVisual ? (
@@ -159,10 +195,7 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
             <div className="mt-1 flex items-center gap-2 text-text-muted">
               <Tag color="green">active</Tag>
               <span>
-                {t("sidepanel:personaGarden.visuals.builder.packCount", {
-                  count: packCount,
-                  defaultValue: "{{count}} packs"
-                })}
+                {packCountText}
               </span>
             </div>
           </div>
@@ -215,6 +248,7 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
           assetsById={assetsById}
           importPreview={importPreview}
           activationBlockers={activationBlockers}
+          onContinueToActivation={onContinueToActivation}
         />
       ) : null}
 

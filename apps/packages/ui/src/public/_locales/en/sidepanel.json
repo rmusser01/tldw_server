@@ -1397,14 +1397,32 @@
   "personaGarden_visuals_builder_nativeImportSource": {
     "message": "Import Persona Visual pack"
   },
+  "personaGarden_visuals_builder_loading": {
+    "message": "loading"
+  },
+  "personaGarden_visuals_builder_packCountOne": {
+    "message": "1 pack"
+  },
   "personaGarden_visuals_builder_review_heading": {
     "message": "Review draft readiness"
   },
   "personaGarden_visuals_builder_review_draftSemantics": {
     "message": "imported as a Persona Visual draft"
   },
+  "personaGarden_visuals_builder_review_readyTag": {
+    "message": "ready"
+  },
+  "personaGarden_visuals_builder_review_missingTag": {
+    "message": "missing"
+  },
   "personaGarden_visuals_builder_review_previewUnavailable": {
     "message": "Preview unavailable"
+  },
+  "personaGarden_visuals_builder_review_noMovementStates": {
+    "message": "No movement states."
+  },
+  "personaGarden_visuals_builder_review_noCustomStates": {
+    "message": "No custom states."
   },
   "personaGarden_visuals_builder_review_activationPath": {
     "message": "Continue to activation"
@@ -1423,6 +1441,32 @@
   },
   "personaGarden_visuals_builder_configure_noCoreStates": {
     "message": "No core states available."
+  },
+  "personaGarden_visuals_builder_configure_animationLabel": {
+    "message": "$state$ animation",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      }
+    }
+  },
+  "personaGarden_visuals_builder_configure_requiredTag": {
+    "message": "required"
+  },
+  "personaGarden_visuals_builder_configure_mappedTag": {
+    "message": "mapped"
+  },
+  "personaGarden_visuals_builder_configure_missingTag": {
+    "message": "missing"
+  },
+  "personaGarden_visuals_builder_configure_notMapped": {
+    "message": "Not mapped"
+  },
+  "personaGarden_visuals_builder_configure_fallbacks": {
+    "message": "Fallbacks"
+  },
+  "personaGarden_visuals_builder_configure_noFallbacks": {
+    "message": "None"
   },
   "personaGarden_visuals_builder_configure_movementStates": {
     "message": "Movement states"

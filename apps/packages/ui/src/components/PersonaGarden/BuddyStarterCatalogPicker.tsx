@@ -89,6 +89,16 @@ const renderStarterTags = (
           })}
         </Badge>
       ) : null}
+      {starter.tags.map((tag) => (
+        <Badge key={tag} variant="secondary" size="sm">
+          {tag}
+        </Badge>
+      ))}
+      {starter.license_label ? (
+        <Badge variant="secondary" size="sm">
+          {starter.license_label}
+        </Badge>
+      ) : null}
     </div>
   )
 }
@@ -114,7 +124,13 @@ export const BuddyStarterCatalogPicker: React.FC<
             defaultValue: "Choose a bundled default"
           })}
         </div>
-        {loading ? <Badge size="sm">loading</Badge> : null}
+        {loading ? (
+          <Badge size="sm">
+            {t("sidepanel:personaGarden.visuals.builder.loading", {
+              defaultValue: "loading"
+            })}
+          </Badge>
+        ) : null}
       </div>
       {error ? (
         <div className="rounded border border-state-error/50 bg-state-error/10 p-2 text-xs text-state-error">

@@ -107,6 +107,7 @@ import {
   getBuddyImportArchiveFileError,
   NATIVE_PERSONA_VISUAL_PACK_EXTENSION
 } from "./buddyBuilderArchive"
+import type { BuddyBuilderSource } from "./buddyBuilderState"
 
 type VisualPackEditorProps = {
   selectedPersonaId: string
@@ -1176,6 +1177,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     React.useState<string | null>(null)
   const [copyingStarterId, setCopyingStarterId] = React.useState("")
   const [starterPickerOpen, setStarterPickerOpen] = React.useState(false)
+  const [builderSourceRequest, setBuilderSourceRequest] = React.useState<{
+    source: BuddyBuilderSource
+    requestId: number
+  } | null>(null)
   const [previewingImport, setPreviewingImport] = React.useState(false)
   const [refreshingImportPreview, setRefreshingImportPreview] = React.useState(false)
   const [committingImport, setCommittingImport] = React.useState(false)
@@ -1208,6 +1213,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const draftTitleInputRef = React.useRef<HTMLInputElement | null>(null)
   const duplicateTargetSelectRef = React.useRef<HTMLSelectElement | null>(null)
   const libraryPanelRef = React.useRef<HTMLDivElement | null>(null)
+  const activationControlsRef = React.useRef<HTMLDivElement | null>(null)
   const generationReadinessRequestIdRef = React.useRef(0)
   const duplicateTargetsRequestIdRef = React.useRef(0)
   const libraryRequestIdRef = React.useRef(0)
@@ -1769,15 +1775,31 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     libraryPanelRef.current?.focus()
   }, [])
 
-  const openImportArchivePicker = React.useCallback(() => {
+  const focusImportPreviewInput = React.useCallback(() => {
     importPreviewInputRef.current?.scrollIntoView?.({ block: "center" })
     importPreviewInputRef.current?.click()
     importPreviewInputRef.current?.focus()
   }, [])
 
+  const openImportArchivePicker = React.useCallback(() => {
+    setBuilderSourceRequest((current) => ({
+      source: "native_import",
+      requestId: (current?.requestId ?? 0) + 1
+    }))
+    globalThis.setTimeout(focusImportPreviewInput, 0)
+  }, [focusImportPreviewInput])
+
   const focusDuplicateControls = React.useCallback(() => {
     duplicateTargetSelectRef.current?.scrollIntoView?.({ block: "center" })
     duplicateTargetSelectRef.current?.focus()
+  }, [])
+
+  const focusActivationControls = React.useCallback(() => {
+    activationControlsRef.current?.scrollIntoView?.({ block: "center" })
+    const activateButton = activationControlsRef.current?.querySelector<
+      HTMLButtonElement
+    >('[data-testid="persona-visual-activate-button"]')
+    activateButton?.focus()
   }, [])
 
   const handleCreateDraft = async () => {
@@ -3436,6 +3458,8 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           starterCatalogLoading={starterCatalogLoading}
           starterCatalogError={starterCatalogError}
           copyingStarterId={copyingStarterId}
+          requestedSource={builderSourceRequest?.source ?? null}
+          requestedSourceRequestId={builderSourceRequest?.requestId ?? 0}
           importPreviewPanel={importPreviewPanel}
           draftManifest={selectedPack ? draftManifest : null}
           assetsById={assetsById}
@@ -3448,11 +3472,12 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           onStartBlank={focusDraftTitleInput}
           onOpenLibrary={focusLibraryPanel}
           onOpenDuplicate={focusDuplicateControls}
+          onContinueToActivation={focusActivationControls}
           onSaveManifest={() => void handleSaveManifest()}
         />
       ) : null}
 
-      {showSetupChoices ? (
+      {showSetupChoices && !showGuidedBuilder ? (
         <VisualBuddySetupChoiceCard
           selectedPersonaId={selectedPersonaId}
           selectedPersonaName={selectedPersonaName || selectedPersonaId}
@@ -3765,7 +3790,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         </div>
       ) : null}
 
-      {!selectedPack ? firstRunImportPanel : null}
+      {!showGuidedBuilder && !selectedPack ? firstRunImportPanel : null}
 
       <div
         ref={libraryPanelRef}
@@ -4012,7 +4037,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 )}
               </div>
 
-              {importPreviewPanel}
+              {!showGuidedBuilder ? importPreviewPanel : null}
             </div>
           </div>
 
@@ -4429,7 +4454,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                   </div>
                 )}
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div ref={activationControlsRef} className="flex flex-wrap gap-2">
                 <Button
                   data-testid="persona-visual-save-manifest"
                   size="small"

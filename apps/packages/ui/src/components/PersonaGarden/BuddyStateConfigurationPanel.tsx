@@ -20,77 +20,107 @@ export type BuddyStateConfigurationPanelProps = {
   onSaveManifest?: () => void
 }
 
-const formatAnimationLabel = (state: BuddyStateConfigurationState): string =>
-  `${state.label} animation`
-
 const getStateBadgeVariant = (state: BuddyStateConfigurationState): BadgeVariant =>
   state.animationId ? "success" : "warning"
 
 const StateRow: React.FC<{
   state: BuddyStateConfigurationState
   showDescription?: boolean
-}> = ({ state, showDescription = false }) => (
-  <li
-    data-testid="buddy-state-config-state-row"
-    data-state-id={state.id}
-    className="rounded-md border border-border bg-surface p-2"
-  >
-    <div className="flex flex-wrap items-start justify-between gap-2">
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-1.5 text-xs font-medium text-text">
-          <span>{state.label}</span>
-          {state.required ? (
-            <Badge variant="danger" size="sm">
-              required
-            </Badge>
+  t: (key: string, options: Record<string, unknown>) => string
+}> = ({ state, showDescription = false, t }) => {
+  const animationLabelTemplate = t(
+    "sidepanel:personaGarden.visuals.builder.configure.animationLabel",
+    { defaultValue: "{{state}} animation" }
+  )
+  const animationLabel = animationLabelTemplate.includes("{{state}}")
+    ? animationLabelTemplate.replaceAll("{{state}}", state.label)
+    : `${state.label} ${animationLabelTemplate.trim() || "animation"}`
+
+  return (
+    <li
+      data-testid="buddy-state-config-state-row"
+      data-state-id={state.id}
+      className="rounded-md border border-border bg-surface p-2"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs font-medium text-text">
+            <span>{state.label}</span>
+            {state.required ? (
+              <Badge variant="danger" size="sm">
+                {t("sidepanel:personaGarden.visuals.builder.configure.requiredTag", {
+                  defaultValue: "required"
+                })}
+              </Badge>
+            ) : null}
+            {state.kind ? (
+              <Badge variant="info" size="sm">
+                {state.kind}
+              </Badge>
+            ) : null}
+          </div>
+          {showDescription && state.description ? (
+            <div className="mt-1 text-xs leading-5 text-text-muted">
+              {state.description}
+            </div>
           ) : null}
-          {state.kind ? (
-            <Badge variant="info" size="sm">
-              {state.kind}
-            </Badge>
+          {state.tags.length ? (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {state.tags.map((tag) => (
+                <Badge key={`${state.id}-${tag}`} size="sm">
+                  {tag}
+                </Badge>
+              ))}
+            </div>
           ) : null}
         </div>
-        {showDescription && state.description ? (
-          <div className="mt-1 text-xs leading-5 text-text-muted">
-            {state.description}
-          </div>
-        ) : null}
-        {state.tags.length ? (
-          <div className="mt-1 flex flex-wrap gap-1">
-            {state.tags.map((tag) => (
-              <Badge key={`${state.id}-${tag}`} size="sm">
-                {tag}
-              </Badge>
-            ))}
-          </div>
-        ) : null}
+        <Badge variant={getStateBadgeVariant(state)} size="sm">
+          {state.animationId
+            ? t("sidepanel:personaGarden.visuals.builder.configure.mappedTag", {
+                defaultValue: "mapped"
+              })
+            : t("sidepanel:personaGarden.visuals.builder.configure.missingTag", {
+                defaultValue: "missing"
+              })}
+        </Badge>
       </div>
-      <Badge variant={getStateBadgeVariant(state)} size="sm">
-        {state.animationId ? "mapped" : "missing"}
-      </Badge>
-    </div>
-    <div className="mt-2 grid gap-2 sm:grid-cols-2">
-      <label className="text-xs text-text-muted">
-        <span className="mb-1 block">{formatAnimationLabel(state)}</span>
-        <select
-          aria-label={formatAnimationLabel(state)}
-          className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
-          disabled
-          value={state.animationId || ""}
-        >
-          <option value="">Not mapped</option>
-          {state.animationId ? (
-            <option value={state.animationId}>{state.animationId}</option>
-          ) : null}
-        </select>
-      </label>
-      <div className="text-xs text-text-muted">
-        <div className="mb-1 font-medium text-text-subtle">Fallbacks</div>
-        <div>{state.fallbackIds.length ? state.fallbackIds.join(", ") : "None"}</div>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        <label className="text-xs text-text-muted">
+          <span className="mb-1 block">{animationLabel}</span>
+          <select
+            aria-label={animationLabel}
+            className="w-full rounded border border-border bg-bg px-2 py-1 text-sm text-text"
+            disabled
+            value={state.animationId || ""}
+          >
+            <option value="">
+              {t("sidepanel:personaGarden.visuals.builder.configure.notMapped", {
+                defaultValue: "Not mapped"
+              })}
+            </option>
+            {state.animationId ? (
+              <option value={state.animationId}>{state.animationId}</option>
+            ) : null}
+          </select>
+        </label>
+        <div className="text-xs text-text-muted">
+          <div className="mb-1 font-medium text-text-subtle">
+            {t("sidepanel:personaGarden.visuals.builder.configure.fallbacks", {
+              defaultValue: "Fallbacks"
+            })}
+          </div>
+          <div>
+            {state.fallbackIds.length
+              ? state.fallbackIds.join(", ")
+              : t("sidepanel:personaGarden.visuals.builder.configure.noFallbacks", {
+                  defaultValue: "None"
+                })}
+          </div>
+        </div>
       </div>
-    </div>
-  </li>
-)
+    </li>
+  )
+}
 
 const EmptySection: React.FC<{ title: string }> = ({ title }) => (
   <DesignSystemEmptyState
@@ -107,7 +137,8 @@ const StateSection: React.FC<{
   states: BuddyStateConfigurationState[]
   emptyText: string
   showDescription?: boolean
-}> = ({ title, testId, states, emptyText, showDescription = false }) => (
+  t: (key: string, options: Record<string, unknown>) => string
+}> = ({ title, testId, states, emptyText, showDescription = false, t }) => (
   <section data-testid={testId} className="space-y-2">
     <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
       {title}
@@ -119,6 +150,7 @@ const StateSection: React.FC<{
             key={state.id}
             state={state}
             showDescription={showDescription}
+            t={t}
           />
         ))}
       </ul>
@@ -218,6 +250,7 @@ export const BuddyStateConfigurationPanel: React.FC<
           "sidepanel:personaGarden.visuals.builder.configure.noCoreStates",
           { defaultValue: "No core states available." }
         )}
+        t={t}
       />
 
       <StateSection
@@ -232,6 +265,7 @@ export const BuddyStateConfigurationPanel: React.FC<
           { defaultValue: "No movement states configured." }
         )}
         showDescription
+        t={t}
       />
 
       <StateSection
@@ -245,6 +279,7 @@ export const BuddyStateConfigurationPanel: React.FC<
           { defaultValue: "No custom states configured." }
         )}
         showDescription
+        t={t}
       />
 
       <section

@@ -17,15 +17,27 @@ export type BuddyDraftReviewPanelProps = {
   assetsById?: Record<string, PersonaVisualAsset>
   importPreview?: PersonaVisualImportPreviewResponse | null
   activationBlockers?: string[]
+  onContinueToActivation?: () => void
 }
 
-const formatResolved = (resolved: boolean): string => (resolved ? "ready" : "missing")
+const formatResolved = (
+  resolved: boolean,
+  t: (key: string, options: { defaultValue: string }) => string
+): string =>
+  resolved
+    ? t("sidepanel:personaGarden.visuals.builder.review.readyTag", {
+        defaultValue: "ready"
+      })
+    : t("sidepanel:personaGarden.visuals.builder.review.missingTag", {
+        defaultValue: "missing"
+      })
 
 export const BuddyDraftReviewPanel: React.FC<BuddyDraftReviewPanelProps> = ({
   manifest = null,
   assetsById = {},
   importPreview = null,
-  activationBlockers = []
+  activationBlockers = [],
+  onContinueToActivation
 }) => {
   const { t } = useTranslation(["sidepanel", "common"])
   const summary = summarizeBuddyDraftReadiness({
@@ -133,7 +145,7 @@ export const BuddyDraftReviewPanel: React.FC<BuddyDraftReviewPanelProps> = ({
               <li key={state.id} className="flex items-center justify-between gap-2">
                 <span>{state.id}</span>
                 <Tag color={state.resolved ? "green" : "orange"}>
-                  {formatResolved(state.resolved)}
+                  {formatResolved(state.resolved, t)}
                 </Tag>
               </li>
             ))}
@@ -155,13 +167,17 @@ export const BuddyDraftReviewPanel: React.FC<BuddyDraftReviewPanelProps> = ({
                 <li key={state.id} className="flex items-center justify-between gap-2">
                   <span>{state.id}</span>
                   <Tag color={state.resolved ? "green" : "orange"}>
-                    {formatResolved(state.resolved)}
+                    {formatResolved(state.resolved, t)}
                   </Tag>
                 </li>
               ))}
             </ul>
           ) : (
-            <div className="mt-1 text-text-muted">No movement states.</div>
+            <div className="mt-1 text-text-muted">
+              {t("sidepanel:personaGarden.visuals.builder.review.noMovementStates", {
+                defaultValue: "No movement states."
+              })}
+            </div>
           )}
         </section>
       </div>
@@ -185,7 +201,11 @@ export const BuddyDraftReviewPanel: React.FC<BuddyDraftReviewPanelProps> = ({
             ))}
           </ul>
         ) : (
-          <div className="mt-1 text-text-muted">No custom states.</div>
+          <div className="mt-1 text-text-muted">
+            {t("sidepanel:personaGarden.visuals.builder.review.noCustomStates", {
+              defaultValue: "No custom states."
+            })}
+          </div>
         )}
       </section>
 
@@ -231,7 +251,8 @@ export const BuddyDraftReviewPanel: React.FC<BuddyDraftReviewPanelProps> = ({
         size="small"
         type="primary"
         icon={<CheckCircle2 className="h-3.5 w-3.5" />}
-        disabled={!summary.canActivate}
+        disabled={!summary.canActivate || !onContinueToActivation}
+        onClick={onContinueToActivation}
       >
         {t("sidepanel:personaGarden.visuals.builder.review.activationPath", {
           defaultValue: "Continue to activation"
