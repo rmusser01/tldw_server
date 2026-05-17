@@ -279,7 +279,10 @@ export class WorkspacePlaygroundPage {
     await expect(this.sourcesPanel).toBeVisible({ timeout: 10_000 })
     await this.disableNextJsPortalPointerInterception()
     await this.clickWhenActionable(
-      this.sourcesPanel.getByRole("button", { name: /^add$/i })
+      this.sourcesPanel
+        .getByRole("button", { name: /^add sources$/i })
+        .or(this.sourcesPanel.getByRole("button", { name: /^add$/i }))
+        .first()
     )
     await expect(this.addSourceModal).toBeVisible({ timeout: 10_000 })
   }

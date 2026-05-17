@@ -41,6 +41,10 @@ import {
   parseSourceCreatedAt,
   validateSourceUploadFile
 } from "./source-ingestion-utils"
+import {
+  getMediaLibraryItemKey,
+  normalizeMediaLibraryResponse
+} from "./media-library-normalization"
 
 const { TextArea } = Input
 const { Dragger } = Upload
@@ -1221,19 +1225,36 @@ const ExistingTab: React.FC<{
   const [searchQuery, setSearchQuery] = React.useState("")
   const [media, setMedia] = React.useState<any[]>([])
   const [isLoading, setIsLoading] = React.useState(false)
-  const [selectedMedia, setSelectedMedia] = React.useState<Set<number>>(
+  const [loadError, setLoadError] = React.useState<string | null>(null)
+  const [selectedMediaKeys, setSelectedMediaKeys] = React.useState<Set<string>>(
     new Set()
   )
   const [currentPage, setCurrentPage] = React.useState(1)
   const [totalCount, setTotalCount] = React.useState(0)
   const [hasMore, setHasMore] = React.useState(false)
+  const mediaRef = React.useRef<any[]>([])
 
   // Already added source media IDs
   const sources = useWorkspaceStore((s) => s.sources)
   const existingMediaIds = React.useMemo(
-    () => new Set(sources.map((s) => s.mediaId)),
+    () => new Set(sources.map((s) => String(s.mediaId))),
     [sources]
   )
+
+  const setMediaList = React.useCallback((items: any[]) => {
+    mediaRef.current = items
+    setMedia(items)
+  }, [])
+
+  const dedupeMediaItems = React.useCallback((items: unknown[]) => {
+    const itemMap = new Map<string, any>()
+    for (const item of items) {
+      const key = getMediaLibraryItemKey(item)
+      if (key == null) continue
+      itemMap.set(key, item)
+    }
+    return Array.from(itemMap.values())
+  }, [])
 
   const fetchMediaFromServer = React.useCallback(
     async (
@@ -1244,7 +1265,7 @@ const ExistingTab: React.FC<{
       if (shouldShowLoading) {
         setIsLoading(true)
       }
-      setError(null)
+      setLoadError(null)
       const page = options?.page || 1
       const append = Boolean(options?.append)
 
@@ -1264,51 +1285,43 @@ const ExistingTab: React.FC<{
           })
         }
 
-        if (response?.media || response?.results) {
-          const items = response.media || response.results || []
-          const total = Number(
-            response.total_count ??
-              response.total ??
-              response.count ??
-              response.results_count ??
-              response.pagination?.total ??
-              (append ? media.length + items.length : items.length)
-          )
-          const normalizedTotal =
-            Number.isFinite(total) && total >= 0
-              ? total
-              : append
-                ? media.length + items.length
-                : items.length
-          const nextItems = append ? [...media, ...items] : items
-          const dedupedItems = Array.from(
-            new Map(
-              nextItems.map((item: any) => [String(item.media_id || item.id), item])
-            ).values()
-          )
+        const normalized = normalizeMediaLibraryResponse(
+          response,
+          append ? mediaRef.current.length : undefined
+        )
+        const nextItems = append
+          ? [...mediaRef.current, ...normalized.items]
+          : normalized.items
+        const dedupedItems = dedupeMediaItems(nextItems)
+        const normalizedTotal = Math.max(normalized.totalCount, dedupedItems.length)
 
-          setMedia(dedupedItems)
-          setTotalCount(normalizedTotal)
-          setCurrentPage(page)
-          setHasMore(dedupedItems.length < normalizedTotal)
+        setMediaList(dedupedItems)
+        setSelectedMediaKeys((previous) => {
+          const availableKeys = new Set(dedupedItems.map(getMediaLibraryItemKey))
+          return new Set(
+            Array.from(previous).filter((key) => availableKeys.has(key))
+          )
+        })
+        setTotalCount(normalizedTotal)
+        setCurrentPage(page)
+        setHasMore(dedupedItems.length < normalizedTotal)
 
-          if (!trimmedQuery && page === 1) {
-            existingMediaCache = {
-              items: dedupedItems,
-              totalCount: normalizedTotal,
-              cachedAt: Date.now()
-            }
+        if (!trimmedQuery && page === 1) {
+          existingMediaCache = {
+            items: dedupedItems,
+            totalCount: normalizedTotal,
+            cachedAt: Date.now()
           }
         }
-      } catch (err) {
-        setError(mapSourceIngestionError(err))
+      } catch {
+        setLoadError("Unable to load media. Please try again.")
       } finally {
         if (shouldShowLoading) {
           setIsLoading(false)
         }
       }
     },
-    [media, setError]
+    [dedupeMediaItems, setMediaList]
   )
 
   const loadMedia = React.useCallback(
@@ -1318,7 +1331,8 @@ const ExistingTab: React.FC<{
         const cacheIsFresh =
           Date.now() - existingMediaCache.cachedAt < EXISTING_MEDIA_CACHE_TTL_MS
         if (cacheIsFresh) {
-          setMedia(existingMediaCache.items)
+          setLoadError(null)
+          setMediaList(existingMediaCache.items)
           setTotalCount(existingMediaCache.totalCount)
           setCurrentPage(1)
           setHasMore(existingMediaCache.items.length < existingMediaCache.totalCount)
@@ -1327,9 +1341,10 @@ const ExistingTab: React.FC<{
       }
 
       setCurrentPage(1)
+      setSelectedMediaKeys(new Set())
       await fetchMediaFromServer(trimmedQuery, { page: 1 })
     },
-    [fetchMediaFromServer]
+    [fetchMediaFromServer, setMediaList]
   )
 
   React.useEffect(() => {
@@ -1350,12 +1365,19 @@ const ExistingTab: React.FC<{
   }
 
   const handleAddSelected = () => {
-    const selectedItems = media.filter(
-      (m) => selectedMedia.has(m.media_id || m.id) && !existingMediaIds.has(m.media_id || m.id)
-    )
+    const selectedItems = media.filter((m) => {
+      const key = getMediaLibraryItemKey(m)
+      const mediaId = Number(m.media_id ?? m.id)
+      return (
+        key != null &&
+        Number.isFinite(mediaId) &&
+        selectedMediaKeys.has(key) &&
+        !existingMediaIds.has(key)
+      )
+    })
 
     const newSources = selectedItems.map((m) => ({
-      mediaId: m.media_id || m.id,
+      mediaId: Number(m.media_id ?? m.id),
       title: m.title || m.name || "Untitled",
       type: getSourceTypeFromMediaType(m.type || m.media_type) as WorkspaceSourceType,
       status: "ready" as const,
@@ -1374,23 +1396,26 @@ const ExistingTab: React.FC<{
     }
   }
 
-  const toggleMedia = (id: number) => {
-    const newSelected = new Set(selectedMedia)
-    if (newSelected.has(id)) {
-      newSelected.delete(id)
+  const toggleMedia = (key: string) => {
+    const newSelected = new Set(selectedMediaKeys)
+    if (newSelected.has(key)) {
+      newSelected.delete(key)
     } else {
-      newSelected.add(id)
+      newSelected.add(key)
     }
-    setSelectedMedia(newSelected)
+    setSelectedMediaKeys(newSelected)
   }
 
-  const availableMedia = media.filter(
-    (m) => !existingMediaIds.has(m.media_id || m.id)
-  )
+  const availableMedia = media.filter((m) => {
+    const key = getMediaLibraryItemKey(m)
+    return key != null && !existingMediaIds.has(key)
+  })
   const visibleTotalCount =
     totalCount > 0
       ? Math.max(totalCount - existingMediaIds.size, availableMedia.length)
       : availableMedia.length
+  const allVisibleMediaAlreadyAdded =
+    media.length > 0 && availableMedia.length === 0
 
   return (
     <div className="space-y-4">
@@ -1412,6 +1437,16 @@ const ExistingTab: React.FC<{
         <div className="flex justify-center py-8">
           <Spin />
         </div>
+      ) : loadError ? (
+        <Alert type="error" title={loadError} showIcon />
+      ) : allVisibleMediaAlreadyAdded ? (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={t(
+            "playground:sources.allVisibleMediaAlreadyAdded",
+            "All visible media are already in this workspace"
+          )}
+        />
       ) : availableMedia.length === 0 ? (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -1437,22 +1472,30 @@ const ExistingTab: React.FC<{
               size="small"
               dataSource={availableMedia}
               renderItem={(item) => {
-                const id = item.media_id || item.id
+                const key = getMediaLibraryItemKey(item)
+                if (key == null) return null
+                const title = item.title || item.name || "Untitled"
                 return (
                   <List.Item
                     className={`cursor-pointer transition hover:bg-surface2 ${
-                      selectedMedia.has(id) ? "bg-primary/10" : ""
+                      selectedMediaKeys.has(key) ? "bg-primary/10" : ""
                     }`}
-                    onClick={() => toggleMedia(id)}
+                    onClick={() => toggleMedia(key)}
                   >
                     <div className="flex items-start gap-2">
                       <Checkbox
-                        checked={selectedMedia.has(id)}
-                        onChange={() => toggleMedia(id)}
+                        aria-label={t(
+                          "playground:sources.selectLibraryItem",
+                          "Select {{title}}",
+                          { title }
+                        )}
+                        checked={selectedMediaKeys.has(key)}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={() => toggleMedia(key)}
                       />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-text">
-                          {item.title || item.name || "Untitled"}
+                          {title}
                         </p>
                         <p className="text-xs text-text-muted capitalize">
                           {item.type || item.media_type || "document"}
@@ -1467,11 +1510,11 @@ const ExistingTab: React.FC<{
           <Button
             type="primary"
             onClick={handleAddSelected}
-            disabled={selectedMedia.size === 0}
+            disabled={selectedMediaKeys.size === 0}
             className="w-full"
           >
             {t("playground:sources.addSelected", "Add {{count}} selected", {
-              count: selectedMedia.size
+              count: selectedMediaKeys.size
             })}
           </Button>
           {hasMore && (

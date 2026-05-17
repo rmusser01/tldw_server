@@ -1363,7 +1363,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
             icon={<Plus className="h-3.5 w-3.5" />}
             onClick={() => openAddSourceModal()}
           >
-            {t("playground:sources.add", "Add")}
+            {t("playground:sources.addSources", "Add Sources")}
           </Button>
           {onHide && (
             <Tooltip title={t("playground:workspace.hideSources", "Hide sources")}>

@@ -1,10 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { AddSourceModal } from "../SourcesPane/AddSourceModal"
 import type { AddSourceTab } from "@/types/workspace"
 
 const ADD_SOURCE_TAB_USAGE_STORAGE_KEY =
   "tldw:workspace-playground:add-source-tab-usage:v1"
+const EXISTING_MEDIA_CACHE_TTL_MS = 60_000
 
 const {
   mockUploadMedia,
@@ -37,6 +39,8 @@ const workspaceStoreState = {
   addSource: mockAddSource,
   workspaceTag: "workspace:test"
 }
+
+let mediaCacheClock = Date.now()
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -83,7 +87,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 
 describe("AddSourceModal Stage 2 intake and relevance", () => {
   beforeEach(() => {
+    vi.restoreAllMocks()
     vi.clearAllMocks()
+    mediaCacheClock += EXISTING_MEDIA_CACHE_TTL_MS + 1
+    vi.spyOn(Date, "now").mockReturnValue(mediaCacheClock)
     window.localStorage.removeItem(ADD_SOURCE_TAB_USAGE_STORAGE_KEY)
     workspaceStoreState.addSourceModalOpen = true
     workspaceStoreState.addSourceError = null
@@ -143,7 +150,7 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
     ])
   })
 
-  it("reorders non-upload tabs based on prior usage frequency", async () => {
+  it("keeps Add Sources tabs in a stable order despite prior usage frequency", async () => {
     window.localStorage.setItem(
       ADD_SOURCE_TAB_USAGE_STORAGE_KEY,
       JSON.stringify({
@@ -163,11 +170,68 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
 
     expect(tabLabels).toEqual([
       "Upload",
-      "Search Server",
-      "URL",
       "My Media",
-      "Paste"
+      "URL",
+      "Paste",
+      "Search Server"
     ])
+  })
+
+  it("shows a load error when My Media cannot load", async () => {
+    workspaceStoreState.addSourceModalTab = "existing"
+    mockListMedia.mockRejectedValueOnce(new Error("offline"))
+
+    render(<AddSourceModal />)
+
+    expect(await screen.findByText(/unable to load media/i)).toBeInTheDocument()
+  })
+
+  it("renders My Media items from items response shape", async () => {
+    workspaceStoreState.addSourceModalTab = "existing"
+    mockListMedia.mockResolvedValueOnce({
+      items: [{ id: 701, title: "Library Item", type: "pdf" }],
+      total: 1
+    })
+
+    render(<AddSourceModal />)
+
+    expect(await screen.findByText("Library Item")).toBeInTheDocument()
+    expect(screen.getByText("Showing 1 of 1")).toBeInTheDocument()
+  })
+
+  it("distinguishes all-added media from an empty media library", async () => {
+    workspaceStoreState.addSourceModalTab = "existing"
+    workspaceStoreState.sources = [{ mediaId: 701 }]
+    mockListMedia.mockResolvedValueOnce({
+      items: [{ id: 701, title: "Already Added", type: "pdf" }],
+      total: 1
+    })
+
+    render(<AddSourceModal />)
+
+    expect(
+      await screen.findByText(/already in this workspace/i)
+    ).toBeInTheDocument()
+  })
+
+  it("toggles a My Media checkbox once when clicked directly", async () => {
+    const user = userEvent.setup()
+    workspaceStoreState.addSourceModalTab = "existing"
+    mockListMedia.mockResolvedValueOnce({
+      items: [{ id: 701, title: "Library Item", type: "pdf" }],
+      total: 1
+    })
+
+    render(<AddSourceModal />)
+
+    const checkbox = await screen.findByRole("checkbox", {
+      name: /select library item/i
+    })
+    await user.click(checkbox)
+    expect(checkbox).toBeChecked()
+
+    await user.click(checkbox)
+    expect(checkbox).not.toBeChecked()
   })
 
   it("persists updated tab usage when switching tabs", async () => {

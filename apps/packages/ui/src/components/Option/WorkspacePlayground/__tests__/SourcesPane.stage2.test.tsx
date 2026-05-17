@@ -123,6 +123,14 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     })
   })
 
+  it("labels the primary source intake action as Add Sources", () => {
+    render(<SourcesPane />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Sources" }))
+
+    expect(mockOpenAddSourceModal).toHaveBeenCalledTimes(1)
+  })
+
   it("scrolls to and highlights a focused source target", () => {
     vi.useFakeTimers()
     const scrollSpy = vi.fn()
