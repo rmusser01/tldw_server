@@ -1,6 +1,12 @@
 import React, { useState } from "react"
-import { Alert, Spin, Typography, message } from "antd"
+import { Spin, Typography, message } from "antd"
 import { useQuery } from "@tanstack/react-query"
+import { useNavigate } from "react-router-dom"
+import {
+  StatePanel,
+  buildCapabilityState,
+  classifyCapabilityError
+} from "@/components/ui/state"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import {
   createScheduledTaskReminder,
@@ -15,8 +21,37 @@ import { ScheduledTaskTable } from "./ScheduledTaskTable"
 import { ReminderTaskEditor } from "./ReminderTaskEditor"
 
 const SCHEDULED_TASKS_PATH = "/api/v1/scheduled-tasks"
+const SCHEDULED_TASKS_FEATURE_NAME = "Scheduled tasks"
+const SCHEDULED_TASKS_CAPABILITY_NAME = "scheduled tasks"
+
+const errorStatus = (error: unknown): number | undefined => {
+  if (!error || typeof error !== "object") {
+    return undefined
+  }
+
+  const status = (error as { status?: unknown; response?: { status?: unknown } }).status ??
+    (error as { response?: { status?: unknown } }).response?.status
+
+  return typeof status === "number" ? status : undefined
+}
+
+const errorMessage = (error: unknown, fallback: string): string => {
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  if (error && typeof error === "object" && "message" in error) {
+    const messageValue = (error as { message?: unknown }).message
+    if (typeof messageValue === "string" && messageValue.trim()) {
+      return messageValue
+    }
+  }
+
+  return typeof error === "string" && error.trim() ? error : fallback
+}
 
 export const ScheduledTasksPage: React.FC = () => {
+  const navigate = useNavigate()
   const { config: connectionConfig, loading: connectionConfigLoading } =
     useCanonicalConnectionConfig()
   const [editorOpen, setEditorOpen] = useState(false)
@@ -129,6 +164,56 @@ export const ScheduledTasksPage: React.FC = () => {
   }
 
   const partialErrors = tasksQuery.data?.errors ?? []
+  const serverUrl = connectionConfig?.serverUrl?.trim()
+  const unsupportedState = buildCapabilityState({
+    kind: "unavailable",
+    featureName: SCHEDULED_TASKS_FEATURE_NAME,
+    capabilityName: SCHEDULED_TASKS_CAPABILITY_NAME,
+    method: "GET",
+    endpoint: SCHEDULED_TASKS_PATH,
+    serverUrl,
+    primaryAction: {
+      label: "Check server setup",
+      onClick: () => {
+        navigate("/settings/health")
+      }
+    }
+  })
+  const loadErrorState = tasksQuery.isError
+    ? buildCapabilityState({
+        kind: classifyCapabilityError(tasksQuery.error),
+        featureName: SCHEDULED_TASKS_FEATURE_NAME,
+        capabilityName: SCHEDULED_TASKS_CAPABILITY_NAME,
+        method: "GET",
+        endpoint: SCHEDULED_TASKS_PATH,
+        status: errorStatus(tasksQuery.error),
+        rawMessage: errorMessage(
+          tasksQuery.error,
+          "The scheduled tasks overview could not be loaded."
+        ),
+        primaryAction: {
+          label: "Try again",
+          onClick: () => {
+            void tasksQuery.refetch()
+          }
+        }
+      })
+    : null
+  const degradedState = tasksQuery.data?.partial
+    ? buildCapabilityState({
+        kind: "degraded",
+        featureName: SCHEDULED_TASKS_FEATURE_NAME,
+        rawMessage: partialErrors.length
+          ? partialErrors.join(", ")
+          : "The overview is partially available.",
+        primaryAction: {
+          label: "Refresh",
+          onClick: () => {
+            void tasksQuery.refetch()
+          }
+        }
+      })
+    : null
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
@@ -143,28 +228,32 @@ export const ScheduledTasksPage: React.FC = () => {
 
       {connectionConfigLoading || scheduledTasksSupported === null ? <Spin /> : null}
       {scheduledTasksSupported === false ? (
-        <Alert
-          type="info"
-          showIcon
-          title="Scheduled tasks unavailable"
-          description="Scheduled tasks endpoints are not available on this server."
+        <StatePanel
+          state={unsupportedState.state}
+          title={unsupportedState.title}
+          message={unsupportedState.message}
+          diagnostics={unsupportedState.diagnostics}
+          primaryAction={unsupportedState.primaryAction}
         />
       ) : null}
       {tasksQuery.isLoading ? <Spin /> : null}
-      {tasksQuery.isError ? (
-        <Alert
-          type="error"
-          showIcon
-          title="Unable to load scheduled tasks"
-          description={tasksQuery.error instanceof Error ? tasksQuery.error.message : "The scheduled tasks overview could not be loaded."}
+      {loadErrorState ? (
+        <StatePanel
+          state={loadErrorState.state}
+          title={loadErrorState.title}
+          message={loadErrorState.message}
+          diagnostics={loadErrorState.diagnostics}
+          primaryAction={loadErrorState.primaryAction}
+          role="alert"
         />
       ) : null}
-      {tasksQuery.data?.partial ? (
-        <Alert
-          type="warning"
-          showIcon
-          title="Some scheduled tasks could not be loaded"
-          description={partialErrors.length ? partialErrors.join(", ") : "The overview is partially available."}
+      {degradedState ? (
+        <StatePanel
+          state={degradedState.state}
+          title={degradedState.title}
+          message={degradedState.message}
+          diagnostics={degradedState.diagnostics}
+          primaryAction={degradedState.primaryAction}
         />
       ) : null}
 

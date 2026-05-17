@@ -27,7 +27,7 @@ Implement the first WP2 capability/error-state remediation slice for the WebUI/e
 - [x] #1 Shared state primitive expectations are locked with focused tests or documented as already covered.
 - [x] #2 A pure capability-state mapping helper is added only if two or more first-adopter routes would otherwise duplicate mapping logic.
 - [x] #3 /sources top-level unavailable/error/empty states use shared user-language state UI, with raw endpoint details only in diagnostics.
-- [ ] #4 /scheduled-tasks top-level unavailable/error/degraded states use shared user-language state UI, with raw endpoint details only in diagnostics.
+- [x] #4 /scheduled-tasks top-level unavailable/error/degraded states use shared user-language state UI, with raw endpoint details only in diagnostics.
 - [ ] #5 /integrations top-level unsupported/error states use shared user-language state UI, with provider-card details left scoped to cards unless they leak raw route state.
 - [ ] #6 Focused Vitest route/component tests pass for changed state primitives and first adopters.
 - [ ] #7 Browser QA or Playwright evidence is recorded for /sources, /scheduled-tasks, and /integrations, with any environment gaps documented.
@@ -43,6 +43,8 @@ Baseline: created clean worktree from `origin/dev` at `a1d24c7f4` after PR #1830
 Shared state foundation: `state-primitives.test.tsx` passed at baseline (7 tests), so no primitive production change was needed. Added a focused locking test proving raw endpoint details can live in diagnostics while primary copy stays user-language. Added pure `capability-state.ts` after a red test failed because the helper did not exist. Helper maps common capability failures to existing design-system state keys and builds diagnostics for method/endpoint/status/server/raw message. Verification: `bunx vitest run src/components/ui/state/__tests__/capability-state.test.ts src/components/ui/state/__tests__/state-primitives.test.tsx` passed 12 tests.
 
 /sources adoption: replaced the unsupported capability guard, query error state, and empty state with shared `StatePanel` states generated through `buildCapabilityState`. Raw `GET /api/v1/sources`, status, and raw messages now render only inside the diagnostics region; the primary page copy uses user-language unavailable/empty messaging and gives retry/create/server-health actions. Updated source workspace and route-guard tests, including the router/connection-state test harness. Verification: `bunx vitest run src/components/Option/Sources/__tests__/SourcesWorkspacePage.test.tsx src/routes/__tests__/option-sources-route-guards.test.tsx` passed 11 tests.
+
+/scheduled-tasks adoption: replaced top-level unsupported endpoint, list-query failure, and partial-overview warnings with shared `StatePanel` states. Primary copy now says unavailable/degraded in user terms; `GET /api/v1/scheduled-tasks`, status codes, server URL, and partial raw messages are diagnostics. The existing reminder table/editor workflow remains unchanged. Verification: `bunx vitest run src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx src/routes/__tests__/scheduled-tasks-route.test.tsx` passed 13 tests.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
