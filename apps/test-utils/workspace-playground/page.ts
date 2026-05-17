@@ -12,6 +12,9 @@ export class WorkspacePlaygroundParityPage {
   readonly sourcesPanel: Locator
   readonly chatPanel: Locator
   readonly studioPanel: Locator
+  readonly chatInput: Locator
+  readonly restoreSourcesButton: Locator
+  readonly restoreStudioButton: Locator
   readonly generatedOutputsToggle: Locator
 
   constructor(page: Page) {
@@ -24,6 +27,9 @@ export class WorkspacePlaygroundParityPage {
     this.sourcesPanel = page.locator("#workspace-sources-panel")
     this.chatPanel = page.locator("#workspace-main-content")
     this.studioPanel = page.locator("#workspace-studio-panel:visible").first()
+    this.chatInput = page.locator("#workspace-main-content textarea").first()
+    this.restoreSourcesButton = page.getByTestId("workspace-restore-sources").first()
+    this.restoreStudioButton = page.getByTestId("workspace-restore-studio").first()
     this.generatedOutputsToggle = this.studioPanel
       .locator('button[aria-controls="studio-generated-outputs-section"]')
       .first()
@@ -103,6 +109,62 @@ export class WorkspacePlaygroundParityPage {
     await expect(this.sourcesPanel).toBeVisible()
     await expect(this.chatPanel).toBeVisible()
     await expect(this.studioPanel).toBeVisible()
+  }
+
+  async expectComposerVisibleWithoutPageScroll(): Promise<void> {
+    await expect(this.chatInput).toBeVisible({ timeout: 10_000 })
+    await expect
+      .poll(async () => await this.page.evaluate(() => window.scrollY), {
+        timeout: 5_000,
+        message: "Expected workspace playground to avoid page-level scrolling",
+      })
+      .toBe(0)
+
+    const box = await this.chatInput.boundingBox()
+    const viewport = this.page.viewportSize()
+    expect(box, "Expected workspace chat composer to have a bounding box").not.toBeNull()
+    expect(viewport, "Expected workspace page to have a viewport").not.toBeNull()
+
+    if (!box || !viewport) {
+      return
+    }
+
+    expect(box.y).toBeGreaterThanOrEqual(0)
+    expect(box.y + box.height).toBeLessThanOrEqual(viewport.height)
+  }
+
+  async hideSourcesPane(): Promise<void> {
+    await this.disablePortalPointerInterception()
+    const hideButton = this.sourcesPanel.getByRole("button", { name: /hide sources/i })
+    await expect(hideButton).toBeVisible({ timeout: 10_000 })
+    await hideButton.click()
+    await expect(this.sourcesPanel).toBeHidden({ timeout: 10_000 })
+    await expect(this.restoreSourcesButton).toBeVisible({ timeout: 10_000 })
+  }
+
+  async restoreSourcesPane(): Promise<void> {
+    await this.disablePortalPointerInterception()
+    await expect(this.restoreSourcesButton).toBeVisible({ timeout: 10_000 })
+    await this.restoreSourcesButton.click()
+    await expect(this.sourcesPanel).toBeVisible({ timeout: 10_000 })
+  }
+
+  async hideStudioPane(): Promise<void> {
+    await this.disablePortalPointerInterception()
+    const hideButton = this.studioPanel.getByRole("button", { name: /hide studio/i })
+    await expect(hideButton).toBeVisible({ timeout: 10_000 })
+    await hideButton.click()
+    await expect(this.page.locator("#workspace-studio-panel")).toBeHidden({
+      timeout: 10_000,
+    })
+    await expect(this.restoreStudioButton).toBeVisible({ timeout: 10_000 })
+  }
+
+  async restoreStudioPane(): Promise<void> {
+    await this.disablePortalPointerInterception()
+    await expect(this.restoreStudioButton).toBeVisible({ timeout: 10_000 })
+    await this.restoreStudioButton.click()
+    await expect(this.studioPanel).toBeVisible({ timeout: 10_000 })
   }
 
   async openOutputTypesSection(): Promise<void> {

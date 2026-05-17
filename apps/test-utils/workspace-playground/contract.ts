@@ -10,6 +10,11 @@ export async function runWorkspacePlaygroundParityContract(
   await workspacePage.waitForReady()
 
   await workspacePage.assertBaselinePanesVisible()
+  await workspacePage.expectComposerVisibleWithoutPageScroll()
+  await workspacePage.hideSourcesPane()
+  await workspacePage.restoreSourcesPane()
+  await workspacePage.hideStudioPane()
+  await workspacePage.restoreStudioPane()
 
   await workspacePage.openOutputTypesSection()
   await workspacePage.openGeneratedOutputsSection()

@@ -19,6 +19,9 @@ export class WorkspacePlaygroundPage {
   readonly sourcesPanel: Locator
   readonly chatPanel: Locator
   readonly studioPanel: Locator
+  readonly chatInput: Locator
+  readonly restoreSourcesButton: Locator
+  readonly restoreStudioButton: Locator
   readonly globalSearchModal: Locator
   readonly globalSearchInput: Locator
   readonly addSourceModal: Locator
@@ -33,6 +36,9 @@ export class WorkspacePlaygroundPage {
     this.sourcesPanel = page.locator("#workspace-sources-panel")
     this.chatPanel = page.locator("#workspace-main-content")
     this.studioPanel = page.locator("#workspace-studio-panel")
+    this.chatInput = page.locator("#workspace-main-content textarea").first()
+    this.restoreSourcesButton = page.getByTestId("workspace-restore-sources").first()
+    this.restoreStudioButton = page.getByTestId("workspace-restore-studio").first()
     this.globalSearchModal = page
       .getByRole("dialog")
       .filter({ hasText: /search workspace/i })
@@ -162,6 +168,28 @@ export class WorkspacePlaygroundPage {
     await this.disableNextJsPortalPointerInterception()
   }
 
+  async expectComposerVisibleWithoutPageScroll(): Promise<void> {
+    await expect(this.chatInput).toBeVisible({ timeout: 10_000 })
+    await expect
+      .poll(async () => await this.page.evaluate(() => window.scrollY), {
+        timeout: 5_000,
+        message: "Expected workspace playground to avoid page-level scrolling"
+      })
+      .toBe(0)
+
+    const box = await this.chatInput.boundingBox()
+    const viewport = this.page.viewportSize()
+    expect(box, "Expected workspace chat composer to have a bounding box").not.toBeNull()
+    expect(viewport, "Expected workspace page to have a viewport").not.toBeNull()
+
+    if (!box || !viewport) {
+      return
+    }
+
+    expect(box.y).toBeGreaterThanOrEqual(0)
+    expect(box.y + box.height).toBeLessThanOrEqual(viewport.height)
+  }
+
   async resetWorkspace(name = "Workspace E2E"): Promise<void> {
     await this.page.evaluate((workspaceName) => {
       const store = (window as { __tldw_useWorkspaceStore?: unknown })
@@ -229,9 +257,7 @@ export class WorkspacePlaygroundPage {
 
   async showSourcesPane(): Promise<void> {
     await this.disableNextJsPortalPointerInterception()
-    await this.clickWhenActionable(
-      this.page.getByRole("button", { name: /show sources/i }).first()
-    )
+    await this.clickWhenActionable(this.restoreSourcesButton)
     await expect(this.sourcesPanel).toBeVisible({ timeout: 10_000 })
   }
 
@@ -245,9 +271,7 @@ export class WorkspacePlaygroundPage {
 
   async showStudioPane(): Promise<void> {
     await this.disableNextJsPortalPointerInterception()
-    await this.clickWhenActionable(
-      this.page.getByRole("button", { name: /show studio/i }).first()
-    )
+    await this.clickWhenActionable(this.restoreStudioButton)
     await expect(this.studioPanel).toBeVisible({ timeout: 10_000 })
   }
 
@@ -389,7 +413,7 @@ export class WorkspacePlaygroundPage {
   }
 
   getChatInput(): Locator {
-    return this.chatPanel.locator("textarea").first()
+    return this.chatInput.first()
   }
 
   async sendChatMessage(message: string): Promise<void> {
