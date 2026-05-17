@@ -78,6 +78,14 @@ def _llamacpp_parser(models_dir: Path, **overrides: str) -> ConfigParser:
     return parser
 
 
+def _allow_public_dns(monkeypatch: pytest.MonkeyPatch, llamacpp_acquisition_service: Any) -> None:
+    monkeypatch.setattr(
+        llamacpp_acquisition_service.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("93.184.216.34", 0))],
+    )
+
+
 @pytest.mark.unit
 def test_download_endpoint_creates_redacted_llamacpp_acquisition_job(monkeypatch, tmp_path: Path) -> None:
     from tldw_Server_API.app.core.Local_LLM import llamacpp_acquisition_service
@@ -89,6 +97,7 @@ def test_download_endpoint_creates_redacted_llamacpp_acquisition_job(monkeypatch
         "load_comprehensive_config",
         lambda: _llamacpp_parser(models_dir),
     )
+    _allow_public_dns(monkeypatch, llamacpp_acquisition_service)
     job_manager = JobManager(db_path=tmp_path / "jobs.db")
     app = _make_app(job_manager)
 
@@ -96,7 +105,7 @@ def test_download_endpoint_creates_redacted_llamacpp_acquisition_job(monkeypatch
         response = client.post(
             "/api/v1/llamacpp/assets/downloads",
             json={
-                "url": "https://user:pass@example.com/releases/model.gguf?token=secret&download=1",
+                "url": "https://example.com/releases/model.gguf?download=1",
                 "expected_size_bytes": 11,
             },
         )
@@ -106,15 +115,12 @@ def test_download_endpoint_creates_redacted_llamacpp_acquisition_job(monkeypatch
     assert body["status"] == "queued"
     assert body["operation"] == "download"
     assert body["queue"] == "acquisition"
-    assert "secret" not in body["source_label"]
-    assert "user:pass" not in body["source_label"]
+    assert body["source_label"] == "https://example.com/releases/model.gguf?download=1"
     job = job_manager.get_job(int(body["job_id"]))
     assert job is not None
     assert job["domain"] == "llamacpp"
     assert job["queue"] == "acquisition"
     assert job["job_type"] == "llamacpp_asset_download"
-    assert "secret" not in str(job["payload"])
-    assert "user:pass" not in str(job["payload"])
     assert job["payload"]["source_url"] == "https://example.com/releases/model.gguf?download=1"
     assert job["payload"]["destination_path"] == str(models_dir / "model.gguf")
 
@@ -130,6 +136,7 @@ def test_download_job_status_list_and_cancel_endpoints(monkeypatch, tmp_path: Pa
         "load_comprehensive_config",
         lambda: _llamacpp_parser(models_dir),
     )
+    _allow_public_dns(monkeypatch, llamacpp_acquisition_service)
     job_manager = JobManager(db_path=tmp_path / "jobs.db")
     app = _make_app(job_manager)
 
@@ -170,3 +177,30 @@ def test_download_endpoint_rejects_invalid_request(monkeypatch, tmp_path: Path) 
 
     assert response.status_code == 400
     assert "scheme" in response.json()["detail"].lower()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://user:pass@example.com/releases/model.gguf",
+        "https://example.com/releases/model.gguf?token=secret&download=1",
+    ],
+)
+def test_download_endpoint_rejects_credentialed_or_secret_urls(monkeypatch, tmp_path: Path, url: str) -> None:
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_acquisition_service
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    monkeypatch.setattr(
+        llamacpp_acquisition_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(models_dir),
+    )
+    app = _make_app(JobManager(db_path=tmp_path / "jobs.db"))
+
+    with TestClient(app) as client:
+        response = client.post("/api/v1/llamacpp/assets/downloads", json={"url": url})
+
+    assert response.status_code == 400
+    assert "credential" in response.json()["detail"].lower() or "secret" in response.json()["detail"].lower()

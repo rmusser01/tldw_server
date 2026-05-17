@@ -72,6 +72,65 @@ def test_validate_download_request_allows_private_network_when_explicitly_enable
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://user:pass@example.com/releases/model.gguf",
+        "https://example.com/releases/model.gguf?token=secret&download=1",
+    ],
+)
+def test_validate_download_request_rejects_credentialed_or_secret_urls(tmp_path: Path, url: str) -> None:
+    from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_acquisition_service
+    from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import LlamaCppAssetDownloadRequest
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    payload = LlamaCppAssetDownloadRequest(url=url, filename="model.gguf")
+
+    with pytest.raises(ServerError, match="credentials|secret"):
+        llamacpp_acquisition_service.validate_download_request(payload, _saved_config(models_dir))
+
+
+@pytest.mark.unit
+def test_validate_download_request_fails_closed_when_dns_cannot_be_verified(monkeypatch, tmp_path: Path) -> None:
+    from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_acquisition_service
+    from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import LlamaCppAssetDownloadRequest
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    payload = LlamaCppAssetDownloadRequest(url="https://unresolved.example/model.gguf")
+    monkeypatch.setattr(
+        llamacpp_acquisition_service.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("dns unavailable")),
+    )
+
+    with pytest.raises(ServerError, match="resolve|verify"):
+        llamacpp_acquisition_service.validate_download_request(payload, _saved_config(models_dir))
+
+
+@pytest.mark.unit
+def test_validate_download_request_rejects_malformed_port(monkeypatch, tmp_path: Path) -> None:
+    from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_acquisition_service
+    from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import LlamaCppAssetDownloadRequest
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    payload = LlamaCppAssetDownloadRequest(url="https://example.com:bad/model.gguf", filename="model.gguf")
+    monkeypatch.setattr(
+        llamacpp_acquisition_service.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("93.184.216.34", 0))],
+    )
+
+    with pytest.raises(ServerError, match="invalid"):
+        llamacpp_acquisition_service.validate_download_request(payload, _saved_config(models_dir))
+
+
+@pytest.mark.unit
 def test_redacted_source_label_removes_credentials_and_secret_queries() -> None:
     from tldw_Server_API.app.core.Local_LLM import llamacpp_acquisition_service
 

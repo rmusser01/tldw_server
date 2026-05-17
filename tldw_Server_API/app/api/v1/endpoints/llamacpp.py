@@ -500,7 +500,11 @@ async def list_llamacpp_asset_downloads_endpoint(
     limit: int = Query(default=100, ge=1, le=500),
     job_manager: JobManager = Depends(get_job_manager),
 ) -> LlamaCppAcquisitionJobListResponse:
-    return await run_in_threadpool(llamacpp_acquisition_jobs.list_download_jobs, job_manager, limit=limit)
+    return await run_in_threadpool(
+        llamacpp_acquisition_jobs.list_download_jobs,
+        job_manager,
+        limit=limit,
+    )
 
 
 @router.get(
@@ -517,7 +521,11 @@ async def get_llamacpp_asset_download_endpoint(
     job_id: int,
     job_manager: JobManager = Depends(get_job_manager),
 ) -> LlamaCppAcquisitionJobResponse:
-    response = await run_in_threadpool(llamacpp_acquisition_jobs.get_download_job, job_manager, job_id)
+    response = await run_in_threadpool(
+        llamacpp_acquisition_jobs.get_download_job,
+        job_manager,
+        job_id,
+    )
     if response is None:
         raise HTTPException(status_code=404, detail="Llama.cpp acquisition job was not found.")
     return response
@@ -537,7 +545,11 @@ async def cancel_llamacpp_asset_download_endpoint(
     job_id: int,
     job_manager: JobManager = Depends(get_job_manager),
 ) -> LlamaCppAcquisitionJobResponse:
-    response = await run_in_threadpool(llamacpp_acquisition_jobs.cancel_download_job, job_manager, job_id)
+    response = await run_in_threadpool(
+        llamacpp_acquisition_jobs.cancel_download_job,
+        job_manager,
+        job_id,
+    )
     if response is None:
         raise HTTPException(status_code=404, detail="Llama.cpp acquisition job was not found.")
     return response

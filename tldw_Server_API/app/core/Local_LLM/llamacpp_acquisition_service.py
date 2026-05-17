@@ -10,7 +10,7 @@ import socket
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
+from urllib.parse import SplitResult, parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 
 from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
     LlamaCppAsset,
@@ -141,7 +141,7 @@ def validate_completed_download(
         raise ServerError("Downloaded file does not exist.")
     if not path.is_file():
         raise ServerError("Downloaded path is not a file.")
-    if expected_size_bytes is not None and path.stat().st_size != int(expected_size_bytes):
+    if expected_size_bytes is not None and path.stat().st_size != expected_size_bytes:
         raise ServerError("Downloaded file size did not match expected size.")
     expected_digest = _normalize_sha256(expected_sha256)
     if expected_digest is not None and _sha256_file(path) != expected_digest:
@@ -179,12 +179,27 @@ def _validate_source_url(url: str, saved_config: dict[str, Any], warnings: list[
         raise ServerError("Download URL scheme must be http or https.")
     if not parsed.hostname:
         raise ServerError("Download URL host is required.")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ServerError("Download URL is invalid.") from exc
+    if parsed.username is not None or parsed.password is not None:
+        raise ServerError("Download URL credentials are not supported.")
+    secret_keys = sorted(
+        {
+            key
+            for key, _val in parse_qsl(parsed.query, keep_blank_values=True)
+            if _is_secret_query_key(key)
+        }
+    )
+    if secret_keys:
+        raise ServerError(f"Download URL query contains secret parameters: {', '.join(secret_keys)}.")
     allow_private = bool(_config_bool(saved_config.get("allow_private_downloads")))
     host = parsed.hostname.strip().lower()
     if _is_local_hostname(host) and not allow_private:
         raise ServerError("Download URL host resolves to a local or private network address.")
     _validate_host_addresses(host, allow_private=allow_private, warnings=warnings)
-    return redacted_source_label(raw_url)
+    return _normalized_source_url(parsed, port=port)
 
 
 def _validate_host_addresses(host: str, *, allow_private: bool, warnings: list[str]) -> None:
@@ -195,6 +210,8 @@ def _validate_host_addresses(host: str, *, allow_private: bool, warnings: list[s
     try:
         resolved = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
     except OSError as exc:
+        if not allow_private:
+            raise ServerError(f"Could not resolve download host '{host}' to verify network safety.") from exc
         warnings.append(f"Could not resolve download host '{host}': {exc.__class__.__name__}.")
         return
     for result in resolved:
@@ -227,6 +244,16 @@ def _ip_address_or_none(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Addr
 
 def _is_local_hostname(host: str) -> bool:
     return host in {"localhost"} or host.endswith(".localhost")
+
+
+def _normalized_source_url(parsed: SplitResult, *, port: int | None) -> str:
+    host = parsed.hostname or ""
+    netloc = host
+    if ":" in host and not host.startswith("["):
+        netloc = f"[{host}]"
+    if port is not None:
+        netloc = f"{netloc}:{port}"
+    return urlunsplit((parsed.scheme.lower(), netloc, parsed.path, parsed.query, ""))
 
 
 def _source_label_for_payload(payload: LlamaCppAssetDownloadRequest) -> str:
