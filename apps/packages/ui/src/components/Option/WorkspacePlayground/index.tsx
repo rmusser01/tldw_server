@@ -6,6 +6,8 @@ import {
   AlertTriangle,
   FileText,
   MessageSquare,
+  PanelLeftOpen,
+  PanelRightOpen,
   Sparkles,
   Search,
   Command,
@@ -180,6 +182,35 @@ type WorkspaceStorageUsageState = {
   originQuotaBytes: number | null
   accountUsedBytes: number | null
   accountQuotaBytes: number | null
+}
+
+type WorkspaceRestoreRailButtonProps = {
+  side: "left" | "right"
+  label: string
+  testId: string
+  onClick: () => void
+}
+
+const WorkspaceRestoreRailButton: React.FC<WorkspaceRestoreRailButtonProps> = ({
+  side,
+  label,
+  testId,
+  onClick
+}) => {
+  const Icon = side === "left" ? PanelLeftOpen : PanelRightOpen
+
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      aria-label={label}
+      onClick={onClick}
+      className="hidden min-h-0 shrink-0 items-center justify-center gap-2 rounded-xl border border-border/80 bg-surface/90 px-3 py-2 text-sm font-medium text-text shadow-card transition hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-bg lg:flex"
+    >
+      <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+      <span className="sr-only 2xl:not-sr-only">{label}</span>
+    </button>
+  )
 }
 
 const parseNoteKeyword = (
@@ -2055,6 +2086,20 @@ const WorkspacePlaygroundBody: React.FC = () => {
     }
   }
 
+  const handleRestoreLeftPane = () => {
+    setLeftPaneCollapsed(false)
+    window.setTimeout(() => {
+      focusWorkspacePane("sources")
+    }, 0)
+  }
+
+  const handleRestoreRightPane = () => {
+    setRightPaneCollapsed(false)
+    window.setTimeout(() => {
+      focusWorkspacePane("studio")
+    }, 0)
+  }
+
   const handleReloadWorkspaceFromSyncWarning = () => {
     if (statusGuardrailsEnabled) {
       const refreshAttempt = recordWorkspaceRefreshLoopAttempt()
@@ -2473,6 +2518,14 @@ const WorkspacePlaygroundBody: React.FC = () => {
                 />
               </>
             )}
+            {!leftPaneOpen && (
+              <WorkspaceRestoreRailButton
+                side="left"
+                label={t("playground:workspace.showSources", "Show sources")}
+                testId="workspace-restore-sources"
+                onClick={handleRestoreLeftPane}
+              />
+            )}
 
             <Drawer
               title={
@@ -2522,6 +2575,14 @@ const WorkspacePlaygroundBody: React.FC = () => {
                   })}
                 </aside>
               </>
+            )}
+            {!rightPaneOpen && (
+              <WorkspaceRestoreRailButton
+                side="right"
+                label={t("playground:workspace.showStudio", "Show studio")}
+                testId="workspace-restore-studio"
+                onClick={handleRestoreRightPane}
+              />
             )}
 
             <Drawer

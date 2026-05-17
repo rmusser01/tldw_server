@@ -1,8 +1,29 @@
-import { render, screen } from "@testing-library/react"
+import { readFileSync } from "node:fs"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { WorkspacePlayground } from "../index"
 
+const testDirname = dirname(fileURLToPath(import.meta.url))
 const chatPanePropsSpy = vi.fn()
+
+const stripTsxComments = (source: string): string =>
+  source
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "")
+
+const getWorkspacePlaygroundWrapperClassName = (source: string): string | null => {
+  const uncommentedSource = stripTsxComments(source)
+  const wrapperMatch = uncommentedSource.match(
+    /<([A-Za-z][\w.]*)\b([^>]*)>\s*<WorkspacePlayground\s*\/>\s*<\/\1>/m
+  )
+  if (!wrapperMatch) return null
+
+  const classNameMatch = wrapperMatch[2].match(/\bclassName=(["'`])([^"'`]+)\1/)
+  return classNameMatch?.[2] ?? null
+}
 
 const testState = {
   isMobile: false,
@@ -130,7 +151,12 @@ vi.mock("@/store/workspace", () => ({
       focusChatMessageById: testState.focusChatMessageById,
       focusWorkspaceNote: testState.focusWorkspaceNote,
       setSourceStatusByMediaId: testState.setSourceStatusByMediaId
-    })
+    }),
+  createWorkspaceStorage: () => ({
+    getItem: vi.fn().mockResolvedValue("1"),
+    setItem: vi.fn().mockResolvedValue(undefined),
+    removeItem: vi.fn().mockResolvedValue(undefined)
+  })
 }))
 
 vi.mock("@/utils/workspace-playground-prefill", () => ({
@@ -290,6 +316,46 @@ describe("WorkspacePlayground desktop layout guardrails", () => {
     )
   })
 
+  it("shows a restore rail for the sources pane when the left pane is collapsed", () => {
+    testState.leftPaneCollapsed = true
+
+    render(<WorkspacePlayground />)
+
+    expect(screen.queryByTestId("workspace-sources-pane")).not.toBeInTheDocument()
+
+    const restoreSourcesButton = screen.getByRole("button", {
+      name: /show sources/i
+    })
+    expect(restoreSourcesButton).toHaveAttribute(
+      "data-testid",
+      "workspace-restore-sources"
+    )
+
+    fireEvent.click(restoreSourcesButton)
+
+    expect(testState.setLeftPaneCollapsed).toHaveBeenCalledWith(false)
+  })
+
+  it("shows a restore rail for the studio pane when the right pane is collapsed", () => {
+    testState.rightPaneCollapsed = true
+
+    render(<WorkspacePlayground />)
+
+    expect(screen.queryByTestId("workspace-studio-pane")).not.toBeInTheDocument()
+
+    const restoreStudioButton = screen.getByRole("button", {
+      name: /show studio/i
+    })
+    expect(restoreStudioButton).toHaveAttribute(
+      "data-testid",
+      "workspace-restore-studio"
+    )
+
+    fireEvent.click(restoreStudioButton)
+
+    expect(testState.setRightPaneCollapsed).toHaveBeenCalledWith(false)
+  })
+
   it("uses full chat content width when both sidebars are collapsed", () => {
     testState.leftPaneCollapsed = true
     testState.rightPaneCollapsed = true
@@ -299,6 +365,30 @@ describe("WorkspacePlayground desktop layout guardrails", () => {
     expect(screen.getByTestId("workspace-chat-pane")).toHaveAttribute(
       "data-content-width-mode",
       "full"
+    )
+  })
+
+  it("keeps the shared WebUI and extension route wrappers height-bounded", () => {
+    const sharedRoute = readFileSync(
+      resolve(testDirname, "../../../../routes/option-workspace-playground.tsx"),
+      "utf8"
+    )
+    const extensionRoute = readFileSync(
+      resolve(
+        testDirname,
+        "../../../../../../../tldw-frontend/extension/routes/option-workspace-playground.tsx"
+      ),
+      "utf8"
+    )
+    const sharedWrapperClassName = getWorkspacePlaygroundWrapperClassName(sharedRoute)
+    const extensionWrapperClassName =
+      getWorkspacePlaygroundWrapperClassName(extensionRoute)
+
+    expect(sharedWrapperClassName?.split(/\s+/)).toEqual(
+      expect.arrayContaining(["min-h-0", "flex-1"])
+    )
+    expect(extensionWrapperClassName?.split(/\s+/)).toEqual(
+      expect.arrayContaining(["min-h-0", "flex-1"])
     )
   })
 })
