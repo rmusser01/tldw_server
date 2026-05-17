@@ -59,6 +59,7 @@ import {
   LARGE_PLAIN_CONTENT_THRESHOLD_CHARS,
   LARGE_PLAIN_CONTENT_CHUNK_CHARS
 } from './hooks/useTranscriptDisplay'
+import { useContentSelectionActions } from './read-along/useContentSelectionActions'
 
 // Re-export for test compatibility
 export {
@@ -265,6 +266,11 @@ export function ContentViewer({
     contentBodyRef,
     onRefreshMedia,
     t
+  })
+
+  const selectionActions = useContentSelectionActions({
+    contentBodyRef,
+    onApplyAnnotationSelection: modals.captureAnnotationSelection
   })
 
   // Now we have shouldShowEmbeddedPlayer from modals, re-run rendering with correct value
@@ -1179,9 +1185,46 @@ export function ContentViewer({
                   className={`text-sm text-text leading-relaxed ${
                     !modals.contentExpanded && shouldShowExpandToggle ? 'max-h-64 overflow-hidden relative' : ''
                   }`}
-                  onMouseUp={modals.handleCaptureAnnotationSelection}
-                  onKeyUp={modals.handleCaptureAnnotationSelection}
+                  onMouseUp={selectionActions.handleContentSelectionEvent}
+                  onKeyUp={selectionActions.handleContentSelectionEvent}
                 >
+                  {selectionActions.selectionActionState ? (
+                    <div
+                      className="fixed z-50 flex items-center gap-1 rounded border border-border bg-surface px-2 py-1 shadow-lg"
+                      style={{
+                        left: Math.max(
+                          8,
+                          selectionActions.selectionActionState.anchorRect.left
+                        ),
+                        top: Math.max(
+                          8,
+                          selectionActions.selectionActionState.anchorRect.top - 40
+                        )
+                      }}
+                      data-testid="media-selection-actions-popover"
+                    >
+                      <Tooltip
+                        title={t('review:mediaPage.annotateSelection', {
+                          defaultValue: 'Annotate selection'
+                        })}
+                      >
+                        <button
+                          type="button"
+                          className="inline-flex h-7 items-center gap-1 rounded px-2 text-xs font-medium text-text hover:bg-surface2"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={selectionActions.applyAnnotationSelection}
+                          data-testid="media-selection-action-annotate"
+                        >
+                          <StickyNote className="h-3.5 w-3.5" />
+                          <span>
+                            {t('review:mediaPage.annotate', {
+                              defaultValue: 'Annotate'
+                            })}
+                          </span>
+                        </button>
+                      </Tooltip>
+                    </div>
+                  ) : null}
                   {rendering.effectiveRenderMode === 'plain' ? (
                     transcript.shouldRenderTranscriptTimestampChips ? (
                       <div

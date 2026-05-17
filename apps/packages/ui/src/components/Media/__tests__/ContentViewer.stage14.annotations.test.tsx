@@ -153,7 +153,7 @@ describe('ContentViewer stage 14 annotations baseline', () => {
     )
 
     fireEvent.click(screen.getByTestId('media-intelligence-toggle'))
-    fireEvent.click(screen.getByTestId('media-intelligence-tab-annotations'))
+    fireEvent.click(await screen.findByTestId('media-intelligence-tab-annotations'))
 
     await waitFor(() => {
       expect(screen.getByTestId('media-annotation-manual-text')).toBeInTheDocument()
@@ -250,6 +250,13 @@ describe('ContentViewer stage 14 annotations baseline', () => {
     selection!.addRange(range)
 
     fireEvent.mouseUp(contentNode)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('media-selection-actions-popover')).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('media-annotation-selection-preview')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('media-selection-action-annotate'))
 
     await waitFor(() => {
       expect(screen.getByTestId('media-annotation-selection-preview')).toHaveTextContent(

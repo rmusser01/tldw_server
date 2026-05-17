@@ -76,6 +76,16 @@ Task 3 completed:
 - `git diff --check` passed for the Task 3 files.
 - Task 3 spec and code-quality re-reviews approved after the fix.
 - Bandit skipped for Task 3 because the touched slice is TypeScript frontend/Dexie code only.
+
+Task 4 completed:
+- Added DOM-safe content-selection helpers, a mediated `useContentSelectionActions` hook, and a temporary annotation-only selection action popover in `ContentViewer`.
+- Split annotation capture into explicit `captureAnnotationSelection(selectionText, location)` while preserving `handleCaptureAnnotationSelection` as a backwards-compatible wrapper.
+- Updated the stage 14 annotation test so text selection opens `media-selection-actions-popover`, keeps `media-annotation-selection-preview` absent until `media-selection-action-annotate` is clicked, then saves the selected highlight.
+- Fixed the pre-existing stage 14 lazy intelligence-tab timing failure by waiting for `media-intelligence-tab-annotations` after expanding the section.
+- Red verification: `cd apps/packages/ui && bunx vitest run src/components/Media/read-along/__tests__/useContentSelectionActions.test.tsx src/components/Media/__tests__/ContentViewer.stage14.annotations.test.tsx --maxWorkers=1` failed before implementation because `../useContentSelectionActions` was missing and the popover was absent.
+- Green verification: `cd apps/packages/ui && bunx vitest run src/components/Media/read-along/__tests__/useContentSelectionActions.test.tsx src/components/Media/__tests__/ContentViewer.stage14.annotations.test.tsx src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx --maxWorkers=1` passed 3 files / 9 tests.
+- `git diff --check` passed for the Task 4 files.
+- Bandit skipped for Task 4 because the touched slice is TypeScript/React frontend code only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
