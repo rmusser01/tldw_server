@@ -24,7 +24,7 @@ Cover root listing, child directory listing, outside-root rejection, file-path r
 Run:
 
 ```bash
-/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Ingestion_Sources/integration/test_ingestion_sources_path_browser.py -q
+.venv/bin/python -m pytest tldw_Server_API/tests/Ingestion_Sources/integration/test_ingestion_sources_path_browser.py -q
 ```
 
 Expected: fail because the endpoint and schemas do not exist.
@@ -89,7 +89,7 @@ Run the focused SourceForm test file.
 - [x] **Step 1: Run focused backend tests**
 
 ```bash
-/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Ingestion_Sources/integration/test_ingestion_sources_path_browser.py tldw_Server_API/tests/Ingestion_Sources/integration/test_ingestion_sources_access_policy.py tldw_Server_API/tests/Ingestion_Sources/unit/test_access_policy.py -q
+.venv/bin/python -m pytest tldw_Server_API/tests/Ingestion_Sources/integration/test_ingestion_sources_path_browser.py tldw_Server_API/tests/Ingestion_Sources/integration/test_ingestion_sources_access_policy.py tldw_Server_API/tests/Ingestion_Sources/unit/test_access_policy.py -q
 ```
 
 Result: `35 passed, 5 warnings`.
@@ -105,7 +105,7 @@ Result: `3 passed (3), 27 tests passed`.
 - [x] **Step 3: Run Bandit on touched backend endpoint/schema scope**
 
 ```bash
-/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/ingestion_sources.py tldw_Server_API/app/api/v1/schemas/ingestion_sources.py -f json -o /tmp/bandit_sources_path_picker.json
+.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/ingestion_sources.py tldw_Server_API/app/api/v1/schemas/ingestion_sources.py -f json -o /tmp/bandit_sources_path_picker.json
 ```
 
 Result: exit 0, no findings.

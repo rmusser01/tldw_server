@@ -40,4 +40,10 @@ describe("shortcut config defaults", () => {
       defaultShortcuts.modeSources
     )
   })
+
+  it("ignores nullish or malformed persisted shortcut configs", () => {
+    expect(mergeShortcutConfig(null)).toEqual(defaultShortcuts)
+    expect(mergeShortcutConfig("bad-storage-value")).toEqual(defaultShortcuts)
+    expect(mergeShortcutConfig(["bad-storage-value"])).toEqual(defaultShortcuts)
+  })
 })

@@ -5,6 +5,7 @@ import { useModeNavigationShortcuts } from "../useKeyboardShortcuts"
 
 describe("useModeNavigationShortcuts", () => {
   beforeEach(() => {
+    document.body.innerHTML = ""
     useRouteTransitionStore.getState().stop()
   })
 
@@ -39,6 +40,24 @@ describe("useModeNavigationShortcuts", () => {
   it("does not navigate while disabled", () => {
     const navigate = vi.fn()
     renderHook(() => useModeNavigationShortcuts(navigate, false))
+
+    act(() => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "2", altKey: true })
+      )
+    })
+
+    expect(navigate).not.toHaveBeenCalled()
+    expect(useRouteTransitionStore.getState().pendingPath).toBeNull()
+  })
+
+  it("does not navigate while an editable element is focused", () => {
+    const navigate = vi.fn()
+    const input = document.createElement("input")
+    document.body.appendChild(input)
+    input.focus()
+
+    renderHook(() => useModeNavigationShortcuts(navigate))
 
     act(() => {
       document.dispatchEvent(

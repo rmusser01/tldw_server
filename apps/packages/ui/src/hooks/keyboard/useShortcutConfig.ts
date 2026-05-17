@@ -124,11 +124,16 @@ export const defaultShortcuts: ShortcutConfig = {
 type PersistedShortcutConfig = Partial<ShortcutConfig> &
   Partial<Record<string, unknown>>
 
-export const mergeShortcutConfig = (
-  value: Partial<ShortcutConfig> | null | undefined
-): ShortcutConfig => ({
+const coerceShortcutOverrides = (value: unknown): PersistedShortcutConfig => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {}
+  }
+  return value as PersistedShortcutConfig
+}
+
+export const mergeShortcutConfig = (value: unknown): ShortcutConfig => ({
   ...defaultShortcuts,
-  ...(value || {})
+  ...coerceShortcutOverrides(value)
 })
 
 /**
@@ -147,7 +152,7 @@ export const useShortcutConfig = () => {
   ) => {
     setShortcuts(prev => ({
       ...defaultShortcuts,
-      ...prev,
+      ...coerceShortcutOverrides(prev),
       [shortcutName]: newShortcut
     }))
   }
@@ -159,7 +164,7 @@ export const useShortcutConfig = () => {
   const resetShortcut = (shortcutName: keyof ShortcutConfig) => {
     setShortcuts(prev => ({
       ...defaultShortcuts,
-      ...prev,
+      ...coerceShortcutOverrides(prev),
       [shortcutName]: defaultShortcuts[shortcutName]
     }))
   }

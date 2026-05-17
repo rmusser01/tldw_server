@@ -49,9 +49,9 @@ Rendered QA used Playwright because the in-app Browser could not reach the isola
 Added a safe server-folder picker for the Sources local-directory path field. The picker is backend-bounded to configured ingestion source allowed roots, supports root browsing and child directory selection, preserves manual path entry, and writes the selected folder back into the form.
 
 Verification:
-- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Ingestion_Sources/integration/test_ingestion_sources_path_browser.py tldw_Server_API/tests/Ingestion_Sources/integration/test_ingestion_sources_access_policy.py tldw_Server_API/tests/Ingestion_Sources/unit/test_access_policy.py -q` -> `35 passed, 5 warnings`
+- `.venv/bin/python -m pytest tldw_Server_API/tests/Ingestion_Sources/integration/test_ingestion_sources_path_browser.py tldw_Server_API/tests/Ingestion_Sources/integration/test_ingestion_sources_access_policy.py tldw_Server_API/tests/Ingestion_Sources/unit/test_access_policy.py -q` -> `35 passed, 5 warnings`
 - `bunx vitest run src/services/__tests__/tldw-api-client.ingestion-sources.test.ts src/hooks/__tests__/use-ingestion-sources.test.tsx src/components/Option/Sources/__tests__/SourceForm.test.tsx` -> `3 passed (3), 27 tests passed`
-- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/ingestion_sources.py tldw_Server_API/app/api/v1/schemas/ingestion_sources.py -f json -o /tmp/bandit_sources_path_picker.json` -> exit 0, no findings
+- `.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/ingestion_sources.py tldw_Server_API/app/api/v1/schemas/ingestion_sources.py -f json -o /tmp/bandit_sources_path_picker.json` -> exit 0, no findings
 - `git diff --check` -> exit 0
 - Playwright rendered QA desktop and mobile -> picker interaction passed with no console or page errors
 <!-- SECTION:FINAL_SUMMARY:END -->

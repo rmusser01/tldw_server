@@ -355,21 +355,26 @@ describe("server capabilities docs-info merge", () => {
     expect(capabilities.specSource).toBe("fallback")
   })
 
-  it("keeps ingestion source capability available through the bundled fallback spec", async () => {
+  it("checks authenticated source capabilities through the bundled fallback spec", async () => {
     mocks.getOpenAPISpec.mockRejectedValue(new Error("openapi unavailable"))
-    mocks.bgRequest.mockRejectedValue(new Error("docs-info unavailable"))
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path === "/api/v1/ingestion-sources/capabilities") {
+        return { can_create_local_directory: true }
+      }
+      throw new Error("docs-info unavailable")
+    })
 
     const { getServerCapabilities } = await importCapabilitiesModule()
     const capabilities = await getServerCapabilities()
 
     expect(capabilities.hasIngestionSources).toBe(true)
-    expect(capabilities.canCreateLocalDirectoryIngestionSource).toBe(false)
+    expect(capabilities.canCreateLocalDirectoryIngestionSource).toBe(true)
     expect(
       mocks.bgRequest.mock.calls.some(
         ([request]) =>
           (request as any)?.path === "/api/v1/ingestion-sources/capabilities"
       )
-    ).toBe(false)
+    ).toBe(true)
   })
 
   it("derives hasAudio from STT-only support while keeping TTS/voice flags explicit", async () => {

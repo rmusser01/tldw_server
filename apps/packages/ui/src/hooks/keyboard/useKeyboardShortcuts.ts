@@ -19,6 +19,7 @@ export interface KeyboardShortcutConfig {
   action: () => void
   enabled?: boolean
   description?: string
+  ignoreIfEditable?: boolean
 }
 
 export type ModeNavigationShortcutKey = keyof Pick<
@@ -54,12 +55,47 @@ export const modeNavigationTargets: ModeNavigationTarget[] = [
   { key: "modeCharacters", path: "/characters", description: "Go to Characters" }
 ]
 
+export const isEditableShortcutTarget = (target: EventTarget | null): boolean => {
+  if (typeof HTMLElement === "undefined" || !(target instanceof HTMLElement)) {
+    return false
+  }
+
+  const tagName = target.tagName.toLowerCase()
+  if (tagName === "input" || tagName === "textarea" || tagName === "select") {
+    return true
+  }
+
+  if (target.isContentEditable) {
+    return true
+  }
+
+  const editableAncestor = target.closest(
+    '[contenteditable="true"], [contenteditable="plaintext-only"]'
+  )
+  if (editableAncestor) {
+    return true
+  }
+
+  const role = target.getAttribute("role")?.toLowerCase()
+  return role === "textbox" || role === "combobox" || role === "searchbox"
+}
+
 export const executeKeyboardShortcuts = (
   event: KeyboardEvent,
   shortcuts: KeyboardShortcutConfig[]
 ) => {
-  shortcuts.forEach(({ shortcut, action, enabled = true }) => {
+  shortcuts.forEach(({ shortcut, action, enabled = true, ignoreIfEditable = false }) => {
     if (!enabled) return
+    if (ignoreIfEditable) {
+      const activeElement =
+        typeof document === "undefined" ? null : document.activeElement
+      if (
+        isEditableShortcutTarget(event.target) ||
+        isEditableShortcutTarget(activeElement)
+      ) {
+        return
+      }
+    }
 
     const {
       key,
@@ -134,7 +170,8 @@ export const useModeNavigationShortcuts = (
       navigate(target.path)
     },
     enabled,
-    description: target.description
+    description: target.description,
+    ignoreIfEditable: true
   }))
 
   useKeyboardShortcuts(shortcuts)

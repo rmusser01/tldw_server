@@ -147,3 +147,23 @@ def test_rollout_percent_is_deterministic_per_user(access_policy, monkeypatch):
     second = access_policy.can_create_local_directory_ingestion_source(FakeUser(7))
 
     assert first is second
+
+
+def test_missing_rollout_percent_defaults_to_full_rollout(access_policy, monkeypatch):
+    monkeypatch.setattr(
+        access_policy,
+        "list_feature_flags",
+        lambda: [_flag(scope="global", rollout_percent=None)],
+    )
+
+    assert access_policy.can_create_local_directory_ingestion_source(FakeUser(7)) is True
+
+
+def test_malformed_rollout_percent_fails_closed(access_policy, monkeypatch):
+    monkeypatch.setattr(
+        access_policy,
+        "list_feature_flags",
+        lambda: [_flag(scope="global", rollout_percent="not-a-number")],
+    )
+
+    assert access_policy.can_create_local_directory_ingestion_source(FakeUser(7)) is False

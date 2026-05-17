@@ -791,11 +791,10 @@ const fetchCapabilitiesFromServer = async (): Promise<ServerCapabilities> => {
   maybeLogDiagnostics(
     diagnosticsSource === "fallback" ? "fallback-spec" : "network-fetch"
   )
-  const authoritativePaths =
-    specSource === "authoritative" ? normalizePaths(spec?.paths || {}) : {}
-  const hasIngestionSourceCapabilitiesEndpoint = Boolean(
-    authoritativePaths["/api/v1/ingestion-sources/capabilities"]
-  )
+  const specPaths = normalizePaths(spec?.paths || {})
+  const shouldFetchIngestionSourceCapabilities =
+    specSource === "fallback" ||
+    Boolean(specPaths["/api/v1/ingestion-sources/capabilities"])
   let capabilities = applyDocsInfoFeatureGates(
     computeCapabilities(spec, specSource),
     docsInfo
@@ -803,7 +802,7 @@ const fetchCapabilitiesFromServer = async (): Promise<ServerCapabilities> => {
 
   if (
     capabilities.hasIngestionSources &&
-    hasIngestionSourceCapabilitiesEndpoint
+    shouldFetchIngestionSourceCapabilities
   ) {
     try {
       const sourceCapabilities =

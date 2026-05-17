@@ -144,7 +144,12 @@ export const SourceForm: React.FC<SourceFormProps> = ({ mode, source, preset }) 
     initialScheduleEnabled,
     initialSinkType,
     initialSourceType,
-    source?.config,
+    source?.config?.account_id,
+    source?.config?.path,
+    source?.config?.ref,
+    source?.config?.repo_url,
+    source?.config?.respect_gitignore,
+    source?.config?.root_subpath,
     source?.source_type
   ])
 

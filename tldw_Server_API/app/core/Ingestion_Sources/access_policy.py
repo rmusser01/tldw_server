@@ -37,6 +37,7 @@ def can_create_local_directory_ingestion_source(
 
 
 def _enabled_flag_applies(flag: dict[str, Any], *, user_id: int, org_ids: set[int]) -> bool:
+    """Return whether one enabled feature flag grants access for a user."""
     if not bool(flag.get("enabled")):
         return False
     target_user_ids = {_coerce_int(value) for value in flag.get("target_user_ids") or []}
@@ -65,6 +66,7 @@ def _enabled_flag_applies(flag: dict[str, Any], *, user_id: int, org_ids: set[in
 
 
 def _user_id(current_user: Any) -> int | None:
+    """Extract a positive integer user id from the authenticated user object."""
     value = getattr(current_user, "id", None)
     coerced = _coerce_int(value)
     if coerced is None or coerced <= 0:
@@ -78,6 +80,7 @@ def _org_ids(
     org_ids: Any = None,
     active_org_id: Any = None,
 ) -> set[int]:
+    """Collect positive organization ids from explicit request state and user attrs."""
     raw_values = [
         active_org_id
         if active_org_id is not None
@@ -94,6 +97,7 @@ def _org_ids(
 
 
 def _coerce_int(value: Any) -> int | None:
+    """Return an integer representation, or None when coercion is invalid."""
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -101,14 +105,18 @@ def _coerce_int(value: Any) -> int | None:
 
 
 def _rollout_percent(value: Any) -> int:
+    """Parse rollout percentage, defaulting missing values open and malformed values closed."""
+    if value is None:
+        return 100
     try:
         percent = int(value)
     except (TypeError, ValueError):
-        return 100
+        return 0
     return min(100, max(0, percent))
 
 
 def _is_in_rollout(*, key: str, user_id: int, percent: int) -> bool:
+    """Return a deterministic rollout decision for a feature flag key and user."""
     digest = hashlib.sha256(f"{key}:{user_id}".encode("utf-8")).hexdigest()
     bucket = int(digest[:8], 16) % 100
     return bucket < percent

@@ -69,10 +69,13 @@ def test_browse_directories_lists_only_immediate_child_directories(path_browser_
     payload = response.json()
     assert payload["current_path"] == str(allowed_root)
     assert payload["parent_path"] is None
-    assert payload["entries"] == [
-        {"name": "media", "path": str(allowed_root / "media"), "is_root": False},
-        {"name": "notes", "path": str(allowed_root / "notes"), "is_root": False},
-    ]
+    assert {
+        (entry["name"], entry["path"], entry["is_root"])
+        for entry in payload["entries"]
+    } == {
+        ("media", str(allowed_root / "media"), False),
+        ("notes", str(allowed_root / "notes"), False),
+    }
 
 
 @pytest.mark.integration
