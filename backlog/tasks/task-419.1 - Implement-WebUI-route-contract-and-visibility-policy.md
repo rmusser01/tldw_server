@@ -1,0 +1,66 @@
+---
+id: TASK-419.1
+title: Implement WebUI route contract and visibility policy
+status: In Progress
+assignee: []
+created_date: ''
+updated_date: '2026-05-17 21:23'
+labels:
+  - ux
+  - webui
+  - extension
+  - implementation
+  - route-contract
+dependencies: []
+documentation:
+  - >-
+    Docs/superpowers/specs/2026-05-17-webui-extension-ux-remediation-program-design.md
+  - >-
+    Docs/superpowers/plans/2026-05-17-webui-route-contract-visibility-implementation-plan.md
+parent_task_id: TASK-419
+priority: high
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Implement the first WP1 slice from the approved WebUI/extension UX remediation plan. Scope: add the canonical route metadata contract and initial coverage tests for audited root routes, route aliases, visibility classes, option registry validation, sidepanel availability, command target trust, and smoke inventory ownership. Keep changes scoped to WebUI/extension route contract files and tests; do not do route-family UX remediation in this task.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 Route metadata contract types and helpers exist for audited root routes.
+- [x] #2 Initial tests prove all audited root routes have metadata and canonical paths where applicable.
+- [ ] #3 Option route registry validation is wired to metadata without changing route behavior.
+- [ ] #4 Extension sidepanel and options availability are represented in metadata or tested as an explicit follow-up gap.
+- [ ] #5 Command palette route target mismatch is covered by tests before any behavior change.
+- [ ] #6 Smoke inventory ownership is derived from or checked against route metadata.
+- [ ] #7 Implementation remains scoped to WP1; no route-family visual remediation is included.
+- [ ] #8 Focused frontend tests and diff checks are recorded in the task before completion.
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+
+Baseline before route metadata edits: `bunx playwright test e2e/smoke/route-contract-stage2.spec.ts --reporter=line` from `apps/tldw-frontend` initially failed in the sandbox because Next could not bind `0.0.0.0:8080` (`listen EPERM`). Rerun with approved escalation passed: 1 test passed in 33.6s.
+
+Task 1 red/green: added `src/routes/__tests__/route-metadata.coverage.test.ts`; first focused Vitest run failed as expected because `../route-metadata` did not exist. Added pure route metadata/types/helpers in `src/routes/route-metadata.ts`; focused run then passed: 5 tests passed.
+
+Additional verification: `bunx tsc --noEmit --pretty false` from `apps/packages/ui` currently fails on existing unrelated TypeScript errors across audio, composer, flashcards, playground, route registry, and service tests. No reported error referenced `src/routes/route-metadata.ts` or `src/routes/__tests__/route-metadata.coverage.test.ts`.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+<!-- DOD:END -->
