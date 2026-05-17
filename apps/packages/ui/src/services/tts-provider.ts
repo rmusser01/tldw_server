@@ -57,6 +57,10 @@ export type TtsSynthesisResult = {
   mimeType: string
 }
 
+export type TtsSynthesizeOptions = {
+  signal?: AbortSignal
+}
+
 export type TtsFormatInfo = {
   requested?: string | null
   resolved: string
@@ -68,7 +72,10 @@ export type TtsProviderContext = {
   utterance: string
   playbackSpeed: number
   supported: boolean
-  synthesize?: (text: string) => Promise<TtsSynthesisResult>
+  synthesize?: (
+    text: string,
+    options?: TtsSynthesizeOptions
+  ) => Promise<TtsSynthesisResult>
   formatInfo?: TtsFormatInfo
 }
 
@@ -162,7 +169,7 @@ export const resolveTtsProviderContext = async (
       utterance,
       playbackSpeed,
       supported: true,
-      synthesize: async (segment: string) => ({
+      synthesize: async (segment: string, _options?: TtsSynthesizeOptions) => ({
         buffer: await generateSpeech(apiKey, segment, voiceId, modelId, speed),
         format: "mp3",
         mimeType: "audio/mpeg"
@@ -176,7 +183,7 @@ export const resolveTtsProviderContext = async (
       utterance,
       playbackSpeed,
       supported: true,
-      synthesize: async (segment: string) => ({
+      synthesize: async (segment: string, _options?: TtsSynthesizeOptions) => ({
         buffer: await generateOpenAITTS({
           text: segment,
           model: overrides?.openAiModel,
@@ -217,7 +224,7 @@ export const resolveTtsProviderContext = async (
     playbackSpeed,
     supported: true,
     formatInfo,
-    synthesize: async (segment: string) => ({
+    synthesize: async (segment: string, options?: TtsSynthesizeOptions) => ({
       buffer: await tldwClient.synthesizeSpeech(segment, {
         model,
         voice,
@@ -226,7 +233,8 @@ export const resolveTtsProviderContext = async (
         language,
         normalizationOptions,
         extraParams,
-        stream: false
+        stream: false,
+        signal: options?.signal
       }),
       format: responseFormat,
       mimeType

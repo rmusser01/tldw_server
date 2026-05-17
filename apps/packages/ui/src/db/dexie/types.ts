@@ -433,6 +433,25 @@ export type SttRecordingRow = {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Media Read-Along Audio Cache Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type MediaReadAlongAudioCacheEntry = {
+  id: string
+  createdAt: number
+  lastUsedAt: number
+  mediaId: string
+  mediaKind: string
+  segmentId: string
+  settingsSignature: string
+  textHash: string
+  mimeType: string
+  format: string
+  blob: Blob
+  sizeBytes: number
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // TTS Clip Types
 // ─────────────────────────────────────────────────────────────────────────────
 
