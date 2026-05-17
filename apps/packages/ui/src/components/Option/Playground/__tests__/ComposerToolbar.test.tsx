@@ -186,6 +186,40 @@ describe("ComposerToolbar web search", () => {
     expect(screen.getByTestId("character-select")).toBeInTheDocument()
   })
 
+  it("labels casual composer control groups for scanning and keyboard focus", () => {
+    render(
+      <ComposerToolbar
+        {...createProps({
+          modeLauncherButton: <button type="button">Modes</button>,
+          voiceChatButton: <button type="button">Start voice chat</button>
+        })}
+      />
+    )
+
+    const contextGroup = screen.getByRole("group", {
+      name: "Mode and context controls"
+    })
+    const runGroup = screen.getByRole("group", {
+      name: "Run input controls"
+    })
+
+    expect(contextGroup).toContainElement(
+      screen.getByRole("button", { name: "Modes" })
+    )
+    expect(contextGroup).toContainElement(
+      screen.getByRole("button", { name: "MCP" })
+    )
+    expect(runGroup).toContainElement(
+      screen.getByRole("button", { name: "Start voice chat" })
+    )
+    expect(runGroup).toContainElement(
+      screen.getByRole("button", { name: "Chat Settings" })
+    )
+    expect(runGroup).toContainElement(
+      screen.getByRole("button", { name: "Send" })
+    )
+  })
+
   it("places token usage in the casual bottom context chip row", () => {
     render(
       <ComposerToolbar
@@ -412,6 +446,81 @@ describe("ComposerToolbar web search", () => {
     expect(
       screen.getByTestId("composer-formatting-guide-toggle")
     ).toBeInTheDocument()
+  })
+
+  it("labels pro cockpit panels by task area without hiding existing controls", () => {
+    render(
+      <ComposerToolbar
+        {...createProps({
+          isProMode: true,
+          modeLauncherButton: <button type="button">Modes</button>,
+          compareControl: <button type="button">Compare</button>,
+          researchLaunchButton: <button type="button">Deep Research</button>
+        })}
+      />
+    )
+
+    const contextPanel = screen.getByRole("group", {
+      name: "Context setup controls"
+    })
+    const generationPanel = screen.getByRole("group", {
+      name: "Model, tools, and run controls"
+    })
+
+    expect(screen.getByText("Context setup")).toBeInTheDocument()
+    expect(screen.getByText("Model, tools, and run")).toBeInTheDocument()
+    expect(contextPanel).toContainElement(
+      screen.getByRole("button", { name: "Modes" })
+    )
+    expect(contextPanel).toContainElement(
+      screen.getByRole("button", { name: "Compare" })
+    )
+    expect(generationPanel).toContainElement(
+      screen.getByRole("button", { name: "MCP" })
+    )
+    expect(generationPanel).toContainElement(
+      screen.getByRole("button", { name: "Deep Research" })
+    )
+    expect(generationPanel).toContainElement(
+      screen.getByRole("button", { name: "Send" })
+    )
+  })
+
+  it("labels mobile composer groups without moving controls into a bottom bar", () => {
+    render(
+      <ComposerToolbar
+        {...createProps({
+          isMobile: true,
+          modeLauncherButton: <button type="button">Modes</button>
+        })}
+      />
+    )
+
+    const primaryGroup = screen.getByRole("group", {
+      name: "Mobile mode and model controls"
+    })
+    const contextGroup = screen.getByRole("group", {
+      name: "Mobile context controls"
+    })
+    const runGroup = screen.getByRole("group", {
+      name: "Mobile run input controls"
+    })
+
+    expect(primaryGroup).toContainElement(
+      screen.getByRole("button", { name: "Modes" })
+    )
+    expect(primaryGroup).toContainElement(screen.getByText("Model selector"))
+    expect(contextGroup).toContainElement(
+      screen.getByRole("button", { name: "Saved" })
+    )
+    expect(contextGroup).toContainElement(
+      screen.getByRole("button", { name: "Search & Context" })
+    )
+    expect(runGroup).toContainElement(screen.getByTestId("toolbar-overflow"))
+    expect(runGroup).toContainElement(
+      screen.getByRole("button", { name: "Attach" })
+    )
+    expect(screen.queryByTestId("composer-bottom-bar")).toBeNull()
   })
 
   it("invokes toggle callback when web search button is clicked", () => {
