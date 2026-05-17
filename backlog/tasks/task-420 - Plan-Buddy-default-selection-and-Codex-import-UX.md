@@ -16,6 +16,7 @@ references:
 - https://github.com/rmusser01/tldw_server/pull/1818
 documentation:
 - Docs/superpowers/specs/2026-05-17-buddy-guided-builder-ux-design.md
+- Docs/superpowers/plans/2026-05-17-buddy-guided-builder-ux-implementation-plan.md
 ---
 
 ## Description
@@ -78,6 +79,20 @@ Design review pass before implementation:
 - Added test expectations for `search-lens-basic` default fixtures, intentional
   `research-buddy-starter` legacy coverage, i18n/accessibility, and narrow
   layout behavior.
+
+Implementation plan:
+
+- Created
+  `Docs/superpowers/plans/2026-05-17-buddy-guided-builder-ux-implementation-plan.md`.
+- The plan keeps implementation in `apps/packages/ui`, preserves
+  `VisualPackEditor` as the lifecycle/mutation owner, and extracts focused
+  builder components instead of expanding the editor inline.
+- Planned stages cover archive admission, builder source/draft shell, review
+  diagnostics, state/trigger configuration, movement runtime follow-through,
+  browser QA, and closeout.
+- Plan review subagent was not dispatched in this pass because this session did
+  not have explicit approval to spawn a reviewer for the new implementation
+  plan.
 
 Verification:
 
