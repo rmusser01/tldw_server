@@ -172,7 +172,8 @@ vi.mock("@/components/Common/QuickIngest/AddContentStep", async () => {
   >("@/components/Common/QuickIngest/IngestWizardContext")
   return {
     AddContentStep: ({ onQuickProcess }: { onQuickProcess?: () => void }) => {
-      const { state, setQueueItems } = actual.useIngestWizard()
+      const context = actual.useIngestWizard() as any
+      const { state, setQueueItems } = context
       return (
         <div>
           <button
@@ -191,6 +192,43 @@ vi.mock("@/components/Common/QuickIngest/AddContentStep", async () => {
             }}
           >
             Queue And Process
+          </button>
+          <button
+            onClick={() => {
+              context.setConferenceBatchMetadata({
+                collectionName: "Strange Loop 2012",
+                conferenceName: "Strange Loop",
+                eventYear: "2012",
+                sharedTags: ["conference", "clojure"],
+                sourcePlaylistUrl: "https://youtube.com/playlist?list=PL-conf",
+              })
+              setQueueItems([
+                {
+                  id: "conference-talk-1",
+                  url: "https://youtube.com/watch?v=talk-1",
+                  detectedType: "video",
+                  icon: "Film",
+                  fileSize: 0,
+                  validation: { valid: true },
+                  playlist: {
+                    playlistId: "PL-conf",
+                    playlistTitle: "Strange Loop 2012",
+                    ordinal: 1,
+                    normalizedSourceId: "youtube:video:talk-1",
+                    duplicateStatus: "new",
+                  },
+                  conferenceOverride: {
+                    selected: true,
+                    title: "Simplicity Matters",
+                    speaker: "Rich Hickey",
+                    tags: ["keynote"],
+                  },
+                },
+              ])
+              onQuickProcess?.()
+            }}
+          >
+            Queue Conference And Process
           </button>
           {state.queueItems.map((item) => (
             <div key={item.id} data-testid={`queued-item-${item.id}`}>
@@ -340,6 +378,66 @@ describe("QuickIngestWizardModal session runtime", () => {
     await waitFor(() => {
       expect(screen.getByTestId("wizard-results")).toHaveTextContent("complete:1")
     })
+  })
+
+  it("submits conference batch metadata and item overrides through the session payload", async () => {
+    const user = userEvent.setup()
+    useQuickIngestSessionStore.getState().createDraftSession()
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-direct-conference",
+    })
+    mocks.submitQuickIngestBatch.mockResolvedValue({
+      ok: true,
+      results: [
+        {
+          id: "conference-talk-1",
+          status: "ok",
+          url: "https://youtube.com/watch?v=talk-1",
+          type: "video",
+        },
+      ],
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Queue Conference And Process" })
+    )
+
+    await waitFor(() => {
+      expect(mocks.submitQuickIngestBatch).toHaveBeenCalledTimes(1)
+    })
+    expect(mocks.submitQuickIngestBatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        __quickIngestSessionId: "qi-direct-conference",
+        conferenceBatchMetadata: {
+          collectionName: "Strange Loop 2012",
+          conferenceName: "Strange Loop",
+          eventYear: "2012",
+          sharedTags: ["conference", "clojure"],
+          sourcePlaylistUrl: "https://youtube.com/playlist?list=PL-conf",
+        },
+        entries: [
+          expect.objectContaining({
+            id: "conference-talk-1",
+            url: "https://youtube.com/watch?v=talk-1",
+            type: "video",
+            playlist: expect.objectContaining({
+              playlistId: "PL-conf",
+              ordinal: 1,
+              normalizedSourceId: "youtube:video:talk-1",
+            }),
+            conferenceOverride: expect.objectContaining({
+              selected: true,
+              title: "Simplicity Matters",
+              speaker: "Rich Hickey",
+              tags: ["keynote"],
+            }),
+          }),
+        ],
+      })
+    )
   })
 
   it("does not pre-seed direct tracking item identities before backend submissions are acknowledged", async () => {

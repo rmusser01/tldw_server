@@ -1,3 +1,9 @@
+import type {
+  ConferenceBatchMetadata,
+  ConferenceItemMetadataOverride,
+  PlaylistQueueMetadata,
+} from "@/components/Common/QuickIngest/types"
+
 export type MediaCollectionItemStatus =
   | "planned"
   | "processing"
@@ -110,6 +116,136 @@ export type MediaCollectionStatusCounts = {
   submitFailed: number
   failed: number
   cancelled: number
+}
+
+export type ConferenceCollectionCreatePayload = {
+  name: string
+  kind: "conference"
+  description?: string | null
+  source_url?: string | null
+  metadata: Record<string, unknown>
+  default_tags: string[]
+}
+
+export type ConferenceCollectionItemPayload = {
+  ordinal?: number
+  source_url: string
+  normalized_source_id?: string | null
+  source_kind?: string | null
+  title?: string | null
+  speaker?: string | null
+  published_at?: string | null
+  track?: string | null
+  duplicate_status?: string | null
+  status?: MediaCollectionItemStatus
+  idempotency_key?: string | null
+  metadata: Record<string, unknown>
+  tags: string[]
+}
+
+export type ConferenceCollectionItemMergeInput = {
+  id: string
+  url: string
+  playlist?: PlaylistQueueMetadata
+  conferenceOverride?: ConferenceItemMetadataOverride
+}
+
+const compactString = (value: unknown): string | undefined => {
+  if (typeof value !== "string") return undefined
+  const trimmed = value.trim()
+  return trimmed || undefined
+}
+
+export const normalizeConferenceTagList = (value: unknown): string[] => {
+  const raw = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(",")
+      : []
+  return Array.from(
+    new Set(
+      raw
+        .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+        .filter(Boolean)
+    )
+  )
+}
+
+export const mergeConferenceTags = (
+  sharedTags: unknown,
+  itemTags: unknown
+): string[] =>
+  normalizeConferenceTagList([
+    ...normalizeConferenceTagList(sharedTags),
+    ...normalizeConferenceTagList(itemTags),
+  ])
+
+export const buildConferenceCollectionCreatePayload = (
+  metadata: ConferenceBatchMetadata,
+  fallbackName?: string | null
+): ConferenceCollectionCreatePayload => {
+  const sourcePlaylistUrl = compactString(metadata.sourcePlaylistUrl)
+  const collectionMetadata: Record<string, unknown> = {}
+  const conferenceName = compactString(metadata.conferenceName)
+  const eventDate = compactString(metadata.eventDate)
+  const eventYear = compactString(metadata.eventYear)
+
+  if (conferenceName) collectionMetadata.conference_name = conferenceName
+  if (eventDate) collectionMetadata.event_date = eventDate
+  if (eventYear) collectionMetadata.event_year = eventYear
+  if (sourcePlaylistUrl) {
+    collectionMetadata.source_playlist_url = sourcePlaylistUrl
+  }
+
+  return {
+    name:
+      compactString(metadata.collectionName) ||
+      conferenceName ||
+      compactString(fallbackName) ||
+      "Conference batch",
+    kind: "conference",
+    source_url: sourcePlaylistUrl ?? null,
+    metadata: collectionMetadata,
+    default_tags: normalizeConferenceTagList(metadata.sharedTags),
+  }
+}
+
+export const buildConferenceCollectionItemPayload = (
+  batchMetadata: ConferenceBatchMetadata,
+  item: ConferenceCollectionItemMergeInput
+): ConferenceCollectionItemPayload => {
+  const override = item.conferenceOverride
+  const playlist = item.playlist
+  const ordinal = playlist?.ordinal
+  const metadata: Record<string, unknown> = {
+    quick_ingest_item_id: item.id,
+  }
+  const playlistId = compactString(playlist?.playlistId ?? undefined)
+  const playlistTitle = compactString(playlist?.playlistTitle ?? undefined)
+  if (playlistId) metadata.playlist_id = playlistId
+  if (playlistTitle) metadata.playlist_title = playlistTitle
+  if (ordinal != null) metadata.playlist_ordinal = ordinal
+  if (compactString(batchMetadata.eventYear)) {
+    metadata.event_year = compactString(batchMetadata.eventYear)
+  }
+
+  return {
+    ordinal,
+    source_url: item.url,
+    normalized_source_id: compactString(playlist?.normalizedSourceId ?? undefined) ?? null,
+    source_kind: playlistId ? "youtube_video" : null,
+    title: compactString(override?.title) ?? null,
+    speaker: compactString(override?.speaker) ?? null,
+    published_at:
+      compactString(override?.talkDate) ??
+      compactString(batchMetadata.eventDate) ??
+      null,
+    track: compactString(override?.track) ?? null,
+    duplicate_status: compactString(playlist?.duplicateStatus ?? undefined) ?? "unknown",
+    status: "planned",
+    metadata,
+    tags: mergeConferenceTags(batchMetadata.sharedTags, override?.tags),
+  }
 }
 
 const nullableString = (value: unknown): string | null => {

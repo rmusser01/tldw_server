@@ -41,9 +41,12 @@ import { useConnectionStore } from "@/store/connection"
 import { ConnectionPhase } from "@/types/connection"
 import type {
   CommonOptions,
+  ConferenceBatchMetadata,
+  ConferenceItemMetadataOverride,
   DetectedMediaType,
   ItemProgress,
   ItemProgressStatus,
+  PlaylistQueueMetadata,
   PersistedQuickIngestTracking,
   ReattachedQuickIngestJob,
   TypeDefaults,
@@ -74,6 +77,8 @@ type QuickIngestRequestPayload = {
     url: string
     type: QuickIngestEntryType
     defaults?: TypeDefaults
+    playlist?: PlaylistQueueMetadata
+    conferenceOverride?: ConferenceItemMetadataOverride
   }>
   files: Array<{
     id: string
@@ -81,12 +86,14 @@ type QuickIngestRequestPayload = {
     type?: string
     data: number[]
     defaults?: TypeDefaults
+    conferenceOverride?: ConferenceItemMetadataOverride
   }>
   storeRemote: boolean
   processOnly: boolean
   common: CommonOptions
   advancedValues: Record<string, unknown>
   fileDefaults: TypeDefaults
+  conferenceBatchMetadata?: ConferenceBatchMetadata | null
   __quickIngestSessionId?: string
 }
 
@@ -297,6 +304,8 @@ const buildPersistedQueueItems = (
     fileSize: item.file?.size ?? item.fileSize,
     mimeType: item.file?.type || item.mimeType,
     validation: item.validation,
+    playlist: item.playlist,
+    conferenceOverride: item.conferenceOverride,
     fileStub:
       item.file || item.fileStub
         ? {
@@ -419,6 +428,8 @@ const hydrateQueueItems = (
         fileSize: item.fileSize,
         mimeType: item.mimeType,
         validation: item.validation,
+        playlist: item.playlist,
+        conferenceOverride: item.conferenceOverride,
       }
     }
 
@@ -439,6 +450,8 @@ const hydrateQueueItems = (
         valid: false,
         warnings,
       },
+      playlist: item.playlist,
+      conferenceOverride: item.conferenceOverride,
       fileStub: item.fileStub || {
         key: item.key,
         lastModified: item.lastModified,
@@ -549,6 +562,7 @@ const buildInitialWizardState = (
   customOptions: session.customOptions,
   processingState: session.processingState,
   results: session.results,
+  conferenceBatchMetadata: session.conferenceBatchMetadata ?? null,
   isMinimized:
     session.visibility === "hidden" && session.lifecycle === "processing",
 })
@@ -566,6 +580,7 @@ const buildSessionPatchFromWizardState = (
     customBasePreset: state.customBasePreset,
     presetConfig: state.presetConfig,
     customOptions: state.customOptions,
+    conferenceBatchMetadata: state.conferenceBatchMetadata,
     processingState: state.processingState,
     results: state.results,
     badge: {
@@ -718,6 +733,7 @@ const buildProgressFromReattachedJobs = (
 
 const buildQuickIngestPayload = async (
   items: WizardQueueItem[],
+  conferenceBatchMetadata: ConferenceBatchMetadata | null,
   options: QuickIngestRequestPayload["common"] & {
     storeRemote: boolean
     reviewBeforeStorage: boolean
@@ -725,7 +741,9 @@ const buildQuickIngestPayload = async (
     typeDefaults: TypeDefaults
   }
 ): Promise<QuickIngestRequestPayload> => {
-  const validItems = items.filter((item) => item.validation.valid)
+  const validItems = items.filter(
+    (item) => item.validation.valid && item.conferenceOverride?.selected !== false
+  )
   const entries = validItems
     .filter((item): item is WizardQueueItem & { url: string } => Boolean(item.url))
     .map((item) => ({
@@ -733,6 +751,8 @@ const buildQuickIngestPayload = async (
       url: item.url,
       type: mapDetectedTypeToEntryType(item.detectedType),
       defaults: buildDefaultsForQueueItem(item, options.typeDefaults),
+      playlist: item.playlist,
+      conferenceOverride: item.conferenceOverride,
     }))
 
   const files = await Promise.all(
@@ -744,6 +764,7 @@ const buildQuickIngestPayload = async (
         type: item.file.type || undefined,
         data: Array.from(new Uint8Array(await item.file.arrayBuffer())),
         defaults: buildDefaultsForQueueItem(item, options.typeDefaults),
+        conferenceOverride: item.conferenceOverride,
       }))
   )
 
@@ -762,6 +783,7 @@ const buildQuickIngestPayload = async (
     },
     advancedValues: options.advancedValues ?? {},
     fileDefaults: options.typeDefaults,
+    conferenceBatchMetadata,
   }
 }
 
@@ -809,7 +831,10 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const runStartedAtRef = useRef<number | null>(null)
   const cancelledSessionIdsRef = useRef<Set<string>>(new Set())
   const validQueueItems = useMemo(
-    () => queueItems.filter((item) => item.validation.valid),
+    () =>
+      queueItems.filter(
+        (item) => item.validation.valid && item.conferenceOverride?.selected !== false
+      ),
     [queueItems]
   )
   const trackedQueueItems = useMemo(
@@ -1332,13 +1357,17 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         // Best effort; background proxy handles auth for direct runtimes.
       }
 
-      const requestPayload = await buildQuickIngestPayload(validQueueItems, {
-        ...presetConfig.common,
-        storeRemote: presetConfig.storeRemote,
-        reviewBeforeStorage: presetConfig.reviewBeforeStorage,
-        advancedValues: presetConfig.advancedValues,
-        typeDefaults: presetConfig.typeDefaults,
-      })
+      const requestPayload = await buildQuickIngestPayload(
+        validQueueItems,
+        state.conferenceBatchMetadata,
+        {
+          ...presetConfig.common,
+          storeRemote: presetConfig.storeRemote,
+          reviewBeforeStorage: presetConfig.reviewBeforeStorage,
+          advancedValues: presetConfig.advancedValues,
+          typeDefaults: presetConfig.typeDefaults,
+        }
+      )
 
       const startAck = await startQuickIngestSession(requestPayload)
       if (!startAck?.ok || !startAck?.sessionId) {
@@ -1417,6 +1446,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     presetConfig.reviewBeforeStorage,
     presetConfig.storeRemote,
     presetConfig.typeDefaults,
+    state.conferenceBatchMetadata,
     markProcessingTracking,
     validQueueItems,
   ])

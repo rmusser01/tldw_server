@@ -9,6 +9,9 @@ import type {
   WizardResultItem,
   WizardStep,
   DetectedMediaType,
+  ConferenceBatchMetadata,
+  ConferenceItemMetadataOverride,
+  PlaylistQueueMetadata,
 } from "@/components/Common/QuickIngest/types"
 import { DEFAULT_PRESET, DEFAULT_PRESETS } from "@/components/Common/QuickIngest/presets"
 
@@ -50,6 +53,8 @@ export type PersistedWizardQueueItem = {
   fileSize: number
   mimeType?: string
   validation: QueueItemValidation
+  playlist?: PlaylistQueueMetadata
+  conferenceOverride?: ConferenceItemMetadataOverride
   fileStub?: {
     key?: string
     instanceId?: string
@@ -93,6 +98,7 @@ export type QuickIngestSessionRecord = {
   customOptions: Partial<PresetConfig>
   processingState: WizardProcessingState
   results: WizardResultItem[]
+  conferenceBatchMetadata?: ConferenceBatchMetadata | null
   badge: QuickIngestSessionBadge
   resultSummary: QuickIngestSessionResultSummary
   tracking?: PersistedQuickIngestTracking
@@ -330,6 +336,8 @@ const sanitizeQueueItems = (
             ? item.type
             : undefined,
       validation: item?.validation || { valid: true },
+      playlist: item?.playlist,
+      conferenceOverride: item?.conferenceOverride,
     }
 
     if (item?.fileStub) {
@@ -454,6 +462,7 @@ const sanitizeSession = (
     customOptions: session.customOptions || {},
     processingState: session.processingState || { ...INITIAL_PROCESSING_STATE },
     results: Array.isArray(session.results) ? session.results : [],
+    conferenceBatchMetadata: session.conferenceBatchMetadata ?? null,
     badge: {
       queueCount: Math.max(
         0,
@@ -503,6 +512,7 @@ export const createEmptyQuickIngestSession = (): QuickIngestSessionRecord => {
     customOptions: {},
     processingState: { ...INITIAL_PROCESSING_STATE },
     results: [],
+    conferenceBatchMetadata: null,
     badge: {
       queueCount: 0,
       hasRecentFailure: false,

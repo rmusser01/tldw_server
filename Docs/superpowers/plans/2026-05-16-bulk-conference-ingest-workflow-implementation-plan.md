@@ -639,7 +639,7 @@ git commit -m "feat: add durable conference media collections"
 - Test: `apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx`
 - Test: `apps/packages/ui/src/services/__tests__/quick-ingest-batch.test.ts`
 
-- [ ] **Step 1: Write failing UI tests for inherited metadata**
+- [x] **Step 1: Write failing UI tests for inherited metadata**
 
 Add a Quick Ingest integration test:
 
@@ -656,7 +656,7 @@ expect(screen.getByText(/34 selected/i)).toBeInTheDocument()
 
 Add an item override test for one speaker/title.
 
-- [ ] **Step 2: Run failing UI tests**
+- [x] **Step 2: Run failing UI tests**
 
 ```bash
 bunx vitest run \
@@ -666,7 +666,7 @@ bunx vitest run \
 
 Expected: FAIL because batch metadata controls and persisted session fields do not exist.
 
-- [ ] **Step 3: Add metadata types and helpers**
+- [x] **Step 3: Add metadata types and helpers**
 
 Add types:
 
@@ -692,11 +692,11 @@ export type ConferenceItemMetadataOverride = {
 
 Add pure merge helpers in `conference-collections.ts`.
 
-- [ ] **Step 4: Implement batch metadata panel and item table**
+- [x] **Step 4: Implement batch metadata panel and item table**
 
 Use compact forms and progressive disclosure. Batch fields are visible; per-item overrides live in a table/drawer and are optional.
 
-- [ ] **Step 5: Submit metadata before or atomically with jobs**
+- [x] **Step 5: Submit metadata before or atomically with jobs**
 
 Update quick-ingest submission so selected preflight items create planned collection items before jobs are submitted. If the API supports atomic create+submit, use that. Otherwise:
 
@@ -705,11 +705,11 @@ Update quick-ingest submission so selected preflight items create planned collec
 3. Submit jobs with planned item IDs/idempotency keys.
 4. Mark item `submit_failed` if submission fails.
 
-- [ ] **Step 6: Mirror extension runtime payload**
+- [x] **Step 6: Mirror extension runtime payload**
 
 Apply the same fields in `apps/packages/ui/src/entries/background.ts` so extension-runtime Quick Ingest does not drop collection metadata.
 
-- [ ] **Step 7: Run verification**
+- [x] **Step 7: Run verification**
 
 ```bash
 bunx vitest run \
@@ -721,7 +721,7 @@ bunx vitest run \
 git diff --check
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add \

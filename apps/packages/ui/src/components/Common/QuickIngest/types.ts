@@ -204,6 +204,24 @@ export type PlaylistQueueMetadata = {
   duplicateStatus?: "new" | "duplicate_in_batch" | "duplicate_existing" | "unknown"
 }
 
+export type ConferenceBatchMetadata = {
+  collectionName: string
+  conferenceName?: string
+  eventDate?: string
+  eventYear?: string
+  sharedTags: string[]
+  sourcePlaylistUrl?: string
+}
+
+export type ConferenceItemMetadataOverride = {
+  title?: string
+  speaker?: string
+  talkDate?: string
+  track?: string
+  tags?: string[]
+  selected: boolean
+}
+
 /**
  * An item in the wizard's ingest queue (files + URLs with detected types).
  */
@@ -236,6 +254,8 @@ export type WizardQueueItem = {
   validation: QueueItemValidation
   /** Metadata carried from a playlist preflight response. */
   playlist?: PlaylistQueueMetadata
+  /** Conference-specific metadata overrides for bulk review workflows. */
+  conferenceOverride?: ConferenceItemMetadataOverride
 }
 
 /**

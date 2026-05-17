@@ -1,6 +1,6 @@
 import React from "react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 // ---------------------------------------------------------------------------
@@ -1110,12 +1110,79 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
 
     // Both items should appear
     await waitFor(() => {
-      expect(screen.getByText("https://example.com/page1")).toBeTruthy()
-      expect(screen.getByText("https://example.com/page2")).toBeTruthy()
+      expect(screen.getAllByText("https://example.com/page1").length).toBeGreaterThan(0)
+      expect(screen.getAllByText("https://example.com/page2").length).toBeGreaterThan(0)
     })
 
     // The configure button should reference 2 items
     expect(screen.getByText(/Configure 2 items/i)).toBeTruthy()
+  })
+
+  it("captures shared conference metadata for a 34-talk batch and shows it in review", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={onClose} />)
+
+    const textarea = screen.getByPlaceholderText(/https:\/\/example\.com/i)
+    const urls = Array.from(
+      { length: 34 },
+      (_, index) => `https://youtube.com/watch?v=conference-talk-${index + 1}`
+    ).join("\n")
+
+    fireEvent.change(textarea, { target: { value: urls } })
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/Configure 34 items/i)).toBeTruthy()
+    })
+
+    await user.type(screen.getByLabelText("Collection name"), "Strange Loop 2012")
+    await user.type(screen.getByLabelText("Conference name"), "Strange Loop")
+    await user.type(screen.getByLabelText("Event year"), "2012")
+    await user.type(screen.getByLabelText("Shared tags"), "conference, clojure")
+
+    await user.click(screen.getByText(/Configure 34 items/i))
+    await user.click(await screen.findByText("Next"))
+
+    await waitFor(() => {
+      expect(screen.getByText("Ready to Process")).toBeTruthy()
+    })
+    expect(screen.getByText(/34 selected/i)).toBeTruthy()
+    expect(screen.getByText(/Strange Loop 2012/i)).toBeTruthy()
+    expect(screen.getByText("Strange Loop")).toBeTruthy()
+    expect(screen.getAllByText("2012").length).toBeGreaterThan(0)
+    expect(screen.getByText(/conference, clojure/i)).toBeTruthy()
+  })
+
+  it("allows overriding one talk title and speaker inside a conference batch", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={onClose} />)
+
+    const textarea = screen.getByPlaceholderText(/https:\/\/example\.com/i)
+    fireEvent.change(textarea, {
+      target: {
+        value:
+          "https://youtube.com/watch?v=talk-1\nhttps://youtube.com/watch?v=talk-2",
+      },
+    })
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/Configure 2 items/i)).toBeTruthy()
+    })
+
+    await user.type(screen.getByLabelText("Collection name"), "Strange Loop 2012")
+    await user.type(screen.getByLabelText("Conference name"), "Strange Loop")
+    await user.type(screen.getByLabelText("Title override for item 1"), "Simplicity Matters")
+    await user.type(screen.getByLabelText("Speaker for item 1"), "Rich Hickey")
+
+    await user.click(screen.getByText(/Configure 2 items/i))
+    await user.click(await screen.findByText("Next"))
+
+    await waitFor(() => {
+      expect(screen.getByText("Ready to Process")).toBeTruthy()
+    })
+    expect(screen.getByText("Simplicity Matters")).toBeTruthy()
+    expect(screen.getByText(/Rich Hickey/i)).toBeTruthy()
   })
 
   // -------------------------------------------------------------------------

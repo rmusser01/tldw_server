@@ -21,6 +21,7 @@ import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { PlaylistPreflightResult } from "@/services/tldw/playlist-preflight"
 import { FileDropZone } from "./QueueTab/FileDropZone"
 import { PlaylistPreflightPanel } from "./PlaylistPreflightPanel"
+import { BatchMetadataPanel } from "./BatchMetadataPanel"
 import {
   QUICK_INGEST_MAX_FILE_SIZE_LABEL,
   QUICK_INGEST_MAX_FILE_SIZE,
@@ -231,8 +232,9 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   onQuickProcess,
 }) => {
   const { t } = useTranslation(["option"])
-  const { state, setQueueItems, goNext } = useIngestWizard()
-  const { queueItems } = state
+  const { state, setQueueItems, setConferenceBatchMetadata, goNext } =
+    useIngestWizard()
+  const { queueItems, conferenceBatchMetadata } = state
 
   const [urlInput, setUrlInput] = useState("")
   const [playlistPreflightUrl, setPlaylistPreflightUrl] = useState("")
@@ -370,6 +372,18 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     }
     if (newItems.length === 0) return
     setQueueItems([...queueItems, ...newItems])
+    setConferenceBatchMetadata({
+      collectionName:
+        conferenceBatchMetadata?.collectionName ||
+        playlistPreflight.playlistTitle ||
+        "",
+      conferenceName: conferenceBatchMetadata?.conferenceName,
+      eventDate: conferenceBatchMetadata?.eventDate,
+      eventYear: conferenceBatchMetadata?.eventYear,
+      sharedTags: conferenceBatchMetadata?.sharedTags ?? [],
+      sourcePlaylistUrl:
+        conferenceBatchMetadata?.sourcePlaylistUrl || playlistPreflightUrl,
+    })
     setUrlInput((current) =>
       current
         .split("\n")
@@ -380,7 +394,14 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     setPlaylistPreflight(null)
     setPlaylistPreflightUrl("")
     setPlaylistPreflightError(null)
-  }, [playlistPreflight, playlistPreflightUrl, queueItems, setQueueItems])
+  }, [
+    conferenceBatchMetadata,
+    playlistPreflight,
+    playlistPreflightUrl,
+    queueItems,
+    setConferenceBatchMetadata,
+    setQueueItems,
+  ])
 
   const handlePreflightItemSelectionChange = useCallback(
     (ordinal: number, selected: boolean) => {
@@ -700,6 +721,8 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
           </div>
         </div>
       )}
+
+      {hasItems && <BatchMetadataPanel />}
 
       {/* Action buttons */}
       <div className="mt-4 flex items-center justify-end gap-2">

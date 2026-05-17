@@ -14,6 +14,7 @@ import type {
   WizardProcessingState,
   WizardResultItem,
   ItemProgress,
+  ConferenceBatchMetadata,
 } from "./types"
 import {
   DEFAULT_PRESETS,
@@ -35,6 +36,7 @@ export type IngestWizardState = {
   customBasePreset: Exclude<IngestPreset, "custom">
   presetConfig: PresetConfig
   customOptions: Partial<PresetConfig>
+  conferenceBatchMetadata: ConferenceBatchMetadata | null
   processingState: WizardProcessingState
   results: WizardResultItem[]
   isMinimized: boolean
@@ -51,6 +53,7 @@ type Action =
   | { type: "SET_QUEUE_ITEMS"; items: WizardQueueItem[] }
   | { type: "SET_PRESET"; preset: IngestPreset }
   | { type: "SET_CUSTOM_OPTIONS"; options: Partial<PresetConfig> }
+  | { type: "SET_CONFERENCE_BATCH_METADATA"; metadata: ConferenceBatchMetadata | null }
   | { type: "START_PROCESSING" }
   | { type: "CANCEL_PROCESSING" }
   | { type: "CANCEL_ITEM"; id: string }
@@ -121,7 +124,10 @@ const mergeCustomOptions = (
 
 const buildInitialProgress = (items: WizardQueueItem[]): ItemProgress[] =>
   items
-    .filter((item) => item.validation.valid)
+    .filter(
+      (item) =>
+        item.validation.valid && item.conferenceOverride?.selected !== false
+    )
     .map((item) => ({
       id: item.id,
       status: "queued" as const,
@@ -156,6 +162,7 @@ const createInitialState = (): IngestWizardState => ({
   customBasePreset: DEFAULT_PRESET,
   presetConfig: DEFAULT_PRESETS[DEFAULT_PRESET],
   customOptions: {},
+  conferenceBatchMetadata: null,
   processingState: { ...INITIAL_PROCESSING_STATE },
   results: [],
   isMinimized: false,
@@ -175,6 +182,8 @@ const createInitialStateFromSeed = (
     customBasePreset: seed.customBasePreset ?? base.customBasePreset,
     presetConfig: seed.presetConfig ?? base.presetConfig,
     customOptions: seed.customOptions ?? base.customOptions,
+    conferenceBatchMetadata:
+      seed.conferenceBatchMetadata ?? base.conferenceBatchMetadata,
     processingState: seed.processingState
       ? {
           ...INITIAL_PROCESSING_STATE,
@@ -269,6 +278,9 @@ const reducer = (state: IngestWizardState, action: Action): IngestWizardState =>
         presetConfig,
       }
     }
+
+    case "SET_CONFERENCE_BATCH_METADATA":
+      return { ...state, conferenceBatchMetadata: action.metadata }
 
     case "START_PROCESSING": {
       const perItemProgress = buildInitialProgress(state.queueItems)
@@ -382,6 +394,7 @@ type IngestWizardContextValue = {
   // Presets & options
   setPreset: (preset: IngestPreset) => void
   setCustomOptions: (options: Partial<PresetConfig>) => void
+  setConferenceBatchMetadata: (metadata: ConferenceBatchMetadata | null) => void
   // Processing
   startProcessing: () => void
   skipToProcessing: () => void
@@ -447,6 +460,11 @@ export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
       dispatch({ type: "SET_CUSTOM_OPTIONS", options }),
     []
   )
+  const setConferenceBatchMetadata = useCallback(
+    (metadata: ConferenceBatchMetadata | null) =>
+      dispatch({ type: "SET_CONFERENCE_BATCH_METADATA", metadata }),
+    []
+  )
   const startProcessing = useCallback(
     () => dispatch({ type: "START_PROCESSING" }),
     []
@@ -490,6 +508,7 @@ export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
       setQueueItems,
       setPreset,
       setCustomOptions,
+      setConferenceBatchMetadata,
       startProcessing,
       skipToProcessing,
       cancelProcessing,
@@ -509,6 +528,7 @@ export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
       setQueueItems,
       setPreset,
       setCustomOptions,
+      setConferenceBatchMetadata,
       startProcessing,
       skipToProcessing,
       cancelProcessing,
