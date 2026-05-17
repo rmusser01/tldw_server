@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 import { getRouteMetadata, ROUTE_METADATA } from "../route-metadata"
@@ -34,9 +35,11 @@ if (!routeRegistryPath) {
 }
 
 const routeRegistrySource = readFileSync(routeRegistryPath, "utf8")
+const testDir = path.dirname(fileURLToPath(import.meta.url))
+const ROUTE_PATH_PATTERN = /path\s*:\s*["']([^"']+)["']/g
 
 const literalRoutePaths = Array.from(
-  routeRegistrySource.matchAll(/path:\s*"([^"]+)"/g),
+  routeRegistrySource.matchAll(ROUTE_PATH_PATTERN),
   (match) => match[1]
 )
 
@@ -61,10 +64,20 @@ const nonDynamicOptionRegistryPaths = optionRegistryPaths.filter(
   (routePath) => !isDynamicRoutePath(routePath)
 )
 
-const frontendPagesRoot = path.resolve(
-  process.cwd(),
-  "../../tldw-frontend/pages"
+const frontendPagesRootCandidates = [
+  path.resolve(process.cwd(), "../../tldw-frontend/pages"),
+  path.resolve(process.cwd(), "tldw-frontend/pages"),
+  path.resolve(process.cwd(), "apps/tldw-frontend/pages"),
+  path.resolve(testDir, "../../../../../tldw-frontend/pages")
+]
+
+const frontendPagesRoot = frontendPagesRootCandidates.find((candidate) =>
+  existsSync(candidate)
 )
+
+if (!frontendPagesRoot) {
+  throw new Error("Unable to locate tldw-frontend/pages for visibility test")
+}
 
 const routePathToPageCandidates = (routePath: string): string[] => {
   const normalizedPath = routePath === "/" ? "/index" : routePath

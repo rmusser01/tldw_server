@@ -4,7 +4,7 @@ title: Implement WebUI route contract and visibility policy
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-17 21:27'
+updated_date: '2026-05-17 21:56'
 labels:
   - ux
   - webui
@@ -58,12 +58,14 @@ Task 4 red/green: added a command palette regression test asserting the `Go to C
 Task 5 red/green: added static smoke inventory contract tests to `e2e/smoke/route-contract-stage2.spec.ts`. Red Playwright run failed on included routes missing from `PAGES` (`/workspace-playground`, `/integrations`, `/scheduled-tasks`, `/vn-assets`, `/vn-play`, `/admin/integrations`, `/admin/runtime-config`, `/sources/new`, `/presentation-studio/new`, `/presentation-studio/start`) and active internal QA/debug entries (`/404`, `/onboarding-test`, `/__debug__/sidepanel-chat`, `/__debug__/sidepanel-error-boundary`). Aligned page inventory for page-backed include routes, marked registry-only `/admin/runtime-config` and `/presentation-studio/start` as manual smoke, changed `/404` to a default self-hosted error-state route, and added skip reasons for onboarding/debug routes. Rerun passed: `bunx playwright test e2e/smoke/route-contract-stage2.spec.ts --reporter=line` passed 4 tests in 56.9s. Generated artifact timestamp/base URL churn was reverted.
 
 Final verification after rebasing onto current `origin/dev`: focused route and command Vitest gate passed (`route-metadata.coverage`, `route-registry.visibility`, `route-registry.sidepanel-availability`, `CommandPalette.shortcuts`): 4 files, 18 tests passed. Standalone route metadata type check passed with `bunx tsc --noEmit --pretty false --target es2022 --module esnext --moduleResolution bundler src/routes/route-metadata.ts`. Playwright route contract gate passed: `bunx playwright test e2e/smoke/route-contract-stage2.spec.ts --reporter=line`, 4 tests passed in 52.6s. `git diff --check` passed before final task-note update. Route metadata coverage count: 120 rows total; smoke policies: 83 include, 31 manual, 6 exclude. Findings closed by this task: F1, F8, F12, F17, F18. Bandit skipped because this task touched TypeScript/TSX, Playwright smoke inventory, and Backlog markdown only; no Python code was touched.
+
+PR review follow-up: addressed Gemini/Qodo comments on brittle route source parsing, cwd-sensitive page root lookup, and the extension sidepanel `/chat` mismatch. Visibility and sidepanel route tests now accept single or double quotes and whitespace around route fields. Test fixture source lookup uses import-location fallbacks so the package test files do not depend only on `process.cwd()`. The extension sidepanel router keeps `/` for compatibility and adds `/chat` as an explicit alias, matching the shared command palette target. Review-fix verification passed: focused sidepanel/visibility Vitest, focused route/command Vitest gate (4 files, 19 tests), standalone route metadata type check, Playwright stage-2 route contract (4 tests), and `git diff --check`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented WP1 route-contract governance for the WebUI/extension: canonical route metadata, audited route coverage, option registry validation, explicit sidepanel availability, command palette `/chat` target correction, and smoke inventory validation. Verification after rebase passed for focused route/command Vitest, standalone route metadata type check, Playwright stage-2 route contract, and diff checks. No backend APIs or page-family visual remediation were changed.
+Implemented WP1 route-contract governance for the WebUI/extension: canonical route metadata, audited route coverage, option registry validation, explicit sidepanel availability, command palette `/chat` target correction, and smoke inventory validation. PR review follow-up hardened the test parsers/source lookup and added the extension sidepanel `/chat` alias while preserving `/`. Verification passed for focused route/command Vitest, standalone route metadata type check, Playwright stage-2 route contract, and diff checks. No backend APIs or page-family visual remediation were changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -833,6 +833,12 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
   { kind: "sidepanel", path: "/", element: <SidepanelChat /> },
   {
     kind: "sidepanel",
+    path: "/chat",
+    element: <SidepanelChat />,
+    targets: ALL_TARGETS
+  },
+  {
+    kind: "sidepanel",
     path: "/agent",
     element: <SidepanelAgent />,
     targets: ALL_TARGETS

@@ -1,4 +1,6 @@
 import { existsSync, readFileSync } from "node:fs"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 import {
@@ -19,9 +21,13 @@ const readFirstExistingSource = (
   return readFileSync(sourcePath, "utf8")
 }
 
+const testDir = path.dirname(fileURLToPath(import.meta.url))
+
 const sharedSidepanelRegistrySource = readFirstExistingSource(
   [
+    path.resolve(testDir, "../sidepanel-route-registry.tsx"),
     "src/routes/sidepanel-route-registry.tsx",
+    "packages/ui/src/routes/sidepanel-route-registry.tsx",
     "../packages/ui/src/routes/sidepanel-route-registry.tsx",
     "apps/packages/ui/src/routes/sidepanel-route-registry.tsx"
   ],
@@ -30,7 +36,12 @@ const sharedSidepanelRegistrySource = readFirstExistingSource(
 
 const extensionSidepanelRegistrySource = readFirstExistingSource(
   [
+    path.resolve(
+      testDir,
+      "../../../../../tldw-frontend/extension/routes/sidepanel-route-registry.tsx"
+    ),
     "../../tldw-frontend/extension/routes/sidepanel-route-registry.tsx",
+    "tldw-frontend/extension/routes/sidepanel-route-registry.tsx",
     "apps/tldw-frontend/extension/routes/sidepanel-route-registry.tsx"
   ],
   "extension sidepanel-route-registry.tsx"
@@ -38,7 +49,12 @@ const extensionSidepanelRegistrySource = readFirstExistingSource(
 
 const extensionOptionRegistrySource = readFirstExistingSource(
   [
+    path.resolve(
+      testDir,
+      "../../../../../tldw-frontend/extension/routes/route-registry.tsx"
+    ),
     "../../tldw-frontend/extension/routes/route-registry.tsx",
+    "tldw-frontend/extension/routes/route-registry.tsx",
     "apps/tldw-frontend/extension/routes/route-registry.tsx"
   ],
   "extension route-registry.tsx"
@@ -46,7 +62,7 @@ const extensionOptionRegistrySource = readFirstExistingSource(
 
 const extractLiteralRoutePaths = (source: string): string[] =>
   Array.from(
-    source.matchAll(/path:\s*"([^"]+)"/g),
+    source.matchAll(/path\s*:\s*["']([^"']+)["']/g),
     (match) => match[1]
   )
 
@@ -61,7 +77,7 @@ const sidepanelRoutePaths = uniqueSorted([
 const extensionOptionNavPaths = uniqueSorted(
   Array.from(
     extensionOptionRegistrySource.matchAll(
-      /path:\s*"([^"]+)"[\s\S]{0,500}?nav:\s*{/g
+      /path\s*:\s*["']([^"']+)["'][\s\S]{0,500}?nav\s*:\s*{/g
     ),
     (match) => match[1]
   ).filter(
@@ -71,6 +87,13 @@ const extensionOptionNavPaths = uniqueSorted(
 )
 
 describe("sidepanel route availability metadata", () => {
+  it("keeps extension sidepanel chat reachable at both root and /chat", () => {
+    expect(extensionSidepanelRegistrySource).toMatch(/path\s*:\s*["']\/["']/)
+    expect(extensionSidepanelRegistrySource).toMatch(/path\s*:\s*["']\/chat["']/)
+    expect(extensionOptionRegistrySource).toMatch(/path\s*:\s*["']\/["']/)
+    expect(extensionOptionRegistrySource).toMatch(/path\s*:\s*["']\/chat["']/)
+  })
+
   it("declares sidepanel availability for every shared or extension sidepanel route", () => {
     const routesMissingSidepanelAvailability = sidepanelRoutePaths.filter(
       (routePath) =>
