@@ -19,6 +19,8 @@ modified_files:
 - apps/packages/ui/src/components/Common/__tests__/ChatSidebar.coordinator.test.tsx
 - apps/packages/ui/src/components/Layouts/Layout.tsx
 - apps/packages/ui/src/components/Layouts/__tests__/Layout.chat-sidebar-reset-signal.guard.test.ts
+- apps/packages/ui/src/routes/route-paths.ts
+- apps/packages/ui/src/routes/__tests__/route-paths.viewport.test.ts
 - apps/tldw-frontend/components/layout/WebLayout.tsx
 - apps/tldw-frontend/__tests__/components/layout/WebLayout.chat-scroll-contract.test.tsx
 ---
@@ -47,7 +49,7 @@ Implement the shared ChatSidebar tools-first expansion behavior: shortcuts expan
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implementation and verification are complete pending human visual approval of the rendered screenshot. Fresh verification passed: apps/packages/ui focused sidebar/layout Vitest suite (4 files, 14 tests), apps/tldw-frontend WebLayout Vitest suite (1 file, 4 tests), and Playwright browser check against the existing Next dev server at http://127.0.0.1:3000/chat. Browser check confirmed opening the collapsed sidebar yields Shortcuts aria-expanded=true, Recent conversations aria-expanded=false, no search while Recent is collapsed; manual Recent expansion shows search; collapse/reopen resets back to Shortcuts expanded and Recent collapsed. Screenshot artifact: output/playwright/chat-sidebar-tools-first-expanded.png. Bandit skipped because the touched implementation is frontend TS/TSX plus Backlog markdown. Root-level Vitest invocation was not used as evidence because it globbed unrelated .worktrees; package-scoped commands were used instead.
+Follow-up fixed the apparent detached-sidebar screenshot issue by adding CHAT_PATH to VIEWPORT_CONSTRAINED_PATHS so /chat uses the same h-screen/min-h-0 layout path as other viewport-bound workspaces. Added route-paths viewport contract coverage. Fresh verification passed: route-paths.viewport red/green test, package UI focused sidebar/layout suite (5 files, 15 tests), WebLayout suite (1 file, 4 tests), and Playwright geometry/disclosure check against http://127.0.0.1:3000/chat. Browser geometry after forced scroll attempt: scrollY=0, html/body scrollHeight=900, sidebar top=0, sidebar width=260, Shortcuts aria-expanded=true, Recent conversations aria-expanded=false. Corrected expanded screenshot artifact: output/playwright/chat-sidebar-tools-first-viewport-constrained.png. Bandit skipped: frontend TS/TSX route contract plus Backlog markdown only. Pending human visual approval of the corrected screenshot.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
