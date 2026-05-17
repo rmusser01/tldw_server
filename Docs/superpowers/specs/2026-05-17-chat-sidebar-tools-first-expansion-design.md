@@ -1,7 +1,7 @@
 # Chat Sidebar Tools-First Expansion Design
 
 Date: 2026-05-17
-Status: Approved for planning
+Status: Approved for planning after critique hardening
 Owner: Codex brainstorming session
 Backlog: TASK-401
 
@@ -27,6 +27,8 @@ confirmed to have the same shortcuts/history disclosure model.
 - Keep WebUI and extension behavior aligned through shared UI code.
 - Add regression coverage for desktop expanded sidebar, direct open/mount, and
   recent-history expansion.
+- Avoid first-render or settings-hydration history fetches before the
+  tools-first reset has applied.
 
 ## Non-Goals
 
@@ -34,6 +36,8 @@ confirmed to have the same shortcuts/history disclosure model.
 - Change chat history APIs or server-side conversation storage.
 - Remove or rewrite server/folder chat lists.
 - Change the user's selected shortcut list.
+- Persist the default-closed recent conversation state in a way that can
+  briefly hydrate as open before reset.
 - Persistently force recent conversations closed while the sidebar is already
   open and the user has manually expanded it.
 
@@ -88,6 +92,8 @@ This applies to:
 - Programmatic sidebar open events such as `tldw:open-chat-sidebar`.
 - Direct expanded mounts, such as when the drawer opens with
   `collapsed={false}`.
+- Explicit open events that occur while the sidebar is already mounted and
+  expanded, if the event is intended to bring the chat sidebar forward.
 
 Route navigation can still collapse shortcuts during navigation if that remains
 useful for page transition behavior. The next open or expand transition must
@@ -107,18 +113,26 @@ while a query is active.
 The state owner should be `ChatSidebar`, because it owns the shortcuts
 disclosure, server/folder tab, search input, and conversation list rendering.
 Parent layouts should not duplicate sidebar-internal presentation state.
+They may pass a narrow reset signal when they are the only code that can observe
+an explicit open event.
 
 `ChatSidebar` should maintain two independent disclosure states:
 
 - `shortcutsCollapsed`, backed by the existing
   `SIDEBAR_SHORTCUTS_COLLAPSED_SETTING`.
-- `recentCollapsed`, backed by a new sidebar recent-conversations setting or a
-  local component state if persistence is not needed.
+- `recentCollapsed`, local component state defaulting to `true` for this V1.
+
+Do not persist `recentCollapsed` in V1. The requirement is to reset recent
+conversations closed on every open, so persistence adds little value and can
+create a first-render race where a stored open value hydrates before the reset
+effect and accidentally enables server-history fetching.
 
 On every open/reset event:
 
-- call `setShortcutsCollapsed(false)`;
+- call `setShortcutsCollapsed(false)` only when shortcuts are currently
+  collapsed, to avoid redundant storage writes;
 - set `recentCollapsed` to `true`;
+- set `selectionMode` to `false`;
 - leave `currentTab`, `shortcutSelection`, and `searchQuery` intact;
 - if `searchQuery.trim()` is non-empty, keep recent search controls/results
   reachable despite the default collapsed state.
@@ -129,9 +143,16 @@ to `false`, and also run the reset when the component mounts already expanded.
 This handles desktop expansion and mobile drawer mounting without requiring
 each layout to know about sidebar internals.
 
-If implementation proves that direct mount detection causes redundant writes,
-use a small internal ref to run the reset only when the visible state becomes
-expanded.
+That is not enough for programmatic open events fired while the sidebar is
+already expanded. Layout shells should pass a small `openResetKey` or equivalent
+monotonic prop to `ChatSidebar` whenever they intentionally open or foreground
+the sidebar. `ChatSidebar` should run the same reset when that key changes. This
+keeps state ownership in the sidebar while allowing parents to signal open
+intent.
+
+If implementation proves that direct mount detection or reset keys cause
+redundant writes, use a small internal ref and current-value guards so the reset
+only mutates state when the visible state actually needs changing.
 
 ## Component Flow
 
@@ -150,10 +171,16 @@ The expanded `ChatSidebar` should be reorganized around two disclosure blocks:
    - Shows existing `ServerChatList` and `FolderChatList` when expanded.
    - Must auto-expand or render a reachable search-results region when
      `searchQuery` is non-empty.
+   - Provides the only visible server-history selection controls.
 
 The existing footer remains below the main sidebar content. If recent
 conversations are collapsed, shortcuts and footer tools should be immediately
 visible instead of being pushed below a history list.
+
+When recent conversations are collapsed with an empty search, the collapsed
+header should be a clear button with label and chevron. It may show local or
+cached metadata, but it should not show live server counts that require a new
+overview request.
 
 Server-history selection controls must be scoped to the visible recent-history
 body. The existing select-chats action should be hidden or disabled while
@@ -166,6 +193,8 @@ Server history should remain lazy:
 
 - When recent conversations are collapsed and search is empty, do not mark
   `server-history` visible or engaged.
+- Do not mount `ServerChatList` while recent conversations are collapsed and
+  search is empty, because that child owns history-fetching hooks.
 - When the user expands recent conversations on the server tab, mark
   `server-history` visible and allow overview fetching through the existing
   coordinator gate.
@@ -175,6 +204,16 @@ Server history should remain lazy:
   either use already-available cached data or stay unloaded until recent
   conversations are expanded or search is active.
 - Folder list behavior should remain local and unchanged.
+
+Implementation should derive one explicit visibility boolean, for example
+`recentHistoryVisible = !recentCollapsed || hasSearchQuery`, and use it
+consistently for:
+
+- rendering the search/tabs/list body;
+- showing or enabling selection controls;
+- setting coordinator `server-history` visibility;
+- enabling the server count/overview query;
+- mounting `ServerChatList`.
 
 This preserves the performance intent of the current lazy-history tests while
 changing the visual default.
@@ -212,6 +251,8 @@ Focused tests should cover:
 - Expanding recent conversations, closing/collapsing the sidebar, reopening it,
   and asserting the sidebar resets to shortcuts visible and recent content
   hidden.
+- Triggering a programmatic open/reset signal while the sidebar is already
+  expanded and asserting the tools-first reset still happens.
 - Collapsing recent conversations while server selection mode is active and
   asserting selection mode exits or selection controls become unavailable.
 - Searching in the sidebar and asserting conversation results remain reachable.
@@ -219,6 +260,8 @@ Focused tests should cover:
   trigger the server overview request.
 - Proving the server chat count badge does not trigger the overview fetch while
   recent conversations are collapsed and search is empty.
+- Proving the expanded direct-mount path does not perform a first-render
+  history overview fetch before the recent-history collapsed state is applied.
 
 Manual/browser verification should check desktop WebUI and extension/mobile
 drawer behavior if the app runs cleanly from the current checkout.
@@ -228,10 +271,11 @@ drawer behavior if the app runs cleanly from the current checkout.
 The implementation plan should stay small:
 
 1. Add recent-conversation disclosure state and reset-on-open behavior to
-   `ChatSidebar`.
+   `ChatSidebar`, including a narrow reset key from layout shells for explicit
+   open events that are not represented by `collapsed` transitions.
 2. Wrap search/tabs/list content in the new disclosure.
 3. Adjust coordinator visibility and lazy-history gating to account for
-   `recentCollapsed`.
+   `recentHistoryVisible`.
 4. Add/update targeted component tests.
 5. Run focused frontend tests and, if possible, browser-check the visible
    desktop and drawer states.
