@@ -139,7 +139,7 @@ def _manifest_with_all_reference_shapes(asset_a: str, asset_b: str) -> dict[str,
     }
 
 
-def test_duplicate_pack_to_persona_copies_referenced_assets_and_remaps_manifest(
+def test_duplicate_pack_to_persona_preserves_all_pack_assets_and_remaps_manifest(
     service: PersonaVisualService,
     db_instance: CharactersRAGDB,
     tmp_path: Path,
@@ -181,6 +181,15 @@ def test_duplicate_pack_to_persona_copies_referenced_assets_and_remaps_manifest(
         original_filename="unused.png",
         asset_role="generated_candidate",
     )
+    neutral_anchor = service.create_asset_from_upload(
+        persona_id=source_persona_id,
+        user_id=user_id,
+        pack_id=source_pack["id"],
+        content=_png_bytes(width=5, height=5),
+        mime_type="image/png",
+        original_filename="neutral-anchor.png",
+        asset_role="still_pose",
+    )
     updated_source = db_instance.update_persona_visual_pack_manifest(
         pack_id=source_pack["id"],
         persona_id=source_persona_id,
@@ -221,17 +230,21 @@ def test_duplicate_pack_to_persona_copies_referenced_assets_and_remaps_manifest(
         persona_id=target_persona_id,
         user_id=user_id,
     )
-    assert len(copied_assets) == 2
+    assert len(copied_assets) == 4
     copied_ids = {asset["id"] for asset in copied_assets}
+    copied_checksums = {asset["checksum_sha256"] for asset in copied_assets}
+    copied_roles = {asset["asset_role"] for asset in copied_assets}
     assert asset_a["id"] not in copied_ids
     assert asset_b["id"] not in copied_ids
-    assert unused["checksum_sha256"] not in {asset["checksum_sha256"] for asset in copied_assets}
+    assert unused["checksum_sha256"] in copied_checksums
+    assert neutral_anchor["checksum_sha256"] in copied_checksums
+    assert {"frame", "preview", "generated_candidate", "still_pose"}.issubset(copied_roles)
     assert all(
         f"persona_visuals/{target_persona_id}/{duplicated['id']}/" in asset["storage_key"]
         for asset in copied_assets
     )
     remapped_animation = duplicated["manifest"]["animations"]["idle"]
-    assert {frame["asset_id"] for frame in remapped_animation["frames"]} == copied_ids
+    assert {frame["asset_id"] for frame in remapped_animation["frames"]}.issubset(copied_ids)
     assert set(remapped_animation["asset_ids"]).issubset(copied_ids)
     assert remapped_animation["preview_asset_id"] in copied_ids
     assert db_instance.get_active_persona_visual_pack(

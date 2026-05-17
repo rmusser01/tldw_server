@@ -46,6 +46,48 @@ def _png_bytes(width: int = 2, height: int = 3) -> bytes:
     return buffer.getvalue()
 
 
+def _codex_pet_spritesheet_bytes() -> bytes:
+    buffer = io.BytesIO()
+    image = Image.new("RGBA", (1536, 1872), (0, 0, 0, 0))
+    for row in range(9):
+        for col in range(8):
+            x = col * 192 + 80
+            y = row * 208 + 72
+            image.putpixel((x, y), (24, 120, 200, 255))
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _codex_pet_archive(tmp_path: Path) -> Path:
+    archive_path = tmp_path / "terminal-tile-codex-pet.zip"
+    sprite_bytes = _codex_pet_spritesheet_bytes()
+    pet_payload = {
+        "id": "terminal-tile",
+        "displayName": "Terminal Tile",
+        "description": "A terminal tile Codex pet.",
+        "spritesheetPath": "spritesheet.png",
+    }
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("pet.json", _json_bytes(pet_payload))
+        archive.writestr("spritesheet.png", sprite_bytes)
+    return archive_path
+
+
+def _petdex_alias_archive(tmp_path: Path) -> Path:
+    archive_path = tmp_path / "petdex-alias-codex-pet.zip"
+    sprite_bytes = _codex_pet_spritesheet_bytes()
+    pet_payload = {
+        "id": "petdex-alias",
+        "displayName": "Petdex Alias",
+        "description": "A Codex pet using the Petdex manifest alias.",
+        "spritesheetPath": "spritesheet.png",
+    }
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("petjson.json", _json_bytes(pet_payload))
+        archive.writestr("sprite.png", sprite_bytes)
+    return archive_path
+
+
 def _valid_manifest(asset_id: str) -> dict[str, object]:
     return {
         "manifest_version": 1,
@@ -764,6 +806,239 @@ def test_import_preview_accepts_buddy_pipeline_packet_with_source_sheet_diagnost
     assert assets_by_id["buddy-animation-atlas"]["manifest_referenced"] is True  # nosec B101
     assert preview["proposed_plan"]["review_before_commit"] is True  # nosec B101
     assert preview["validation_warnings"] == []  # nosec B101
+
+
+def test_import_preview_accepts_codex_pet_archive_as_atlas_pack(tmp_path: Path) -> None:
+    archive_path = _codex_pet_archive(tmp_path)
+
+    preview = PersonaVisualPackImportPreviewer().create_preview(
+        archive_path=archive_path,
+        owner_user_id="user-1",
+        target_persona_id="target-persona",
+    )
+
+    summary = preview["bundle_summary"]
+    asset = summary["assets"][0]
+    assert preview["status"] == "completed"  # nosec B101
+    assert preview["schema_version"] == "codex.pet.v1"  # nosec B101
+    assert preview["proposed_plan"]["source_format"] == "codex_pet"  # nosec B101
+    assert preview["proposed_plan"]["review_before_commit"] is True  # nosec B101
+    assert preview["validation_warnings"] == []  # nosec B101
+    assert summary["pack_title"] == "Terminal Tile"  # nosec B101
+    assert summary["renderer_type"] == "sprite_frames"  # nosec B101
+    assert summary["source_format"] == "codex_pet"  # nosec B101
+    assert summary["asset_count"] == 1  # nosec B101
+    assert summary["assets_with_bytes"] == 1  # nosec B101
+    assert summary["resolved_required_states"] == {  # nosec B101
+        "idle": "idle-loop",
+        "listening": "codex-waiting-loop",
+        "thinking": "codex-review-loop",
+        "speaking": "codex-waving-loop",
+        "error": "codex-failed-loop",
+    }
+    assert summary["manifest_asset_references"] == ["codex-pet-spritesheet"]  # nosec B101
+    assert asset["source_asset_id"] == "codex-pet-spritesheet"  # nosec B101
+    assert asset["asset_role"] == "sprite_sheet"  # nosec B101
+    assert asset["asset_group"] == "animation_atlas"  # nosec B101
+    assert asset["width"] == 1536  # nosec B101
+    assert asset["height"] == 1872  # nosec B101
+    assert asset["manifest_referenced"] is True  # nosec B101
+
+
+def test_import_preview_codex_pet_without_target_requires_target_selection(tmp_path: Path) -> None:
+    archive_path = _codex_pet_archive(tmp_path)
+
+    preview = PersonaVisualPackImportPreviewer().create_preview(
+        archive_path=archive_path,
+        owner_user_id="user-1",
+    )
+
+    assert preview["required_choices"] == [  # nosec B101
+        {
+            "choice_id": "target_persona",
+            "resource": "persona",
+            "source_persona_id": None,
+            "allowed_actions": ["select_existing_persona"],
+            "default_action": "select_existing_persona",
+            "required": True,
+        }
+    ]
+
+
+def test_import_preview_accepts_petdex_petjson_manifest_alias(tmp_path: Path) -> None:
+    archive_path = _petdex_alias_archive(tmp_path)
+
+    preview = PersonaVisualPackImportPreviewer().create_preview(
+        archive_path=archive_path,
+        owner_user_id="user-1",
+        target_persona_id="target-persona",
+    )
+
+    asset = preview["bundle_summary"]["assets"][0]
+    assert preview["status"] == "completed"  # nosec B101
+    assert preview["schema_version"] == "codex.pet.v1"  # nosec B101
+    assert preview["bundle_summary"]["pack_title"] == "Petdex Alias"  # nosec B101
+    assert asset["source_asset_id"] == "codex-pet-spritesheet"  # nosec B101
+    assert asset["width"] == 1536  # nosec B101
+    assert asset["height"] == 1872  # nosec B101
+
+
+def test_import_commit_accepts_codex_pet_archive_as_inactive_draft(
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_portability.importer import (
+        PersonaVisualPackImporter,
+    )
+
+    _patch_visuals_dir(monkeypatch, tmp_path / "visuals")
+    persona_id = db_instance.create_persona_profile(
+        {"user_id": "user-1", "name": "Codex Pet Target"}
+    )
+    archive_path = _codex_pet_archive(tmp_path)
+    preview_result = PersonaVisualPackImportPreviewer().create_preview(
+        archive_path=archive_path,
+        owner_user_id="user-1",
+        target_persona_id=persona_id,
+    )
+    repo = PersonaVisualPortabilityRepository.initialized(db_instance)
+    preview = repo.create_import_preview(
+        owner_user_id="user-1",
+        job_id="job-preview-codex-pet",
+        status="completed",
+        stage="completed",
+        archive_path=str(archive_path),
+        archive_sha256=preview_result["archive_sha256"],
+        canonical_payload_fingerprint=preview_result["canonical_payload_fingerprint"],
+        schema_version=preview_result["schema_version"],
+        target_persona_id=persona_id,
+        bundle_summary=preview_result["bundle_summary"],
+        proposed_plan=preview_result["proposed_plan"],
+        required_choices=preview_result["required_choices"],
+    )
+
+    imported = PersonaVisualPackImporter(
+        db=db_instance,
+        repo=repo,
+        user_id="user-1",
+    ).import_preview(
+        preview_id=str(preview["id"]),
+        target_persona_id=persona_id,
+        trust_mode="untrusted_import",
+    )
+
+    pack = db_instance.get_persona_visual_pack(
+        pack_id=imported["pack_id"],
+        persona_id=persona_id,
+        user_id="user-1",
+    )
+    assets = db_instance.list_persona_visual_assets(
+        pack_id=imported["pack_id"],
+        persona_id=persona_id,
+        user_id="user-1",
+    )
+    assert imported["status"] == "imported"  # nosec B101
+    assert pack is not None  # nosec B101
+    assert pack["title"] == "Terminal Tile"  # nosec B101
+    assert pack["status"] == "draft"  # nosec B101
+    assert len(assets) == 1  # nosec B101
+    assert assets[0]["asset_role"] == "sprite_sheet"  # nosec B101
+    assert assets[0]["width"] == 1536  # nosec B101
+    assert assets[0]["height"] == 1872  # nosec B101
+    idle_frame = pack["manifest"]["animations"]["idle-loop"]["frames"][0]
+    assert idle_frame["asset_id"] == assets[0]["id"]  # nosec B101
+    assert idle_frame["region"] == {"x": 0, "y": 0, "width": 192, "height": 208}  # nosec B101
+    assert pack["manifest"]["states"]["tool_running"]["animation_id"] == "codex-running-loop"  # nosec B101
+    assert pack["manifest"]["states"]["moving_right"]["animation_id"] == "codex-moving-right-loop"  # nosec B101
+    assert pack["manifest"]["states"]["moving_left"]["animation_id"] == "codex-moving-left-loop"  # nosec B101
+    assert "moving_right" in pack["manifest"]["state_catalog"]  # nosec B101
+    assert "moving_left" in pack["manifest"]["state_catalog"]  # nosec B101
+
+
+def test_import_commit_codex_pet_cleans_up_failed_manifest_update(
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_portability.importer import (
+        PersonaVisualPackImporter,
+    )
+
+    _patch_visuals_dir(monkeypatch, tmp_path / "visuals")
+    persona_id = db_instance.create_persona_profile(
+        {"user_id": "user-1", "name": "Codex Pet Target"}
+    )
+    archive_path = _codex_pet_archive(tmp_path)
+    preview_result = PersonaVisualPackImportPreviewer().create_preview(
+        archive_path=archive_path,
+        owner_user_id="user-1",
+        target_persona_id=persona_id,
+    )
+    repo = PersonaVisualPortabilityRepository.initialized(db_instance)
+    preview = repo.create_import_preview(
+        owner_user_id="user-1",
+        job_id="job-preview-codex-pet-cleanup",
+        status="completed",
+        stage="completed",
+        archive_path=str(archive_path),
+        archive_sha256=preview_result["archive_sha256"],
+        canonical_payload_fingerprint=preview_result["canonical_payload_fingerprint"],
+        schema_version=preview_result["schema_version"],
+        target_persona_id=persona_id,
+        bundle_summary=preview_result["bundle_summary"],
+        proposed_plan=preview_result["proposed_plan"],
+        required_choices=preview_result["required_choices"],
+    )
+    original_update = db_instance.update_persona_visual_pack_manifest
+
+    def fail_manifest_update(*args: object, **kwargs: object) -> object:
+        if kwargs.get("persona_id") == persona_id:
+            raise RuntimeError("injected manifest failure")
+        return original_update(*args, **kwargs)
+
+    monkeypatch.setattr(db_instance, "update_persona_visual_pack_manifest", fail_manifest_update)
+
+    with pytest.raises(RuntimeError, match="injected manifest failure"):
+        PersonaVisualPackImporter(
+            db=db_instance,
+            repo=repo,
+            user_id="user-1",
+        ).import_preview(
+            preview_id=str(preview["id"]),
+            target_persona_id=persona_id,
+            trust_mode="untrusted_import",
+        )
+
+    active_packs = db_instance.list_persona_visual_packs(
+        persona_id=persona_id,
+        user_id="user-1",
+    )
+    deleted_packs = db_instance.list_persona_visual_packs(
+        persona_id=persona_id,
+        user_id="user-1",
+        include_deleted=True,
+    )
+    asset_rows = db_instance.execute_query(
+        """
+        SELECT deleted
+          FROM persona_visual_assets
+         WHERE persona_id = ?
+           AND user_id = ?
+        """,
+        (persona_id, "user-1"),
+    ).fetchall()
+    assert active_packs == []  # nosec B101
+    assert len(deleted_packs) == 1  # nosec B101
+    assert deleted_packs[0]["deleted"] is True  # nosec B101
+    assert len(asset_rows) == 1  # nosec B101
+    assert bool(asset_rows[0]["deleted"]) is True  # nosec B101
 
 
 def test_import_preview_reports_v2_live2d_renderer_diagnostics_without_activation(

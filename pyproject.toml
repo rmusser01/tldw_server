@@ -536,6 +536,7 @@ tldw_Server_API = [
   "app/Setup_UI/*.html",
   "app/core/Evaluations/data/*.json",
   "app/core/Evaluations/data/**/*.json",
+  "app/core/Persona/assets/**/*.png",
   "app/core/Slides/revealjs/**/*",
   "Databases/**/*.sql",
   "Samples/Workflows/*.json",

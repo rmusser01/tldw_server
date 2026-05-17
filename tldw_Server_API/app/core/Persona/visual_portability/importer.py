@@ -22,6 +22,10 @@ from tldw_Server_API.app.core.Persona.visual_portability.constants import (
     TRUST_MODE_TRUSTED_RESTORE,
     TRUST_MODE_UNTRUSTED_IMPORT,
 )
+from tldw_Server_API.app.core.Persona.visual_portability.codex_pet import (
+    CODEX_PET_SCHEMA_VERSION,
+    load_codex_pet_archive,
+)
 from tldw_Server_API.app.core.Persona.visual_portability.fingerprints import sha256_file
 from tldw_Server_API.app.core.Persona.visual_portability.preview import (
     PersonaVisualPackImportPreviewer,
@@ -104,6 +108,16 @@ class PersonaVisualPackImporter:
                 target_persona_id=target_persona_id,
                 target_pack_id=target_pack_id,
                 preview_conflicts=current_conflicts,
+            )
+        if revalidated.get("schema_version") == CODEX_PET_SCHEMA_VERSION:
+            return self._import_codex_pet_archive(
+                archive_path=archive_path,
+                preview_id=str(preview_id),
+                target_persona_id=target_persona_id,
+                target_mode_value=target_mode_value,
+                replacement_pack=replacement_pack,
+                title=title,
+                progress=progress,
             )
 
         with zipfile.ZipFile(archive_path, "r") as archive:
@@ -213,6 +227,139 @@ class PersonaVisualPackImporter:
         return {
             "status": "imported",
             "preview_id": str(preview_id),
+            "pack_id": str(created_pack["id"]),
+            "target_mode": target_mode_value,
+            "replaced_pack_id": replaced_pack_id,
+            "pack": updated_pack,
+            "id_maps": id_maps,
+            "created_records": {
+                "pack_id": str(created_pack["id"]),
+                "asset_ids": [str(asset["id"]) for asset in imported_assets],
+                "replaced_pack_id": replaced_pack_id,
+            },
+        }
+
+    def _import_codex_pet_archive(
+        self,
+        *,
+        archive_path: Path,
+        preview_id: str,
+        target_persona_id: str,
+        target_mode_value: str,
+        replacement_pack: dict[str, Any] | None,
+        title: str | None,
+        progress: Any | None,
+    ) -> dict[str, Any]:
+        """Commit a Codex pet archive as a Persona Visual draft pack."""
+        payload = load_codex_pet_archive(archive_path)
+        pack = payload.pack
+        assets = payload.assets
+
+        self._progress(progress, "creating_pack", {"target_persona_id": target_persona_id})
+        pack_title = _import_pack_title(title=title, pack=pack)
+        created_pack = self.db.create_persona_visual_pack(
+            persona_id=target_persona_id,
+            user_id=self.user_id,
+            title=pack_title,
+            renderer_type=str(pack.get("renderer_type") or "sprite_frames"),
+            manifest={
+                "manifest_version": 1,
+                "renderer_type": str(pack.get("renderer_type") or "sprite_frames"),
+                "states": {},
+                "animations": {},
+            },
+            provenance="imported",
+        )
+
+        id_maps: dict[str, Any] = {"assets": {}, "packs": {}}
+        imported_assets = []
+        try:
+            for asset in assets:
+                asset_path = normalize_member_name(str(asset.get("asset_path") or ""))
+                if asset_path not in payload.asset_files:
+                    raise ValueError(f"missing_asset_file: {asset_path}")
+                imported = self.service.create_asset_from_upload(
+                    persona_id=target_persona_id,
+                    user_id=self.user_id,
+                    pack_id=str(created_pack["id"]),
+                    content=payload.asset_files[asset_path],
+                    mime_type=str(asset.get("mime_type") or "application/octet-stream"),
+                    original_filename=asset.get("original_filename"),
+                    asset_role=str(asset.get("asset_role") or "frame"),
+                    provenance="imported",
+                )
+                source_asset_id = str(asset.get("source_asset_id") or "")
+                if source_asset_id:
+                    id_maps["assets"][source_asset_id] = str(imported["id"])
+                imported_assets.append(imported)
+
+            visual_manifest = pack.get("visual_manifest") if isinstance(
+                pack.get("visual_manifest"),
+                dict,
+            ) else {}
+            remapped_manifest = remap_visual_manifest_assets(visual_manifest, id_maps["assets"])
+            asset_ids = {str(asset["id"]) for asset in imported_assets}
+            asset_dimensions = {
+                str(asset["id"]): (int(asset["width"]), int(asset["height"]))
+                for asset in imported_assets
+                if asset.get("width") is not None and asset.get("height") is not None
+            }
+            validation = validate_visual_manifest(
+                remapped_manifest,
+                available_asset_ids=asset_ids,
+                available_asset_dimensions=asset_dimensions,
+                require_activatable=False,
+            )
+            updated_pack = self.db.update_persona_visual_pack_manifest(
+                pack_id=str(created_pack["id"]),
+                persona_id=target_persona_id,
+                user_id=self.user_id,
+                manifest=validation.manifest,
+                expected_version=int(created_pack["version"]),
+            )
+        except Exception:
+            self._cleanup_created_pack(
+                pack_id=str(created_pack["id"]),
+                target_persona_id=target_persona_id,
+            )
+            raise
+        replaced_pack_id = None
+        if replacement_pack is not None:
+            replaced_pack_id = str(replacement_pack["id"])
+            self._progress(
+                progress,
+                "replacing_draft",
+                {"target_pack_id": replaced_pack_id, "pack_id": str(created_pack["id"])},
+            )
+            try:
+                replaced = self.db.soft_delete_persona_visual_pack_with_assets(
+                    pack_id=replaced_pack_id,
+                    persona_id=target_persona_id,
+                    user_id=self.user_id,
+                    expected_version=int(replacement_pack["version"]),
+                    allowed_statuses=_REPLACEABLE_IMPORT_TARGET_STATUSES,
+                )
+            except Exception:
+                self._cleanup_created_pack(
+                    pack_id=str(created_pack["id"]),
+                    target_persona_id=target_persona_id,
+                )
+                raise
+            if not replaced:
+                self._cleanup_created_pack(
+                    pack_id=str(created_pack["id"]),
+                    target_persona_id=target_persona_id,
+                )
+                raise ValueError("import_target_pack_not_replaceable")
+
+        self._progress(
+            progress,
+            "completed",
+            {"pack_id": str(created_pack["id"]), "asset_count": len(imported_assets)},
+        )
+        return {
+            "status": "imported",
+            "preview_id": preview_id,
             "pack_id": str(created_pack["id"]),
             "target_mode": target_mode_value,
             "replaced_pack_id": replaced_pack_id,

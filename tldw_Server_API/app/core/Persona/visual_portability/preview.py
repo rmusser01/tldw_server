@@ -33,6 +33,12 @@ from .constants import (
     TRUST_MODE_TRUSTED_RESTORE,
     TRUST_MODE_UNTRUSTED_IMPORT,
 )
+from .codex_pet import (
+    CODEX_PET_ASSET_ID,
+    CODEX_PET_SCHEMA_VERSION,
+    is_codex_pet_archive,
+    load_codex_pet_archive,
+)
 from .fingerprints import canonical_payload_fingerprint, sha256_file, sha256_stream
 
 _INTEGER_TEXT_RE = re.compile(r"^[+-]?[0-9]+$")
@@ -52,6 +58,13 @@ class PersonaVisualPackImportPreviewer:
     ) -> dict[str, Any]:
         archive_path = Path(archive_path)
         self._progress(progress, "validating_archive", {"archive_path": str(archive_path)})
+        if is_codex_pet_archive(archive_path):
+            return self._create_codex_pet_preview(
+                archive_path=archive_path,
+                target_persona_id=target_persona_id,
+                target_packs=target_packs,
+                progress=progress,
+            )
         validate_archive_members(archive_path)
         archive_sha256 = sha256_file(archive_path)
 
@@ -187,6 +200,105 @@ class PersonaVisualPackImportPreviewer:
             ),
         }
 
+    def _create_codex_pet_preview(
+        self,
+        *,
+        archive_path: Path,
+        target_persona_id: str | None,
+        target_packs: Sequence[Mapping[str, Any]] | None,
+        progress: Callable[[str, dict[str, Any]], None] | None,
+    ) -> dict[str, Any]:
+        """Return an import preview for a Petdex/Codex pet archive."""
+        self._progress(progress, "validating_codex_pet", {"archive_path": str(archive_path)})
+        payload = load_codex_pet_archive(archive_path)
+        archive_sha256 = sha256_file(archive_path)
+        pack = payload.pack
+        assets = payload.assets
+        visual_manifest = pack["visual_manifest"]
+        manifest_validation = validate_visual_manifest(
+            visual_manifest,
+            available_asset_ids={CODEX_PET_ASSET_ID},
+            available_asset_dimensions={
+                CODEX_PET_ASSET_ID: (
+                    int(assets[0]["width"]),
+                    int(assets[0]["height"]),
+                )
+            },
+            require_activatable=False,
+        )
+        asset_summary = {
+            "present_asset_items": len(assets),
+            "missing_asset_items": 0,
+            "present_asset_bytes": sum(
+                len(payload.asset_files[str(asset["asset_path"])])
+                for asset in assets
+                if asset.get("asset_path") in payload.asset_files
+            ),
+        }
+        conflicts = _target_pack_conflicts(pack=pack, target_packs=target_packs)
+        replaceable_pack_ids = _replaceable_pack_ids(conflicts)
+        target_modes = ["create_new"]
+        if replaceable_pack_ids:
+            target_modes.append("replace_draft")
+        required_choices = _required_choices(
+            source_persona_id=None,
+            target_persona_id=target_persona_id,
+            conflicts=conflicts,
+            replaceable_pack_ids=replaceable_pack_ids,
+        )
+        proposed_plan = {
+            "target_mode": "create_new",
+            "target_modes": target_modes,
+            "trust_modes": [
+                TRUST_MODE_TRUSTED_RESTORE,
+                TRUST_MODE_UNTRUSTED_IMPORT,
+            ],
+            "default_trust_mode": TRUST_MODE_UNTRUSTED_IMPORT,
+            "default_target_mode": "create_new",
+            "review_before_commit": True,
+            "commit_eligible": True,
+            "default_target_persona_id": target_persona_id,
+            "missing_asset_policy": "import_all_codex_pet_atlas_bytes",
+            "source_format": "codex_pet",
+            "replaceable_pack_ids": replaceable_pack_ids,
+            "update_identity_rules": {
+                "assets": [
+                    "source_asset_id",
+                    "asset_role+checksum_sha256",
+                ],
+                "manifest": "state_and_animation_ids",
+            },
+        }
+        bundle_summary = _bundle_summary(
+            manifest=payload.manifest,
+            pack=pack,
+            assets=assets,
+            asset_summary=asset_summary,
+            resolved_required_states=manifest_validation.resolved_required_states,
+        )
+        self._progress(progress, "completed", {"archive_sha256": archive_sha256})
+        return {
+            "status": "completed",
+            "archive_sha256": archive_sha256,
+            "canonical_payload_fingerprint": _preview_fingerprint(
+                manifest=payload.manifest,
+                pack=pack,
+                assets=assets,
+            ),
+            "schema_version": CODEX_PET_SCHEMA_VERSION,
+            "bundle_summary": bundle_summary,
+            "validation_warnings": [],
+            "conflicts": conflicts,
+            "proposed_plan": proposed_plan,
+            "quota_estimate": {
+                "asset_bytes": asset_summary["present_asset_bytes"],
+                "present_asset_items": asset_summary["present_asset_items"],
+                "missing_asset_items": asset_summary["missing_asset_items"],
+            },
+            "required_choices": required_choices,
+            "target_warnings": [],
+        }
+
     def _progress(
         self,
         progress: Callable[[str, dict[str, Any]], None] | None,
@@ -200,7 +312,7 @@ class PersonaVisualPackImportPreviewer:
 def _archive_members_by_normalized_name(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
     members: dict[str, zipfile.ZipInfo] = {}
     for info in archive.infolist():
-        members[normalize_member_name(getattr(info, "orig_filename", info.filename))] = info
+        members[normalize_member_name(info.filename)] = info
     return members
 
 
@@ -343,6 +455,7 @@ def _bundle_summary(
     return {
         "pack_title": pack.get("title") or manifest.get("pack_title"),
         "renderer_type": pack.get("renderer_type") or manifest.get("renderer_type"),
+        "source_format": pack.get("source_format"),
         "source_persona_id": pack.get("source_persona_id"),
         "asset_count": len(assets),
         "assets_with_bytes": asset_summary["present_asset_items"],
@@ -464,7 +577,7 @@ def _replaceable_pack_ids(conflicts: Sequence[Mapping[str, Any]]) -> list[str]:
 
 def _required_choices(
     *,
-    source_persona_id: str,
+    source_persona_id: str | None,
     target_persona_id: str | None,
     conflicts: Sequence[Mapping[str, Any]],
     replaceable_pack_ids: Sequence[str],
@@ -486,13 +599,19 @@ def _required_choices(
                 }
             )
         return choices
+    source_persona_id_value = str(source_persona_id or "").strip()
+    allowed_actions = ["select_existing_persona"]
+    default_action = "select_existing_persona"
+    if source_persona_id_value:
+        allowed_actions.insert(0, "import_to_source_persona")
+        default_action = "import_to_source_persona"
     choices.append(
         {
             "choice_id": "target_persona",
             "resource": "persona",
-            "source_persona_id": source_persona_id or None,
-            "allowed_actions": ["import_to_source_persona", "select_existing_persona"],
-            "default_action": "import_to_source_persona",
+            "source_persona_id": source_persona_id_value or None,
+            "allowed_actions": allowed_actions,
+            "default_action": default_action,
             "required": True,
         }
     )

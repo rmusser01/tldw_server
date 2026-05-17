@@ -273,8 +273,9 @@ class PersonaVisualService:
                 details={"asset_ids": missing_asset_ids},
             )
 
+        asset_ids_to_copy = set(source_assets_by_id)
         preflight_assets: list[tuple[dict[str, Any], Path]] = []
-        for asset_id in sorted(referenced_asset_ids):
+        for asset_id in sorted(asset_ids_to_copy):
             asset = source_assets_by_id[asset_id]
             source_path = self._asset_storage_path(
                 user_id=user_id,

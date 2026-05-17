@@ -119,7 +119,133 @@ archive metadata does not become a support claim. This lets review surfaces
 distinguish source sheets and neutral anchors from runtime strip or atlas outputs
 without committing or activating the archive.
 
-### Sprite Atlas Frames
+### Codex Pet Imports
+
+Persona Visual import preview also accepts Petdex/Codex pet `.zip` packages as
+an adapter format. A Codex pet package must include `pet.json` or `petjson.json`
+and one declared PNG or WebP spritesheet. The supported atlas layout is the
+current Codex pet sheet contract: 1536x1872 pixels, 8 columns by 9 rows, with
+192x208 pixel frames.
+
+The adapter does not create a parallel asset store. Preview translates the
+Codex package into a normal `sprite_frames` Persona Visual draft plan with one
+`sprite_sheet` asset in the `animation_atlas` group. Commit imports that atlas
+through the existing Persona Visual storage service, remaps manifest asset
+references to the newly created asset id, and leaves the resulting pack in
+`draft` status until the user explicitly activates it.
+
+Codex atlas rows map into tldw states as follows:
+
+1. `idle` -> `idle`
+2. `running-right` -> custom `moving_right`
+3. `running-left` -> custom `moving_left`
+4. `waving` -> `speaking`, `wake_armed`, and custom `codex.waving`
+5. `jumping` -> custom `codex.jumping`
+6. `failed` -> `error` and custom `codex.failed`
+7. `waiting` -> `listening` and custom `codex.waiting`
+8. `running` -> `tool_running` and custom `codex.running`
+9. `review` -> `thinking`, `approval_needed`, and custom `codex.review`
+
+`moving_right` and `moving_left` are tldw movement states for Buddy drag or
+screen-position movement, not generic tool activity. They are declared in the
+pack `state_catalog`, so runtimes that do not know those states can still fall
+back through normal state resolution.
+
+### Simple Buddy Creator Reference
+
+tldw's user-facing Buddy creation flow should use the hatch-pet workflow as a
+reference model, retuned around the Persona Visual functionality available in
+tldw. Hatch-pet supplies the practical creation loop: canonical base, row-based
+poses, deterministic atlas assembly, contact-sheet review, motion-preview
+review, packaging, and cleanup. tldw supplies the product surface: Persona
+Garden review, Persona Visual pack storage, import-preview diagnostics,
+inactive draft creation, optional library reuse, MCP-triggerable custom states,
+and explicit activation.
+
+The goal is not to require users to understand Codex pet internals before they
+can make a Buddy. The simple path should guide users through the smallest useful
+asset workflow and then store the result as a normal Persona Visual draft pack.
+The full Codex-compatible path should remain available when users want import,
+export, or reuse with Codex pets.
+
+The tldw-retuned creation modes are:
+
+1. **Simple Buddy mode**: user provides a name, description, optional reference
+   image, and style notes. tldw helps create one neutral anchor and the minimum
+   runtime states needed for a usable Buddy: `idle`, `listening`, `thinking`,
+   `speaking`, and `error`. If the Buddy can move around the screen, it can also
+   add `moving_right` and `moving_left`. The output is a Persona Visual draft
+   pack with review evidence.
+2. **Codex-compatible mode**: user creates the full nine-row Codex atlas:
+   `idle`, `running-right`, `running-left`, `waving`, `jumping`, `failed`,
+   `waiting`, `running`, and `review`. tldw imports the result as a Persona
+   Visual draft and can also preserve `pet.json` plus `spritesheet.webp`
+   compatibility.
+
+Both modes should use the same user-facing checkpoints:
+
+1. Confirm the Buddy name, description, style notes, optional references, and
+   desired complexity.
+2. Create or upload the canonical neutral anchor that becomes the identity lock
+   for every generated pose.
+3. Generate or import state rows/frames from that anchor.
+4. Assemble deterministic runtime assets rather than trusting generated images
+   to have exact geometry.
+5. Show a review sheet and, when animation exists, motion previews.
+6. Import the accepted result into a normal Persona Visual draft pack.
+7. Keep the imported pack inactive until explicit activation.
+
+For a full Codex-compatible Buddy animation pack, the expected production shape
+is:
+
+1. Define the Buddy name, description, style notes, references, and neutral
+   identity anchor.
+2. Generate or author one canonical base image that becomes the identity lock
+   for every animation row.
+3. Produce the nine Codex rows: `idle`, `running-right`, `running-left`,
+   `waving`, `jumping`, `failed`, `waiting`, `running`, and `review`.
+4. Derive `running-left` from `running-right` only when mirroring preserves the
+   Buddy identity, prop side, markings, lighting, and movement meaning.
+5. Assemble the final atlas deterministically as 1536x1872 pixels with 8
+   columns, 9 rows, and 192x208 pixel cells.
+6. Validate atlas geometry, transparent unused pixels, non-empty used cells,
+   and frame-region manifest references.
+7. Review a contact sheet and per-row motion previews before accepting the
+   pack.
+8. Package `pet.json` plus `spritesheet.webp` for Codex-pet compatibility, or
+   import the atlas directly into a Persona Visual draft pack.
+9. Keep the imported pack inactive until explicit activation.
+
+The visual QA rules from the hatch process are also the right bar for
+user-created and bundled Buddy defaults. Reject rows with identity drift,
+clipped body parts, slot overlap, copied guide marks, white or nontransparent
+cell backgrounds, unexpected size popping, wrong facing direction, inert idle
+loops, or effects that detach from the sprite. State motion should be expressed
+through pose, silhouette, expression, and attached props rather than shadows,
+glows, motion trails, speed lines, floor marks, loose punctuation, or detached
+icons.
+
+The state semantics should stay aligned with Codex while using tldw labels where
+they are clearer:
+
+1. `idle` is calm micro-motion and must not become waving, walking, talking, or
+   tool work.
+2. `running-right` and `running-left` are tldw `moving_right` and `moving_left`
+   movement states for user-driven Buddy movement.
+3. `waving` maps to greeting or speaking-like visible acknowledgement.
+4. `jumping` is vertical movement through body position only.
+5. `failed` maps to the `error` state.
+6. `waiting` maps to `listening` or approval/input waiting.
+7. `running` maps to active tool work or processing, not literal foot-running.
+8. `review` maps to focused thinking or approval review.
+
+Basic defaults and simple user-created Buddies can stay visually simple, but
+their final production packets should still pass the same identity,
+transparency, state semantics, and review process. The earlier 3x4 source sheets
+are acceptable as concept review evidence; they should be converted into either
+the simple tldw draft-pack contract or the full Codex-compatible atlas contract
+before the pack is treated as a final bundled default.
+
 ## Sprite Atlas Packs
 
 Sprite atlas support is part of the existing `sprite_frames` renderer. In this
@@ -244,46 +370,202 @@ declares the state; otherwise it falls back to normal live/tool state resolution
 This keeps direct MCP triggers compatible with large custom state catalogs
 without allowing arbitrary runtime state strings to become renderable states.
 
-## Bundled Starter Catalog Scaffolds
+## Bundled Starter Catalog
 
 Bundled starter catalog entries are immutable server fixtures for first-run or
-recovery flows. They are not global Persona Visual pack rows, shared library
-entries, runtime assets, final character artwork, or completed animation packs.
-Listing the catalog returns safe fixture metadata only.
+recovery flows. They are not global Persona Visual pack rows or shared library
+entries. Listing the catalog returns safe fixture metadata only, and copying a
+starter always creates a normal user-owned draft pack before activation.
 
-The current bundled catalog exposes nine starter IDs in stable order:
+The current bundled catalog exposes twelve starter IDs in stable order while the
+basic tier is being rebuilt into the six approved defaults:
 
-1. `research-buddy-basic`
-2. `migu-marker-basic`
-3. `minimal-helper-basic`
-4. `study-desk-intermediate`
-5. `tool-helper-intermediate`
-6. `object-creature-intermediate`
-7. `lofi-study-intricate`
-8. `action-guide-intricate`
-9. `elaborate-persona-intricate`
+1. `search-lens-basic`
+2. `index-card-basic`
+3. `archive-cube-basic`
+4. `paperclip-basic`
+5. `terminal-tile-basic`
+6. `migu-marker-basic`
+7. `study-desk-intermediate`
+8. `tool-helper-intermediate`
+9. `object-creature-intermediate`
+10. `lofi-study-intricate`
+11. `action-guide-intricate`
+12. `elaborate-persona-intricate`
 
 These map to the approved basic, intermediate, and intricate tiers from the
-Persona Buddy default catalog design, but this slice only adds backend catalog
-scaffolds. The included PNGs are deliberately tiny deterministic fixtures, and
-the manifest animations are metadata examples that validate state/asset copying;
-they are not the final generated/imported buddy art or expressive animation
-frames. Real default buddy assets still need to be created through the approved
-neutral-pose-to-animation pipeline and can replace these fixture assets without
-changing the catalog copy contract.
+Persona Buddy default catalog design. The bundled basic tier is Search Lens,
+Index Card, Archive Cube, Paperclip, Terminal Tile, and Migu. The approved 3x4
+basic sheets are retained as review evidence and Simple Buddy production
+packets. Full Codex-pet-compatible atlas packets can be produced from the same
+neutral-anchor process when a bundled default or user-created Buddy needs the
+Codex import/export pathway.
 
-The scaffold fixtures establish stable copy-to-draft behavior, required-state
-coverage, custom-state examples, and an atlas-backed example while preserving
-the same explicit activation rule as user-created packs. The legacy
-`research-buddy-starter` id remains accepted as a compatibility alias for the
-research buddy scaffold, but it is not listed as a tenth catalog item.
+Each final basic starter should include a neutral anchor, preview asset, and
+required state coverage for `idle`, `listening`, `thinking`, `speaking`, and
+`error`. When the starter targets the full Codex-compatible path, it should also
+include atlas-backed movement coverage for `moving_right` and `moving_left`. The
+existing 96x96 frame packets remain useful review artifacts and bundled Simple
+Buddy assets. New full-compatibility packets should use the Codex atlas
+interchange path.
+
+The Search Lens source-sheet checkpoint is stored with its processed frame
+review packet:
+
+![Search Lens Buddy processed frame review](assets/buddy-defaults/search-lens-basic/review/search-lens-basic-3x4-processed-review-v2.png)
+
+The Index Card source-sheet checkpoint is stored with its processed frame
+review packet:
+
+![Index Card Buddy processed frame review](assets/buddy-defaults/index-card-basic/review/index-card-basic-3x4-processed-review-v2.png)
+
+The Archive Cube source-sheet checkpoint is stored with its processed frame
+review packet:
+
+![Archive Cube Buddy processed frame review](assets/buddy-defaults/archive-cube-basic/review/archive-cube-basic-3x4-processed-review-v1.png)
+
+The Paperclip source-sheet checkpoint is stored with its processed frame review
+packet:
+
+![Paperclip Buddy processed frame review](assets/buddy-defaults/paperclip-basic/review/paperclip-basic-3x4-processed-review-v1.png)
+
+The Terminal Tile source-sheet checkpoint is stored with its processed frame
+review packet:
+
+![Terminal Tile Buddy processed frame review](assets/buddy-defaults/terminal-tile-basic/review/terminal-tile-basic-3x4-processed-review-v1.png)
+
+The Migu source-sheet checkpoint is stored with its processed frame review
+packet:
+
+![Migu Buddy processed frame review](assets/buddy-defaults/migu-marker-basic/review/migu-marker-basic-3x4-processed-review-v1.png)
+
+### Basic Buddy recreation walkthrough
+
+The basic tier intentionally models the simplest user-facing creation process:
+start with one neutral anchor, preserve that silhouette, and author only the
+smallest state deltas needed for expressive runtime feedback. The bundled basic
+packs do not require a separate static talking sheet, reaction sheet, or
+tool-specific variants. For production import parity with Codex pets, a full
+compatibility packet can be a single 8x9 atlas derived from that same neutral
+anchor and reviewed with the hatch-style contact-sheet and motion-preview bar.
+
+#### `search-lens-basic`
+
+1. Create the neutral anchor as a friendly magnifying-glass assistant: round
+   teal-blue lens face, charcoal rim, short handle body, tiny arms, two short
+   legs, rounded feet, and a calm readable smile.
+2. Keep the round lens, handle, and two-leg construction fixed across the
+   two-frame loops so the Buddy reads as the same character even at small sizes.
+3. Derive state frames from that neutral pose:
+   - `idle`: tiny vertical bounce with the neutral smile.
+   - `listening`: slight lens tilt plus hand-to-rim attention gesture.
+   - `thinking`: small head tilt with a hand near the rim.
+   - `speaking`: alternating open mouth and shifted arm gesture.
+   - `error`: worried mouth plus wobble or alert posture.
+   - `reaction.success`: single celebratory pose from the same source sheet.
+
+#### `index-card-basic`
+
+1. Create the neutral anchor as a friendly tabbed index-card assistant: cream
+   ruled-card body, visible tab, dot eyes, small smile, tiny arms, and two short
+   legs.
+2. Keep the rectangular card body, tab, ruled lines, and two-leg construction
+   fixed across the two-frame loops so the Buddy reads as the same paper
+   character at small sizes.
+3. Derive state frames from that neutral pose:
+   - `idle`: tiny vertical bounce with the neutral smile.
+   - `listening`: slight page tilt plus attention marks.
+   - `thinking`: tilted card with a small thought cue.
+   - `speaking`: alternating open mouth with small speech marks.
+   - `error`: worried mouth plus red correction marks.
+   - `reaction.success`: single celebratory pose from the same source sheet.
+
+#### `archive-cube-basic`
+
+1. Create the neutral anchor as a friendly archive cube assistant: muted
+   teal-blue cube sides, cream drawer panel, small tab slot, dot eyes, simple
+   mouth, tiny arms, and two short legs.
+2. Keep the cube body, drawer panel, label slot, and two-leg construction fixed
+   across the two-frame loops so the Buddy reads as the same storage character
+   at small sizes.
+3. Derive state frames from that neutral pose:
+   - `idle`: tiny bounce with the neutral smile.
+   - `listening`: slight cube tilt plus attention marks.
+   - `thinking`: cube tilt with a small thought cue.
+   - `speaking`: alternating open mouth and arm gesture.
+   - `error`: worried mouth plus a red alert corner.
+   - `reaction.success`: single celebratory pose from the same source sheet.
+
+#### `paperclip-basic`
+
+1. Create the neutral anchor as a friendly paperclip assistant: looped wire
+   body, pale metal linework, small face, tiny arms, and two short legs.
+2. Keep the looped clip silhouette, wire thickness, and two-leg construction
+   fixed across the two-frame loops so the Buddy reads as the same object
+   character at small sizes.
+3. Derive state frames from that neutral pose:
+   - `idle`: tiny bounce with the neutral smile.
+   - `listening`: slight clip tilt plus attention marks.
+   - `thinking`: loop squash or bend with a small thought cue.
+   - `speaking`: alternating open mouth and arm gesture.
+   - `error`: worried mouth plus red alert marks.
+   - `reaction.success`: single celebratory pose from the same source sheet.
+
+#### `terminal-tile-basic`
+
+1. Create the neutral anchor as a friendly terminal-window tile assistant:
+   charcoal rounded-square body, subtle top title bar, mint cursor-face accents,
+   tiny arms, and two short legs.
+2. Keep the terminal tile body, top-bar hint, mint face language, and two-leg
+   construction fixed across the two-frame loops so the Buddy reads as the same
+   CLI-flavored object character at small sizes.
+3. Derive state frames from that neutral pose:
+   - `idle`: tiny bounce with the calm cursor face.
+   - `listening`: attentive face plus subtle side signal marks.
+   - `thinking`: cursor-face expression shifts with one hand near the tile.
+   - `speaking`: alternating open cursor mouth and small arm gesture.
+   - `error`: worried cursor face plus slumped posture.
+   - `reaction.success`: single celebratory pose from the same source sheet.
+
+#### `migu-marker-basic`
+
+1. Create the neutral anchor from the supplied Migu direction as a rough
+   marker-line chibi: cream oval face, tiny gray body, black sketch limbs, cyan
+   twin tails, magenta hair ties, a simple earpiece headset with mic, and a
+   black center line splitting the shirt.
+2. Preserve the handmade asymmetry and cyan twin-tail silhouette. The roughness
+   is part of the design, so cleanup should improve readability without turning
+   it into a polished mascot. Keep the headset, mic, and shirt split readable
+   without letting them dominate the marker-sketch identity.
+3. Derive state frames from that neutral pose:
+   - `idle`: small bounce with the simple happy face.
+   - `listening`: hair and headset attention posture lift outward.
+   - `thinking`: mouth flattens while the head and twin tails shift subtly.
+   - `speaking`: mouth opens while the mic-side pose carries the beat.
+   - `reaction.success`: single celebratory pose from the same source sheet.
+   - `error`: worried mouth plus a red alert mark.
+
+The six intermediate and intricate starters remain catalog scaffolds until their
+own asset-production issues produce reviewed final art. Their included PNGs are
+small deterministic fixtures and their manifest animations are metadata examples
+that validate state/asset copying, custom-state examples, and atlas-backed
+support. Real intermediate and intricate default Buddy assets still need to be
+created through the approved neutral-pose-to-animation pipeline and can replace
+those fixture assets without changing the catalog copy contract.
+
+The bundled starter catalog preserves the same explicit activation rule as
+user-created packs. The legacy `research-buddy-starter` id remains accepted as a
+compatibility alias for the research buddy default, but it is not listed as a
+separate catalog item.
 
 Starter catalog responses include production-readiness metadata so clients,
 review surfaces, and future generation workers can distinguish current
 scaffolds from final authored default assets:
 
 1. `complexity_tier` is one of `basic`, `intermediate`, or `intricate`.
-2. `production_status` is currently `scaffold` for all bundled starters.
+2. `production_status` is `art_ready` for the current basic bundled defaults and
+   `scaffold` for the six intermediate/intricate starters until their final
+   assets pass review.
 3. `neutral_anchor_required` is true when the final authored pack should begin
    from a neutral identity anchor.
 4. `expected_asset_groups` lists the authored inputs and outputs expected
@@ -300,16 +582,18 @@ scaffolds from final authored default assets:
 The neutral-anchor pipeline remains: identity brief, neutral anchor, optional
 static talking and reaction sheets, animation strips or atlas regions, review,
 then copy/import into an inactive draft with separate activation. The production
-metadata is catalog guidance for that pipeline; it does not create final art,
-run image generation, activate a pack, or change renderer support.
+metadata is catalog guidance for that pipeline. It does not run image
+generation, activate a pack, or change renderer support.
 
 Production recipes make the scaffold-to-art handoff explicit. Basic starters
 usually expect only required-state loops derived from a single neutral anchor.
 Intermediate starters add separate static talking and reaction sheets and custom-state
 variants. Intricate starters add animation strips or atlas regions on top of the
 same neutral anchor. These recipes are not prompts that the server executes and
-are not proof that finished animation assets exist; they are bounded metadata
-for reviewers, future generation jobs, and custom provider handoffs.
+are bounded metadata for reviewers, future generation jobs, and custom provider
+handoffs. For `art_ready` bundled defaults, the recipe describes the production
+path used to create the included runtime assets; for `scaffold` starters, it
+describes the remaining handoff.
 
 Static talking sheets and static reaction sheets are source material, not timed animation outputs.
 They may appear in `expected_asset_groups` and in the recipe `static_sheet`
@@ -330,6 +614,10 @@ has an active pack, that active pack stays active until the user explicitly
 activates the copied draft through the existing activation endpoint. This keeps
 bundled defaults aligned with the same review-before-activation rule used by
 imports, library reuse, and generated candidates.
+
+The current default packs are bundled with the server by default. More/additional
+packs should be optional add-ons or user imports; they are not required baseline
+content for the Persona/Buddy system.
 
 Current starter-pack API routes:
 

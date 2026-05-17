@@ -196,9 +196,9 @@ def test_get_persona_visual_starter_pack_detail(persona_db: CharactersRAGDB) -> 
     payload = response.json()
     assert payload["id"] == DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID
     assert payload["manifest"]["renderer_type"] == "sprite_frames"
-    assert "catalog:scaffold" in payload["tags"]
-    assert "scaffold" in payload["description"].lower()
-    assert payload["production_status"] == "scaffold"
+    assert "catalog:art-ready" in payload["tags"]
+    assert "scaffold" not in payload["description"].lower()
+    assert payload["production_status"] == "art_ready"
     assert payload["complexity_tier"] == "basic"
     assert payload["neutral_anchor_required"] is True
     assert "neutral_anchor" in payload["expected_asset_groups"]
@@ -398,12 +398,12 @@ def test_list_persona_visual_starter_packs(persona_db: CharactersRAGDB) -> None:
         item["id"] for item in payload["starter_packs"]
     }
     starter = payload["starter_packs"][0]
-    assert starter["title"] == "Research Buddy Basic"
+    assert starter["title"] == "Search Lens Basic"
     assert starter["renderer_type"] == "sprite_frames"
-    assert starter["asset_count"] == 1
-    assert "catalog:scaffold" in starter["tags"]
-    assert "scaffold" in starter["description"].lower()
-    assert starter["production_status"] == "scaffold"
+    assert starter["asset_count"] == 13
+    assert "catalog:art-ready" in starter["tags"]
+    assert "scaffold" not in starter["description"].lower()
+    assert starter["production_status"] == "art_ready"
     assert starter["complexity_tier"] == "basic"
     assert starter["neutral_anchor_required"] is True
     assert "neutral_anchor" in starter["expected_asset_groups"]
@@ -455,13 +455,13 @@ def test_copy_visual_starter_pack_creates_draft_without_activation(
 
         assert response.status_code == 201, response.text
         payload = response.json()
-        assert payload["title"] == "Research Buddy Basic"
+        assert payload["title"] == "Search Lens Basic"
         assert payload["persona_id"] == persona_id
         assert payload["status"] == "draft"
         assert payload["provenance"] == "imported"
         assert payload["parent_pack_id"] is None
         assert payload["active_at"] is None
-        assert len(payload["assets"]) == 1
+        assert len(payload["assets"]) == 13
         assert payload["assets"][0]["provenance"] == "imported"
         assert "neutral" not in str(payload["manifest"])
         assert persona_db.get_active_persona_visual_pack(
@@ -1547,6 +1547,46 @@ def test_start_import_preview_creates_preview_job_without_mutating_packs(
     preview = repo.get_import_preview(payload["preview_id"], owner_user_id="1")
     assert preview is not None
     assert preview["target_persona_id"] == persona_id
+    assert packs_after == packs_before
+
+
+def test_start_import_preview_accepts_codex_pet_zip_without_mutating_packs(
+    persona_db: CharactersRAGDB,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_jobs import (
+        PERSONA_VISUAL_PACK_IMPORT_PREVIEW_JOB_TYPE,
+    )
+
+    manager = FakeJobManager()
+    fastapi_app.dependency_overrides[persona_ep.get_persona_visual_job_manager] = lambda: manager
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Codex Pet Import Persona")
+        packs_before = client.get(f"/api/v1/persona/profiles/{persona_id}/visual-packs").json()
+
+        response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/import-previews",
+            files={
+                "archive": (
+                    "terminal-tile-codex-pet.zip",
+                    b"codex pet archive",
+                    "application/zip",
+                )
+            },
+        )
+        packs_after = client.get(f"/api/v1/persona/profiles/{persona_id}/visual-packs").json()
+
+    assert response.status_code == 202, response.text
+    payload = response.json()
+    assert payload["operation"] == "import_preview"
+    assert payload["target_persona_id"] == persona_id
+    assert manager.created[0]["job_type"] == PERSONA_VISUAL_PACK_IMPORT_PREVIEW_JOB_TYPE
+    repo = PersonaVisualPortabilityRepository.initialized(persona_db)
+    preview = repo.get_import_preview(payload["preview_id"], owner_user_id="1")
+    assert preview is not None
+    assert preview["archive_path"].endswith(".zip")
     assert packs_after == packs_before
 
 
