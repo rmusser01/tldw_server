@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import type { PersonaVisualStarterPackSummary } from "@/types/persona-visuals"
 
+import { asPersonaVisualCustomStateId } from "@/types/persona-visuals"
 import { BASIC_BUDDY_STARTER_IDS } from "../buddyBuilderState"
 import { BuddyGuidedBuilder } from "../BuddyGuidedBuilder"
 
@@ -166,6 +167,38 @@ describe("BuddyGuidedBuilder", () => {
     )
     expect(screen.getByTestId("buddy-guided-builder-active-pack")).toHaveTextContent(
       "active"
+    )
+  })
+
+  it("renders draft review diagnostics inside the builder when a draft manifest exists", () => {
+    renderBuilder({
+      draftManifest: {
+        manifest_version: 1,
+        renderer_type: "sprite_frames",
+        states: {
+          idle: { animation_id: "idle" },
+          [asPersonaVisualCustomStateId("moving_left")]: {
+            animation_id: "move-left"
+          }
+        },
+        animations: {
+          idle: { id: "idle", mode: "frame_sequence", frames: [] },
+          "move-left": { id: "move-left", mode: "frame_sequence", frames: [] }
+        },
+        state_catalog: {
+          [asPersonaVisualCustomStateId("moving_left")]: {
+            label: "Moving left",
+            kind: "movement"
+          }
+        }
+      }
+    })
+
+    expect(screen.getByTestId("buddy-draft-review-panel")).toHaveTextContent(
+      "Review draft readiness"
+    )
+    expect(screen.getByTestId("buddy-draft-review-movement-states")).toHaveTextContent(
+      "moving_left"
     )
   })
 })

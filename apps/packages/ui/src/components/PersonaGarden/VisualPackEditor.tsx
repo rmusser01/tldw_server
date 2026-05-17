@@ -1280,6 +1280,14 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     [duplicateTargets]
   )
   const assets = React.useMemo(() => getPackAssets(selectedPack), [selectedPack])
+  const assetsById = React.useMemo(
+    () =>
+      assets.reduce<Record<string, PersonaVisualAsset>>((next, asset) => {
+        next[asset.id] = asset
+        return next
+      }, {}),
+    [assets]
+  )
   const animationIds = React.useMemo(
     () => getAnimationIds(draftManifest),
     [draftManifest]
@@ -3429,6 +3437,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           starterCatalogError={starterCatalogError}
           copyingStarterId={copyingStarterId}
           importPreviewPanel={importPreviewPanel}
+          draftManifest={selectedPack ? draftManifest : null}
+          assetsById={assetsById}
+          importPreview={fullImportPreview}
+          activationBlockers={validationErrors}
           onCopyStarterPack={(starterPackId) =>
             void handleCopyStarterPack(starterPackId)
           }

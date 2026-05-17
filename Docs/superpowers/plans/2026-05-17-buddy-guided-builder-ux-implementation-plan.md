@@ -626,9 +626,9 @@ git commit -m "feat: add guided Buddy source and draft builder"
 - Modify: `apps/packages/ui/src/assets/locale/en/sidepanel.json`
 - Modify: `apps/packages/ui/src/public/_locales/en/sidepanel.json`
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] **Step 1: Write review summarizer tests**
+- [x] **Step 1: Write review summarizer tests**
 
 Add tests in `buddyBuilderState.test.ts` for a helper like `summarizeBuddyDraftReadiness()`.
 
@@ -639,7 +639,7 @@ Cases:
 - Missing required states produce activation blockers.
 - `moving_right` and `moving_left` appear under movement states when in `state_catalog`.
 
-- [ ] **Step 2: Run summarizer tests and verify they fail**
+- [x] **Step 2: Run summarizer tests and verify they fail**
 
 Run:
 
@@ -650,7 +650,7 @@ bunx vitest run src/components/PersonaGarden/__tests__/buddyBuilderState.test.ts
 
 Expected: FAIL because the summarizer does not exist.
 
-- [ ] **Step 3: Implement review summarizer helpers**
+- [x] **Step 3: Implement review summarizer helpers**
 
 Add pure helpers to `buddyBuilderState.ts` for required state coverage, movement state extraction, custom state extraction, warnings/blockers extraction, and source-format labels. Do not parse ZIP data in the frontend.
 
@@ -669,7 +669,7 @@ export type BuddyDraftReadinessSummary = {
 }
 ```
 
-- [ ] **Step 4: Write panel render tests**
+- [x] **Step 4: Write panel render tests**
 
 Create `BuddyDraftReviewPanel.test.tsx` to verify:
 
@@ -679,7 +679,7 @@ Create `BuddyDraftReviewPanel.test.tsx` to verify:
 - Existing `SpriteFrameRenderer` is used when a draft has renderable `sprite_frames` assets.
 - Missing preview bytes falls back to diagnostics and does not use a handcrafted HTML mockup.
 
-- [ ] **Step 5: Run panel tests and verify they fail**
+- [x] **Step 5: Run panel tests and verify they fail**
 
 Run:
 
@@ -690,7 +690,7 @@ bunx vitest run src/components/PersonaGarden/__tests__/BuddyDraftReviewPanel.tes
 
 Expected: FAIL because the panel does not exist.
 
-- [ ] **Step 6: Implement `BuddyDraftReviewPanel`**
+- [x] **Step 6: Implement `BuddyDraftReviewPanel`**
 
 Render:
 
@@ -705,15 +705,15 @@ Render:
 - activation blockers,
 - optional `SpriteFrameRenderer` preview for the selected draft and `idle` state.
 
-- [ ] **Step 7: Integrate review panel into the builder**
+- [x] **Step 7: Integrate review panel into the builder**
 
 In `BuddyGuidedBuilder`, make the Review step the canonical place to commit imports, inspect copied drafts, and proceed to Configure or Activate.
 
-- [ ] **Step 8: Add i18n keys**
+- [x] **Step 8: Add i18n keys**
 
 Add review-specific keys under `personaGarden.visuals.builder.review`.
 
-- [ ] **Step 9: Run focused review tests**
+- [x] **Step 9: Run focused review tests**
 
 Run:
 
@@ -724,7 +724,7 @@ bunx vitest run src/components/PersonaGarden/__tests__/buddyBuilderState.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 10: Commit Task 3**
+- [x] **Step 10: Commit Task 3**
 
 ```bash
 git add apps/packages/ui/src/components/PersonaGarden/BuddyDraftReviewPanel.tsx apps/packages/ui/src/components/PersonaGarden/__tests__/BuddyDraftReviewPanel.test.tsx apps/packages/ui/src/components/PersonaGarden/BuddyGuidedBuilder.tsx apps/packages/ui/src/components/PersonaGarden/buddyBuilderState.ts apps/packages/ui/src/components/PersonaGarden/__tests__/BuddyGuidedBuilder.test.tsx apps/packages/ui/src/components/PersonaGarden/__tests__/buddyBuilderState.test.ts apps/packages/ui/src/components/PersonaGarden/VisualPackEditor.tsx apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx apps/packages/ui/src/assets/locale/en/sidepanel.json apps/packages/ui/src/public/_locales/en/sidepanel.json

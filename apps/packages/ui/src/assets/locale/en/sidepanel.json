@@ -556,6 +556,22 @@
         "copyPacket": "Copy production packet",
         "activePackFallback": "Active visual buddy",
         "packCount": "{{count}} packs",
+        "review": {
+          "heading": "Review draft readiness",
+          "draftSemantics": "imported as a Persona Visual draft",
+          "readyTag": "ready",
+          "needsReviewTag": "needs review",
+          "previewHeading": "Draft preview",
+          "previewFallback": "Buddy preview",
+          "previewUnavailable": "Preview unavailable",
+          "atlasHeading": "Atlas metadata",
+          "requiredStates": "Required states",
+          "movementStates": "Movement states",
+          "customStates": "Custom states",
+          "warnings": "Warnings",
+          "blockers": "Activation blockers",
+          "activationPath": "Continue to activation"
+        },
         "importUnsupportedExtension": "Choose a .tldw-persona-vpack or Codex/Petdex .zip archive.",
         "importUnsupportedMimeType": "Choose a Persona Visual or Codex/Petdex archive with a supported zip media type."
       },

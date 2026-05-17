@@ -1396,5 +1396,17 @@
   },
   "personaGarden_visuals_builder_nativeImportSource": {
     "message": "Import Persona Visual pack"
+  },
+  "personaGarden_visuals_builder_review_heading": {
+    "message": "Review draft readiness"
+  },
+  "personaGarden_visuals_builder_review_draftSemantics": {
+    "message": "imported as a Persona Visual draft"
+  },
+  "personaGarden_visuals_builder_review_previewUnavailable": {
+    "message": "Preview unavailable"
+  },
+  "personaGarden_visuals_builder_review_activationPath": {
+    "message": "Continue to activation"
   }
 }

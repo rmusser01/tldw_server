@@ -3,8 +3,14 @@ import { Tag } from "antd"
 import { CheckCircle2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import type { PersonaVisualStarterPackSummary } from "@/types/persona-visuals"
+import type {
+  PersonaVisualAsset,
+  PersonaVisualImportPreviewResponse,
+  PersonaVisualManifest,
+  PersonaVisualStarterPackSummary
+} from "@/types/persona-visuals"
 
+import { BuddyDraftReviewPanel } from "./BuddyDraftReviewPanel"
 import { BuddyImportFormatPanel } from "./BuddyImportFormatPanel"
 import { BuddySourcePicker } from "./BuddySourcePicker"
 import { BuddyStarterCatalogPicker } from "./BuddyStarterCatalogPicker"
@@ -27,6 +33,10 @@ export type BuddyGuidedBuilderProps = {
   starterCatalogError?: string | null
   copyingStarterId?: string | null
   importPreviewPanel: React.ReactNode
+  draftManifest?: PersonaVisualManifest | null
+  assetsById?: Record<string, PersonaVisualAsset>
+  importPreview?: PersonaVisualImportPreviewResponse | null
+  activationBlockers?: string[]
   onCopyStarterPack: (starterPackId: string) => void
   onStartBlank?: () => void
   onOpenLibrary?: () => void
@@ -82,6 +92,10 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
   starterCatalogError = null,
   copyingStarterId = null,
   importPreviewPanel,
+  draftManifest = null,
+  assetsById = {},
+  importPreview = null,
+  activationBlockers = [],
   onCopyStarterPack,
   onStartBlank,
   onOpenLibrary,
@@ -189,6 +203,15 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
         source={selectedSource}
         importPreviewPanel={importPreviewPanel}
       />
+
+      {draftManifest || importPreview ? (
+        <BuddyDraftReviewPanel
+          manifest={draftManifest}
+          assetsById={assetsById}
+          importPreview={importPreview}
+          activationBlockers={activationBlockers}
+        />
+      ) : null}
 
       {selectedSource === "blank" ? (
         <div className="rounded-md border border-border bg-bg p-3 text-xs leading-5 text-text-muted">
