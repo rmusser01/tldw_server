@@ -9,7 +9,9 @@ import { WORKSPACE_SOURCE_DRAG_TYPE } from "../drag-source"
 const hoistedMocks = vi.hoisted(() => ({
   setSelectedModel: vi.fn(),
   fetchChatModels: vi.fn(),
-  getModels: vi.fn()
+  getModels: vi.fn(),
+  setFavoriteModels: vi.fn(),
+  setModelSortMode: vi.fn()
 }))
 
 const mockCheckConnectionOnce = vi.fn()
@@ -267,6 +269,24 @@ vi.mock("@/services/tldw-server", () => ({
   fetchChatModels: hoistedMocks.fetchChatModels
 }))
 
+vi.mock("@plasmohq/storage/hook", () => ({
+  useStorage: (key: string, defaultValue: unknown) => {
+    const initialValue =
+      key === "favoriteChatModels"
+        ? ["tldw:openai/gpt-4o"]
+        : key === "modelSelectSortMode"
+          ? "favorites"
+          : defaultValue
+    const setter =
+      key === "favoriteChatModels"
+        ? hoistedMocks.setFavoriteModels
+        : key === "modelSelectSortMode"
+          ? hoistedMocks.setModelSortMode
+          : vi.fn()
+    return [initialValue, setter, { isLoading: false }] as const
+  }
+}))
+
 vi.mock("antd", async () => {
   const actual = await vi.importActual<typeof import("antd")>("antd")
   return {
@@ -323,6 +343,8 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
     })
     mockGetWorkspaceChatSession.mockReturnValue(null)
     hoistedMocks.setSelectedModel.mockReset()
+    hoistedMocks.setFavoriteModels.mockReset()
+    hoistedMocks.setModelSortMode.mockReset()
     hoistedMocks.fetchChatModels.mockResolvedValue([])
     hoistedMocks.getModels.mockResolvedValue([])
 
@@ -466,7 +488,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
     expect(screen.getByText(/Doc A, Doc B, Doc C \+1 more/)).toBeInTheDocument()
   })
 
-  it("renders model picker options and updates selected model", async () => {
+  it("renders chat model selector options and updates selected model", async () => {
     hoistedMocks.getModels.mockRejectedValue(new Error("legacy models unused"))
     hoistedMocks.fetchChatModels.mockResolvedValue([
       {
@@ -492,23 +514,74 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
     })
     expect(hoistedMocks.getModels).not.toHaveBeenCalled()
 
-    const modelSelect = await screen.findByRole("combobox", {
-      name: "Select model"
-    })
-    expect(modelSelect.closest("label")).toBeNull()
-    fireEvent.change(modelSelect, {
-      target: { value: "tldw:openai/gpt-4o" }
-    })
+    const modelSelector = await screen.findByTestId("model-selector")
+    expect(modelSelector.closest("label")).toBeNull()
+    fireEvent.click(modelSelector)
+
+    expect(
+      await screen.findByPlaceholderText("Search models")
+    ).toBeInTheDocument()
+    expect(await screen.findByText("GPT-4o")).toBeInTheDocument()
+    fireEvent.click(await screen.findByText("Claude 3.5 Sonnet"))
 
     expect(hoistedMocks.setSelectedModel).toHaveBeenCalledWith(
-      "tldw:openai/gpt-4o"
+      "tldw:anthropic/claude-3-5-sonnet"
     )
-    expect(
-      screen.getByRole("option", { name: /openai.*GPT-4o/i })
-    ).toBeInTheDocument()
   })
 
-  it("keeps the model picker selectable with Auto when no models load", async () => {
+  it("uses the chat model selector menu with favorites and search", async () => {
+    hoistedMocks.getModels.mockRejectedValue(new Error("legacy models unused"))
+    hoistedMocks.fetchChatModels.mockResolvedValue([
+      {
+        model: "tldw:openai/gpt-4o",
+        name: "tldw:openai/gpt-4o",
+        nickname: "GPT-4o",
+        provider: "openai",
+        details: {
+          capabilities: ["vision", "tools", "streaming"],
+          price_hint: "$5/$15"
+        }
+      },
+      {
+        model: "tldw:anthropic/claude-3-5-sonnet",
+        name: "tldw:anthropic/claude-3-5-sonnet",
+        nickname: "Claude 3.5 Sonnet",
+        provider: "anthropic"
+      }
+    ])
+
+    renderChatPane()
+
+    await waitFor(() => {
+      expect(hoistedMocks.fetchChatModels).toHaveBeenCalledWith({
+        returnEmpty: true
+      })
+    })
+
+    const modelSelector = await screen.findByTestId("model-selector")
+    fireEvent.click(modelSelector)
+
+    expect(
+      await screen.findByPlaceholderText("Search models")
+    ).toBeInTheDocument()
+    expect(await screen.findByText("GPT-4o")).toBeInTheDocument()
+    expect(screen.getAllByText("Favorites").length).toBeGreaterThan(0)
+    expect(
+      screen.getByRole("button", { name: "Remove from favorites" })
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove from favorites" }))
+    expect(hoistedMocks.setFavoriteModels).toHaveBeenCalledWith(
+      expect.any(Function)
+    )
+
+    fireEvent.click(screen.getByText("Claude 3.5 Sonnet"))
+    expect(hoistedMocks.setSelectedModel).toHaveBeenCalledWith(
+      "tldw:anthropic/claude-3-5-sonnet"
+    )
+  })
+
+  it("keeps the model selector usable with settings fallback when no models load", async () => {
     hoistedMocks.getModels.mockRejectedValue(new Error("legacy models unused"))
     hoistedMocks.fetchChatModels.mockResolvedValue([])
 
@@ -520,14 +593,14 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       })
     })
 
-    const modelSelect = screen.getByRole("combobox", {
-      name: "Select model"
-    }) as HTMLSelectElement
-    expect(modelSelect).not.toBeDisabled()
-    expect(screen.getByRole("option", { name: "Auto" })).toBeInTheDocument()
-    fireEvent.change(modelSelect, { target: { value: "" } })
+    const modelSelector = screen.getByTestId("model-selector")
+    expect(modelSelector).not.toBeDisabled()
+    fireEvent.click(modelSelector)
 
-    expect(hoistedMocks.setSelectedModel).toHaveBeenCalledWith(null)
+    expect(
+      await screen.findByText("No models available. Connect your server in Settings.")
+    ).toBeInTheDocument()
+    expect(screen.getByText("Open model settings")).toBeInTheDocument()
   })
 
   it("handles partial retrieval metadata by inferring diagnostics from sources", () => {

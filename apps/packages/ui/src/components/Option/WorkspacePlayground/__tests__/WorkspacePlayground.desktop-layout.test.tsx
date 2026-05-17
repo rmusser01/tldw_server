@@ -336,6 +336,32 @@ describe("WorkspacePlayground desktop layout guardrails", () => {
     expect(testState.setLeftPaneCollapsed).toHaveBeenCalledWith(false)
   })
 
+  it("keeps collapsed sidebar restore rails persistent and associated with their panels", () => {
+    testState.leftPaneCollapsed = true
+    testState.rightPaneCollapsed = true
+
+    render(<WorkspacePlayground />)
+
+    const restoreSourcesButton = screen.getByTestId("workspace-restore-sources")
+    const restoreStudioButton = screen.getByTestId("workspace-restore-studio")
+
+    expect(restoreSourcesButton).toHaveAttribute("aria-controls", "workspace-sources-panel")
+    expect(restoreSourcesButton).toHaveAttribute("aria-expanded", "false")
+    expect(restoreSourcesButton).toHaveClass("sticky")
+    expect(restoreSourcesButton).toHaveClass("top-2")
+    expect(restoreSourcesButton).toHaveClass("self-stretch")
+    expect(restoreSourcesButton).toHaveClass("min-h-[14rem]")
+    expect(restoreSourcesButton).toHaveClass("w-11")
+
+    expect(restoreStudioButton).toHaveAttribute("aria-controls", "workspace-studio-panel")
+    expect(restoreStudioButton).toHaveAttribute("aria-expanded", "false")
+    expect(restoreStudioButton).toHaveClass("sticky")
+    expect(restoreStudioButton).toHaveClass("top-2")
+    expect(restoreStudioButton).toHaveClass("self-stretch")
+    expect(restoreStudioButton).toHaveClass("min-h-[14rem]")
+    expect(restoreStudioButton).toHaveClass("w-11")
+  })
+
   it("shows a restore rail for the studio pane when the right pane is collapsed", () => {
     testState.rightPaneCollapsed = true
 
@@ -385,10 +411,10 @@ describe("WorkspacePlayground desktop layout guardrails", () => {
       getWorkspacePlaygroundWrapperClassName(extensionRoute)
 
     expect(sharedWrapperClassName?.split(/\s+/)).toEqual(
-      expect.arrayContaining(["min-h-0", "flex-1"])
+      expect.arrayContaining(["h-full", "min-h-0", "flex-1", "overflow-hidden"])
     )
     expect(extensionWrapperClassName?.split(/\s+/)).toEqual(
-      expect.arrayContaining(["min-h-0", "flex-1"])
+      expect.arrayContaining(["h-full", "min-h-0", "flex-1", "overflow-hidden"])
     )
   })
 })

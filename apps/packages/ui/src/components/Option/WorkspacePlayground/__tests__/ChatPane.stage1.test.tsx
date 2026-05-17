@@ -319,6 +319,11 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     expect((transcript as HTMLElement).className).toContain("overflow-y-auto")
     expect((transcript as HTMLElement).className).toContain("flex-1")
     expect((transcript as HTMLElement).className).toContain("min-h-0")
+
+    const composerFooter = screen.getByTestId("chat-drop-zone")
+    expect(composerFooter).toHaveClass("shrink-0")
+    expect(composerFooter).toHaveClass("sticky")
+    expect(composerFooter).toHaveClass("bottom-0")
   })
 
   it("clears chat with confirmation and persists empty session state", () => {

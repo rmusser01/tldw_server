@@ -1361,7 +1361,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
             type="primary"
             size="small"
             icon={<Plus className="h-3.5 w-3.5" />}
-            onClick={() => openAddSourceModal()}
+            onClick={() => openAddSourceModal("existing")}
           >
             {t("playground:sources.addSources", "Add Sources")}
           </Button>
@@ -1578,7 +1578,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                   type="primary"
                   size="small"
                   icon={<Plus className="h-3.5 w-3.5" />}
-                  onClick={() => openAddSourceModal()}
+                  onClick={() => openAddSourceModal("existing")}
                 >
                   {t("playground:sources.addFirst", "Add your first source")}
                 </Button>

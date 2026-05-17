@@ -199,6 +199,30 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
     expect(screen.getByText("Showing 1 of 1")).toBeInTheDocument()
   })
 
+  it("uses backend pagination.total_items so large media libraries can load more", async () => {
+    workspaceStoreState.addSourceModalTab = "existing"
+    mockListMedia.mockResolvedValueOnce({
+      items: [
+        { id: 701, title: "Library Item", type: "pdf" },
+        { id: 702, title: "Second Library Item", type: "video" }
+      ],
+      pagination: {
+        page: 1,
+        per_page: 2,
+        total_pages: 63,
+        results_per_page: 2,
+        total_items: 125
+      }
+    })
+
+    render(<AddSourceModal />)
+
+    expect(await screen.findByText("Library Item")).toBeInTheDocument()
+    expect(screen.getByText("Second Library Item")).toBeInTheDocument()
+    expect(screen.getByText("Showing 2 of 125")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Load more" })).toBeInTheDocument()
+  })
+
   it("distinguishes all-added media from an empty media library", async () => {
     workspaceStoreState.addSourceModalTab = "existing"
     workspaceStoreState.sources = [{ mediaId: 701 }]
