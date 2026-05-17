@@ -267,6 +267,7 @@ async def agentic_rag_pipeline(
     effective_top_k = max(1, int(effective_retrieval_plan.top_k or top_k or 10))
     effective_min_score = float(effective_retrieval_plan.min_score if effective_retrieval_plan.min_score is not None else min_score or 0.0)
     effective_index_namespace = effective_retrieval_plan.index_namespace
+    allowed_media_ids = (resolved_request.payload or {}).get("include_media_ids")
     effective_hybrid_alpha = _coerce_float(
         (resolved_request.payload or {}).get("hybrid_alpha", hybrid_alpha),
         default=_coerce_float(hybrid_alpha, 0.7),
@@ -314,6 +315,7 @@ async def agentic_rag_pipeline(
             retrieval_plan=effective_retrieval_plan,
             retriever=retriever,
             retrieval_config=config,
+            allowed_media_ids=allowed_media_ids,
         )
         docs = list(retrieved_evidence.documents)
     except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, TimeoutError):
@@ -345,6 +347,7 @@ async def agentic_rag_pipeline(
             fallback_docs = await fb_retriever.retrieve(
                 query=effective_query,
                 media_type=None,
+                allowed_media_ids=allowed_media_ids,
             )
             if fallback_docs:
                 docs = fallback_docs

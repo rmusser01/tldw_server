@@ -22,6 +22,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_
 
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 
 # Dependencies
@@ -39,6 +40,7 @@ from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import (
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_READ
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
@@ -88,6 +90,69 @@ _BATCH_ROUND2_DEFAULT_FIELDS = {
     "enable_image_search",
     "enable_video_search",
 }
+
+_READY_MEDIA_COLLECTION_STATUSES = frozenset({"completed", "skipped_existing"})
+_EMPTY_MEDIA_SCOPE_SENTINEL = -1
+
+
+def _copy_rag_request_with_updates(
+    request: UnifiedRAGRequest,
+    updates: dict[str, Any],
+) -> UnifiedRAGRequest:
+    """Return a copy of a RAG request using the active Pydantic compatibility API."""
+    model_copy = getattr(request, "model_copy", None)
+    if callable(model_copy):
+        return model_copy(update=updates)
+    return request.copy(update=updates)
+
+
+def _ready_media_ids_from_collection(collection: Any) -> list[int]:
+    """Extract ordered, unique ready media IDs from a durable media collection row."""
+    ready_ids: list[int] = []
+    seen: set[int] = set()
+    for item in getattr(collection, "items", []) or []:
+        if getattr(item, "status", None) not in _READY_MEDIA_COLLECTION_STATUSES:
+            continue
+        media_id = getattr(item, "media_id", None)
+        if not isinstance(media_id, int) or media_id <= 0 or media_id in seen:
+            continue
+        ready_ids.append(media_id)
+        seen.add(media_id)
+    return ready_ids
+
+
+def _apply_media_collection_scope(
+    request: UnifiedRAGRequest,
+    collections_db: CollectionsDatabase,
+) -> UnifiedRAGRequest:
+    """Resolve request.collection_id to backend-owned ready media IDs for RAG retrieval."""
+    collection_id = getattr(request, "collection_id", None)
+    if collection_id is None:
+        return request
+
+    try:
+        collection = collections_db.get_media_collection(int(collection_id))
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="media_collection_not_found",
+        ) from exc
+    ready_media_ids = _ready_media_ids_from_collection(collection)
+    explicit_media_ids = request.include_media_ids
+    if explicit_media_ids is not None:
+        ready_set = set(ready_media_ids)
+        scoped_media_ids = [
+            int(media_id)
+            for media_id in explicit_media_ids
+            if isinstance(media_id, int) and media_id in ready_set
+        ]
+    else:
+        scoped_media_ids = ready_media_ids
+
+    if not scoped_media_ids:
+        scoped_media_ids = [_EMPTY_MEDIA_SCOPE_SENTINEL]
+
+    return _copy_rag_request_with_updates(request, {"include_media_ids": scoped_media_ids})
 
 
 def _search_agent_setting(env_key: str, config_key: str) -> Optional[str]:
@@ -1159,6 +1224,7 @@ async def unified_search_endpoint(
     media_db: Any = Depends(get_media_db_for_user),
     chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     prompts_db: PromptsDatabase = Depends(get_prompts_db_for_user),
+    collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
 ):
     """
     Unified RAG search with all features as parameters.
@@ -1168,6 +1234,7 @@ async def unified_search_endpoint(
     is accessible by setting the appropriate parameter.
     """
     try:
+        request = _apply_media_collection_scope(request, collections_db)
         logger.info(f"Unified RAG search: query='{request.query}', user={current_user.username if current_user else 'anonymous'}")
         # Topic monitoring (non-blocking) for query text
         try:
@@ -1314,6 +1381,8 @@ async def unified_search_endpoint(
         if result.errors and request.debug_mode:
             logger.warning(f"Errors during processing: {result.errors}")
 
+    except HTTPException:
+        raise
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
         logger.exception("Unified search error: {}", e)
         detail = "Search failed due to an internal error."

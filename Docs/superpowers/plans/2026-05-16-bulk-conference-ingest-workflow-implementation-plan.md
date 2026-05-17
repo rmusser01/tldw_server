@@ -981,7 +981,7 @@ Completion notes:
 - Test: `tldw_Server_API/tests/RAG/test_conference_collection_scope.py`
 - Test: `apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/conference-scope.test.tsx`
 
-- [ ] **Step 1: Inventory current Knowledge QA/RAG scope contract**
+- [x] **Step 1: Inventory current Knowledge QA/RAG scope contract**
 
 Search:
 
@@ -995,7 +995,7 @@ rg -n "media_ids|source_ids|filters|selection|rag/search|KnowledgeQA" \
 
 Record the actual contract in Task 0's inventory or a new short note before modifying RAG.
 
-- [ ] **Step 2: Write failing backend scoped retrieval test**
+- [x] **Step 2: Write failing backend scoped retrieval test**
 
 ```python
 def test_conference_collection_scope_limits_rag_to_ready_media(client, seeded_collection):
@@ -1011,15 +1011,15 @@ def test_conference_collection_scope_limits_rag_to_ready_media(client, seeded_co
     assert {hit["media_id"] for hit in response.json()["results"]} <= seeded_collection.ready_media_ids
 ```
 
-- [ ] **Step 3: Implement or reuse backend-enforced scope**
+- [x] **Step 3: Implement or reuse backend-enforced scope**
 
 If existing RAG selection filters support media IDs, map collection ID to ready media IDs server-side. If not, add a minimal request field and retrieval filter. Do not rely on client-only filtering.
 
-- [ ] **Step 4: Write failing review UI test**
+- [x] **Step 4: Write failing review UI test**
 
 Assert talk list, transcript readiness counts, next/previous navigation, compare selected, and disabled QA when no items are ready.
 
-- [ ] **Step 5: Implement collection review UI**
+- [x] **Step 5: Implement collection review UI**
 
 Minimum V1:
 
@@ -1030,7 +1030,7 @@ Minimum V1:
 - selected-talk comparison using metadata plus available summaries/excerpts
 - scoped QA CTA with readiness copy
 
-- [ ] **Step 6: Run verification**
+- [x] **Step 6: Run verification**
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -1044,7 +1044,7 @@ bunx vitest run \
 git diff --check
 ```
 
-- [ ] **Step 7: Bandit**
+- [x] **Step 7: Bandit**
 
 ```bash
 source .venv/bin/activate && python -m bandit \
@@ -1055,7 +1055,7 @@ source .venv/bin/activate && python -m bandit \
 
 Review only findings in touched RAG/API files.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add \

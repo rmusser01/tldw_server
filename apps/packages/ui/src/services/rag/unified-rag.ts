@@ -83,6 +83,7 @@ export type RagSettings = {
   cache_threshold: number
   adaptive_cache: boolean
   keyword_filter: string
+  collection_id: number | null
   include_media_ids: number[]
   include_note_ids: string[]
   enable_security_filter: boolean
@@ -289,6 +290,7 @@ export const DEFAULT_RAG_SETTINGS: RagSettings = {
   cache_threshold: 0.8,
   adaptive_cache: true,
   keyword_filter: "",
+  collection_id: null,
   include_media_ids: [],
   include_note_ids: [],
   enable_security_filter: true,

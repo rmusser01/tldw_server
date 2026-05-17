@@ -100,3 +100,12 @@ Capability discovery should expose playlist preflight, durable media collections
 - Existing localStorage collections can be offered an explicit migration path into backend media collections, but migration is not required before bulk conference ingest. Local collections without source URLs should migrate as manual resolved-media collections, not playlist ingestion plans.
 - Task 2 decision: `media:collections:v1` in `apps/packages/ui/src/components/Review/hooks/useMediaSelection.ts` remains a local-only manual review collection store. Durable playlist/conference ingestion now uses `/api/v1/media/collections`; migration or side-by-side labeling of local review collections is deferred to a later UX slice.
 - The extension and WebUI should submit the same collection/run payloads through shared services so a playlist detected in the sidepanel can be continued and reviewed in the WebUI.
+
+## Task 6 RAG Scope Inventory
+
+- `UnifiedRAGRequest` already supported `include_media_ids`, and the standard retrieval path already passed those IDs into `execute_retrieval_phase()` as `allowed_media_ids`.
+- `MediaDBRetriever` and `MultiDatabaseRetriever` already enforce `allowed_media_ids`, so collection-scoped QA should map a backend-owned `collection_id` to ready media IDs server-side instead of filtering results in the client.
+- Ready conference items are `completed` or `skipped_existing` rows with a positive `media_id`. Other statuses are excluded from scoped QA.
+- If a collection has no ready media IDs, the backend must fail closed by sending a sentinel media-ID scope that returns no matches rather than silently broadening the search.
+- The agentic RAG fallback path must receive the same resolved media-ID scope as standard retrieval.
+- The WebUI may pass `collection_id` in Knowledge QA options only after `hasKnowledgeQaMediaScope` is true; request construction should not depend on client-side media-ID lists for durable conference collections.

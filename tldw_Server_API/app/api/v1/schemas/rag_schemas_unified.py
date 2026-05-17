@@ -301,6 +301,12 @@ class UnifiedRAGRequest(BaseModel):
         description="Restrict search to these Media DB item IDs",
         example=[1, 2, 3]
     )
+    collection_id: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Restrict search to ready media items in this durable media collection",
+        example=7,
+    )
     include_note_ids: Optional[list[str]] = Field(
         default=None,
         description="Restrict search to these Note IDs (ChaChaNotes UUIDs)",
