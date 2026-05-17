@@ -8,6 +8,8 @@
 
 **Tech Stack:** FastAPI, Pydantic v2, existing llama.cpp Admin schemas/endpoints, `llamacpp_inventory_service`, core Jobs `JobManager`/`WorkerSDK`, pytest/TestClient, React/Ant Design shared UI, Vitest/testing-library, Bandit.
 
+**Command note:** Run Python verification commands after activating the project virtual environment from the repository root, for example `source .venv/bin/activate`.
+
 ---
 
 ## References
@@ -159,7 +161,7 @@ Also cover:
 Run:
 
 ```bash
-/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
+python -m pytest \
   tldw_Server_API/tests/LLM_Local/test_llamacpp_asset_inventory_service.py \
   -k "import_asset_folder_preview" -v
 ```
@@ -257,7 +259,7 @@ async def preview_llamacpp_asset_folder_endpoint(
 Run:
 
 ```bash
-/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
+python -m pytest \
   tldw_Server_API/tests/LLM_Local/test_llamacpp_asset_inventory_service.py \
   tldw_Server_API/tests/LLM_Local/test_llamacpp_inventory_api.py \
   tldw_Server_API/tests/AuthNZ_Unit/test_llamacpp_permissions_claims.py -v
@@ -307,7 +309,7 @@ Cover:
 Run:
 
 ```bash
-/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
+python -m pytest \
   tldw_Server_API/tests/LLM_Local/test_llamacpp_acquisition_service.py -v
 ```
 
@@ -396,7 +398,7 @@ Use `get_job_manager` from `API_Deps.jobs_deps`.
 Run:
 
 ```bash
-/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
+python -m pytest \
   tldw_Server_API/tests/LLM_Local/test_llamacpp_acquisition_service.py \
   tldw_Server_API/tests/LLM_Local/test_llamacpp_acquisition_api.py \
   tldw_Server_API/tests/AuthNZ_Unit/test_llamacpp_permissions_claims.py -v
@@ -444,7 +446,7 @@ Use a local aiohttp/httpx test server or a monkeypatched stream adapter. Cover:
 Run:
 
 ```bash
-/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
+python -m pytest \
   tldw_Server_API/tests/LLM_Local/test_llamacpp_acquisition_jobs_worker.py -v
 ```
 
@@ -500,7 +502,7 @@ Use the existing worker inventory registration helper so shutdown diagnostics se
 Run:
 
 ```bash
-/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
+python -m pytest \
   tldw_Server_API/tests/LLM_Local/test_llamacpp_acquisition_jobs_worker.py \
   tldw_Server_API/tests/Services/test_startup_content_jobs_pollers.py -v
 ```
@@ -646,7 +648,7 @@ Do not require real remote downloads in E2E.
 Run:
 
 ```bash
-/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
+python -m pytest \
   tldw_Server_API/tests/LLM_Local/test_llamacpp_asset_inventory_service.py \
   tldw_Server_API/tests/LLM_Local/test_llamacpp_inventory_api.py \
   tldw_Server_API/tests/LLM_Local/test_llamacpp_acquisition_service.py \
@@ -685,7 +687,7 @@ If the suite requires a running backend/frontend server, start the established d
 Run:
 
 ```bash
-/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit \
+python -m bandit \
   -r tldw_Server_API/app/core/Local_LLM/llamacpp_inventory_service.py \
      tldw_Server_API/app/core/Local_LLM/llamacpp_acquisition_service.py \
      tldw_Server_API/app/core/Local_LLM/llamacpp_acquisition_jobs.py \
