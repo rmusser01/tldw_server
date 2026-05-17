@@ -21,16 +21,16 @@ Write a staged design spec for addressing the audited main /chat role-play prese
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [x] #1 Spec documents the approved hybrid staged remediation approach.
-- [x] #2 Spec stays scoped to main /chat role-play preset experience.
-- [x] #3 Spec defines stage boundaries, data flow, testing, rollout, and implementation task split.
-- [x] #4 Spec is reviewed before implementation planning begins.
+- [ ] #1 Spec documents the approved hybrid staged remediation approach.
+- [ ] #2 Spec stays scoped to main /chat role-play preset experience.
+- [ ] #3 Spec defines stage boundaries, data flow, testing, rollout, and implementation task split.
+- [ ] #4 Spec is reviewed before implementation planning begins.
 <!-- AC:END -->
 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Second hardening review completed. Issues found and patched: Stage 1 now requires reproducing the current crash before behavior changes; default-entry wording no longer overfits to one fixture name; terminology changes must update i18n/fallbacks; Stage 3 mobile parity must create reusable entry points rather than throwaway controls; Stage 4 must preserve Stage 3 mobile access; extension sidepanel parity is explicitly out of scope except for avoiding shared-component regressions. Verification: local diff review and placeholder scan completed. Bandit skipped because this task touched documentation and Backlog task metadata only.
+Design approved in-session and reviewed twice by spec-document-reviewer. Both reviews returned Approved with no blocking issues. Non-blocking implementation-planning notes: define generation-style reset target, and include character vs persona as a Stage 6 compatibility test axis. Verification: spec was inspected locally for TODO/TBD placeholders; none were found. Bandit skipped because this task touched documentation and Backlog task metadata only.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -42,15 +42,15 @@ Second hardening review completed. Issues found and patched: Stage 1 now require
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created and hardened the staged main /chat role-play preset remediation design spec. The final spec covers the approved hybrid six-stage sequence and includes implementation anchors, coordination constraints, adapter sequencing, recovery semantics, saved setup eligibility, compatibility test axes, i18n requirements, current-branch reproduction guidance, mobile reuse constraints, and extension scope boundaries.
+Created the staged main /chat role-play preset remediation design spec. The spec covers the approved hybrid six-stage sequence: crash/recovery/accessibility fixes, visible state and terminology cleanup, mobile parity, role-play setup consolidation, saved role-play presets, and compatibility/guardrail tests.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
