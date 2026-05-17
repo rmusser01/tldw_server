@@ -35,6 +35,7 @@ Canonical base profiles:
    - Prepare: `make setup-local-single`
    - Start: `make start-local-single`
    - Verify: `make verify-local-single`
+   - No-`make` shortcuts: `./quick-launch.sh`, `quick-launch.command`, or `.\quick-launch.ps1`
 
 Generated multi-user admin bootstrap:
 

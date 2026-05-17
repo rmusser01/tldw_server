@@ -318,7 +318,12 @@ make verify-local-single
 Use these paths when `make` is not available.
 
 Local single-user:
-- Follow [Manual Setup](#manual-setup) below, then start with `python -m uvicorn tldw_Server_API.app.main:app --reload`.
+- Shortcut scripts from the repository root:
+  - macOS/Linux terminal: `./quick-launch.sh`
+  - macOS Finder: double-click `quick-launch.command`
+  - Windows PowerShell: `.\quick-launch.ps1`
+- These scripts create or update `.venv`, run the `local-single` setup wizard, and start the API at `http://127.0.0.1:8000`.
+- For manual control, follow [Manual Setup](#manual-setup) below, then start with `python -m uvicorn tldw_Server_API.app.main:app --reload`.
 
 Docker single-user + WebUI:
 ```powershell

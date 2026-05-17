@@ -19,7 +19,21 @@ make install-local
 make setup-local-single
 ```
 
-PowerShell / no-`make` equivalent:
+No-`make` shortcut scripts from the repository root:
+
+```bash
+# macOS/Linux terminal
+./quick-launch.sh
+```
+
+```powershell
+# Windows PowerShell
+.\quick-launch.ps1
+```
+
+On macOS, you can also double-click `quick-launch.command` from Finder. These shortcuts create or update `.venv`, run the `local-single` setup wizard, and start the API at `http://127.0.0.1:8000`.
+
+PowerShell / manual no-`make` equivalent:
 
 ```powershell
 py -3.12 -m venv .venv
@@ -38,7 +52,7 @@ py -3.12 -m venv .venv
 make start-local-single
 ```
 
-PowerShell / no-`make` equivalent:
+PowerShell / manual no-`make` equivalent:
 
 ```powershell
 .\.venv\Scripts\python -m uvicorn tldw_Server_API.app.main:app --host 127.0.0.1 --port 8000

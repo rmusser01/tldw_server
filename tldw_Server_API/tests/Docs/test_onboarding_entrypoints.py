@@ -103,3 +103,24 @@ def test_getting_started_index_calls_out_default_webui_path() -> None:
         "Docker multi-user + Postgres" in text,
         "Getting Started index should keep the team/public deployment callout",
     )
+
+
+def test_no_make_local_quick_launch_shortcuts_are_documented() -> None:
+    """No-Make local self-hosters should be able to find the quick-launch scripts."""
+    docs = {
+        "README.md": Path("README.md").read_text(),
+        "Docs/Getting_Started/README.md": Path("Docs/Getting_Started/README.md").read_text(),
+        "Docs/Getting_Started/Profile_Local_Single_User.md": Path(
+            "Docs/Getting_Started/Profile_Local_Single_User.md"
+        ).read_text(),
+        "Docs/Published/Getting_Started/README.md": Path(
+            "Docs/Published/Getting_Started/README.md"
+        ).read_text(),
+        "Docs/Published/Getting_Started/Profile_Local_Single_User.md": Path(
+            "Docs/Published/Getting_Started/Profile_Local_Single_User.md"
+        ).read_text(),
+    }
+
+    for path, text in docs.items():
+        for script in ("quick-launch.sh", "quick-launch.command", "quick-launch.ps1"):
+            _require(script in text, f"{path} should document {script}")
