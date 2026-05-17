@@ -483,8 +483,8 @@ Expected: PASS.
 - [ ] **Step 5: Run E2E smoke if environment is available**
 
 ```bash
+# Set TLDW_E2E_API_KEY in your shell from your local test configuration first.
 TLDW_E2E_SERVER_URL=127.0.0.1:8000 \
-TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY \
 bunx playwright test apps/tldw-frontend/e2e/workflows/llamacpp-runtime-admin.spec.ts --reporter=line
 ```
 
