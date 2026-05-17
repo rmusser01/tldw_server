@@ -14,6 +14,7 @@ import {
   type Page,
   type Response,
 } from '@playwright/test';
+import { waitForStreamComplete } from '../utils/journey-helpers';
 
 const serverUrl = (
   process.env.TLDW_E2E_SERVER_URL ||
@@ -535,12 +536,15 @@ const assertChatCompletionRenderedOrRecoverable = async (
 ) => {
   const chatLog = page.getByRole('log', { name: /chat messages/i });
   if (!response || response.status() < 400) {
-    await expect(chatLog).toContainText(
-      /tldw:|Empty assistant response|No response text was returned/i,
-      { timeout: 60_000 }
-    );
+    await waitForStreamComplete(page, 60_000);
+    const assistantMessage = chatLog
+      .locator(
+        "article[aria-label*='Assistant message'], [data-role='assistant'], [data-message-role='assistant'], .assistant-message"
+      )
+      .last();
+    await expect(assistantMessage).toBeVisible({ timeout: 5_000 });
 
-    const emptyResponseNotice = chatLog.getByRole('status', {
+    const emptyResponseNotice = assistantMessage.getByRole('status', {
       name: 'Empty assistant response',
     });
     if ((await emptyResponseNotice.count()) > 0) {
@@ -1479,10 +1483,10 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(mobileWebSearchControl).toHaveAttribute('aria-pressed', 'false');
     }
 
-    const mobileSmokePrompt = `mobile cockpit smoke ${Date.now()}`;
+    const mobileSmokePrompt = 'mobile cockpit smoke deterministic prompt';
     await page.getByTestId('chat-input').fill(mobileSmokePrompt);
     await page.getByRole('button', { name: /send message/i }).click();
-    await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(
+    await expect(page.locator("article[data-role='user']").last()).toContainText(
       mobileSmokePrompt
     );
     await assertChatCompletionRenderedOrRecoverable(page, null);

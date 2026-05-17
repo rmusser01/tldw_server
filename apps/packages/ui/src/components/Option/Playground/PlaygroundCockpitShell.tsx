@@ -340,7 +340,6 @@ export const PlaygroundCockpitShell = ({
             <button
               type="button"
               aria-label={mobileReturnToFocusLabel}
-              aria-pressed={focusMode}
               onClick={() => onModeChange("focus")}
               className="inline-flex min-h-[32px] items-center gap-1 rounded-md border border-border bg-surface2 px-2 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
             >
