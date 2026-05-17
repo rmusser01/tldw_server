@@ -186,6 +186,57 @@ describe("ComposerToolbar web search", () => {
     expect(screen.getByTestId("character-select")).toBeInTheDocument()
   })
 
+  it("labels casual composer control groups for scanning and keyboard focus", () => {
+    render(
+      <ComposerToolbar
+        {...createProps({
+          modeLauncherButton: <button type="button">Modes</button>,
+          voiceChatButton: <button type="button">Start voice chat</button>
+        })}
+      />
+    )
+
+    const contextGroup = screen.getByRole("group", {
+      name: "Mode and context controls"
+    })
+    const runGroup = screen.getByRole("group", {
+      name: "Run input controls"
+    })
+
+    expect(contextGroup).toContainElement(
+      screen.getByRole("button", { name: "Modes" })
+    )
+    expect(contextGroup).toContainElement(
+      screen.getByRole("button", { name: "MCP" })
+    )
+    expect(runGroup).toContainElement(
+      screen.getByRole("button", { name: "Start voice chat" })
+    )
+    expect(runGroup).toContainElement(
+      screen.getByRole("button", { name: "Chat Settings" })
+    )
+    expect(runGroup).toContainElement(
+      screen.getByRole("button", { name: "Send" })
+    )
+  })
+
+  it("only exposes casual advanced aria-controls when the controlled group is mounted", () => {
+    render(<ComposerToolbar {...createProps()} />)
+
+    const toggle = screen.getByTestId("composer-casual-advanced-chip")
+    expect(toggle).not.toHaveAttribute("aria-controls")
+
+    fireEvent.click(toggle)
+
+    expect(toggle).toHaveAttribute(
+      "aria-controls",
+      "composer-casual-advanced-controls-row"
+    )
+    expect(
+      screen.getByRole("group", { name: "Advanced composer controls" })
+    ).toHaveAttribute("id", "composer-casual-advanced-controls-row")
+  })
+
   it("places token usage in the casual bottom context chip row", () => {
     render(
       <ComposerToolbar
@@ -412,6 +463,102 @@ describe("ComposerToolbar web search", () => {
     expect(
       screen.getByTestId("composer-formatting-guide-toggle")
     ).toBeInTheDocument()
+  })
+
+  it("only exposes pro advanced aria-controls when the controlled group is mounted", () => {
+    render(<ComposerToolbar {...createProps({ isProMode: true })} />)
+
+    const toggle = screen.getByTestId("composer-advanced-toggle")
+    expect(toggle).not.toHaveAttribute("aria-controls")
+
+    fireEvent.click(toggle)
+
+    expect(toggle).toHaveAttribute(
+      "aria-controls",
+      "composer-pro-advanced-controls-row"
+    )
+    expect(
+      screen.getByRole("group", { name: "Advanced composer controls" })
+    ).toHaveAttribute("id", "composer-pro-advanced-controls-row")
+  })
+
+  it("labels pro cockpit panels by task area without hiding existing controls", () => {
+    render(
+      <ComposerToolbar
+        {...createProps({
+          isProMode: true,
+          modeLauncherButton: <button type="button">Modes</button>,
+          compareControl: <button type="button">Compare</button>,
+          researchLaunchButton: <button type="button">Deep Research</button>
+        })}
+      />
+    )
+
+    const contextPanel = screen.getByRole("group", {
+      name: "Context setup"
+    })
+    const generationPanel = screen.getByRole("group", {
+      name: "Model, tools, and run"
+    })
+
+    expect(
+      screen.getByRole("heading", { name: "Context setup" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: "Model, tools, and run" })
+    ).toBeInTheDocument()
+    expect(contextPanel).toContainElement(
+      screen.getByRole("button", { name: "Modes" })
+    )
+    expect(contextPanel).toContainElement(
+      screen.getByRole("button", { name: "Compare" })
+    )
+    expect(generationPanel).toContainElement(
+      screen.getByRole("button", { name: "MCP" })
+    )
+    expect(generationPanel).toContainElement(
+      screen.getByRole("button", { name: "Deep Research" })
+    )
+    expect(generationPanel).toContainElement(
+      screen.getByRole("button", { name: "Send" })
+    )
+  })
+
+  it("labels mobile composer groups without moving controls into a bottom bar", () => {
+    render(
+      <ComposerToolbar
+        {...createProps({
+          isMobile: true,
+          modeLauncherButton: <button type="button">Modes</button>
+        })}
+      />
+    )
+
+    const primaryGroup = screen.getByRole("group", {
+      name: "Mobile mode and model controls"
+    })
+    const contextGroup = screen.getByRole("group", {
+      name: "Mobile context controls"
+    })
+    const runGroup = screen.getByRole("group", {
+      name: "Mobile run input controls"
+    })
+
+    expect(primaryGroup).toContainElement(
+      screen.getByRole("button", { name: "Modes" })
+    )
+    expect(primaryGroup).toContainElement(screen.getByText("Model selector"))
+    expect(contextGroup).toContainElement(
+      screen.getByRole("button", { name: "Saved" })
+    )
+    expect(contextGroup).toContainElement(
+      screen.getByRole("button", { name: "Search & Context" })
+    )
+    expect(runGroup).toContainElement(screen.getByTestId("toolbar-overflow"))
+    expect(runGroup).toContainElement(
+      screen.getByRole("button", { name: "Attach" })
+    )
+    expect(screen.queryByTestId("composer-bottom-bar")).toBeNull()
   })
 
   it("invokes toggle callback when web search button is clicked", () => {
