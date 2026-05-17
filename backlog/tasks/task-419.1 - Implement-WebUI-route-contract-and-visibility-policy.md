@@ -33,7 +33,7 @@ Implement the first WP1 slice from the approved WebUI/extension UX remediation p
 - [x] #2 Initial tests prove all audited root routes have metadata and canonical paths where applicable.
 - [x] #3 Option route registry validation is wired to metadata without changing route behavior.
 - [x] #4 Extension sidepanel and options availability are represented in metadata or tested as an explicit follow-up gap.
-- [ ] #5 Command palette route target mismatch is covered by tests before any behavior change.
+- [x] #5 Command palette route target mismatch is covered by tests before any behavior change.
 - [ ] #6 Smoke inventory ownership is derived from or checked against route metadata.
 - [ ] #7 Implementation remains scoped to WP1; no route-family visual remediation is included.
 - [ ] #8 Focused frontend tests and diff checks are recorded in the task before completion.
@@ -52,6 +52,8 @@ Additional verification: `bunx tsc --noEmit --pretty false` from `apps/packages/
 Task 2 red/green: added `src/routes/__tests__/route-registry.visibility.test.ts`. First attempt imported `route-registry.tsx` and failed for the wrong reason by resolving optional OCR dependency `pa-tesseract.js`; corrected the test to inspect registry source text plus pure route-path constants. The corrected red run reported missing metadata for 41 non-dynamic option registry paths. Added registry metadata for settings, admin, nested source, companion, presentation, moderation, prototype workspace, research-studio, and workspace-studio routes. Focused run passed: 4 registry visibility tests passed. Combined metadata plus registry run passed: 9 tests passed.
 
 Task 3 red/green: added `src/routes/__tests__/route-registry.sidepanel-availability.test.ts` over shared and extension sidepanel registry source files. Initial red run reported missing sidepanel availability for `/agent`, `/clipper`, and `/error-boundary-test`; the nav parser was tightened to avoid dynamic/sidepanel false positives. Added sidepanel-only and debug metadata for `/agent`, `/clipper`, `/error-boundary-test`, `/__debug__/sidepanel-chat`, and `/__debug__/sidepanel-error-boundary`. Focused sidepanel run passed: 4 tests passed. Combined metadata, registry, and sidepanel run passed: 13 tests passed. Standalone route metadata type check passed.
+
+Task 4 red/green: added a command palette regression test asserting the `Go to Chat` row exposes `data-command-id="nav-chat"`, `data-target-path="/chat"`, and navigates to `/chat`. Red run failed because command rows had no command id/target path attributes and `nav-chat` targeted `/`. Updated `CommandPalette.tsx` to use `CHAT_PATH`, set `nav-chat.targetPath` to `/chat`, navigate to `/chat`, and expose nonvisual data attributes for command id/target path. Focused command palette run passed: 5 tests passed. Combined route plus command run passed: 18 tests passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

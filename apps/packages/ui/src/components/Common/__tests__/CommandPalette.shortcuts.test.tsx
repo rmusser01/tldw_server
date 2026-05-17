@@ -1,7 +1,7 @@
 import React from "react"
 import { describe, it, expect, vi } from "vitest"
 import { fireEvent, render, screen, within } from "@testing-library/react"
-import { MemoryRouter } from "react-router-dom"
+import { MemoryRouter, useLocation } from "react-router-dom"
 import { CommandPalette } from "../CommandPalette"
 import {
   formatShortcut,
@@ -71,6 +71,39 @@ const expectedShortcutLabel = (shortcut: {
   })
 
 describe("CommandPalette shortcut hints", () => {
+  const LocationProbe = () => {
+    const location = useLocation()
+
+    return <div data-testid="current-route">{location.pathname}</div>
+  }
+
+  it("routes the Go to Chat command to the chat page", async () => {
+    render(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <CommandPalette
+          onNewChat={vi.fn()}
+          onToggleRag={vi.fn()}
+          onToggleWebSearch={vi.fn()}
+          onIngestPage={vi.fn()}
+          onSwitchModel={vi.fn()}
+          onToggleSidebar={vi.fn()}
+        />
+        <LocationProbe />
+      </MemoryRouter>
+    )
+
+    window.dispatchEvent(new CustomEvent("tldw:open-command-palette"))
+
+    const goToChat = await screen.findByRole("option", { name: /Go to Chat/i })
+
+    expect(goToChat).toHaveAttribute("data-command-id", "nav-chat")
+    expect(goToChat).toHaveAttribute("data-target-path", "/chat")
+
+    fireEvent.click(goToChat)
+
+    expect(screen.getByTestId("current-route")).toHaveTextContent("/chat")
+  })
+
   it("shows configured shortcut hints only for actions with real keyboard bindings", async () => {
     render(
       <MemoryRouter>
