@@ -20,26 +20,6 @@
 
 This plan covers one reviewable subsystem: read-along behavior inside the shared `ContentViewer` path. It deliberately excludes backend API work, new TTS providers, persistent server-side audio cache, word-level timing, and a page-level read-aloud player.
 
-## Plan Hardening Review - 2026-05-23
-
-Status: this plan has already been executed. The implementation is recorded in `TASK-417`, and post-PR review fixes are recorded in `TASK-425` for PR #1835. Do not treat the unchecked task-step checkboxes below as current backlog work; they are preserved as the original execution script. The authoritative completion evidence is the completed `TASK-417`/`TASK-425` records plus the final verification checklist in this file.
-
-Current-code ownership check passed:
-
-- `apps/packages/ui/src/components/Media/read-along/` contains the planned segmentation, cache, DOM, selection, session, popover, transport, and focused test modules.
-- `ContentViewer` imports and wires `useContentSelectionActions`, `useMediaReadAlongSession`, `MediaReadAlongPopover`, and `MediaReadAlongTransport`.
-- `useContentViewerModals` exposes explicit `captureAnnotationSelection` while retaining `handleCaptureAnnotationSelection` as a compatibility wrapper.
-- `useTranscriptDisplay` and `ContentViewer` expose `data-read-along-segment-id` / `data-read-along-active` markers for plain and transcript rendering.
-- `tts-provider` exposes `TtsSynthesizeOptions.signal`; `tldw`, OpenAI, and ElevenLabs synthesis paths accept abort signals where their helpers support it, while the browser provider remains a no-cache SpeechSynthesis path.
-- Dexie schema/types include `mediaReadAlongAudioCache` with the media read-along audio cache entry type.
-- Route guards verify WebUI and extension media routes stay on the shared `ViewMediaPage` path and do not duplicate read-along implementation in extension route files.
-
-Risk review passed:
-
-- Annotation selection mediation, full-content versus rendered-window behavior, abort/stale suppression, cache privacy/quota behavior, browser TTS, embedded media pause, markdown/html fallback, route parity, and accessibility all map to focused tests or recorded browser verification.
-- No stale file ownership paths were found in this plan.
-- Future read-along changes should use new focused Backlog tasks rather than re-executing this historical plan.
-
 ## File Structure
 
 Create this directory:
@@ -737,8 +717,6 @@ git commit -m "feat: add media read-along playback session"
 
 ## Task 6: ContentViewer UI Integration
 
-**Status:** Complete
-
 **Files:**
 - Create: `apps/packages/ui/src/components/Media/read-along/MediaReadAlongPopover.tsx`
 - Create: `apps/packages/ui/src/components/Media/read-along/MediaReadAlongTransport.tsx`
@@ -748,7 +726,7 @@ git commit -m "feat: add media read-along playback session"
 - Test: `apps/packages/ui/src/components/Media/__tests__/ContentViewer.stage12.performance.test.tsx`
 - Test: `apps/packages/ui/src/components/Media/__tests__/ContentViewer.stage10.findBar.test.tsx`
 
-- [x] **Step 1: Write failing UI tests**
+- [ ] **Step 1: Write failing UI tests**
 
 Create `ContentViewer.read-along.test.tsx`.
 
@@ -762,7 +740,7 @@ Cover:
 - embedded audio/video preview is paused when generated playback starts
 - markdown/html fallback starts playback without unsafe HTML mutation
 
-- [x] **Step 2: Run UI tests red**
+- [ ] **Step 2: Run UI tests red**
 
 Run:
 
@@ -772,7 +750,7 @@ cd apps/packages/ui && bunx vitest run src/components/Media/__tests__/ContentVie
 
 Expected: FAIL.
 
-- [x] **Step 3: Implement popover**
+- [ ] **Step 3: Implement popover**
 
 Use real buttons. Test IDs:
 
@@ -785,7 +763,7 @@ Use real buttons. Test IDs:
 
 Keep labels short and use `t()` fallbacks. Do not add a page-level button.
 
-- [x] **Step 4: Implement inline transport**
+- [ ] **Step 4: Implement inline transport**
 
 Use compact icon buttons from lucide-react where available:
 
@@ -805,7 +783,7 @@ Test IDs:
 
 The transport should be anchored near the selection/active segment and clamp to the content viewport. On narrow widths, keep it compact near the active segment; do not add a sticky bottom player.
 
-- [x] **Step 5: Wrap plain/transcript segments**
+- [ ] **Step 5: Wrap plain/transcript segments**
 
 For plain and transcript-line rendering, render segment wrappers with:
 
@@ -821,11 +799,11 @@ For plain and transcript-line rendering, render segment wrappers with:
 
 Do not break existing find highlighting. If find highlighting is active, prefer find markup and skip exact read-along wrappers until the query is cleared.
 
-- [x] **Step 6: Keep large-content rendering lazy**
+- [ ] **Step 6: Keep large-content rendering lazy**
 
 Use full content for queue construction inside the session hook, but only wrap the visible plain content window in the DOM. Do not force `visiblePlainContentChars = content.length` when `Read full item` starts.
 
-- [x] **Step 7: Run UI/performance/find tests green**
+- [ ] **Step 7: Run UI/performance/find tests green**
 
 Run:
 
@@ -840,7 +818,7 @@ cd apps/packages/ui && bunx vitest run \
 
 Expected: PASS.
 
-- [x] **Step 8: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Media/read-along/MediaReadAlongPopover.tsx \
@@ -855,15 +833,13 @@ git commit -m "feat: wire read-along into media content viewer"
 
 ## Task 7: Accessibility, Route Parity, And Regression Hardening
 
-**Status:** Complete
-
 **Files:**
 - Modify: `apps/packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx`
 - Modify or create: `apps/packages/ui/src/routes/__tests__/option-media-route-guards.test.tsx`
 - Modify: `apps/tldw-frontend/__tests__/extension/entry-shell-performance.test.ts`
 - Optional create: `apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.read-along-parity.test.tsx`
 
-- [x] **Step 1: Add accessibility tests**
+- [ ] **Step 1: Add accessibility tests**
 
 Cover:
 
@@ -873,15 +849,15 @@ Cover:
 - reduced motion disables smooth auto-scroll
 - no essential controls are hover-only
 
-- [x] **Step 2: Add route/shared import guard**
+- [ ] **Step 2: Add route/shared import guard**
 
 The feature must stay in `apps/packages/ui`. Add or extend a guard that proves WebUI and extension media routes both use shared `ViewMediaPage`/`ContentViewer`, with no duplicate read-along implementation under `apps/tldw-frontend/extension`.
 
-- [x] **Step 3: Add bundle/performance guard**
+- [ ] **Step 3: Add bundle/performance guard**
 
 Update the extension entry-shell performance test only if the new read-along modules change the expected static import set. Prefer lazy or local imports if static media entry cost grows unexpectedly.
 
-- [x] **Step 4: Run tests**
+- [ ] **Step 4: Run tests**
 
 Run:
 
@@ -901,7 +877,7 @@ bunx vitest run apps/tldw-frontend/__tests__/extension/entry-shell-performance.t
 
 Expected: PASS.
 
-- [x] **Step 5: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx \
@@ -919,7 +895,7 @@ git commit -m "test: verify media read-along route parity"
   - focused tests touched above
 - Modify: `backlog/tasks/task-416 - Plan-media-viewer-read-along-TTS-implementation.md` only to record implementation verification if this plan task is kept as the tracking task.
 
-- [x] **Step 1: Run the focused unit/component suite**
+- [ ] **Step 1: Run the focused unit/component suite**
 
 Run:
 
@@ -938,7 +914,7 @@ cd apps/packages/ui && bunx vitest run \
 
 Expected: PASS.
 
-- [x] **Step 2: Run design-system/openapi guards if touched imports cross those boundaries**
+- [ ] **Step 2: Run design-system/openapi guards if touched imports cross those boundaries**
 
 Run:
 
@@ -949,11 +925,11 @@ cd apps/packages/ui && bun run verify:openapi
 
 Expected: PASS, or document why a guard is unrelated and skipped.
 
-- [x] **Step 3: Start the WebUI dev server**
+- [ ] **Step 3: Start the WebUI dev server**
 
 Use the repo's normal dev flow. If a dev server is already running, reuse it. Otherwise run the existing frontend/server command expected for this repo and record the URL.
 
-- [x] **Step 4: Browser smoke the WebUI media viewer**
+- [ ] **Step 4: Browser smoke the WebUI media viewer**
 
 Manual/browser checks:
 
@@ -966,7 +942,7 @@ Manual/browser checks:
 - select text again and click `Annotate`
 - verify annotation draft appears only after annotation action
 
-- [x] **Step 5: Browser smoke extension-width behavior**
+- [ ] **Step 5: Browser smoke extension-width behavior**
 
 Use a narrow viewport comparable to the extension sidepanel. Confirm:
 
@@ -975,11 +951,11 @@ Use a narrow viewport comparable to the extension sidepanel. Confirm:
 - text does not overlap controls
 - no sticky bottom player appears
 
-- [x] **Step 6: Run Bandit only if Python/backend files were touched**
+- [ ] **Step 6: Run Bandit only if Python/backend files were touched**
 
 Expected for this implementation: skipped, because the planned implementation is TypeScript UI-only. If Python files were touched despite this plan, run Bandit on the touched Python scope before completion.
 
-- [x] **Step 7: Final commit for QA fixes**
+- [ ] **Step 7: Final commit for QA fixes**
 
 If browser QA required fixes:
 
@@ -991,33 +967,23 @@ git commit -m "fix: harden media read-along browser behavior"
 
 If no fixes were needed, do not create an empty commit.
 
-Task 8 verification notes:
-
-- Focused read-along suite rerun from `apps/packages/ui`: 12 files / 104 tests passed, including segmentation, cache, content selection, playback session, `ContentViewer.read-along`, find/performance/annotation/accessibility coverage, TTS provider mapping, and Dexie STT regression coverage.
-- Route parity rerun from `apps/packages/ui`: 2 files / 6 tests passed for shared WebUI/extension media route guards and `ViewMediaPage` connection behavior.
-- `git diff --check` passed.
-- `bun run verify:openapi` passed earlier in Task 8; `bun run verify:design-system-state` remains blocked by unrelated repo-wide baseline findings outside read-along touched files.
-- Next dev server was started at `http://127.0.0.1:8080` with quickstart deployment env. Browser render smoke passed against mocked backend responses, confirming `/media` renders a media detail in the shared content region and that the content region is explicitly text-selectable.
-- A fuller headless interaction smoke exposed real hardening issues: the content body needed explicit text selection, the selection hook needed an always-on content-scoped `selectionchange` listener, popover buttons needed pointer-down default prevention, and floating controls needed visible-window fallback when the pane rectangle is offscreen. Those fixes were added with focused regression coverage. The remaining full interaction smoke was not kept as a final gate because headless programmatic text selection stayed flaky after the product fixes; interaction behavior is covered by the focused component tests.
-- Bandit skipped because only TypeScript/React/docs/backlog files were touched.
-
 ## Final Verification Checklist
 
-- [x] `ContentViewer` selection no longer automatically switches to annotations for every selection.
-- [x] Annotation creation from selected text still works through the mediated selection action.
-- [x] No read-along UI appears before selection or active playback.
-- [x] Read-along actions support selection, from-here, current-section, and full-item scopes.
-- [x] `Read from here` and `Read full item` use canonical full content, not only rendered large-content windows.
-- [x] Large-content segmentation is lazy and cancellable.
-- [x] Stop/media/content changes abort in-flight TTS requests and suppress stale cache writes.
-- [x] Generated audio cache uses Dexie, LRU eviction, quota fallback, and no raw selected text metadata.
-- [x] Existing TTS settings are reused and frozen per active session.
-- [x] Browser TTS provider works as a no-cache SpeechSynthesis path.
-- [x] Embedded media preview pauses when generated read-along playback starts.
-- [x] Plain/transcript active highlighting works with find highlighting preserved.
-- [x] Markdown/html use safe nearest-block fallback without mutating sanitized HTML.
-- [x] WebUI and extension routes share the implementation.
-- [x] Keyboard and reduced-motion paths are covered.
+- [ ] `ContentViewer` selection no longer automatically switches to annotations for every selection.
+- [ ] Annotation creation from selected text still works through the mediated selection action.
+- [ ] No read-along UI appears before selection or active playback.
+- [ ] Read-along actions support selection, from-here, current-section, and full-item scopes.
+- [ ] `Read from here` and `Read full item` use canonical full content, not only rendered large-content windows.
+- [ ] Large-content segmentation is lazy and cancellable.
+- [ ] Stop/media/content changes abort in-flight TTS requests and suppress stale cache writes.
+- [ ] Generated audio cache uses Dexie, LRU eviction, quota fallback, and no raw selected text metadata.
+- [ ] Existing TTS settings are reused and frozen per active session.
+- [ ] Browser TTS provider works as a no-cache SpeechSynthesis path.
+- [ ] Embedded media preview pauses when generated read-along playback starts.
+- [ ] Plain/transcript active highlighting works with find highlighting preserved.
+- [ ] Markdown/html use safe nearest-block fallback without mutating sanitized HTML.
+- [ ] WebUI and extension routes share the implementation.
+- [ ] Keyboard and reduced-motion paths are covered.
 
 ## Suggested PR/Commit Stack
 
