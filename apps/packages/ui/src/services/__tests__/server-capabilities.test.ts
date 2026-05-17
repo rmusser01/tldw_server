@@ -216,7 +216,8 @@ describe("server capabilities docs-info merge", () => {
       info: { version: "ingestion-sources-local-directory-version" },
       paths: {
         "/api/v1/ingestion-sources": {},
-        "/api/v1/ingestion-sources/{source_id}": {}
+        "/api/v1/ingestion-sources/{source_id}": {},
+        "/api/v1/ingestion-sources/capabilities": {}
       }
     })
     mocks.bgRequest.mockImplementation(async (request: any) => {
@@ -247,7 +248,8 @@ describe("server capabilities docs-info merge", () => {
       info: { version: "ingestion-sources-capabilities-fail" },
       paths: {
         "/api/v1/ingestion-sources": {},
-        "/api/v1/ingestion-sources/{source_id}": {}
+        "/api/v1/ingestion-sources/{source_id}": {},
+        "/api/v1/ingestion-sources/capabilities": {}
       }
     })
     mocks.bgRequest.mockImplementation(async (request: any) => {
@@ -262,6 +264,29 @@ describe("server capabilities docs-info merge", () => {
 
     expect(capabilities.hasIngestionSources).toBe(true)
     expect(capabilities.canCreateLocalDirectoryIngestionSource).toBe(false)
+  })
+
+  it("does not call authenticated source capabilities for older authoritative source specs", async () => {
+    mocks.getOpenAPISpec.mockResolvedValue({
+      info: { version: "ingestion-sources-without-entitlement-route" },
+      paths: {
+        "/api/v1/ingestion-sources": {},
+        "/api/v1/ingestion-sources/{source_id}": {}
+      }
+    })
+    mocks.bgRequest.mockResolvedValue({})
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+
+    expect(capabilities.hasIngestionSources).toBe(true)
+    expect(capabilities.canCreateLocalDirectoryIngestionSource).toBe(false)
+    expect(
+      mocks.bgRequest.mock.calls.some(
+        ([request]) =>
+          (request as any)?.path === "/api/v1/ingestion-sources/capabilities"
+      )
+    ).toBe(false)
   })
 
   it("does not call authenticated source capabilities when ingestion sources are absent", async () => {

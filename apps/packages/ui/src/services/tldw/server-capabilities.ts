@@ -791,12 +791,20 @@ const fetchCapabilitiesFromServer = async (): Promise<ServerCapabilities> => {
   maybeLogDiagnostics(
     diagnosticsSource === "fallback" ? "fallback-spec" : "network-fetch"
   )
+  const authoritativePaths =
+    specSource === "authoritative" ? normalizePaths(spec?.paths || {}) : {}
+  const hasIngestionSourceCapabilitiesEndpoint = Boolean(
+    authoritativePaths["/api/v1/ingestion-sources/capabilities"]
+  )
   let capabilities = applyDocsInfoFeatureGates(
     computeCapabilities(spec, specSource),
     docsInfo
   )
 
-  if (specSource === "authoritative" && capabilities.hasIngestionSources) {
+  if (
+    capabilities.hasIngestionSources &&
+    hasIngestionSourceCapabilitiesEndpoint
+  ) {
     try {
       const sourceCapabilities =
         await bgRequest<IngestionSourceCapabilitiesResponse, any>({
