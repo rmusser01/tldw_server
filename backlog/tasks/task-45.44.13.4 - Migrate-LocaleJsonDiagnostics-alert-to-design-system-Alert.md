@@ -17,6 +17,7 @@ references:
 - apps/packages/ui/src/components/Option/Sources/SourceForm.tsx
 - apps/packages/ui/src/components/Option/WorkspacePlayground/ChatPane/index.tsx
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
+- https://github.com/rmusser01/tldw_server/pull/1823
 documentation:
 - Docs/superpowers/specs/2026-05-14-design-system-remaining-work-tracker-design.md
 modified_files:
@@ -56,7 +57,7 @@ During verifier proof, current dev had product-state drift outside LocaleJsonDia
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated LocaleJsonDiagnostics to the shared design-system Alert and resolved current-dev product-state verifier drift in PlaylistPreflightPanel, SourceForm, and WorkspacePlayground ChatPane. Verification: focused red test failed before LocaleJsonDiagnostics panel existed; PlaylistPreflightPanel red test failed before DS primitives; focused LocaleJsonDiagnostics + PlaylistPreflightPanel + SourceForm + product-state guard Vitest passed (71 tests); bun run verify:design-system-state passed with 399 remaining allowed baseline exceptions; baseline JSON parse passed; git diff --check passed; bunx tsc --noEmit still exits 2 on existing package-wide type debt with no touched-file matches. Bandit is not applicable because this slice touched frontend TypeScript/JSON/backlog files only.
+Migrated LocaleJsonDiagnostics to the shared design-system Alert and resolved current-dev product-state verifier drift in PlaylistPreflightPanel, SourceForm, and WorkspacePlayground ChatPane. PR opened: https://github.com/rmusser01/tldw_server/pull/1823. Verification: focused red test failed before LocaleJsonDiagnostics panel existed; PlaylistPreflightPanel red test failed before DS primitives; focused LocaleJsonDiagnostics + PlaylistPreflightPanel + SourceForm + product-state guard Vitest passed (71 tests); bun run verify:design-system-state passed with 399 remaining allowed baseline exceptions; baseline JSON parse passed; git diff --check passed; bunx tsc --noEmit still exits 2 on existing package-wide type debt with no touched-file matches. Bandit is not applicable because this slice touched frontend TypeScript/JSON/backlog files only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
