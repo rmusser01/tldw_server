@@ -40,6 +40,9 @@ def _enabled_flag_applies(flag: dict[str, Any], *, user_id: int, org_ids: set[in
     """Return whether one enabled feature flag grants access for a user."""
     if not bool(flag.get("enabled")):
         return False
+    scope = str(flag.get("scope") or "global").strip().lower()
+    if scope == "global":
+        return False
     target_user_ids = {_coerce_int(value) for value in flag.get("target_user_ids") or []}
     target_user_ids.discard(None)
     if target_user_ids and user_id not in target_user_ids:
@@ -54,9 +57,6 @@ def _enabled_flag_applies(flag: dict[str, Any], *, user_id: int, org_ids: set[in
     ):
         return False
 
-    scope = str(flag.get("scope") or "global").strip().lower()
-    if scope == "global":
-        return True
     if scope == "user":
         return _coerce_int(flag.get("user_id")) == user_id
     if scope == "org":

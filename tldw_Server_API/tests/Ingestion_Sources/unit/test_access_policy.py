@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 
@@ -100,14 +102,17 @@ def test_disabled_flags_do_not_allow(access_policy, monkeypatch):
     ) is False
 
 
-def test_target_user_ids_narrows_global_flags(access_policy, monkeypatch):
+def test_global_flags_do_not_allow_local_directory_creation(access_policy, monkeypatch):
     monkeypatch.setattr(
         access_policy,
         "list_feature_flags",
-        lambda: [_flag(scope="global", target_user_ids=[7])],
+        lambda: [
+            _flag(scope="global"),
+            _flag(scope="global", target_user_ids=[7]),
+        ],
     )
 
-    assert access_policy.can_create_local_directory_ingestion_source(FakeUser(7)) is True
+    assert access_policy.can_create_local_directory_ingestion_source(FakeUser(7)) is False
     assert access_policy.can_create_local_directory_ingestion_source(FakeUser(8)) is False
 
 
@@ -140,7 +145,7 @@ def test_rollout_percent_is_deterministic_per_user(access_policy, monkeypatch):
     monkeypatch.setattr(
         access_policy,
         "list_feature_flags",
-        lambda: [_flag(scope="global", rollout_percent=50)],
+        lambda: [_flag(scope="user", user_id=7, rollout_percent=50)],
     )
 
     first = access_policy.can_create_local_directory_ingestion_source(FakeUser(7))
@@ -153,7 +158,7 @@ def test_missing_rollout_percent_defaults_to_full_rollout(access_policy, monkeyp
     monkeypatch.setattr(
         access_policy,
         "list_feature_flags",
-        lambda: [_flag(scope="global", rollout_percent=None)],
+        lambda: [_flag(scope="user", user_id=7, rollout_percent=None)],
     )
 
     assert access_policy.can_create_local_directory_ingestion_source(FakeUser(7)) is True
@@ -163,7 +168,31 @@ def test_malformed_rollout_percent_fails_closed(access_policy, monkeypatch):
     monkeypatch.setattr(
         access_policy,
         "list_feature_flags",
-        lambda: [_flag(scope="global", rollout_percent="not-a-number")],
+        lambda: [_flag(scope="user", user_id=7, rollout_percent="not-a-number")],
     )
+
+    assert access_policy.can_create_local_directory_ingestion_source(FakeUser(7)) is False
+
+
+def test_malformed_persisted_rollout_percent_from_feature_flag_service_fails_closed(
+    access_policy,
+    monkeypatch,
+    tmp_path,
+):
+    from tldw_Server_API.app.services import admin_system_ops_service
+
+    store_path = tmp_path / "system_ops.json"
+    store_path.write_text(
+        json.dumps(
+            {
+                "feature_flags": [
+                    _flag(scope="user", user_id=7, rollout_percent="not-a-number")
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(admin_system_ops_service, "_STORE_PATH", store_path)
+    monkeypatch.setattr(access_policy, "list_feature_flags", admin_system_ops_service.list_feature_flags)
 
     assert access_policy.can_create_local_directory_ingestion_source(FakeUser(7)) is False
