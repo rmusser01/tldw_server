@@ -48,6 +48,8 @@ Shared state foundation: `state-primitives.test.tsx` passed at baseline (7 tests
 
 /integrations adoption: replaced top-level personal unsupported and overview-load failures with shared `StatePanel` states. Personal/workspace integration endpoint paths, status codes, server URL, and raw overview errors are diagnostics; provider cards, drawers, and workspace policy panels remain in their existing scoped UI. The overview query now surfaces the shared error state immediately instead of retrying the same route-level failure three times; the retry path is explicit through the state action. Verification: `bunx vitest run src/components/Option/Integrations/__tests__/IntegrationManagementPage.test.tsx src/routes/__tests__/integrations-route.test.tsx` passed 15 tests.
 
+Design-system guard follow-up: `bun run verify:design-system-state` initially found one remaining touched-file AntD product-state import in `IntegrationManagementPage.tsx` for the Telegram linked actors warning. Added coverage and migrated that warning to a degraded shared state with diagnostics, then removed stale baseline entries for the migrated `/sources`, `/scheduled-tasks`, and `/integrations` AntD states. Verification: targeted Telegram linked-actor test passed; `bun run verify:design-system-state` passed with only pre-existing allowed legacy exceptions.
+
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

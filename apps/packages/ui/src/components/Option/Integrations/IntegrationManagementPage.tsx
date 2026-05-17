@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react"
-import { Alert, Button, Card, Col, Row, Skeleton, Space, Tag, Typography, message } from "antd"
+import { Button, Card, Col, Row, Skeleton, Space, Tag, Typography, message } from "antd"
 import { useQuery } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 import {
@@ -54,6 +54,8 @@ const isPersonalProvider = (provider: IntegrationProvider): provider is Personal
 
 const PERSONAL_INTEGRATIONS_PATH = "/api/v1/integrations/personal"
 const WORKSPACE_INTEGRATIONS_PATH = "/api/v1/integrations/workspace"
+const WORKSPACE_TELEGRAM_LINKED_ACTORS_PATH =
+  "/api/v1/integrations/workspace/telegram/linked-actors"
 
 const errorStatus = (error: unknown): number | undefined => {
   if (!error || typeof error !== "object") {
@@ -282,12 +284,6 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
       : telegramBotQuery.isError
         ? "Telegram bot settings could not be loaded."
         : null
-  const telegramActorsError =
-    telegramActorsQuery.isError && telegramActorsQuery.error instanceof Error
-      ? telegramActorsQuery.error.message
-      : telegramActorsQuery.isError
-        ? "Telegram linked actors could not be loaded."
-        : null
   const personalIntegrationsUnsupported =
     scope === "personal" &&
     (personalIntegrationsSupported === false || isUnsupportedOverviewError(scope, overviewQuery.error))
@@ -328,6 +324,26 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
             label: "Try again",
             onClick: () => {
               void overviewQuery.refetch()
+            }
+          }
+      })
+      : null
+  const telegramActorsErrorState =
+    telegramActorsQuery.isError
+      ? buildCapabilityState({
+          kind: "degraded",
+          featureName: "Workspace integrations",
+          method: "GET",
+          endpoint: WORKSPACE_TELEGRAM_LINKED_ACTORS_PATH,
+          status: errorStatus(telegramActorsQuery.error),
+          rawMessage: errorMessage(
+            telegramActorsQuery.error,
+            "Telegram linked actors could not be loaded."
+          ),
+          primaryAction: {
+            label: "Refresh Telegram actors",
+            onClick: () => {
+              void telegramActorsQuery.refetch()
             }
           }
         })
@@ -438,12 +454,13 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
 
       {isWorkspace ? (
         <>
-          {telegramActorsError ? (
-            <Alert
-              type="warning"
-              showIcon
-              title="Unable to load Telegram linked actors"
-              description={telegramActorsError}
+          {telegramActorsErrorState ? (
+            <StatePanel
+              state={telegramActorsErrorState.state}
+              title={telegramActorsErrorState.title}
+              message={telegramActorsErrorState.message}
+              diagnostics={telegramActorsErrorState.diagnostics}
+              primaryAction={telegramActorsErrorState.primaryAction}
             />
           ) : null}
 

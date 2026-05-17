@@ -449,6 +449,27 @@ describe("IntegrationManagementPage", () => {
     expect(screen.getByText("Telegram bot")).toBeInTheDocument()
   })
 
+  it("shows Telegram linked-actor load failures as a degraded shared state", async () => {
+    mockWorkspaceQueries()
+    mocks.listWorkspaceTelegramLinkedActors.mockRejectedValue(
+      Object.assign(
+        new Error(
+          "Telegram actors unavailable (GET /api/v1/integrations/workspace/telegram/linked-actors)"
+        ),
+        { status: 503 }
+      )
+    )
+
+    renderWithQueryClient(<IntegrationManagementPage scope="workspace" />)
+
+    expect(await screen.findByText("Degraded")).toBeInTheDocument()
+    expect(screen.getByText("Workspace integrations are partially available")).toBeInTheDocument()
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
+      "/api/v1/integrations/workspace/telegram/linked-actors"
+    )
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent("503")
+  })
+
   it("preserves hidden Slack policy fields when saving visible settings", async () => {
     const user = userEvent.setup()
 
