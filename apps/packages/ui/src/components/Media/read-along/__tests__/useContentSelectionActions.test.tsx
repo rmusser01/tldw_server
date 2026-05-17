@@ -40,6 +40,7 @@ describe('useContentSelectionActions', () => {
     const { result } = renderHook(() =>
       useContentSelectionActions({
         contentBodyRef: ref,
+        contentIdentityKey: 'media:777:plain:a',
         onApplyAnnotationSelection: vi.fn()
       })
     )
@@ -61,6 +62,7 @@ describe('useContentSelectionActions', () => {
     const { result } = renderHook(() =>
       useContentSelectionActions({
         contentBodyRef: ref,
+        contentIdentityKey: 'media:777:plain:a',
         onApplyAnnotationSelection: vi.fn()
       })
     )
@@ -102,6 +104,7 @@ describe('useContentSelectionActions', () => {
     const { result } = renderHook(() =>
       useContentSelectionActions({
         contentBodyRef: ref,
+        contentIdentityKey: 'media:777:plain:a',
         onApplyAnnotationSelection: vi.fn()
       })
     )
@@ -127,6 +130,7 @@ describe('useContentSelectionActions', () => {
     const { result } = renderHook(() =>
       useContentSelectionActions({
         contentBodyRef: ref,
+        contentIdentityKey: 'media:777:plain:a',
         onApplyAnnotationSelection: vi.fn()
       })
     )
@@ -154,6 +158,7 @@ describe('useContentSelectionActions', () => {
     const { result } = renderHook(() =>
       useContentSelectionActions({
         contentBodyRef: ref,
+        contentIdentityKey: 'media:777:plain:a',
         onApplyAnnotationSelection
       })
     )
@@ -174,5 +179,40 @@ describe('useContentSelectionActions', () => {
       result.current.applyAnnotationSelection()
     })
     expect(onApplyAnnotationSelection).not.toHaveBeenCalled()
+  })
+
+  it('refuses to apply a selection opened under a previous content identity key', () => {
+    const onApplyAnnotationSelection = vi.fn()
+    const contentBody = document.createElement('div')
+    contentBody.textContent = 'Identity guarded text'
+    document.body.append(contentBody)
+    setSelectionRange(contentBody.firstChild as Text, 0, contentBody.firstChild as Text, 8)
+
+    const ref = { current: contentBody } as React.RefObject<HTMLDivElement | null>
+    const { result, rerender } = renderHook(
+      ({ contentIdentityKey }: { contentIdentityKey: string }) =>
+        useContentSelectionActions({
+          contentBodyRef: ref,
+          contentIdentityKey,
+          onApplyAnnotationSelection
+        }),
+      {
+        initialProps: { contentIdentityKey: 'media:777:plain:a' }
+      }
+    )
+
+    act(() => {
+      result.current.handleContentSelectionEvent()
+    })
+    expect(result.current.selectionActionState?.selectedText).toBe('Identity')
+
+    rerender({ contentIdentityKey: 'media:778:plain:b' })
+
+    act(() => {
+      result.current.applyAnnotationSelection()
+    })
+
+    expect(onApplyAnnotationSelection).not.toHaveBeenCalled()
+    expect(result.current.selectionActionState).toBeNull()
   })
 })

@@ -119,6 +119,15 @@ export const shouldShowMediaDeveloperTools = (
   return Boolean((env as Record<string, unknown>).DEV) || mode === 'development'
 }
 
+const buildContentRevisionHash = (value: string): string => {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash.toString(16).padStart(8, '0')
+}
+
 // Metadata helpers moved to useContentMetadata hook
 
 interface ContentViewerProps {
@@ -268,20 +277,26 @@ export function ContentViewer({
     t
   })
 
+  const contentSelectionIdentityKey = useMemo(
+    () => [
+      selectedMediaId || 'none',
+      selectedMedia?.kind || 'none',
+      rendering.effectiveRenderMode,
+      content.length,
+      buildContentRevisionHash(content)
+    ].join(':'),
+    [content, rendering.effectiveRenderMode, selectedMedia?.kind, selectedMediaId]
+  )
+
   const selectionActions = useContentSelectionActions({
     contentBodyRef,
+    contentIdentityKey: contentSelectionIdentityKey,
     onApplyAnnotationSelection: modals.captureAnnotationSelection
   })
 
   useEffect(() => {
     selectionActions.clearSelectionActions()
-  }, [
-    content,
-    rendering.effectiveRenderMode,
-    selectedMedia?.kind,
-    selectedMediaId,
-    selectionActions.clearSelectionActions
-  ])
+  }, [contentSelectionIdentityKey, selectionActions.clearSelectionActions])
 
   // Now we have shouldShowEmbeddedPlayer from modals, re-run rendering with correct value
   // Actually, we need to use the modals result. Let's restructure:

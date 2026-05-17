@@ -6,10 +6,12 @@ import type { ReadAlongSelection } from './types'
 
 export interface UseContentSelectionActionsOptions {
   contentBodyRef: RefObject<HTMLElement | null>
+  contentIdentityKey: string
   onApplyAnnotationSelection: (selectionText: string, location?: string) => void
 }
 
 export interface ContentSelectionActionState extends ReadAlongSelection {
+  contentIdentityKey: string
   location?: string
 }
 
@@ -21,13 +23,18 @@ const buildSelectionLocation = (selection: ReadAlongSelection): string | undefin
   return `read-along-segment:${selection.startSegmentId}..${selection.endSegmentId}`
 }
 
-const toActionState = (selection: ReadAlongSelection): ContentSelectionActionState => ({
+const toActionState = (
+  selection: ReadAlongSelection,
+  contentIdentityKey: string
+): ContentSelectionActionState => ({
   ...selection,
+  contentIdentityKey,
   location: buildSelectionLocation(selection)
 })
 
 export const useContentSelectionActions = ({
   contentBodyRef,
+  contentIdentityKey,
   onApplyAnnotationSelection
 }: UseContentSelectionActionsOptions) => {
   const [selectionActionState, setSelectionActionState] =
@@ -44,11 +51,15 @@ export const useContentSelectionActions = ({
       return
     }
 
-    setSelectionActionState(toActionState(selection))
-  }, [clearSelectionActions, contentBodyRef])
+    setSelectionActionState(toActionState(selection, contentIdentityKey))
+  }, [clearSelectionActions, contentBodyRef, contentIdentityKey])
 
   const applyAnnotationSelection = useCallback(() => {
     if (!selectionActionState) return
+    if (selectionActionState.contentIdentityKey !== contentIdentityKey) {
+      clearSelectionActions()
+      return
+    }
 
     const currentSelection = getContentSelectionFromDom(contentBodyRef.current)
     if (!currentSelection) {
@@ -56,10 +67,16 @@ export const useContentSelectionActions = ({
       return
     }
 
-    const currentActionState = toActionState(currentSelection)
+    const currentActionState = toActionState(currentSelection, contentIdentityKey)
     onApplyAnnotationSelection(currentActionState.selectedText, currentActionState.location)
     clearSelectionActions()
-  }, [clearSelectionActions, contentBodyRef, onApplyAnnotationSelection, selectionActionState])
+  }, [
+    clearSelectionActions,
+    contentBodyRef,
+    contentIdentityKey,
+    onApplyAnnotationSelection,
+    selectionActionState
+  ])
 
   useEffect(() => {
     if (!selectionActionState || typeof document === 'undefined') return
@@ -70,17 +87,31 @@ export const useContentSelectionActions = ({
         clearSelectionActions()
         return
       }
-      setSelectionActionState(toActionState(selection))
+      setSelectionActionState(toActionState(selection, contentIdentityKey))
     }
 
     document.addEventListener('selectionchange', handleSelectionChange)
     return () => {
       document.removeEventListener('selectionchange', handleSelectionChange)
     }
-  }, [clearSelectionActions, contentBodyRef, selectionActionState])
+  }, [clearSelectionActions, contentBodyRef, contentIdentityKey, selectionActionState])
+
+  useEffect(() => {
+    if (
+      selectionActionState &&
+      selectionActionState.contentIdentityKey !== contentIdentityKey
+    ) {
+      clearSelectionActions()
+    }
+  }, [clearSelectionActions, contentIdentityKey, selectionActionState])
+
+  const currentSelectionActionState =
+    selectionActionState?.contentIdentityKey === contentIdentityKey
+      ? selectionActionState
+      : null
 
   return {
-    selectionActionState,
+    selectionActionState: currentSelectionActionState,
     handleContentSelectionEvent,
     clearSelectionActions,
     applyAnnotationSelection
