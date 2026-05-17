@@ -1,5 +1,5 @@
 import React from "react"
-import { Button, Tag } from "antd"
+import { Tag } from "antd"
 import { Box, CopyPlus, FolderOpen, PackageOpen, PenLine, Upload } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
@@ -116,10 +116,11 @@ export const BuddySourcePicker: React.FC<BuddySourcePickerProps> = ({
         {options.map((option) => {
           const isSelected = selectedSource === option.source
           return (
-            <Button
+            <button
+              type="button"
               key={option.source}
               aria-label={option.label}
-              className={`h-auto justify-start whitespace-normal rounded-md border px-3 py-2 text-left ${
+              className={`min-h-[4.5rem] rounded-md border px-3 py-2 text-left transition-colors hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
                 isSelected ? "border-primary bg-primary/10" : "border-border bg-bg"
               }`}
               onClick={() => handleSelect(option.source)}
@@ -136,7 +137,7 @@ export const BuddySourcePicker: React.FC<BuddySourcePickerProps> = ({
                   </span>
                 </span>
               </span>
-            </Button>
+            </button>
           )
         })}
       </div>
