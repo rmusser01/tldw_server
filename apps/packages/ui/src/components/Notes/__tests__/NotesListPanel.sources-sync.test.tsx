@@ -122,4 +122,19 @@ describe("NotesListPanel Sources folder sync entry", () => {
       "Ask an administrator to enable server folder sync for this account"
     )
   })
+
+  it("keeps Sync folder enabled while local-directory entitlement is unknown", async () => {
+    const { props } = renderPanel({
+      capabilities: {
+        ...baseCapabilities,
+        canCreateLocalDirectoryIngestionSource: null
+      }
+    })
+
+    const button = screen.getByRole("button", { name: "Sync folder" })
+    expect(button).toBeEnabled()
+
+    fireEvent.click(button)
+    expect(props.onSyncFolder).toHaveBeenCalledTimes(1)
+  })
 })

@@ -178,7 +178,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
     !capsLoading &&
     Boolean(capabilities?.hasNotes) &&
     Boolean(capabilities?.hasIngestionSources) &&
-    Boolean(capabilities?.canCreateLocalDirectoryIngestionSource)
+    capabilities?.canCreateLocalDirectoryIngestionSource !== false
   const syncFolderDisabled = !canSyncFolder || syncFolderInProgress
   const syncFolderDisabledReason = (() => {
     if (syncFolderInProgress) {
@@ -206,7 +206,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
         defaultValue: 'Sources are not available on this server'
       })
     }
-    if (!capabilities?.canCreateLocalDirectoryIngestionSource) {
+    if (capabilities?.canCreateLocalDirectoryIngestionSource === false) {
       return t('option:notesSearch.syncFolderEntitlementDisabled', {
         defaultValue: 'Ask an administrator to enable server folder sync for this account'
       })

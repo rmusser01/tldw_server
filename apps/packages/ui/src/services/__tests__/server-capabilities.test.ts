@@ -263,10 +263,10 @@ describe("server capabilities docs-info merge", () => {
     const capabilities = await getServerCapabilities()
 
     expect(capabilities.hasIngestionSources).toBe(true)
-    expect(capabilities.canCreateLocalDirectoryIngestionSource).toBe(false)
+    expect(capabilities.canCreateLocalDirectoryIngestionSource).toBeNull()
   })
 
-  it("does not call authenticated source capabilities for older authoritative source specs", async () => {
+  it("best-effort probes source capabilities for older authoritative source specs", async () => {
     mocks.getOpenAPISpec.mockResolvedValue({
       info: { version: "ingestion-sources-without-entitlement-route" },
       paths: {
@@ -274,19 +274,24 @@ describe("server capabilities docs-info merge", () => {
         "/api/v1/ingestion-sources/{source_id}": {}
       }
     })
-    mocks.bgRequest.mockResolvedValue({})
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path === "/api/v1/ingestion-sources/capabilities") {
+        throw new Error("capability endpoint unavailable")
+      }
+      return {}
+    })
 
     const { getServerCapabilities } = await importCapabilitiesModule()
     const capabilities = await getServerCapabilities()
 
     expect(capabilities.hasIngestionSources).toBe(true)
-    expect(capabilities.canCreateLocalDirectoryIngestionSource).toBe(false)
+    expect(capabilities.canCreateLocalDirectoryIngestionSource).toBeNull()
     expect(
       mocks.bgRequest.mock.calls.some(
         ([request]) =>
           (request as any)?.path === "/api/v1/ingestion-sources/capabilities"
       )
-    ).toBe(false)
+    ).toBe(true)
   })
 
   it("does not call authenticated source capabilities when ingestion sources are absent", async () => {
@@ -621,6 +626,36 @@ describe("server capabilities docs-info merge", () => {
     expect(mocks.getOpenAPISpec).toHaveBeenCalledTimes(1)
     expect(capabilities.specVersion).toBe("cache-v4-version")
     expect(capabilities.specSource).toBe("authoritative")
+  })
+
+  it("does not reuse persisted V4 capability payloads after entitlement unknown-state support", async () => {
+    cacheState.values.set("__tldwServerCapabilitiesCacheV4", {
+      key: "server:17azy7u:auth:single-user:org:none:user:single-user:key:none",
+      fetchedAt: Date.now(),
+      capabilities: {
+        hasIngestionSources: true,
+        canCreateLocalDirectoryIngestionSource: false
+      }
+    })
+    mocks.getOpenAPISpec.mockResolvedValue({
+      info: { version: "cache-v5-entitlement-version" },
+      paths: {
+        "/api/v1/ingestion-sources": {}
+      }
+    })
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path === "/api/v1/ingestion-sources/capabilities") {
+        return { can_create_local_directory: true }
+      }
+      return {}
+    })
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+
+    expect(mocks.getOpenAPISpec).toHaveBeenCalledTimes(1)
+    expect(capabilities.specVersion).toBe("cache-v5-entitlement-version")
+    expect(capabilities.canCreateLocalDirectoryIngestionSource).toBe(true)
   })
 
   it("detects presentation studio and render capability from docs-info", async () => {

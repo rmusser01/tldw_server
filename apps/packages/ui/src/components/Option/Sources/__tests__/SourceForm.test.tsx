@@ -184,6 +184,23 @@ describe("SourceForm", () => {
     })
   })
 
+  it("keeps local-directory create available while entitlement is unknown", async () => {
+    capabilityMocks.useServerCapabilities.mockReturnValue({
+      capabilities: { canCreateLocalDirectoryIngestionSource: null },
+      loading: false,
+      refresh: vi.fn()
+    })
+
+    render(<SourceForm mode="create" />)
+
+    expect(screen.getByRole("button", { name: "Create source" })).toBeEnabled()
+    expect(
+      screen.queryByText(
+        "The administrator must enable server folder sync before you can create a local directory source."
+      )
+    ).not.toBeInTheDocument()
+  })
+
   it("switches fields between local directory and archive source modes", async () => {
     render(<SourceForm mode="create" />)
 

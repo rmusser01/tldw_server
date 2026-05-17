@@ -18,7 +18,7 @@ export type ServerCapabilities = {
   hasPresentationStudio: boolean
   hasPresentationRender: boolean
   hasIngestionSources: boolean
-  canCreateLocalDirectoryIngestionSource: boolean
+  canCreateLocalDirectoryIngestionSource: boolean | null
   hasPrompts: boolean
   hasFlashcards: boolean
   hasQuizzes: boolean
@@ -208,7 +208,7 @@ type IngestionSourceCapabilitiesResponse = {
 }
 
 const CAPABILITIES_CACHE_TTL_MS = 5 * 60 * 1000
-const CAPABILITIES_STORAGE_KEY = "__tldwServerCapabilitiesCacheV4"
+const CAPABILITIES_STORAGE_KEY = "__tldwServerCapabilitiesCacheV5"
 
 type CapabilitiesCachePayload = {
   key: string
@@ -539,6 +539,10 @@ const computeCapabilities = (
   const hasMediaIngestJobs = has("/api/v1/media/ingest/jobs")
   const hasMediaIngestJobEvents = has("/api/v1/media/ingest/jobs/events/stream")
   const hasDurableMediaCollections = has("/api/v1/media/collections")
+  const hasIngestionSources =
+    has("/api/v1/ingestion-sources") ||
+    has("/api/v1/ingestion-sources/{source_id}") ||
+    has("/api/v1/ingestion-sources/{source_id}/items")
 
   return {
     hasChat: has("/api/v1/chat/completions"),
@@ -561,11 +565,8 @@ const computeCapabilities = (
     hasSlides,
     hasPresentationStudio,
     hasPresentationRender,
-    hasIngestionSources:
-      has("/api/v1/ingestion-sources") ||
-      has("/api/v1/ingestion-sources/{source_id}") ||
-      has("/api/v1/ingestion-sources/{source_id}/items"),
-    canCreateLocalDirectoryIngestionSource: false,
+    hasIngestionSources,
+    canCreateLocalDirectoryIngestionSource: hasIngestionSources ? null : false,
     hasPrompts: has("/api/v1/prompts") || has("/api/v1/prompts/"),
     hasFlashcards:
       has("/api/v1/flashcards") ||
@@ -791,19 +792,12 @@ const fetchCapabilitiesFromServer = async (): Promise<ServerCapabilities> => {
   maybeLogDiagnostics(
     diagnosticsSource === "fallback" ? "fallback-spec" : "network-fetch"
   )
-  const specPaths = normalizePaths(spec?.paths || {})
-  const shouldFetchIngestionSourceCapabilities =
-    specSource === "fallback" ||
-    Boolean(specPaths["/api/v1/ingestion-sources/capabilities"])
   let capabilities = applyDocsInfoFeatureGates(
     computeCapabilities(spec, specSource),
     docsInfo
   )
 
-  if (
-    capabilities.hasIngestionSources &&
-    shouldFetchIngestionSourceCapabilities
-  ) {
+  if (capabilities.hasIngestionSources) {
     try {
       const sourceCapabilities =
         await bgRequest<IngestionSourceCapabilitiesResponse, any>({

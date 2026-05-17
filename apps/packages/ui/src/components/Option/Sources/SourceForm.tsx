@@ -154,12 +154,12 @@ export const SourceForm: React.FC<SourceFormProps> = ({ mode, source, preset }) 
   ])
 
   const effectiveSourceType = identityLocked && source ? source.source_type : sourceType
-  const localDirectoryCreateAllowed =
-    capabilities?.canCreateLocalDirectoryIngestionSource === true
+  const localDirectoryCreateKnownFalse =
+    capabilities?.canCreateLocalDirectoryIngestionSource === false
   const localDirectoryCreateBlocked =
     mode === "create" &&
     effectiveSourceType === "local_directory" &&
-    (capabilitiesLoading || !localDirectoryCreateAllowed)
+    (capabilitiesLoading || localDirectoryCreateKnownFalse)
   const localDirectoryCapabilityMessage = capabilitiesLoading
     ? "Checking whether this server allows folder sync."
     : "The administrator must enable server folder sync before you can create a local directory source."
@@ -533,7 +533,7 @@ export const SourceForm: React.FC<SourceFormProps> = ({ mode, source, preset }) 
 
         {effectiveSourceType === "local_directory" && !identityLocked ? (
           <>
-            {mode === "create" && !capabilitiesLoading && !localDirectoryCreateAllowed ? (
+            {mode === "create" && !capabilitiesLoading && localDirectoryCreateKnownFalse ? (
               <Alert
                 type="warning"
                 showIcon
