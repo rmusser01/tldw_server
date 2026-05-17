@@ -18,6 +18,7 @@ const mockShortcutConfig: ShortcutConfig = {
   toggleWebSearch: { key: "w", altKey: true },
   toggleQuickChatHelper: { key: "h", ctrlKey: true, shiftKey: true },
   modePlayground: { key: "1", altKey: true },
+  modeSources: { key: "2", altKey: true },
   modeMedia: { key: "3", altKey: true },
   modeKnowledge: { key: "4", altKey: true },
   modeNotes: { key: "5", altKey: true },

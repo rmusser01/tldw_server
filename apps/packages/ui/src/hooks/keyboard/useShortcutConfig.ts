@@ -121,7 +121,8 @@ export const defaultShortcuts: ShortcutConfig = {
   }
 }
 
-type PersistedShortcutConfig = Partial<ShortcutConfig> & Record<string, unknown>
+type PersistedShortcutConfig = Partial<ShortcutConfig> &
+  Partial<Record<string, unknown>>
 
 export const mergeShortcutConfig = (
   value: Partial<ShortcutConfig> | null | undefined
