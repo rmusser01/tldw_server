@@ -1013,7 +1013,7 @@ git commit -m "feat: clarify chat role-play context inclusion"
 - Backlog task updates.
 - No code files unless verification reveals defects.
 
-- [ ] **Step 1: Run focused role-play suite**
+- [x] **Step 1: Run focused role-play suite**
 
 Run:
 ```bash
@@ -1031,7 +1031,9 @@ bunx vitest run \
 
 Expected: pass.
 
-- [ ] **Step 2: Run broader affected Playground tests**
+Result: passed from `apps/tldw-frontend`: 9 files, 60 tests. The run emitted a non-fatal React key warning from the existing `PromptSelect.system-prompt-modal.test.tsx` Dropdown mock.
+
+- [x] **Step 2: Run broader affected Playground tests**
 
 Run:
 ```bash
@@ -1045,7 +1047,9 @@ bunx vitest run \
 
 Expected: pass.
 
-- [ ] **Step 3: Run frontend lint**
+Result: passed from `apps/tldw-frontend`: 5 files, 35 tests.
+
+- [x] **Step 3: Run frontend lint**
 
 Run:
 ```bash
@@ -1055,7 +1059,9 @@ bun run lint
 
 Expected: pass, or document pre-existing lint failures separately from role-play changes.
 
-- [ ] **Step 4: Run frontend build or compile if feasible**
+Result: `bun run lint` exited 0. ESLint reported 130 warnings in pre-existing unrelated test/e2e/utility files and no errors.
+
+- [x] **Step 4: Run frontend build or compile if feasible**
 
 Run one of:
 ```bash
@@ -1071,7 +1077,9 @@ bun run compile
 
 Expected: pass, or document environment/pre-existing failure.
 
-- [ ] **Step 5: Run browser verification**
+Result: `bun run compile` failed without `NEXT_PUBLIC_API_URL` because the WebUI networking config requires an absolute browser API URL. Re-run as `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run compile` passed; Next compiled successfully and token sync verified OK.
+
+- [x] **Step 5: Run browser verification**
 
 Start frontend:
 ```bash
@@ -1095,7 +1103,14 @@ Mobile verification:
 Compatibility verification:
 - included, blended, excluded, and override-risk states match actual request behavior.
 
-- [ ] **Step 6: Security validation**
+Result: CDP verification only, no Computer Use.
+- `node /private/tmp/cdp-verify-final-role-play-remediation.mjs first-time` passed: setup discoverable, layers visible, saved setup area visible.
+- `node /private/tmp/cdp-verify-final-role-play-remediation.mjs saved` passed: returning user switched character, behavior template and generation style were applied, scene was edited/applied, recovery controls were visible, saved setup source was `role-play-setup`, preview showed role-play fields, delete worked, and generic templates stayed stored but hidden from the role-play list.
+- `node /private/tmp/cdp-verify-final-role-play-remediation.mjs mobile` passed: mobile overflow exposed Generation style and Role-play setup, no horizontal overflow was detected, and the composer textarea remained visible. The verifier measured the textarea at about 87.6px wide on a 390px viewport; this is cramped and should be treated as a broader mobile composer ergonomics risk if that surface is audited separately.
+- `node /private/tmp/cdp-verify-stage6-role-play-compatibility.mjs` passed: character included, pinned-source blended, compare excluded, and persona-specific included states were visible.
+- `node /private/tmp/cdp-verify-final-role-play-remediation.mjs compatibility` passed after splitting the all-in-one verifier into scoped runs: included, blended, excluded, override-risk, and persona-specific compatibility states were all true.
+
+- [x] **Step 6: Security validation**
 
 This plan is frontend TypeScript/React only. Bandit does not apply unless a Python file is touched unexpectedly.
 
@@ -1107,7 +1122,9 @@ python -m bandit -r <touched_python_paths> -f json -o /tmp/bandit_chat_role_play
 
 If no Python files are touched, record Bandit skip in Backlog final summaries.
 
-- [ ] **Step 7: Update Backlog tasks**
+Result: Bandit skipped because the implementation touched frontend TypeScript/React, locale JSON, plan docs, and Backlog task metadata only.
+
+- [x] **Step 7: Update Backlog tasks**
 
 For each implementation child task:
 - mark status;
@@ -1115,11 +1132,15 @@ For each implementation child task:
 - add focused test commands and browser verification notes;
 - add skips/blockers.
 
-- [ ] **Step 8: Final commit or PR handoff**
+Result: child tasks `TASK-407.1` through `TASK-407.6` are already `Done`; final closeout updates are recorded on parent task `TASK-407`.
+
+- [x] **Step 8: Final commit or PR handoff**
 
 If all stages are already committed, create or update the PR. The PR body must preserve the human-owned `Change summary` placeholder required by repo policy.
 
 Do not fabricate the human `Change summary`.
+
+Result: ready for closeout commit and PR handoff. The PR body must keep the human-owned `Change summary` placeholder.
 
 ## Execution Order
 
