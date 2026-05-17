@@ -20,6 +20,10 @@ const settingState = vi.hoisted(() => ({
   setShortcutSelection: vi.fn()
 }))
 
+const debounceState = vi.hoisted(() => ({
+  override: undefined as unknown
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, defaultValue?: string) => defaultValue || key
@@ -45,7 +49,8 @@ vi.mock("@/hooks/useSetting", () => ({
 }))
 
 vi.mock("@/hooks/useDebounce", () => ({
-  useDebounce: <T,>(value: T) => value
+  useDebounce: <T,>(value: T) =>
+    debounceState.override === undefined ? value : (debounceState.override as T)
 }))
 
 vi.mock("@/hooks/useServerChatHistory", () => ({
@@ -117,6 +122,7 @@ describe("ChatSidebar tools-first reset", () => {
     settingState.setActiveTab.mockClear()
     settingState.setShortcutsCollapsed.mockClear()
     settingState.setShortcutSelection.mockClear()
+    debounceState.override = undefined
     useChatSurfaceCoordinatorStore.setState({
       routeId: null,
       surface: null,
@@ -226,6 +232,7 @@ describe("ChatSidebar tools-first reset", () => {
   })
 
   it("keeps search controls reachable when a query is active across reset", () => {
+    debounceState.override = ""
     const { rerender } = renderSidebar({ openResetKey: 1 })
 
     fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))

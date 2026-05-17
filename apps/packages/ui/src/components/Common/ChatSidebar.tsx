@@ -70,11 +70,7 @@ export function ChatSidebar({
   const debouncedSearchQuery = useDebounce(searchQuery, 300)
   const [selectionMode, setSelectionMode] = useState(false)
   const [recentCollapsed, setRecentCollapsed] = useState(true)
-  const normalizedSearchQuery = useMemo(
-    () => debouncedSearchQuery.trim().toLowerCase(),
-    [debouncedSearchQuery]
-  )
-  const hasSearchQuery = normalizedSearchQuery.length > 0
+  const hasSearchQuery = searchQuery.trim().length > 0
   const recentHistoryVisible = !recentCollapsed || hasSearchQuery
 
   // Tab state persisted in UI settings
