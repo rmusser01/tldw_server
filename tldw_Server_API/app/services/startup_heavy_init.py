@@ -114,6 +114,7 @@ async def _init_local_llm_manager(
 
         manager = await asyncio.to_thread(LLMInferenceManager, LLMManagerConfig(**cfg_kwargs))
         app.state.llm_manager = manager
+        await _init_llamacpp_runtime_reconciler(app, manager, deferred=deferred)
         try:
             from tldw_Server_API.app.api.v1.endpoints import llamacpp as _llamacpp_module
 
@@ -132,6 +133,27 @@ async def _init_local_llm_manager(
                 "Local LLM inference manager not initialized; llama.cpp endpoints will return 503: "
                 f"{_llm_init_err}"
             )
+
+
+async def _init_llamacpp_runtime_reconciler(app: Any, manager: Any, *, deferred: bool) -> None:
+    supervisor = getattr(manager, "llamacpp_supervisor", None)
+    if supervisor is None:
+        return
+    try:
+        from tldw_Server_API.app.core.Local_LLM import llamacpp_runtime_reconciler as reconciler_module
+
+        reconciler = reconciler_module.LlamaCppRuntimeReconciler(supervisor)
+        app.state.llamacpp_runtime_reconciler = reconciler
+        await reconciler.reconcile_startup()
+        logger.info(
+            ("Deferred startup: " if deferred else "App Startup: ")
+            + "llama.cpp runtime reconciliation complete"
+        )
+    except Exception as exc:  # noqa: BLE001 - autostart reconciliation must not block API startup.
+        logger.warning(
+            ("Deferred startup: " if deferred else "App Startup: ")
+            + f"llama.cpp runtime reconciliation skipped/failed: {exc}"
+        )
 
 
 async def _init_mcp_server(app: Any, *, deferred: bool) -> Any | None:

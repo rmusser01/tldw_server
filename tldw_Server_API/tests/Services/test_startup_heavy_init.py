@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+from collections.abc import Callable
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -158,6 +159,59 @@ async def test_start_heavy_initializations_schedules_background_task_when_deferr
     await created_tasks[0]
     assert observed == [(True, True)]
     assert handles.provider_manager == "deferred-provider"
+
+
+@pytest.mark.asyncio
+async def test_init_local_llm_manager_runs_llamacpp_runtime_reconciler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_heavy = _import_startup_heavy_init()
+    calls: list[str] = []
+    app = SimpleNamespace(state=SimpleNamespace())
+    supervisor = object()
+
+    class _Manager:
+        def __init__(self, _config: object) -> None:
+            self.llamacpp_supervisor = supervisor
+
+    class _Reconciler:
+        def __init__(self, observed_supervisor: object) -> None:
+            assert observed_supervisor is supervisor
+            calls.append("created")
+
+        async def reconcile_startup(self) -> list[object]:
+            calls.append("reconcile")
+            return []
+
+    async def _fake_to_thread(fn: Callable[..., object], *args: object, **kwargs: object) -> object:
+        return fn(*args, **kwargs)
+
+    from tldw_Server_API.app.core import Local_LLM as local_llm_package
+    from tldw_Server_API.app.core import config as config_module
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_runtime_reconciler
+
+    llamacpp_endpoint_module = ModuleType("tldw_Server_API.app.api.v1.endpoints.llamacpp")
+    monkeypatch.setattr(config_module, "get_llamacpp_handler_config", lambda: object())
+    monkeypatch.setattr(local_llm_package, "LLMInferenceManager", _Manager, raising=False)
+    monkeypatch.setattr(local_llm_package, "LLMManagerConfig", lambda **kwargs: kwargs, raising=False)
+    monkeypatch.setattr(llamacpp_runtime_reconciler, "LlamaCppRuntimeReconciler", _Reconciler)
+    monkeypatch.setitem(
+        sys.modules,
+        "tldw_Server_API.app.api.v1.endpoints.llamacpp",
+        llamacpp_endpoint_module,
+    )
+    monkeypatch.setattr(startup_heavy.asyncio, "to_thread", _fake_to_thread)
+
+    await startup_heavy._init_local_llm_manager(
+        app,
+        route_enabled=lambda key: key in {"llm", "llamacpp"},
+        deferred=False,
+    )
+
+    assert calls == ["created", "reconcile"]
+    assert app.state.llm_manager.llamacpp_supervisor is supervisor
+    assert app.state.llamacpp_runtime_reconciler.__class__ is _Reconciler
+    assert llamacpp_endpoint_module.llm_manager is app.state.llm_manager
 
 
 @pytest.mark.asyncio

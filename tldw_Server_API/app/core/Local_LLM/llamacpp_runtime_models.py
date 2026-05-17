@@ -47,6 +47,7 @@ class LlamaCppProfile(BaseModel):
     server_args: dict[str, object] = Field(default_factory=dict)
     autostart: bool = False
     restart_policy: dict[str, object] = Field(default_factory=dict)
+    last_runtime_failure: dict[str, object] = Field(default_factory=dict)
     provider_alias: str | None = None
     tags: list[str] = Field(default_factory=list)
 

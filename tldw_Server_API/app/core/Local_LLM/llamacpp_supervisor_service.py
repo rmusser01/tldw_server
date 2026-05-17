@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import weakref
+from datetime import UTC, datetime
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -31,6 +32,8 @@ from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
 )
 
 RunnerFactory = Callable[[LlamaCppConfig, str], Any]
+
+_MAX_FAILURE_TEXT_LENGTH = 500
 
 
 class LlamaCppProfileCreateInput(Protocol):
@@ -189,7 +192,10 @@ class LlamaCppSupervisor:
                 path_resolver=self._resolve_launch_asset_path,
             )
             launch_profile = profile.model_copy(update={"server_args": resolved.server_args})
-            return await runner.start(resolved.model_path, launch_profile)
+            runtime = await runner.start(resolved.model_path, launch_profile)
+            if profile.last_runtime_failure:
+                await self._store_upsert(profile.model_copy(update={"last_runtime_failure": {}}))
+            return runtime
 
     async def stop_profile(self, profile_id: str, disable: bool = False) -> LlamaCppRuntime:
         async with self._lock_for(profile_id):
@@ -230,9 +236,63 @@ class LlamaCppSupervisor:
         runner = self._runners.get(profile_id)
         if runner is not None:
             return runner.status()
-        if self.store.get(profile_id) is not None:
+        profile = self.store.get(profile_id)
+        if profile is not None:
+            if profile.last_runtime_failure:
+                return self.runtime_from_last_failure(profile)
             return LlamaCppRuntime(profile_id=profile_id, state=LlamaCppRuntimeState.DEFINED)
         raise LlamaCppProfileNotFoundError(f"Llama.cpp profile '{profile_id}' was not found.")
+
+    def is_profile_paused(self, profile_id: str) -> bool:
+        """Return True when a profile is paused in the current process."""
+        return profile_id in self._paused
+
+    async def record_runtime_failure(
+        self,
+        profile_id: str,
+        *,
+        runtime: LlamaCppRuntime | None = None,
+        error: BaseException | None = None,
+        restart_count: int | None = None,
+    ) -> LlamaCppRuntime:
+        """Persist bounded failure metadata for one managed runtime profile."""
+        async with self._lock_for(profile_id):
+            profile = self._require_profile(profile_id)
+            metadata = self._failure_metadata(
+                profile=profile,
+                runtime=runtime,
+                error=error,
+                restart_count=restart_count,
+            )
+            updated = await self._store_upsert(profile.model_copy(update={"last_runtime_failure": metadata}))
+            return self.runtime_from_last_failure(updated)
+
+    async def clear_runtime_failure(self, profile_id: str) -> LlamaCppProfile:
+        """Clear durable failure metadata for one managed runtime profile."""
+        async with self._lock_for(profile_id):
+            profile = self._require_profile(profile_id)
+            if not profile.last_runtime_failure:
+                return profile
+            return await self._store_upsert(profile.model_copy(update={"last_runtime_failure": {}}))
+
+    def runtime_from_last_failure(self, profile: LlamaCppProfile) -> LlamaCppRuntime:
+        """Build runtime status from a profile's durable failure metadata."""
+        failure = profile.last_runtime_failure
+        return LlamaCppRuntime(
+            profile_id=profile.profile_id,
+            state=LlamaCppRuntimeState.FAILED,
+            host=profile.host,
+            port=profile.port,
+            endpoint=f"http://{profile.host}:{profile.port}" if profile.host and profile.port else None,
+            model_id=profile.model_id,
+            model_path=_str_or_none(failure.get("model_path")) or profile.model_path,
+            stopped_at=_str_or_none(failure.get("stopped_at")),
+            restart_count=_non_negative_int(failure.get("restart_count")),
+            exit_code=_optional_int(failure.get("exit_code")),
+            last_error=_str_or_none(failure.get("last_error")),
+            health={"ready": False},
+            message=_str_or_none(failure.get("last_error")) or "Last llama.cpp start failed.",
+        )
 
     def tail_logs(self, profile_id: str, lines: int) -> dict[str, object]:
         self._require_profile(profile_id)
@@ -242,11 +302,18 @@ class LlamaCppSupervisor:
         return runner.tail_logs(lines)
 
     async def shutdown(self) -> None:
+        failures: list[tuple[str, BaseException]] = []
         for profile_id in list(self._runners):
-            async with self._lock_for(profile_id):
-                runner = self._runners.get(profile_id)
-                if runner is not None:
-                    await runner.stop()
+            try:
+                async with self._lock_for(profile_id):
+                    runner = self._runners.get(profile_id)
+                    if runner is not None:
+                        await runner.stop()
+            except Exception as exc:  # noqa: BLE001 - shutdown should attempt every owned runner.
+                failures.append((profile_id, exc))
+        if failures:
+            failed_ids = ", ".join(profile_id for profile_id, _exc in failures)
+            raise RuntimeError(f"Failed to stop llama.cpp runner(s): {failed_ids}") from failures[0][1]
 
     def cleanup_sync(self) -> None:
         for runner in list(self._runners.values()):
@@ -473,5 +540,62 @@ class LlamaCppSupervisor:
                     f"Running llama.cpp profile '{other_id}' already uses {runtime.host}:{runtime.port}."
                 )
 
+    def _failure_metadata(
+        self,
+        *,
+        profile: LlamaCppProfile,
+        runtime: LlamaCppRuntime | None,
+        error: BaseException | None,
+        restart_count: int | None,
+    ) -> dict[str, object]:
+        existing = profile.last_runtime_failure
+        last_error = (
+            (runtime.last_error if runtime is not None else None)
+            or (str(error) if error is not None else None)
+            or "Llama.cpp runtime failed."
+        )
+        metadata: dict[str, object] = {
+            "state": LlamaCppRuntimeState.FAILED.value,
+            "last_error": last_error[:_MAX_FAILURE_TEXT_LENGTH],
+            "restart_count": _non_negative_int(
+                restart_count if restart_count is not None else _non_negative_int(existing.get("restart_count")) + 1
+            ),
+            "recorded_at": datetime.now(UTC).isoformat(),
+        }
+        if runtime is not None:
+            if runtime.exit_code is not None:
+                metadata["exit_code"] = runtime.exit_code
+            if runtime.stopped_at:
+                metadata["stopped_at"] = runtime.stopped_at
+            if runtime.model_path:
+                metadata["model_path"] = runtime.model_path
+        return metadata
+
 
 __all__ = ["LlamaCppSupervisor"]
+
+
+def _non_negative_int(value: object) -> int:
+    """Coerce a value to a non-negative integer, defaulting invalid values to zero."""
+    try:
+        parsed = int(value) if value is not None else 0
+    except (TypeError, ValueError):
+        return 0
+    return max(0, parsed)
+
+
+def _optional_int(value: object) -> int | None:
+    """Coerce a value to int when possible, preserving missing or invalid values as None."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _str_or_none(value: object) -> str | None:
+    """Coerce a non-empty value to string while keeping missing values as None."""
+    if value in (None, ""):
+        return None
+    return str(value)
