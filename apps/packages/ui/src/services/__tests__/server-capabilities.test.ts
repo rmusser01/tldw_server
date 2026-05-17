@@ -338,6 +338,13 @@ describe("server capabilities docs-info merge", () => {
     const capabilities = await getServerCapabilities()
 
     expect(capabilities.hasIngestionSources).toBe(true)
+    expect(capabilities.canCreateLocalDirectoryIngestionSource).toBe(false)
+    expect(
+      mocks.bgRequest.mock.calls.some(
+        ([request]) =>
+          (request as any)?.path === "/api/v1/ingestion-sources/capabilities"
+      )
+    ).toBe(false)
   })
 
   it("derives hasAudio from STT-only support while keeping TTS/voice flags explicit", async () => {

@@ -796,7 +796,7 @@ const fetchCapabilitiesFromServer = async (): Promise<ServerCapabilities> => {
     docsInfo
   )
 
-  if (capabilities.hasIngestionSources) {
+  if (specSource === "authoritative" && capabilities.hasIngestionSources) {
     try {
       const sourceCapabilities =
         await bgRequest<IngestionSourceCapabilitiesResponse, any>({
