@@ -44,8 +44,11 @@ export const sha256Hex = async (text: string): Promise<string> => {
   return toHex(new Uint8Array(digest))
 }
 
-const normalizeSignaturePart = (value: unknown): string =>
+const normalizeCaseInsensitiveSignaturePart = (value: unknown): string =>
   value == null ? '' : String(value).trim().toLowerCase()
+
+const normalizeOpaqueIdSignaturePart = (value: unknown): string =>
+  value == null ? '' : String(value).trim()
 
 export const buildTtsSettingsSignature = ({
   provider,
@@ -59,12 +62,12 @@ export const buildTtsSettingsSignature = ({
     typeof speed === 'number' && Number.isFinite(speed) ? String(speed) : ''
 
   return [
-    `provider:${normalizeSignaturePart(provider)}`,
-    `model:${normalizeSignaturePart(model)}`,
-    `voice:${normalizeSignaturePart(voice)}`,
+    `provider:${normalizeCaseInsensitiveSignaturePart(provider)}`,
+    `model:${normalizeOpaqueIdSignaturePart(model)}`,
+    `voice:${normalizeOpaqueIdSignaturePart(voice)}`,
     `speed:${normalizedSpeed}`,
-    `format:${normalizeSignaturePart(format)}`,
-    `language:${normalizeSignaturePart(language)}`
+    `format:${normalizeCaseInsensitiveSignaturePart(format)}`,
+    `language:${normalizeCaseInsensitiveSignaturePart(language)}`
   ].join('|')
 }
 

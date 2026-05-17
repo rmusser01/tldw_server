@@ -1,10 +1,12 @@
 import { db } from '@/db/dexie/schema'
 import type { MediaReadAlongAudioCacheEntry } from '@/db/dexie/types'
 
-export const MEDIA_READ_ALONG_CACHE_MAX_BYTES = 50 * 1024 * 1024
+export const MEDIA_READ_ALONG_CACHE_MAX_ENTRIES = 200
+export const MEDIA_READ_ALONG_CACHE_MAX_BYTES = 250 * 1024 * 1024
 
 type SaveOptions = {
   maxBytes?: number
+  maxEntries?: number
   signal?: AbortSignal
   shouldContinue?: () => boolean
 }
@@ -32,21 +34,42 @@ const listEntries = async (): Promise<MediaReadAlongAudioCacheEntry[]> => {
   return await table().orderBy('lastUsedAt').toArray()
 }
 
+const resolveMaxEntries = (maxEntries: number): number => {
+  if (!Number.isFinite(maxEntries)) return MEDIA_READ_ALONG_CACHE_MAX_ENTRIES
+  return Math.max(0, Math.floor(maxEntries))
+}
+
 const evictLeastRecentlyUsed = async (
-  incomingSizeBytes: number,
+  incomingEntry: MediaReadAlongAudioCacheEntry,
   maxBytes: number,
+  maxEntries: number,
   options: SaveOptions,
   forceOne = false
 ): Promise<boolean> => {
   const entries = await listEntries()
   const sorted = [...entries].sort((a, b) => a.lastUsedAt - b.lastUsedAt)
   const idsToDelete: string[] = []
-  let totalBytes = sorted.reduce((sum, entry) => sum + (entry.sizeBytes || 0), 0)
+  const existingEntry = sorted.find((entry) => entry.id === incomingEntry.id)
+  let totalBytesAfterWrite =
+    sorted.reduce((sum, entry) => sum + (entry.sizeBytes || 0), 0) -
+    (existingEntry?.sizeBytes || 0) +
+    incomingEntry.sizeBytes
+  let entryCountAfterWrite = sorted.length + (existingEntry ? 0 : 1)
 
   for (const entry of sorted) {
-    if (!forceOne && totalBytes + incomingSizeBytes <= maxBytes) break
+    if (
+      !forceOne &&
+      totalBytesAfterWrite <= maxBytes &&
+      entryCountAfterWrite <= maxEntries
+    ) {
+      break
+    }
+    if (entry.id === incomingEntry.id && !forceOne) {
+      continue
+    }
     idsToDelete.push(entry.id)
-    totalBytes -= entry.sizeBytes || 0
+    totalBytesAfterWrite -= entry.sizeBytes || 0
+    entryCountAfterWrite -= 1
     if (forceOne) break
   }
 
@@ -85,6 +108,7 @@ const putEntryIfCurrent = async (
   entry: MediaReadAlongAudioCacheEntry,
   options: SaveOptions
 ): Promise<boolean> => {
+  if (!canContinueSave(options)) return false
   await table().put(entry)
   if (canContinueSave(options)) return true
 
@@ -119,11 +143,15 @@ export const saveMediaReadAlongAudioCacheEntry = async (
   if (cacheDisabledForSession) return false
 
   const maxBytes = options.maxBytes ?? MEDIA_READ_ALONG_CACHE_MAX_BYTES
+  const maxEntries = resolveMaxEntries(
+    options.maxEntries ?? MEDIA_READ_ALONG_CACHE_MAX_ENTRIES
+  )
   if (entry.sizeBytes > maxBytes) return false
+  if (maxEntries < 1) return false
   if (!canContinueSave(options)) return false
 
   try {
-    if (!(await evictLeastRecentlyUsed(entry.sizeBytes, maxBytes, options))) {
+    if (!(await evictLeastRecentlyUsed(entry, maxBytes, maxEntries, options))) {
       return false
     }
     return await putEntryIfCurrent(entry, options)
@@ -131,7 +159,7 @@ export const saveMediaReadAlongAudioCacheEntry = async (
     if (!isQuotaExceededError(error)) return false
 
     try {
-      if (!(await evictLeastRecentlyUsed(entry.sizeBytes, maxBytes, options, true))) {
+      if (!(await evictLeastRecentlyUsed(entry, maxBytes, maxEntries, options, true))) {
         return false
       }
       return await putEntryIfCurrent(entry, options)

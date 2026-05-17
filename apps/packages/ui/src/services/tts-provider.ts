@@ -215,7 +215,8 @@ export const resolveTtsProviderContext = async (
   text: string,
   overrides?: TtsProviderOverrides
 ): Promise<TtsProviderContext> => {
-  const provider = overrides?.provider || (await getTTSProvider())
+  const rawProvider = overrides?.provider ?? (await getTTSProvider())
+  const provider = String(rawProvider || '').trim().toLowerCase()
   const normalizeText = await resolveTtsTextNormalizer()
   const utterance = normalizeText(text)
   const playbackSpeed = await getSpeechPlaybackSpeed()

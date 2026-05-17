@@ -464,6 +464,7 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
           await inFlight.promise
         } catch (error) {
           if (isAbortError(error)) return
+          continue
         }
       }
     },
@@ -620,7 +621,7 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
           await audio.play()
           if (!isCurrentPlayAttempt(session, playToken)) return
           if (sourceIndex === 0) {
-            void prefetchLookahead(session, index)
+            void prefetchLookahead(session, index).catch(() => undefined)
           }
         }
 

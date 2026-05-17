@@ -120,6 +120,27 @@ describe('tts provider read-along synthesis', () => {
     )
   })
 
+  it('normalizes mixed-case provider overrides before provider support checks', async () => {
+    vi.mocked(generateOpenAITTS).mockResolvedValueOnce(new ArrayBuffer(8))
+
+    const context = await resolveTtsProviderContext('hello', {
+      provider: ' OpenAI ',
+      openAiModel: 'model-a',
+      openAiVoice: 'voice-a'
+    })
+    await context.synthesize?.('hello')
+
+    expect(context.provider).toBe('openai')
+    expect(context.supported).toBe(true)
+    expect(generateOpenAITTS).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'hello',
+        model: 'model-a',
+        voice: 'voice-a'
+      })
+    )
+  })
+
   it('passes abort signals through ElevenLabs synthesis', async () => {
     const signal = new AbortController().signal
     vi.mocked(getElevenLabsApiKey).mockResolvedValueOnce('eleven-key')

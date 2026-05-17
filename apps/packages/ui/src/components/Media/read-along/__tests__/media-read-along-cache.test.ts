@@ -62,6 +62,8 @@ vi.mock('@/db/dexie/schema', () => ({
 }))
 
 import {
+  MEDIA_READ_ALONG_CACHE_MAX_BYTES,
+  MEDIA_READ_ALONG_CACHE_MAX_ENTRIES,
   getMediaReadAlongAudioCacheEntry,
   resetMediaReadAlongAudioCacheSessionForTests,
   saveMediaReadAlongAudioCacheEntry
@@ -100,6 +102,11 @@ describe('media read-along audio cache', () => {
     resetMediaReadAlongAudioCacheSessionForTests()
   })
 
+  it('uses the spec default entry and byte caps', () => {
+    expect(MEDIA_READ_ALONG_CACHE_MAX_ENTRIES).toBe(200)
+    expect(MEDIA_READ_ALONG_CACHE_MAX_BYTES).toBe(250 * 1024 * 1024)
+  })
+
   it('saves and retrieves cache entries by id', async () => {
     const entry = cacheEntry()
 
@@ -132,6 +139,21 @@ describe('media read-along audio cache', () => {
 
     expect(mockTable.bulkDelete).toHaveBeenCalledWith(['oldest'])
     expect(rows.has('oldest')).toBe(false)
+    expect(rows.has('incoming')).toBe(true)
+  })
+
+  it('evicts least recently used entries before writes that exceed the entry cap', async () => {
+    rows.set('oldest', cacheEntry({ id: 'oldest', lastUsedAt: 10, sizeBytes: 100 }))
+    rows.set('newest', cacheEntry({ id: 'newest', lastUsedAt: 20, sizeBytes: 100 }))
+
+    await saveMediaReadAlongAudioCacheEntry(
+      cacheEntry({ id: 'incoming', sizeBytes: 100 }),
+      { maxBytes: 1000, maxEntries: 2 }
+    )
+
+    expect(mockTable.bulkDelete).toHaveBeenCalledWith(['oldest'])
+    expect(rows.has('oldest')).toBe(false)
+    expect(rows.has('newest')).toBe(true)
     expect(rows.has('incoming')).toBe(true)
   })
 

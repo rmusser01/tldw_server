@@ -368,6 +368,33 @@ describe('useMediaReadAlongSession', () => {
       .toBeLessThan(8)
   })
 
+  it('contains background lookahead failures without changing current playback state', async () => {
+    providerContext.synthesize = vi.fn(async (text: string) => {
+      eventLog.push(`synthesize:${text}`)
+      if (text === 'Second sentence.') {
+        throw new Error('lookahead failed')
+      }
+      return audioResult(text)
+    })
+    const { result } = setupHook()
+
+    await act(async () => {
+      await result.current.start('full-item')
+    })
+    await waitFor(() =>
+      expect(providerContext.synthesize).toHaveBeenCalledWith(
+        'Second sentence.',
+        expect.any(Object)
+      )
+    )
+
+    expect(result.current.state).toMatchObject({
+      status: 'playing',
+      activeSegmentId: 'media-1:0:sentence:0:15',
+      error: null
+    })
+  })
+
   it('browser TTS provider uses window.speechSynthesis.speak() and does not touch generated-audio cache', async () => {
     providerContext = {
       provider: 'browser',

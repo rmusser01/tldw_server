@@ -121,15 +121,28 @@ async function fetchElevenLabs<T>(
   const headers = new Headers(init.headers);
   headers.set('xi-api-key', apiKey);
 
-  let response: Response;
   try {
-    response = await fetch(`${BASE_URL}${path}`, {
+    const response = await fetch(`${BASE_URL}${path}`, {
       ...init,
       headers,
       signal: requestSignal.signal,
     });
+
+    if (!response.ok) {
+      throw new Error(`ElevenLabs request failed with status ${response.status}`);
+    }
+
+    switch (options?.responseType ?? 'json') {
+      case 'arrayBuffer':
+      case 'arraybuffer':
+        return (await response.arrayBuffer()) as T;
+      case 'text':
+        return (await response.text()) as T;
+      case 'json':
+      default:
+        return (await response.json()) as T;
+    }
   } catch (error) {
-    requestSignal.cleanup();
     const callerAbort = requestSignal.didCallerAbort();
     if (
       !callerAbort &&
@@ -142,22 +155,8 @@ async function fetchElevenLabs<T>(
       throw new Error('ElevenLabs request timed out');
     }
     throw error;
-  }
-  requestSignal.cleanup();
-
-  if (!response.ok) {
-    throw new Error(`ElevenLabs request failed with status ${response.status}`);
-  }
-
-  switch (options?.responseType ?? 'json') {
-    case 'arrayBuffer':
-    case 'arraybuffer':
-      return response.arrayBuffer() as Promise<T>;
-    case 'text':
-      return response.text() as Promise<T>;
-    case 'json':
-    default:
-      return response.json() as Promise<T>;
+  } finally {
+    requestSignal.cleanup();
   }
 }
 

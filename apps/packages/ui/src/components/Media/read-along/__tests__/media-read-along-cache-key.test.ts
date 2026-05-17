@@ -87,4 +87,30 @@ describe('media read-along cache keys', () => {
     expect(base).not.toEqual(changedVoice)
     expect(base).not.toEqual(changedSpeed)
   })
+
+  it('preserves opaque model and voice id casing in settings signatures', () => {
+    const mixedCase = buildTtsSettingsSignature({
+      provider: ' OpenAI ',
+      model: ' TTS-Model-A ',
+      voice: ' Voice-ID-A ',
+      speed: 1,
+      format: ' MP3 ',
+      language: ' EN-US '
+    })
+    const lowerCaseIds = buildTtsSettingsSignature({
+      provider: 'openai',
+      model: 'tts-model-a',
+      voice: 'voice-id-a',
+      speed: 1,
+      format: 'mp3',
+      language: 'en-us'
+    })
+
+    expect(mixedCase).toContain('provider:openai')
+    expect(mixedCase).toContain('model:TTS-Model-A')
+    expect(mixedCase).toContain('voice:Voice-ID-A')
+    expect(mixedCase).toContain('format:mp3')
+    expect(mixedCase).toContain('language:en-us')
+    expect(mixedCase).not.toEqual(lowerCaseIds)
+  })
 })
