@@ -34,40 +34,14 @@ const toHex = (bytes: Uint8Array): string =>
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('')
 
-const fallbackHash64 = (text: string): string => {
-  let first = 0x811c9dc5
-  let second = 0x01000193
-
-  for (let index = 0; index < text.length; index += 1) {
-    const code = text.charCodeAt(index)
-    first ^= code
-    first = Math.imul(first, 0x01000193) >>> 0
-    second ^= code + index
-    second = Math.imul(second, 0x85ebca6b) >>> 0
-  }
-
-  const chunks = [
-    first,
-    second,
-    Math.imul(first ^ second, 0xc2b2ae35) >>> 0,
-    Math.imul(first + second, 0x27d4eb2f) >>> 0,
-    Math.imul(first ^ text.length, 0x165667b1) >>> 0,
-    Math.imul(second ^ text.length, 0xd3a2646c) >>> 0,
-    Math.imul(first + text.length, 0x9e3779b1) >>> 0,
-    Math.imul(second + text.length, 0x85ebca77) >>> 0
-  ]
-
-  return chunks.map((chunk) => chunk.toString(16).padStart(8, '0')).join('')
-}
-
 export const sha256Hex = async (text: string): Promise<string> => {
   const subtle = globalThis.crypto?.subtle
-  if (subtle) {
-    const digest = await subtle.digest('SHA-256', textEncoder.encode(text))
-    return toHex(new Uint8Array(digest))
+  if (!subtle) {
+    throw new Error('Web Crypto SHA-256 is required for read-along audio cache keys')
   }
 
-  return fallbackHash64(text)
+  const digest = await subtle.digest('SHA-256', textEncoder.encode(text))
+  return toHex(new Uint8Array(digest))
 }
 
 const normalizeSignaturePart = (value: unknown): string =>

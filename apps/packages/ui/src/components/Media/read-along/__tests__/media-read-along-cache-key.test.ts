@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import {
   buildReadAlongCacheKey,
-  buildTtsSettingsSignature
+  buildTtsSettingsSignature,
+  sha256Hex
 } from '../media-read-along-cache-key'
 
 describe('media read-along cache keys', () => {
@@ -35,6 +36,29 @@ describe('media read-along cache keys', () => {
     })
 
     expect(key.textHash).toMatch(/^[a-f0-9]{64}$/)
+  })
+
+  it('matches the known SHA-256 digest for abc', async () => {
+    await expect(sha256Hex('abc')).resolves.toBe(
+      'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
+    )
+  })
+
+  it('fails closed instead of producing a fake SHA-256 digest when Web Crypto is unavailable', async () => {
+    const originalCrypto = globalThis.crypto
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: undefined
+    })
+
+    try {
+      await expect(sha256Hex('abc')).rejects.toThrow(/SHA-256/)
+    } finally {
+      Object.defineProperty(globalThis, 'crypto', {
+        configurable: true,
+        value: originalCrypto
+      })
+    }
   })
 
   it('changes settings signature when voice or speed changes', () => {

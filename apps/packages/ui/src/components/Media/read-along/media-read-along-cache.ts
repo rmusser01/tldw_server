@@ -73,6 +73,7 @@ export const saveMediaReadAlongAudioCacheEntry = async (
   if (cacheDisabledForSession) return false
 
   const maxBytes = options.maxBytes ?? MEDIA_READ_ALONG_CACHE_MAX_BYTES
+  if (entry.sizeBytes > maxBytes) return false
 
   try {
     await evictLeastRecentlyUsed(entry.sizeBytes, maxBytes)
