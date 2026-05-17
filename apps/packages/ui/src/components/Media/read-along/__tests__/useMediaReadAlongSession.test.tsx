@@ -14,6 +14,7 @@ const eventLog: string[] = []
 let providerContext: TtsProviderContext
 let objectUrlCounter = 0
 let playRejects = false
+let cacheSaveGate: Promise<void> | null = null
 
 type DeferredAudio = {
   promise: Promise<{
@@ -142,8 +143,15 @@ vi.mock('../media-read-along-cache', () => ({
         }
       : undefined
   }),
-  saveMediaReadAlongAudioCacheEntry: vi.fn(async (entry) => {
+  saveMediaReadAlongAudioCacheEntry: vi.fn(async (entry, options) => {
     eventLog.push(`cache:save:${entry.id}`)
+    if (cacheSaveGate) {
+      await cacheSaveGate
+    }
+    if (options?.signal?.aborted || options?.shouldContinue?.() === false) {
+      eventLog.push(`cache:skip:${entry.id}`)
+      return false
+    }
     cacheEntries.set(entry.id, {
       blob: entry.blob,
       mimeType: entry.mimeType,
@@ -224,6 +232,7 @@ describe('useMediaReadAlongSession', () => {
     eventLog.length = 0
     objectUrlCounter = 0
     playRejects = false
+    cacheSaveGate = null
     providerContext = {
       provider: 'tldw',
       utterance: '',
@@ -473,6 +482,32 @@ describe('useMediaReadAlongSession', () => {
     expect(result.current.state.status).toBe('stopped')
   })
 
+  it('rejects a generated cache save that is cancelled while the write is pending', async () => {
+    let releaseSave!: () => void
+    cacheSaveGate = new Promise<void>((resolve) => {
+      releaseSave = resolve
+    })
+    const { result } = setupHook()
+
+    act(() => {
+      void result.current.start('selection')
+    })
+    await waitFor(() => expect(saveMediaReadAlongAudioCacheEntry).toHaveBeenCalledTimes(1))
+
+    act(() => {
+      result.current.stop()
+    })
+    await act(async () => {
+      releaseSave()
+      await cacheSaveGate
+    })
+
+    expect(cacheEntries.size).toBe(0)
+    expect(eventLog).toContain('cache:skip:cache:media-1:0:sentence:0:15:tldw|||1|mp3|')
+    expect(audioInstances).toHaveLength(0)
+    expect(result.current.state.status).toBe('stopped')
+  })
+
   it('settings are captured at session start and do not mutate mid-session', async () => {
     const firstSynthesize = vi.fn(async (text: string) => ({
       buffer: new TextEncoder().encode(`first:${text}`).buffer,
@@ -629,6 +664,51 @@ describe('useMediaReadAlongSession', () => {
       error: null
     })
     expect(window.speechSynthesis.speak).toHaveBeenCalledTimes(2)
+  })
+
+  it('invalidates browser utterance callbacks before synchronous cancel during skip', async () => {
+    providerContext = {
+      provider: 'browser',
+      utterance: 'First sentence.',
+      playbackSpeed: 1,
+      supported: true
+    }
+    const spoken: MockSpeechSynthesisUtterance[] = []
+    Object.defineProperty(window, 'speechSynthesis', {
+      configurable: true,
+      value: {
+        speak: vi.fn((utterance: MockSpeechSynthesisUtterance) => {
+          spoken.push(utterance)
+          eventLog.push(`speech:speak:${utterance.text}`)
+        }),
+        cancel: vi.fn(() => {
+          spoken[0]?.onerror?.()
+          spoken[0]?.onend?.()
+        }),
+        pause: vi.fn(),
+        resume: vi.fn()
+      }
+    })
+    const { result } = setupHook()
+
+    await act(async () => {
+      await result.current.start('full-item')
+    })
+
+    act(() => {
+      result.current.skip()
+    })
+
+    expect(result.current.state).toMatchObject({
+      status: 'playing',
+      activeSegmentId: 'media-1:1:sentence:16:32',
+      error: null
+    })
+    expect(window.speechSynthesis.speak).toHaveBeenCalledTimes(2)
+    expect(spoken.map((utterance) => utterance.text)).toEqual([
+      'First sentence.',
+      'Second sentence.'
+    ])
   })
 
   it('starting read-along pauses embeddedMediaRef.current if it is playing', async () => {

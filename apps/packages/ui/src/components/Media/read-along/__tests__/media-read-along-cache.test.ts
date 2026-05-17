@@ -135,6 +135,22 @@ describe('media read-along audio cache', () => {
     expect(rows.has('oversized')).toBe(false)
   })
 
+  it('does not write when the save guard fails after eviction and before put', async () => {
+    rows.set('oldest', cacheEntry({ id: 'oldest', lastUsedAt: 10, sizeBytes: 900 }))
+    const entry = cacheEntry({ id: 'guarded', sizeBytes: 200 })
+    let checks = 0
+
+    const saved = await saveMediaReadAlongAudioCacheEntry(entry, {
+      maxBytes: 1000,
+      shouldContinue: () => checks++ === 0
+    })
+
+    expect(saved).toBe(false)
+    expect(mockTable.put).not.toHaveBeenCalled()
+    expect(mockTable.bulkDelete).toHaveBeenCalledWith(['oldest'])
+    expect(rows.has('guarded')).toBe(false)
+  })
+
   it('retries once after QuotaExceededError by evicting LRU entries', async () => {
     rows.set('oldest', cacheEntry({ id: 'oldest', lastUsedAt: 10, sizeBytes: 500 }))
     rows.set('newest', cacheEntry({ id: 'newest', lastUsedAt: 20, sizeBytes: 100 }))

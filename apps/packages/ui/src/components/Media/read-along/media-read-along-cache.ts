@@ -5,6 +5,8 @@ export const MEDIA_READ_ALONG_CACHE_MAX_BYTES = 50 * 1024 * 1024
 
 type SaveOptions = {
   maxBytes?: number
+  signal?: AbortSignal
+  shouldContinue?: () => boolean
 }
 
 let cacheDisabledForSession = false
@@ -16,6 +18,12 @@ const isQuotaExceededError = (error: unknown): boolean => {
 }
 
 const table = () => db.mediaReadAlongAudioCache
+
+const canContinueSave = (options: SaveOptions): boolean => {
+  if (options.signal?.aborted) return false
+  if (options.shouldContinue && !options.shouldContinue()) return false
+  return true
+}
 
 const listEntries = async (): Promise<MediaReadAlongAudioCacheEntry[]> => {
   if (typeof table().toArray === 'function') {
@@ -74,9 +82,11 @@ export const saveMediaReadAlongAudioCacheEntry = async (
 
   const maxBytes = options.maxBytes ?? MEDIA_READ_ALONG_CACHE_MAX_BYTES
   if (entry.sizeBytes > maxBytes) return false
+  if (!canContinueSave(options)) return false
 
   try {
     await evictLeastRecentlyUsed(entry.sizeBytes, maxBytes)
+    if (!canContinueSave(options)) return false
     await table().put(entry)
     return true
   } catch (error) {
@@ -84,6 +94,7 @@ export const saveMediaReadAlongAudioCacheEntry = async (
 
     try {
       await evictLeastRecentlyUsed(entry.sizeBytes, maxBytes, true)
+      if (!canContinueSave(options)) return false
       await table().put(entry)
       return true
     } catch (retryError) {

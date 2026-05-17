@@ -211,29 +211,35 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
         throw readAlongAbortError()
       }
       const blob = new Blob([generated.buffer], { type: generated.mimeType })
-      const saved = await saveMediaReadAlongAudioCacheEntry({
-        id: key.id,
-        createdAt: Date.now(),
-        lastUsedAt: Date.now(),
-        mediaId: key.mediaId,
-        mediaKind: key.mediaKind,
-        segmentId: key.segmentId,
-        settingsSignature: key.settingsSignature,
-        textHash: key.textHash,
-        blob,
-        mimeType: generated.mimeType,
-        format: generated.format,
-        sizeBytes: blob.size
-      })
+      const saved = await saveMediaReadAlongAudioCacheEntry(
+        {
+          id: key.id,
+          createdAt: Date.now(),
+          lastUsedAt: Date.now(),
+          mediaId: key.mediaId,
+          mediaKind: key.mediaKind,
+          segmentId: key.segmentId,
+          settingsSignature: key.settingsSignature,
+          textHash: key.textHash,
+          blob,
+          mimeType: generated.mimeType,
+          format: generated.format,
+          sizeBytes: blob.size
+        },
+        {
+          signal,
+          shouldContinue: isCurrentLoad
+        }
+      )
+      if (signal.aborted || !isCurrentLoad()) {
+        throw readAlongAbortError()
+      }
       if (!saved) {
         session.cacheDisabled = true
         mutateState(session.token, (previous) => ({
           ...previous,
           cacheDisabled: true
         }))
-      }
-      if (signal.aborted || !isCurrentLoad()) {
-        throw readAlongAbortError()
       }
 
       return {
@@ -389,6 +395,11 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
         void prefetchLookahead(session, index)
       } catch (error) {
         if (!isCurrentPlayAttempt(session, playToken) || isAbortError(error)) return
+        if (session.objectUrl) {
+          revokeObjectUrl(session.objectUrl)
+          session.objectUrl = null
+        }
+        session.audio = null
         mutateState(session.token, (previous) => ({
           ...previous,
           status: 'segment-error',
@@ -595,6 +606,8 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
       )
       session.audio?.pause()
       if (session.providerContext.provider === 'browser' && typeof window !== 'undefined') {
+        session.browserUtterance = null
+        session.playAttemptToken = null
         window.speechSynthesis?.cancel()
       }
       void playSegment(session, nextIndex)
