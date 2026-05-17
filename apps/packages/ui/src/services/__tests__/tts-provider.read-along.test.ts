@@ -89,7 +89,20 @@ describe('tts provider read-along synthesis', () => {
       text: 'next segment',
       model: 'model-a',
       voice: 'voice-a',
-      speed: undefined
+      speed: undefined,
+      signal: undefined
     })
+  })
+
+  it('passes abort signals through OpenAI synthesis', async () => {
+    const signal = new AbortController().signal
+    vi.mocked(generateOpenAITTS).mockResolvedValueOnce(new ArrayBuffer(8))
+    const context = await resolveTtsProviderContext('hello', { provider: 'openai' })
+
+    await context.synthesize?.('hello', { signal })
+
+    expect(generateOpenAITTS).toHaveBeenCalledWith(
+      expect.objectContaining({ signal })
+    )
   })
 })

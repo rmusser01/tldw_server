@@ -220,7 +220,8 @@ export const resolveTtsProviderContext = async (
           text: segment,
           model,
           voice,
-          speed
+          speed,
+          signal: _options?.signal
         }),
         format: "mp3",
         mimeType: "audio/mpeg"

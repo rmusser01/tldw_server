@@ -15,6 +15,37 @@ let providerContext: TtsProviderContext
 let objectUrlCounter = 0
 let playRejects = false
 
+type DeferredAudio = {
+  promise: Promise<{
+    buffer: ArrayBuffer
+    format: string
+    mimeType: string
+  }>
+  resolve: (value: {
+    buffer: ArrayBuffer
+    format: string
+    mimeType: string
+  }) => void
+}
+
+const deferredAudio = (): DeferredAudio => {
+  let resolve!: DeferredAudio['resolve']
+  const promise = new Promise<{
+    buffer: ArrayBuffer
+    format: string
+    mimeType: string
+  }>((resolver) => {
+    resolve = resolver
+  })
+  return { promise, resolve }
+}
+
+const audioResult = (text: string) => ({
+  buffer: new TextEncoder().encode(text).buffer,
+  format: 'mp3',
+  mimeType: 'audio/mpeg'
+})
+
 class TrackingAbortController extends AbortController {
   constructor() {
     super()
@@ -386,6 +417,62 @@ describe('useMediaReadAlongSession', () => {
     })
   })
 
+  it('ignores a pending generated segment when skip starts the next segment', async () => {
+    const pending = new Map<string, DeferredAudio>()
+    providerContext.synthesize = vi.fn((text: string) => {
+      const deferred = deferredAudio()
+      pending.set(text, deferred)
+      return deferred.promise
+    })
+    const { result } = setupHook()
+
+    act(() => {
+      void result.current.start('full-item')
+    })
+    await waitFor(() => expect(pending.has('First sentence.')).toBe(true))
+
+    act(() => {
+      result.current.skip()
+    })
+    await waitFor(() => expect(pending.has('Second sentence.')).toBe(true))
+    await act(async () => {
+      pending.get('Second sentence.')!.resolve(audioResult('second'))
+    })
+    await waitFor(() =>
+      expect(result.current.state.activeSegmentId).toBe('media-1:1:sentence:16:32')
+    )
+
+    await act(async () => {
+      pending.get('First sentence.')!.resolve(audioResult('first'))
+    })
+
+    expect(result.current.state.activeSegmentId).toBe('media-1:1:sentence:16:32')
+    expect(audioInstances).toHaveLength(1)
+    expect(audioInstances[0]?.src).toBe('blob:read-along-0')
+  })
+
+  it('does not cache or play generated audio that resolves after stop', async () => {
+    const deferred = deferredAudio()
+    providerContext.synthesize = vi.fn(() => deferred.promise)
+    const { result } = setupHook()
+
+    act(() => {
+      void result.current.start('selection')
+    })
+    await waitFor(() => expect(providerContext.synthesize).toHaveBeenCalledTimes(1))
+
+    act(() => {
+      result.current.stop()
+    })
+    await act(async () => {
+      deferred.resolve(audioResult('stopped'))
+    })
+
+    expect(saveMediaReadAlongAudioCacheEntry).not.toHaveBeenCalled()
+    expect(audioInstances).toHaveLength(0)
+    expect(result.current.state.status).toBe('stopped')
+  })
+
   it('settings are captured at session start and do not mutate mid-session', async () => {
     const firstSynthesize = vi.fn(async (text: string) => ({
       buffer: new TextEncoder().encode(`first:${text}`).buffer,
@@ -497,6 +584,51 @@ describe('useMediaReadAlongSession', () => {
 
     await waitFor(() => expect(result.current.state.status).toBe('segment-error'))
     expect(result.current.state.error).toContain('autoplay blocked')
+  })
+
+  it('ignores old browser utterance callbacks after skip cancels speech', async () => {
+    providerContext = {
+      provider: 'browser',
+      utterance: 'First sentence.',
+      playbackSpeed: 1,
+      supported: true
+    }
+    const spoken: MockSpeechSynthesisUtterance[] = []
+    Object.defineProperty(window, 'speechSynthesis', {
+      configurable: true,
+      value: {
+        speak: vi.fn((utterance: MockSpeechSynthesisUtterance) => {
+          spoken.push(utterance)
+          eventLog.push(`speech:speak:${utterance.text}`)
+        }),
+        cancel: vi.fn(),
+        pause: vi.fn(),
+        resume: vi.fn()
+      }
+    })
+    const { result } = setupHook()
+
+    await act(async () => {
+      await result.current.start('full-item')
+    })
+    expect(spoken[0]?.text).toBe('First sentence.')
+
+    act(() => {
+      result.current.skip()
+    })
+    expect(spoken[1]?.text).toBe('Second sentence.')
+
+    act(() => {
+      spoken[0]!.onend?.()
+      spoken[0]!.onerror?.()
+    })
+
+    expect(result.current.state).toMatchObject({
+      status: 'playing',
+      activeSegmentId: 'media-1:1:sentence:16:32',
+      error: null
+    })
+    expect(window.speechSynthesis.speak).toHaveBeenCalledTimes(2)
   })
 
   it('starting read-along pauses embeddedMediaRef.current if it is playing', async () => {

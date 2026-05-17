@@ -27,6 +27,7 @@ import type {
 const LOOKAHEAD_SEGMENT_COUNT = 4
 
 type SessionToken = symbol
+type PlayAttemptToken = symbol
 
 type AudioSource = {
   blob: Blob
@@ -42,6 +43,8 @@ type ReadAlongSession = {
   settingsSignature: string
   currentController: AbortController
   lookaheadController: AbortController
+  playAttemptToken: PlayAttemptToken | null
+  pendingIndex: number
   audio: HTMLAudioElement | null
   objectUrl: string | null
   browserUtterance: SpeechSynthesisUtterance | null
@@ -80,6 +83,9 @@ const isAbortError = (error: unknown): boolean =>
     ? error.name === 'AbortError'
     : error instanceof Error && error.name === 'AbortError'
 
+const readAlongAbortError = (): DOMException =>
+  new DOMException('Read-along playback cancelled', 'AbortError')
+
 const revokeObjectUrl = (url: string | null): void => {
   if (!url || typeof URL === 'undefined' || typeof URL.revokeObjectURL !== 'function') {
     return
@@ -112,6 +118,13 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
     return activeTokenRef.current === token
   }, [])
 
+  const isCurrentPlayAttempt = React.useCallback(
+    (session: ReadAlongSession, playToken: PlayAttemptToken): boolean => {
+      return isCurrentSession(session.token) && session.playAttemptToken === playToken
+    },
+    [isCurrentSession]
+  )
+
   const mutateState = React.useCallback(
     (
       token: SessionToken,
@@ -135,6 +148,7 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
       revokeObjectUrl(session.objectUrl)
       session.objectUrl = null
       session.browserUtterance = null
+      session.playAttemptToken = null
       if (
         cancelBrowserSpeech &&
         session.providerContext.provider === 'browser' &&
@@ -162,7 +176,8 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
     async (
       session: ReadAlongSession,
       segment: ReadAlongSegment,
-      signal: AbortSignal
+      signal: AbortSignal,
+      isCurrentLoad: () => boolean
     ): Promise<AudioSource> => {
       const key = await buildReadAlongCacheKey({
         serverScope: 'media-read-along',
@@ -176,6 +191,9 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
       })
 
       const cached = await getMediaReadAlongAudioCacheEntry(key.id)
+      if (signal.aborted || !isCurrentLoad()) {
+        throw readAlongAbortError()
+      }
       if (cached) {
         return {
           blob: cached.blob,
@@ -189,6 +207,9 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
       }
 
       const generated = await session.providerContext.synthesize(segment.text, { signal })
+      if (signal.aborted || !isCurrentLoad()) {
+        throw readAlongAbortError()
+      }
       const blob = new Blob([generated.buffer], { type: generated.mimeType })
       const saved = await saveMediaReadAlongAudioCacheEntry({
         id: key.id,
@@ -210,6 +231,9 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
           ...previous,
           cacheDisabled: true
         }))
+      }
+      if (signal.aborted || !isCurrentLoad()) {
+        throw readAlongAbortError()
       }
 
       return {
@@ -236,7 +260,8 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
           const source = await loadSegmentAudio(
             session,
             segment,
-            session.lookaheadController.signal
+            session.lookaheadController.signal,
+            () => isCurrentSession(session.token) && !session.lookaheadController.signal.aborted
           )
           if (!isCurrentSession(session.token)) return
           session.prefetched.set(segment.id, source)
@@ -249,7 +274,11 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
   )
 
   const playBrowserSegment = React.useCallback(
-    (session: ReadAlongSession, index: number): void => {
+    (
+      session: ReadAlongSession,
+      index: number,
+      playToken: PlayAttemptToken
+    ): void => {
       const segment = session.queue[index]
       if (!segment || typeof window === 'undefined' || !window.speechSynthesis) {
         mutateState(session.token, (previous) => ({
@@ -263,10 +292,21 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
       const utterance = new SpeechSynthesisUtterance(segment.text)
       utterance.rate = session.providerContext.playbackSpeed || 1
       utterance.onend = () => {
-        if (!isCurrentSession(session.token)) return
+        if (
+          !isCurrentPlayAttempt(session, playToken) ||
+          session.browserUtterance !== utterance
+        ) {
+          return
+        }
         void playSegment(session, index + 1)
       }
       utterance.onerror = () => {
+        if (
+          !isCurrentPlayAttempt(session, playToken) ||
+          session.browserUtterance !== utterance
+        ) {
+          return
+        }
         mutateState(session.token, (previous) => ({
           ...previous,
           status: 'segment-error',
@@ -286,19 +326,28 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
       })
       window.speechSynthesis.speak(utterance)
     },
-    [isCurrentSession, mutateState]
+    [isCurrentPlayAttempt, mutateState]
   )
 
   const playGeneratedSegment = React.useCallback(
-    async (session: ReadAlongSession, index: number): Promise<void> => {
+    async (
+      session: ReadAlongSession,
+      index: number,
+      playToken: PlayAttemptToken
+    ): Promise<void> => {
       const segment = session.queue[index]
       if (!segment) return
 
       try {
         const source =
           session.prefetched.get(segment.id) ||
-          (await loadSegmentAudio(session, segment, session.currentController.signal))
-        if (!isCurrentSession(session.token)) return
+          (await loadSegmentAudio(
+            session,
+            segment,
+            session.currentController.signal,
+            () => isCurrentPlayAttempt(session, playToken)
+          ))
+        if (!isCurrentPlayAttempt(session, playToken)) return
 
         session.prefetched.delete(segment.id)
         revokeObjectUrl(session.objectUrl)
@@ -313,12 +362,12 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
           if (session.objectUrl === objectUrl) {
             session.objectUrl = null
           }
-          if (!isCurrentSession(session.token)) return
+          if (!isCurrentPlayAttempt(session, playToken)) return
           void playSegment(session, index + 1)
         })
         audio.addEventListener('error', () => {
           revokeObjectUrl(objectUrl)
-          if (!isCurrentSession(session.token)) return
+          if (!isCurrentPlayAttempt(session, playToken)) return
           mutateState(session.token, (previous) => ({
             ...previous,
             status: 'segment-error',
@@ -336,10 +385,10 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
           cacheDisabled: session.cacheDisabled
         })
         await audio.play()
-        if (!isCurrentSession(session.token)) return
+        if (!isCurrentPlayAttempt(session, playToken)) return
         void prefetchLookahead(session, index)
       } catch (error) {
-        if (!isCurrentSession(session.token) || isAbortError(error)) return
+        if (!isCurrentPlayAttempt(session, playToken) || isAbortError(error)) return
         mutateState(session.token, (previous) => ({
           ...previous,
           status: 'segment-error',
@@ -347,12 +396,20 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
         }))
       }
     },
-    [isCurrentSession, loadSegmentAudio, mutateState, prefetchLookahead]
+    [isCurrentPlayAttempt, loadSegmentAudio, mutateState, prefetchLookahead]
   )
 
   const playSegment = React.useCallback(
     async (session: ReadAlongSession, index: number): Promise<void> => {
       if (!isCurrentSession(session.token)) return
+      session.currentController.abort()
+      session.currentController = new AbortController()
+      session.audio?.pause()
+      session.browserUtterance = null
+      session.pendingIndex = index
+      const playToken = Symbol('read-along-play-attempt')
+      session.playAttemptToken = playToken
+
       if (index >= session.queue.length) {
         cleanupSession(session, false)
         sessionRef.current = null
@@ -368,11 +425,11 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
       }
 
       if (session.providerContext.provider === 'browser' && !session.providerContext.synthesize) {
-        playBrowserSegment(session, index)
+        playBrowserSegment(session, index, playToken)
         return
       }
 
-      await playGeneratedSegment(session, index)
+      await playGeneratedSegment(session, index, playToken)
     },
     [cleanupSession, isCurrentSession, playBrowserSegment, playGeneratedSegment]
   )
@@ -440,6 +497,8 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
         objectUrl: null,
         browserUtterance: null,
         prefetched: new Map(),
+        playAttemptToken: null,
+        pendingIndex: -1,
         cacheDisabled: false
       }
 
@@ -529,9 +588,10 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
       const session = sessionRef.current
       if (!session) return
       const offset = direction === 'previous' ? -1 : 1
+      const baseIndex = state.activeIndex >= 0 ? state.activeIndex : session.pendingIndex
       const nextIndex = Math.min(
         session.queue.length,
-        Math.max(0, state.activeIndex + offset)
+        Math.max(0, baseIndex + offset)
       )
       session.audio?.pause()
       if (session.providerContext.provider === 'browser' && typeof window !== 'undefined') {
