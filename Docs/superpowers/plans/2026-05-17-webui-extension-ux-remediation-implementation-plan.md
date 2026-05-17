@@ -97,7 +97,7 @@ slice as needed.
 | F6 | Task 6 | Global chrome and chat-context controls. |
 | F10 | Task 8 | Media first-selection and mobile master-detail. |
 | F14 | Task 9 | Ask/Research/Workspace/Transform product ladder. |
-| F19 | Task 11B and Task 12 | Track deprecated UI cleanup only where it blocks UX remediation. |
+| F19 | Task 11A, Task 11B, and Task 12 | Track deprecated UI cleanup only where it blocks UX remediation. |
 
 ### Route Owners By Slice
 

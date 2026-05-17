@@ -530,6 +530,12 @@ Routes covered:
 `/claims-review`, `/data-tables`, `/chunking-playground`, `/kanban`,
 `/vn-assets`, `/vn-play`.
 
+Implementation split:
+WP11 is an umbrella package. Implementation plans must keep it split into
+WP11A for audio routes (`/speech`, `/audio`, `/stt`, `/tts`,
+`/audiobook-studio`) and WP11B for study, safety, review, data, chunking,
+kanban, and VN routes. Route coverage rows below use that split directly.
+
 User outcomes:
 Users understand whether a route is a production tool, advanced tool, beta,
 labs, hosted-only, or internal/debug surface. Power users get readiness and
@@ -612,7 +618,7 @@ updates, and diff checks for documentation.
 | F6 | Global chrome is chat-specific on non-chat pages | P2 | WP6 | WP1, WP4 | Route metadata controls chat-specific actions outside chat/workspace contexts. |
 | F7 | Settings navigation leaks internal translation key | P2 | WP5 | WP12 | Settings nav has no dotted i18n keys and has a regression test. |
 | F8 | Command palette contains route-label mismatch | P2 | WP1 | WP6, WP12 | "Go to Chat" opens `/chat` or is relabeled with separate Chat command. |
-| F9 | Capability and unsupported-state handling is inconsistent | P2 | WP2 | WP10, WP11, WP12 | Shared capability state adopted by representative routes. |
+| F9 | Capability and unsupported-state handling is inconsistent | P2 | WP2 | WP10, WP11A, WP11B, WP12 | Shared capability state adopted by representative routes. |
 | F10 | Media Inspector is powerful but not first-selection or mobile friendly | P2 | WP8 | WP4, WP12 | `/media` first-selection empty state and mobile list-detail pass browser QA. |
 | F11 | Settings is too broad for one flat route experience | P2 | WP5 | WP4, WP12 | Settings groups are task-led and mobile-safe. |
 | F12 | Extension sidepanel route availability is not aligned with shared intent | P2 | WP1 | WP12 | Sidepanel availability matrix exists and is tested. |
@@ -621,8 +627,8 @@ updates, and diff checks for documentation.
 | F15 | Root pages have inconsistent heading landmarks | P2 | WP4 | WP12 | User-facing root routes have one `h1` or approved exception. |
 | F16 | General settings mixes routine preferences with high-risk system actions | P2 | WP5 | WP4 | Data/destructive settings are separated from routine preferences. |
 | F17 | Route inventory and smoke coverage are not authoritative | P2 | WP12 | WP1 | Smoke inventory is generated from or checked against route metadata. |
-| F18 | Specialized, hosted, beta, and debug routes need a visibility policy | P2 | WP1 | WP11, WP12 | Route visibility classes gate nav, command palette, docs, and smoke suites. |
-| F19 | Ant Design deprecation warnings signal maintenance risk | P3 | WP11 | WP12 | Deprecated components are tracked separately and cleaned when they block a UX fix. |
+| F18 | Specialized, hosted, beta, and debug routes need a visibility policy | P2 | WP1 | WP11A, WP11B, WP12 | Route visibility classes gate nav, command palette, docs, and smoke suites. |
+| F19 | Ant Design deprecation warnings signal maintenance risk | P3 | WP11A, WP11B | WP12 | Deprecated components are tracked separately and cleaned when they block a UX fix. |
 
 ## Route Coverage Matrix
 
@@ -656,7 +662,7 @@ updates, and diff checks for documentation.
 | `/model-playground` | WP9 | WP5, WP6 | Model testing versus generic chat | Browser QA for compare/config layout |
 | `/writing-playground` | WP9 | WP4 | Writing session framing and persistence | Heading and session QA |
 | `/presentation-studio` | WP9 | WP1 | Deck creation and render recovery | Route metadata and browser QA |
-| `/audiobook-studio` | WP11 | WP9, WP2 | Audio generation readiness and jobs | Readiness-state QA |
+| `/audiobook-studio` | WP11A | WP9, WP2 | Audio generation readiness and jobs | Readiness-state QA |
 | `/media` | WP8 | WP4 | First selection and mobile master-detail | Desktop and 390px browser QA |
 | `/media-multi` | WP8 | WP4 | Bulk selection purpose and recovery | Selection action QA |
 | `/review` | WP8 | WP1 | Review alias to bulk media workflow | Alias route test |
@@ -682,22 +688,22 @@ updates, and diff checks for documentation.
 | `/prompt-studio` | WP5 | WP1 | Prompt Studio alias/tab state | Alias route test |
 | `/dictionaries` | WP7 | WP1 | Dictionary activation scope | Browser QA |
 | `/world-books` | WP7 | WP2 | World Book context scope and errors | Capability and heading QA |
-| `/speech` | WP11 | WP2, WP4 | Audio route canonicalization and readiness | Browser QA and heading check |
-| `/stt` | WP11 | WP2, WP4 | STT provider readiness and heading | Browser QA and heading check |
-| `/tts` | WP11 | WP2, WP4 | TTS provider readiness and voice state | Browser QA and heading check |
-| `/audio` | WP11 | WP1 | Audio alias or hub policy | Alias route test |
-| `/evaluations` | WP11 | WP2 | Worker unavailable and eval presets | Browser QA |
-| `/flashcards` | WP11 | WP4 | Study mode framing and heading | Browser QA and heading check |
-| `/quiz` | WP11 | WP2, WP4 | Quiz start state and degraded mode | Browser QA |
-| `/moderation-playground` | WP11 | WP4 | Safety test versus setup framing | Heading and route QA |
-| `/content-review` | WP11 | WP8 | Review queue identity | Empty-state browser QA |
-| `/claims-review` | WP11 | WP1 | Claims alias or queue distinction | Alias route test |
-| `/data-tables` | WP11 | WP2 | Backend readiness and schema/output flow | Capability and browser QA |
-| `/chunking-playground` | WP11 | WP1 | Advanced RAG tuning classification | Visibility and browser QA |
-| `/kanban` | WP11 | WP1 | Labs versus production planning board | Visibility or persistence QA |
-| `/skills` | WP10 | WP2, WP11 | Skill capability and empty state | Capability fixture QA |
-| `/vn-assets` | WP11 | WP1 | VN asset lab classification and readiness | Visibility and route QA |
-| `/vn-play` | WP11 | WP1 | VN play versus runtime inspector | Browser QA |
+| `/speech` | WP11A | WP2, WP4 | Audio route canonicalization and readiness | Browser QA and heading check |
+| `/stt` | WP11A | WP2, WP4 | STT provider readiness and heading | Browser QA and heading check |
+| `/tts` | WP11A | WP2, WP4 | TTS provider readiness and voice state | Browser QA and heading check |
+| `/audio` | WP11A | WP1 | Audio alias or hub policy | Alias route test |
+| `/evaluations` | WP11B | WP2 | Worker unavailable and eval presets | Browser QA |
+| `/flashcards` | WP11B | WP4 | Study mode framing and heading | Browser QA and heading check |
+| `/quiz` | WP11B | WP2, WP4 | Quiz start state and degraded mode | Browser QA |
+| `/moderation-playground` | WP11B | WP4 | Safety test versus setup framing | Heading and route QA |
+| `/content-review` | WP11B | WP8 | Review queue identity | Empty-state browser QA |
+| `/claims-review` | WP11B | WP1 | Claims alias or queue distinction | Alias route test |
+| `/data-tables` | WP11B | WP2 | Backend readiness and schema/output flow | Capability and browser QA |
+| `/chunking-playground` | WP11B | WP1 | Advanced RAG tuning classification | Visibility and browser QA |
+| `/kanban` | WP11B | WP1 | Labs versus production planning board | Visibility or persistence QA |
+| `/skills` | WP10 | WP2, WP11B | Skill capability and empty state | Capability fixture QA |
+| `/vn-assets` | WP11B | WP1 | VN asset lab classification and readiness | Visibility and route QA |
+| `/vn-play` | WP11B | WP1 | VN play versus runtime inspector | Browser QA |
 | `/documentation` | WP1 | WP10 | Docs root index and route classification | Docs route browser QA |
 | `/notifications` | WP8 | WP10 | Notification grouping and deep links | Browser QA |
 | `/composer-variants-preview` | WP1 | WP12 | Internal QA route classification | Visibility metadata test |
@@ -792,8 +798,8 @@ When this spec is converted into an implementation plan:
   For example, `/sources` may be owned by the Operations package while adopting
   the shared capability-state package.
 - Split overloaded route-family packages before implementation when one package
-  spans unrelated workflows. WP11 in particular should become separate
-  audio/study/safety/specialized-tool slices unless the actual change is only a
+  spans unrelated workflows. Keep WP11 split into WP11A audio and WP11B
+  study/safety/specialized-tool slices unless the actual change is only a
   shared classification or route-contract update.
 - Do not use explanatory text as a substitute for structural UX fixes. Prefer
   clearer controls, status states, progressive disclosure, route ownership, and
