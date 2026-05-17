@@ -1,7 +1,7 @@
 ---
 id: TASK-405
 title: Implement folder-to-notes Sources UI exposure
-status: In Progress
+status: Done
 labels:
 - webui
 - extension
@@ -11,6 +11,10 @@ labels:
 documentation:
 - Docs/superpowers/specs/2026-05-17-folder-notes-sources-ui-exposure-design.md
 - Docs/superpowers/plans/2026-05-17-folder-notes-sources-ui-exposure-implementation-plan.md
+modified_files:
+- Docs/superpowers/plans/2026-05-17-folder-notes-sources-ui-exposure-implementation-plan.md
+- tldw_Server_API/Config_Files/config.txt
+- tldw_Server_API/tests/Config/test_config_txt_inline_comment_regression.py
 ---
 
 ## Description
@@ -45,20 +49,21 @@ Task 5 real Sources navigation shortcut implemented. Added `modeSources` as `Alt
 Task 5 quality review follow-up: loosened the persisted shortcut config storage type so `defaultShortcuts` remains assignable, and added `modeSources` to the existing typed CommandPalette shortcut fixture. Verification: from `apps/packages/ui`, `bunx vitest run src/hooks/keyboard/__tests__/useShortcutConfig.test.ts src/hooks/keyboard/__tests__/useModeNavigationShortcuts.test.tsx src/components/Common/__tests__/CommandPalette.shortcuts.test.tsx` passed with 10 tests; `git diff --check` passed.
 Task 5 real Sources navigation shortcut completed across commits e1f445442664da3c255b626c47fbf7c318b531e9 and 271ee95a2, and passed both review gates after the typed-storage and CommandPalette fixture follow-up. Verification: from `apps/packages/ui`, `bunx vitest run src/hooks/keyboard/__tests__/useShortcutConfig.test.ts src/hooks/keyboard/__tests__/useModeNavigationShortcuts.test.tsx src/components/Common/__tests__/CommandPalette.shortcuts.test.tsx` passed with 10 tests; `git diff --check` passed. Bandit skipped for frontend-only Task 5 slice.
 Task 6 shortcut modal and header launcher discoverability implemented. Added Sources to Keyboard Shortcuts and Page Help navigation rows, exposed Sources in default header shortcuts with legacy full-default migration only, and added the Sources library launcher item. Verification: from `apps/packages/ui`, `bunx vitest run src/components/Common/__tests__/KeyboardShortcutsModal.focus.test.tsx src/components/Common/__tests__/PageHelpModal.shortcuts.test.tsx src/services/__tests__/ui-settings.header-shortcuts.test.ts src/components/Layouts/__tests__/HeaderShortcuts.test.tsx src/components/Layouts/__tests__/persona-shortcut-defaults.test.ts` passed with 41 tests. Bandit skipped for frontend-only Task 6 slice.
+Task 7 final verification/browser QA completed. Browser QA found the default config did not force-enable the experimental ingestion-sources router, causing the fresh Sources UI to fall back to "This server does not advertise ingestion source support." Added a config regression and enabled `ingestion-sources` in `tldw_Server_API/Config_Files/config.txt`. Verification recorded: config regression red/green; backend focused suite 33 passed; frontend focused Vitest suite 100 passed; Bandit touched backend source returned 0 findings; git diff --check clean; browser QA verified the source preset form, Notes Sync folder navigation, Alt+5 Notes navigation, shortcut modal Sources row, header launcher Sources row, and mobile-width Source/Notes drawer rendering.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented WebUI/extension exposure for folder-to-notes Sources sync. The backend now gates local-directory ingestion sources by single-user mode or the admin feature flag `ingestion_sources.local_directory`, exposes an authenticated current-user capability endpoint, and enforces entitlement before local-directory create/retarget operations. The shared UI now consumes that capability, adds the notes-folder-sync Source preset with visible scheduled-rescan control, exposes a Notes `Sync folder` action that routes to the preset, wires real mode navigation shortcuts including `Alt+2` for Sources, and surfaces Sources in shortcut/help/header launcher surfaces. Final follow-up enabled the ingestion-sources router in the default config so the exposed UI is reachable in the default local WebUI setup, with regression coverage.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
