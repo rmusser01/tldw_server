@@ -173,7 +173,7 @@ Produce and validate the six bundled basic tier Buddy defaults as production-rea
 - [x] #10 Basic-tier documentation and visual review evidence reflect the final six bundled basic defaults.
 - [x] #11 Codex/Petdex pet import preview and commit accept `pet.json` plus spritesheet `.zip` packages as draft Persona Visual packs.
 - [x] #12 Basic-tier production planning is pivoted to Codex-pet-compatible 8x9 atlas packets, with `moving_right` and `moving_left` as movement states.
-- [x] #13 Buddy creation docs use hatch-pet as the reference workflow for a tldw-native Simple Buddy Creator with simple draft-pack and full Codex-compatible modes.
+- [x] #13 Buddy creation docs use hatch-pet as the reference workflow for a tldw-native Buddy creator with Persona Visual draft-pack review and full Codex-compatible modes.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -202,7 +202,7 @@ Verification:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed the six-pack basic Buddy default slice. The catalog now exposes Search Lens, Index Card, Archive Cube, Paperclip, Terminal Tile, and Migu Marker as art-ready starter packs with package-backed 96x96 frame resources, required-state loops, neutral/preview assets, inactive draft copy semantics, and reaction.success coverage. Docs now include the final six review packets plus Simple Buddy/Codex-compatible creation guidance.
+Completed the six-pack basic Buddy default slice. The catalog now exposes Search Lens, Index Card, Archive Cube, Paperclip, Terminal Tile, and Migu Marker as art-ready starter packs with package-backed 96x96 frame resources, required-state loops, neutral/preview assets, inactive draft copy semantics, and reaction.success coverage. Docs now include the final six review packets plus Persona Visual draft-pack and Codex-compatible creation guidance.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -305,15 +305,15 @@ Verification:
 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Persona/visual_starter_fixtures.py tldw_Server_API/app/core/Persona/visual_portability/codex_pet.py tldw_Server_API/app/core/Persona/visual_portability/preview.py tldw_Server_API/app/core/Persona/visual_portability/importer.py tldw_Server_API/app/api/v1/endpoints/persona.py -f json -o /tmp/bandit_basic_buddy_defaults.json -> 0 findings.
 - git diff --check -> passed.
 Hatch-pet reference checkpoint:
-- Persona Visual docs now treat hatch-pet as the reference workflow for a user-facing tldw Simple Buddy Creator, not as a tldw runtime dependency.
-- The documented creator flow has two modes: simple tldw draft-pack mode for name/description/reference/style plus core states, and full Codex-compatible mode for the nine-row `pet.json` plus `spritesheet.webp` atlas.
+- Persona Visual docs now treat hatch-pet as the reference workflow for user-facing tldw Buddy creation, not as a tldw runtime dependency.
+- The documented creator flow has a simple UX path for name/description/reference/style plus core states, and a full Codex-compatible mode for the nine-row `pet.json` plus `spritesheet.webp` atlas.
 - The documented Buddy process now uses tldw surfaces for Persona Garden review, Persona Visual draft storage, import-preview diagnostics, optional library reuse, MCP-triggerable custom states, and explicit activation.
 - The docs carry over hatch visual QA blockers such as identity drift, clipping, slot overlap, copied guides, nontransparent backgrounds, size popping, wrong facing direction, inert idle loops, and detached effects.
 Terminal Tile checkpoint:
 - User approved the Terminal Tile neutral anchor and 3x4 simple-state source sheet.
 - Source was copied into Docs/Code_Documentation/assets/buddy-defaults/terminal-tile-basic/source/ and chroma-keyed to alpha.
 - Processed v1 frame packet uses one stable global scale across all 12 frames, with tiny detached extraction specks removed before review.
-- Runtime starter catalog now includes terminal-tile-basic in stable order after paperclip-basic, replacing the old minimal-helper-basic basic slot.
+- Runtime starter catalog now includes terminal-tile-basic in stable order after paperclip-basic, replacing the previous geometric-helper placeholder basic slot.
 - terminal-tile-basic uses the approved v1 package-backed PNG frame packet, required state loops, and reaction.success.
 - Documentation now records the Terminal Tile review packet and recreation walkthrough.
 

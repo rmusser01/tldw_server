@@ -6,7 +6,7 @@ Draft design for GitHub issue #1765 and Backlog TASK-406.
 
 ## Purpose
 
-Persona Visual starter packs now expose `production_recipe` metadata for the nine bundled starter scaffolds. That metadata describes the authored-asset workflow: identity brief, neutral anchor, static sheet guidance, animation output targets, and review checks. The next backend step is to let generation requests reference those recipe outputs while reusing the existing Persona Visual generation Jobs and generated-candidate review flow.
+Persona Visual starter packs now expose `production_recipe` metadata for the bundled starter catalog. That metadata describes the authored-asset workflow: identity brief, neutral anchor, static sheet guidance, animation output targets, and review checks. The next backend step is to let generation requests reference those recipe outputs while reusing the existing Persona Visual generation Jobs and generated-candidate review flow.
 
 This design is backend-only. It does not add WebUI behavior, final art generation, automatic activation, runtime renderer support, MCP provider execution, marketplace behavior, shared library behavior, or VN/CYOA behavior.
 
@@ -54,8 +54,8 @@ Recommended request shape:
   "prompt": "User direction layered onto the recipe",
   "target_state": "speaking",
   "backend": "configured-image-backend",
-  "starter_pack_id": "research-buddy-basic",
-  "recipe_output": "static_talking_reaction_sheet"
+  "starter_pack_id": "search-lens-basic",
+  "recipe_output": "required_state_loops"
 }
 ```
 
@@ -95,8 +95,8 @@ Add a `recipe_intent` object to the existing generation payload:
   "target_state": "speaking",
   "backend": "configured-image-backend",
   "recipe_intent": {
-    "starter_pack_id": "research-buddy-basic",
-    "recipe_output": "static_talking_reaction_sheet",
+    "starter_pack_id": "search-lens-basic",
+    "recipe_output": "required_state_loops",
     "correlation_id": "client-or-server-correlation-id",
     "user_prompt": "User direction layered onto the recipe",
     "identity_brief": "bounded recipe identity text",

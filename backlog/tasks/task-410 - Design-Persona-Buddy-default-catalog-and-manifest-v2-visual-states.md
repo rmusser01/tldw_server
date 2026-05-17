@@ -44,7 +44,7 @@ Create a repo-backed design spec for the Persona Buddy default visual catalog an
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created the Buddy animation pipeline design spec and GitHub tracker issue #1787 under epic #1510. The spec covers the nine default Buddy catalog tiers, neutral-anchor-first workflow, static sheet versus timed animation separation, state_catalog/authored_triggers custom-state semantics, staged implementation slices, and verification expectations. Validation so far is documentation-focused: git diff --check passed. Bandit is not applicable because this slice only changes Markdown/Backlog tracking.
+Created the Buddy animation pipeline design spec and GitHub tracker issue #1787 under epic #1510. The spec originally tracked the nine-default Buddy catalog tiers; TASK-419 reconciles that with the later six-basic Codex Buddy expansion and current twelve-ID starter catalog. The still-current design covers the neutral-anchor-first workflow, static sheet versus timed animation separation, state_catalog/authored_triggers custom-state semantics, staged implementation slices, and verification expectations. Validation so far is documentation-focused: git diff --check passed. Bandit is not applicable because this slice only changes Markdown/Backlog tracking.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -44,9 +44,15 @@ Implement issue #1732 by adding nine server-owned Persona Visual starter catalog
 <!-- SECTION:NOTES:BEGIN -->
 Created after PR #1725 merged and issue #1695 closed. Issue #1732 tracks this next Persona/Buddy visual catalog slice under epic #1510.
 
+Supersession note from TASK-419: this task recorded the earlier nine-scaffold
+catalog expansion. Later basic-tier asset production replaced that basic set
+with the six Codex Buddy defaults and the current twelve-ID starter catalog.
+Keep this task as historical evidence for the scaffold expansion, not as the
+current basic-tier source of truth.
+
 Implementation started in worktree .worktrees/persona-visual-nine-starters-1732. Baseline focused starter catalog pytest passed before edits: 9 tests.
 
-Implemented nine bundled Persona Visual starter fixture packs with stable IDs, required sprite_frames states, custom-state examples, an atlas-backed starter, legacy research-buddy-starter alias support, API/test expectation updates, and docs for the nine-default catalog.
+Implemented the initial bundled Persona Visual starter fixture set with stable IDs, required sprite_frames states, custom-state examples, an atlas-backed starter, legacy research-buddy-starter alias support, API/test expectation updates, and docs for the then-current default catalog.
 
 Verification: focused starter catalog pytest passed with 20 tests; broader persona visual slice passed with 84 tests across starter catalog, visual API, and visual service; git diff --check passed; Bandit JSON report for touched Persona backend starter modules reported zero findings.
 
@@ -64,7 +70,7 @@ PR #1734 review fixes: wrapped the long fixture/test lines identified by Qodo an
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added nine bundled Persona Visual starter catalog scaffold fixtures across basic, intermediate, and intricate tiers. Added deterministic fixture PNG generation, custom-state and atlas metadata examples, legacy research-buddy-starter alias handling, updated API/service coverage, and documented that these are backend scaffolds rather than finished buddy art or completed animation packs. PR review fixes also wrap newly touched long Python lines and ensure multi-custom-state scaffolds use distinct variant fixture assets. Verification: focused starter catalog/API pytest passed with 25 tests after review fixes; prior broader persona visual slice passed with 84 tests; git diff --check passed; Bandit on touched Persona starter backend modules reported zero findings. Known skips/blockers: real default buddy art and neutral-pose-to-animation asset creation remain future work.
+Added the initial bundled Persona Visual starter catalog scaffold fixtures across basic, intermediate, and intricate tiers. Added deterministic fixture PNG generation, custom-state and atlas metadata examples, legacy research-buddy-starter alias handling, updated API/service coverage, and documented that these are backend scaffolds rather than finished buddy art or completed animation packs. PR review fixes also wrap newly touched long Python lines and ensure multi-custom-state scaffolds use distinct variant fixture assets. Verification: focused starter catalog/API pytest passed with 25 tests after review fixes; prior broader persona visual slice passed with 84 tests; git diff --check passed; Bandit on touched Persona starter backend modules reported zero findings. Known skips/blockers: real default buddy art and neutral-pose-to-animation asset creation remain future work.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

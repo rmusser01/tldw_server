@@ -22,7 +22,7 @@ workflow:
 5. import or copy the result into an inactive Persona Visual draft pack,
 6. activate only after explicit user review.
 
-The current starter catalog already contains nine scaffold IDs and the runtime
+The current starter catalog contains twelve starter IDs and the runtime
 already supports bounded custom visual states through `state_catalog` and
 `authored_triggers`. This spec turns those scaffolds into a production-ready
 asset pipeline without claiming that finished default animation packs already
@@ -35,11 +35,13 @@ reuse:
 
 - `Docs/Code_Documentation/Persona_Visual_Packs.md` documents user-owned,
   persona-attached, manifest-backed packs, explicit activation, import/export,
-  generated-candidate review, personal library reuse, and the nine starter
-  scaffold IDs.
+  generated-candidate review, personal library reuse, the default-pack
+  production tracker, and the current twelve starter IDs.
 - `tldw_Server_API/app/core/Persona/visual_starter_fixtures.py` defines the
-  nine immutable starter scaffolds, production recipe metadata, complexity
-  tiers, expected asset groups, and current scaffold status.
+  immutable starter fixtures, production recipe metadata, complexity tiers,
+  expected asset groups, and current production status. The basic tier now
+  contains six art-ready defaults; intermediate and intricate starters remain
+  scaffolds until their reviewed production assets land.
 - `tldw_Server_API/app/core/Persona/visuals.py` validates sprite-frame manifests,
   frame timing, atlas regions, required states, custom state catalog entries,
   authored triggers, fallbacks, and bounds such as 256 custom states and 512
@@ -58,7 +60,7 @@ existing stack, not a new avatar runtime.
 
 ## Goals
 
-1. Define the final-art production workflow for nine bundled default Buddies.
+1. Define the final-art production workflow for bundled default Buddies.
 2. Preserve the existing Persona Visual pack contract and explicit activation
    model.
 3. Adapt the Puzzle Attack art pipeline pattern to Buddy assets: manifest-driven
@@ -82,17 +84,22 @@ existing stack, not a new avatar runtime.
 6. Do not use raw prompts, secrets, host-local paths, or provider payloads as
    durable user-facing provenance.
 
-## Nine Default Buddies
+## Bundled Default Starter Catalog
 
-The bundled defaults are organized as three complexity tiers. The existing
-starter IDs stay stable; final art replaces scaffold assets behind those
-contracts.
+The bundled defaults are organized as three complexity tiers. Earlier tracker
+and issue text described three basic defaults, but the current basic tier is the
+six Codex Buddy defaults: Search Lens, Index Card, Archive Cube, Paperclip,
+Terminal Tile, and Migu. The existing starter IDs stay stable; final art
+replaces scaffold assets behind those contracts.
 
 | Tier | Starter ID | Design intent | Production target |
 | --- | --- | --- | --- |
-| Basic | `research-buddy-basic` | Clean assistant mascot based on the original Buddy mockup direction. | One strong neutral anchor plus required-state loops. |
-| Basic | `migu-marker-basic` | Rough marker-line user-art feel inspired by the supplied Migu image. | Preserve hand-drawn charm; simple mouth and reaction changes. |
-| Basic | `minimal-helper-basic` | Geometric low-complexity helper. | Fast user-customizable baseline with few moving parts. |
+| Basic | `search-lens-basic` | Friendly search-lens object Buddy. | Reviewed neutral/preview assets and required-state loops; Codex atlas upgrade path. |
+| Basic | `index-card-basic` | Friendly tabbed card object Buddy. | Reviewed neutral/preview assets and required-state loops; Codex atlas upgrade path. |
+| Basic | `archive-cube-basic` | Friendly archive/storage cube Buddy. | Reviewed neutral/preview assets and required-state loops; Codex atlas upgrade path. |
+| Basic | `paperclip-basic` | Friendly paperclip object Buddy. | Reviewed neutral/preview assets and required-state loops; Codex atlas upgrade path. |
+| Basic | `terminal-tile-basic` | Friendly terminal-window tile Buddy. | Reviewed neutral/preview assets and required-state loops; Codex atlas upgrade path. |
+| Basic | `migu-marker-basic` | Rough marker-line user-art feel inspired by the supplied Migu image. | Preserve hand-drawn charm; reviewed required-state loops and Codex atlas upgrade path. |
 | Intermediate | `study-desk-intermediate` | Calm study companion in the Puzzle Attack clean anime/game-sprite style. | Neutral anchor, static talking sheet, separate required-state loops. |
 | Intermediate | `tool-helper-intermediate` | Utility-themed helper with exact tool variant support. | Required states plus at least one exact `tool_name` animation variant. |
 | Intermediate | `object-creature-intermediate` | Non-human expressive object companion. | Proves the format is not humanoid-only. |
@@ -105,6 +112,10 @@ companion in the same clean, readable game-art language as Puzzle Attack. It
 must not copy a protected character identity. The Migu default should preserve
 the user-art spirit of the reference image: playful proportions, visible marker
 quality, cyan twin-tail silhouette, and deliberately simple expression language.
+The six basic defaults currently ship as art-ready 96x96 Persona Visual frame
+packets; cross-app interchange or Codex Buddy reuse should use the documented
+Codex/Petdex `pet.json` plus 8x9 atlas path rather than treating those 96x96
+packets as the interchange ceiling.
 
 ## Complexity Tiers
 
@@ -112,7 +123,10 @@ quality, cyan twin-tail silhouette, and deliberately simple expression language.
 
 Basic Buddies optimize for quick creation and low art burden. A user should be
 able to create a usable Buddy from one neutral pose plus a small number of
-derived loops.
+derived loops. For bundled defaults, this tier is the six Codex Buddy defaults
+listed above. The simple tldw runtime packet may use separate frame assets, but
+the portability target for Codex Buddy parity is the Codex/Petdex 8x9 atlas
+contract.
 
 Required production assets:
 
@@ -393,12 +407,12 @@ Verification:
 
 ### Stage 2: Catalog Metadata Alignment
 
-Goal: make starter catalog metadata match the final nine-default production
-intent without adding fake animation assets.
+Goal: make starter catalog metadata match the current bundled default
+production intent without adding fake animation assets.
 
 Likely changes:
 
-- tighten production recipes for the nine IDs,
+- tighten production recipes for the starter IDs,
 - ensure final-art status stays `scaffold` until assets exist,
 - add doc/API tests proving the catalog is explicit about scaffold status.
 
@@ -464,7 +478,7 @@ Verification:
 
 ### Stage 6: Final Default Art Production
 
-Goal: produce the actual nine default Buddy animation packs.
+Goal: produce the actual bundled default Buddy animation packs.
 
 This is an asset-production effort, not a code-only patch. Each default should
 go through:
