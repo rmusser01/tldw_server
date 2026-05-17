@@ -4,7 +4,7 @@ title: Produce basic tier Buddy default animation packs
 status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-05-16 20:26
+updated_date: 2026-05-16 20:32
 labels:
 - persona
 - buddy
@@ -23,6 +23,7 @@ modified_files:
 - tldw_Server_API/app/core/Persona/visual_portability/codex_pet.py
 - tldw_Server_API/app/core/Persona/visual_portability/preview.py
 - tldw_Server_API/app/core/Persona/visual_portability/importer.py
+- tldw_Server_API/app/core/Persona/visual_service.py
 - tldw_Server_API/tests/Persona/test_persona_visual_portability.py
 - Docs/Code_Documentation/assets/buddy-defaults/search-lens-basic/source/search-lens-basic-3x4-source.png
 - Docs/Code_Documentation/assets/buddy-defaults/search-lens-basic/source/search-lens-basic-3x4-transparent.png
@@ -148,6 +149,7 @@ modified_files:
 - tldw_Server_API/app/core/Persona/assets/starter_packs/paperclip-basic/frames/10_error_a.png
 - tldw_Server_API/app/core/Persona/assets/starter_packs/paperclip-basic/frames/11_error_b.png
 - tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py
+- tldw_Server_API/tests/Persona/test_persona_visual_service.py
 - tldw_Server_API/tests/Persona/test_persona_visuals_api.py
 ---
 
@@ -323,4 +325,19 @@ Verification:
 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m py_compile tldw_Server_API/app/core/Persona/visual_starter_fixtures.py tldw_Server_API/app/core/Persona/visual_portability/codex_pet.py tldw_Server_API/app/core/Persona/visual_portability/preview.py tldw_Server_API/app/core/Persona/visual_portability/importer.py tldw_Server_API/app/api/v1/endpoints/persona.py -> passed.
 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python package resource/image validation script -> validated search-lens-basic, index-card-basic, archive-cube-basic, paperclip-basic, terminal-tile-basic, and migu-marker-basic package resources and manifests.
 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Persona/visual_starter_fixtures.py tldw_Server_API/app/core/Persona/visual_portability/codex_pet.py tldw_Server_API/app/core/Persona/visual_portability/preview.py tldw_Server_API/app/core/Persona/visual_portability/importer.py tldw_Server_API/app/api/v1/endpoints/persona.py -f json -o /tmp/bandit_basic_buddy_defaults.json -> 0 findings, 0 errors.
+PR review follow-up checkpoint:
+- Verified Qodo's nine-pack comment against the current staged effort. It is not a code change for this basic-tier PR: the nine-pack epic remains split across basic, intermediate, and intricate asset-production issues, and this task/PR intentionally completes the basic tier first.
+- Wrapped the long `_png_chunk()` return expression back to PEP 8-friendly multiline form.
+- Updated duplicate-pack copying so Persona Visual duplicate-to-persona preserves all source-pack asset rows, including non-manifest `preview`, `still_pose`, and generated-candidate assets, while still remapping only manifest references.
+- Added regression coverage that duplicate-to-persona preserves unreferenced non-manifest assets.
+
+Verification:
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_service.py::test_duplicate_pack_to_persona_preserves_all_pack_assets_and_remaps_manifest -q -> failed before implementation with 2 copied assets instead of 4, then passed after the fix.
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_service.py -q -> 14 passed, 5 warnings.
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py -q -> 76 passed, 5 warnings.
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_portability.py -q -> 18 passed, 5 warnings.
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q -> 64 passed, 5 warnings.
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m py_compile tldw_Server_API/app/core/Persona/visual_service.py tldw_Server_API/app/core/Persona/visual_starter_fixtures.py tldw_Server_API/app/core/Persona/visual_portability/codex_pet.py tldw_Server_API/app/core/Persona/visual_portability/preview.py tldw_Server_API/app/core/Persona/visual_portability/importer.py tldw_Server_API/app/api/v1/endpoints/persona.py -> passed.
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python package resource/image validation script -> validated search-lens-basic, index-card-basic, archive-cube-basic, paperclip-basic, terminal-tile-basic, and migu-marker-basic package resources and manifests.
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Persona/visual_service.py tldw_Server_API/app/core/Persona/visual_starter_fixtures.py tldw_Server_API/app/core/Persona/visual_portability/codex_pet.py tldw_Server_API/app/core/Persona/visual_portability/preview.py tldw_Server_API/app/core/Persona/visual_portability/importer.py tldw_Server_API/app/api/v1/endpoints/persona.py -f json -o /tmp/bandit_basic_buddy_defaults.json -> 0 findings, 0 errors.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

@@ -148,7 +148,12 @@ class PersonaVisualStarterPack:
 
 def _png_chunk(kind: bytes, payload: bytes) -> bytes:
     """Build one PNG chunk with length and CRC fields."""
-    return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+    return (
+        struct.pack(">I", len(payload))
+        + kind
+        + payload
+        + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+    )
 
 
 def _png_from_rgba(width: int, height: int, pixels: bytes | bytearray) -> bytes:
