@@ -1,15 +1,20 @@
 ---
 id: TASK-407.2
 title: Implement chat role-play visible state and terminology cleanup
-status: To Do
+status: In Progress
+assignee: []
+created_date: ''
+updated_date: '2026-05-17 07:53'
 labels:
-- chat
-- ux
-- roleplay
-- stage-2
-parent_task_id: TASK-407
+  - chat
+  - ux
+  - roleplay
+  - stage-2
+dependencies: []
 documentation:
-- Docs/superpowers/plans/2026-05-17-main-chat-role-play-preset-remediation-implementation-plan.md
+  - >-
+    Docs/superpowers/plans/2026-05-17-main-chat-role-play-preset-remediation-implementation-plan.md
+parent_task_id: TASK-407
 ---
 
 ## Description
@@ -28,14 +33,13 @@ Stage 2 implementation for the main /chat role-play preset plan: add derived rol
 
 ## Implementation Notes
 
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:BEGIN -->
+Stage 2 started after Stage 1 commit 6bd234f1d passed spec and code-quality review. Scope remains limited to visible role-play state, behavior template identity, active chips, and terminology cleanup on main /chat.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
