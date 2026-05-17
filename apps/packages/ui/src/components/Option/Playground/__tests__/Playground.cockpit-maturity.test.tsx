@@ -271,23 +271,38 @@ describe("Playground mature cockpit surfaces", () => {
     )
 
     const mobilePanels = screen.getByTestId("playground-cockpit-mobile-rails")
-    expect(within(mobilePanels).queryByRole("tab", { name: "Context" })).toBeInTheDocument()
-    expect(within(mobilePanels).queryByText("Context controls")).toBeInTheDocument()
-    expect(within(mobilePanels).queryByText("Runtime controls")).toBeNull()
-    expect(within(mobilePanels).queryByRole("tab", { name: "Runtime" })).toHaveAttribute(
+    const contextTab = within(mobilePanels).getByRole("tab", { name: "Context" })
+    const runtimeTab = within(mobilePanels).getByRole("tab", { name: "Runtime" })
+    const contextPanel = document.getElementById(
+      contextTab.getAttribute("aria-controls") ?? ""
+    )
+    const runtimePanel = document.getElementById(
+      runtimeTab.getAttribute("aria-controls") ?? ""
+    )
+
+    expect(contextTab).toBeInTheDocument()
+    expect(contextPanel).not.toBeNull()
+    expect(runtimePanel).not.toBeNull()
+    expect(contextPanel).toHaveTextContent("Context controls")
+    expect(contextPanel).toBeVisible()
+    expect(runtimePanel).toHaveTextContent("Runtime controls")
+    expect(runtimePanel).not.toBeVisible()
+    expect(runtimeTab).toHaveAttribute(
       "aria-selected",
       "false"
     )
 
-    fireEvent.click(within(mobilePanels).getByRole("tab", { name: "Runtime" }))
+    fireEvent.click(runtimeTab)
     expect(onMobilePanelChange).toHaveBeenCalledWith("runtime")
   })
 
   it("keeps mobile cockpit panel state explicit while preserving the draft surface", () => {
+    const onModeChange = vi.fn()
+
     render(
       <PlaygroundCockpitShell
         mode="cockpit"
-        onModeChange={vi.fn()}
+        onModeChange={onModeChange}
         leftRailVisible
         rightRailVisible
         mobilePanel={"context" satisfies PlaygroundCockpitMobilePanel}
@@ -313,5 +328,14 @@ describe("Playground mature cockpit surfaces", () => {
     expect(within(mobilePanels).getByRole("tab", { name: "Runtime" })).toHaveClass(
       "min-h-[44px]"
     )
+
+    const focusFromPanel = within(mobilePanels).getByRole("button", {
+      name: "Return to focus chat",
+    })
+    expect(focusFromPanel).toBeInTheDocument()
+
+    fireEvent.click(focusFromPanel)
+
+    expect(onModeChange).toHaveBeenCalledWith("focus")
   })
 })

@@ -216,9 +216,28 @@ describe("Playground cockpit accessibility", () => {
     expect(onModeChange).toHaveBeenCalledWith("focus");
 
     const runtimeTab = screen.getByRole("tab", { name: "Runtime" });
+    const contextTab = screen.getByRole("tab", { name: "Context" });
+    for (const tab of [contextTab, runtimeTab]) {
+      const controlledPanel = document.getElementById(
+        tab.getAttribute("aria-controls") ?? "",
+      );
+
+      expect(controlledPanel).not.toBeNull();
+      expect(controlledPanel).toHaveAttribute("role", "tabpanel");
+      expect(controlledPanel).toHaveAttribute("aria-labelledby", tab.id);
+    }
+
     runtimeTab.focus();
     await user.keyboard("{Enter}");
     expect(onMobilePanelChange).toHaveBeenCalledWith("runtime");
+
+    const mobilePanels = screen.getByTestId("playground-cockpit-mobile-rails");
+    const panelFocusToggle = within(mobilePanels).getByRole("button", {
+      name: "Return to focus chat",
+    });
+    panelFocusToggle.focus();
+    await user.keyboard("{Enter}");
+    expect(onModeChange).toHaveBeenCalledWith("focus");
   });
 
   it("announces compact runtime state through one status region", () => {
