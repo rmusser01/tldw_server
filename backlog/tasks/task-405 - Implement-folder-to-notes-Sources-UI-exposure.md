@@ -32,7 +32,8 @@ Docs/superpowers/plans/2026-05-17-folder-notes-sources-ui-exposure-implementatio
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Task 1 backend entitlement/enforcement completed and reviewed. Commits: cebe876df initial backend gate, 87b4fac5 request-state org scope/no-op patch/capability test fixes, 92003c4f authorization-before-path-validation/sink_type/response model fixes, 15f3f7a3 normalized-equivalent config patch fix. Spec review approved and code-quality review approved with only non-blocking minor notes. Focused tests reported passing: 30 access-policy unit/integration tests, 16 existing ingestion source API tests, Bandit touched backend source with 0 findings, git diff --check clean.
+Task 2 frontend capability contract implemented locally after stopping a timed-out partial worker. Added canCreateLocalDirectoryIngestionSource to ServerCapabilities, fetched authenticated /api/v1/ingestion-sources/capabilities only when generic ingestion sources are available, kept endpoint failure non-fatal, scoped the capabilities cache with buildChatSurfaceScopeKeyFromConfig, and bumped persisted cache storage to V4. Verification: from apps/packages/ui, bunx vitest run src/services/__tests__/server-capabilities.test.ts -> 33 passed; git diff --check passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
