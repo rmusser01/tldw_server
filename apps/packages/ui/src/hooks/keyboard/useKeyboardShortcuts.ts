@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useRef } from 'react'
-import { useShortcutConfig } from './useShortcutConfig'
+import { useShortcutConfig, type ShortcutConfig } from './useShortcutConfig'
+import { useRouteTransitionStore } from '@/store/route-transition'
 
 export { isMac } from '../useKeyboardShortcuts'
 
@@ -19,6 +20,39 @@ export interface KeyboardShortcutConfig {
   enabled?: boolean
   description?: string
 }
+
+export type ModeNavigationShortcutKey = keyof Pick<
+  ShortcutConfig,
+  | "modePlayground"
+  | "modeSources"
+  | "modeMedia"
+  | "modeKnowledge"
+  | "modeNotes"
+  | "modePrompts"
+  | "modeFlashcards"
+  | "modeWorldBooks"
+  | "modeDictionaries"
+  | "modeCharacters"
+>
+
+export type ModeNavigationTarget = {
+  key: ModeNavigationShortcutKey
+  path: string
+  description: string
+}
+
+export const modeNavigationTargets: ModeNavigationTarget[] = [
+  { key: "modePlayground", path: "/chat", description: "Go to Chat" },
+  { key: "modeSources", path: "/sources", description: "Go to Sources" },
+  { key: "modeMedia", path: "/media", description: "Go to Media" },
+  { key: "modeKnowledge", path: "/knowledge", description: "Go to Knowledge" },
+  { key: "modeNotes", path: "/notes", description: "Go to Notes" },
+  { key: "modePrompts", path: "/prompts", description: "Go to Prompts" },
+  { key: "modeFlashcards", path: "/flashcards", description: "Go to Flashcards" },
+  { key: "modeWorldBooks", path: "/world-books", description: "Go to World Books" },
+  { key: "modeDictionaries", path: "/dictionaries", description: "Go to Dictionaries" },
+  { key: "modeCharacters", path: "/characters", description: "Go to Characters" }
+]
 
 export const executeKeyboardShortcuts = (
   event: KeyboardEvent,
@@ -85,6 +119,29 @@ export const useKeyboardShortcuts = (
       target.removeEventListener('keydown', handleKeyDown)
     }
   }, [target, handleKeyDown])
+}
+
+export const useModeNavigationShortcuts = (
+  navigate: (path: string) => void,
+  enabled: boolean = true
+) => {
+  const { shortcuts: configuredShortcuts } = useShortcutConfig()
+
+  const shortcuts: KeyboardShortcutConfig[] = modeNavigationTargets.map((target) => ({
+    shortcut: configuredShortcuts[target.key],
+    action: () => {
+      useRouteTransitionStore.getState().start(target.path)
+      navigate(target.path)
+    },
+    enabled,
+    description: target.description
+  }))
+
+  useKeyboardShortcuts(shortcuts)
+
+  return {
+    shortcuts
+  }
 }
 
 /**

@@ -3,7 +3,7 @@ import React, { lazy, Suspense, useContext, useState } from "react"
 import { Drawer, Tooltip } from "antd"
 import { EraserIcon, XIcon } from "lucide-react"
 import { IconButton } from "../Common/IconButton"
-import { useLocation } from "react-router-dom"
+import { useLocation, useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { useQueryClient } from "@tanstack/react-query"
 
@@ -13,7 +13,8 @@ import { useMessageOption } from "@/hooks/useMessageOption"
 import {
   useChatShortcuts,
   useSidebarShortcuts,
-  useQuickChatShortcuts
+  useQuickChatShortcuts,
+  useModeNavigationShortcuts
 } from "@/hooks/keyboard/useKeyboardShortcuts"
 import { useQuickChatStore } from "@/store/quick-chat"
 import { useLayoutUiStore } from "@/store/layout-ui"
@@ -129,6 +130,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     (state) => state.setChatSidebarCollapsed
   )
   const { t } = useTranslation(["option", "common", "settings"])
+  const navigate = useNavigate()
   const [openModelSettings, setOpenModelSettings] = useState(false)
   const { isLoading: migrationLoading } = useMigration()
   const { demoEnabled } = useDemoMode()
@@ -245,6 +247,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   useChatShortcuts(clearChat, true)
   useSidebarShortcuts(toggleSidebar, true)
   useQuickChatShortcuts(toggleQuickChat, true)
+  useModeNavigationShortcuts(navigate, !hideHeader)
 
   // Help modal (tutorials + shortcuts)
   const { toggle: toggleHelpModal } = useHelpModal()

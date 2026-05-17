@@ -1,5 +1,5 @@
 import { useStorage } from "@plasmohq/storage/hook"
-import { KeyboardShortcut } from "./useKeyboardShortcuts"
+import type { KeyboardShortcut } from "./useKeyboardShortcuts"
 
 export interface ShortcutConfig {
   focusTextarea: KeyboardShortcut
@@ -9,6 +9,7 @@ export interface ShortcutConfig {
   toggleWebSearch: KeyboardShortcut
   toggleQuickChatHelper: KeyboardShortcut
   modePlayground: KeyboardShortcut
+  modeSources: KeyboardShortcut
   modeMedia: KeyboardShortcut
   modeKnowledge: KeyboardShortcut
   modeNotes: KeyboardShortcut
@@ -64,6 +65,12 @@ export const defaultShortcuts: ShortcutConfig = {
     preventDefault: true,
     stopPropagation: true
   },
+  modeSources: {
+    key: "2",
+    altKey: true,
+    preventDefault: true,
+    stopPropagation: true
+  },
   modeMedia: {
     key: "3",
     altKey: true,
@@ -114,12 +121,21 @@ export const defaultShortcuts: ShortcutConfig = {
   }
 }
 
+type PersistedShortcutConfig = Partial<ShortcutConfig> & Record<string, unknown>
+
+export const mergeShortcutConfig = (
+  value: Partial<ShortcutConfig> | null | undefined
+): ShortcutConfig => ({
+  ...defaultShortcuts,
+  ...(value || {})
+})
+
 /**
  * Hook for managing keyboard shortcut configurations
  * Allows users to customize their keyboard shortcuts
  */
 export const useShortcutConfig = () => {
-  const [shortcuts, setShortcuts] = useStorage<ShortcutConfig>(
+  const [shortcuts, setShortcuts] = useStorage<PersistedShortcutConfig>(
     "keyboardShortcuts",
     defaultShortcuts
   )
@@ -129,6 +145,7 @@ export const useShortcutConfig = () => {
     newShortcut: KeyboardShortcut
   ) => {
     setShortcuts(prev => ({
+      ...defaultShortcuts,
       ...prev,
       [shortcutName]: newShortcut
     }))
@@ -140,13 +157,14 @@ export const useShortcutConfig = () => {
 
   const resetShortcut = (shortcutName: keyof ShortcutConfig) => {
     setShortcuts(prev => ({
+      ...defaultShortcuts,
       ...prev,
       [shortcutName]: defaultShortcuts[shortcutName]
     }))
   }
 
   return {
-    shortcuts,
+    shortcuts: mergeShortcutConfig(shortcuts),
     updateShortcut,
     resetShortcuts,
     resetShortcut
