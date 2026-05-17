@@ -485,7 +485,7 @@ git commit -m "feat: show active chat role-play state"
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/Playground.responsive-parity.guard.test.ts`
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/mobile-composer-layout.test.ts`
 
-- [ ] **Step 1: Write mobile parity tests**
+- [x] **Step 1: Write mobile parity tests**
 
 Create `ComposerToolbar.role-play-mobile.test.tsx`.
 
@@ -495,13 +495,13 @@ Test cases:
 - active role-play chips expose clear/change actions without requiring desktop-only controls;
 - entries use callbacks that Stage 4 can reuse to open Role-play setup.
 
-- [ ] **Step 2: Implement reusable mobile entry callbacks**
+- [x] **Step 2: Implement reusable mobile entry callbacks**
 
 In `ComposerToolbar.tsx`:
 - pass `onOpenSystemPrompts`, `onOpenGenerationStyle`, and future `onOpenRolePlaySetup` callbacks through one shared prop shape;
 - avoid mobile-only state that will be deleted in Stage 4.
 
-- [ ] **Step 3: Add role-play entries to overflow**
+- [x] **Step 3: Add role-play entries to overflow**
 
 In `ComposerToolbarOverflow.tsx`:
 - add `System prompts`/`Behavior templates`;
@@ -509,7 +509,7 @@ In `ComposerToolbarOverflow.tsx`:
 - make both keyboard reachable and labelled;
 - keep composer send box reachable.
 
-- [ ] **Step 4: Run mobile tests**
+- [x] **Step 4: Run mobile tests**
 
 Run:
 ```bash
@@ -521,7 +521,7 @@ bunx vitest run \
 
 Expected: pass.
 
-- [ ] **Step 5: Browser verify mobile**
+- [x] **Step 5: Browser verify mobile**
 
 At 390px wide viewport on `/chat`:
 - find and open system prompts/behavior templates;
@@ -530,7 +530,11 @@ At 390px wide viewport on `/chat`:
 - clear active role-play state;
 - verify composer remains visible.
 
-- [ ] **Step 6: Commit Stage 3**
+Result:
+- Focused Stage 3 tests, existing responsive/layout guards, locale parsing, and diff whitespace checks were completed.
+- Browser verification was blocked by the same in-app browser target policy for `http://127.0.0.1:3001/chat`; raw CDP and alternate browser surfaces were not used because the policy explicitly prohibited routing around the blocked target.
+
+- [x] **Step 6: Commit Stage 3**
 
 ```bash
 git add \

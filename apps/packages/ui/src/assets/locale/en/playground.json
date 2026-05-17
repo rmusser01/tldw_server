@@ -511,6 +511,7 @@
     "modeCharacter": "Character / Scene",
     "modeCharacterNotice": "Character / scene settings opened.",
     "modeCharacterActive": "Active: {{name}}",
+    "rolePlaySetup": "Role-play setup",
     "context": {
       "character": "Character",
       "persona": "Persona",

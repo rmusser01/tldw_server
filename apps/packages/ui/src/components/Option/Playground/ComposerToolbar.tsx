@@ -3,7 +3,7 @@ import { Button as TldwButton } from "@/components/Common/Button"
 import { PromptSelect } from "@/components/Common/PromptSelect"
 import { ConnectionStatus } from "@/components/Layouts/ConnectionStatus"
 import { PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY } from "@/utils/output-formatting-guide"
-import { Tooltip } from "antd"
+import { Modal, Tooltip } from "antd"
 import {
   ChevronDown,
   FileIcon,
@@ -18,11 +18,16 @@ import { useTranslation } from "react-i18next"
 
 import { useStorage } from "@plasmohq/storage/hook"
 
-import { ComposerToolbarOverflow } from "./ComposerToolbarOverflow"
+import {
+  ComposerToolbarOverflow,
+  type ComposerToolbarRolePlayActions
+} from "./ComposerToolbarOverflow"
 import {
   ParameterPresets,
+  ParameterPresetsDropdown,
   type PromptTemplate,
   SessionCostEstimation,
+  SystemPromptTemplatesModal,
   SystemPromptTemplatesButton
 } from "./playground-features"
 
@@ -92,6 +97,7 @@ export type ComposerToolbarProps = {
   onDismissServerPersistenceHint: () => void
   onFocusConnectionCard: () => void
   contextItems?: ComposerContextItem[]
+  rolePlayActions?: ComposerToolbarRolePlayActions
 }
 
 export type ComposerContextItem = {
@@ -169,7 +175,8 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     showServerPersistenceHint,
     onDismissServerPersistenceHint,
     onFocusConnectionCard,
-    contextItems = []
+    contextItems = [],
+    rolePlayActions: providedRolePlayActions
   } = props
   const toolbarSendControl =
     sendControlPlacement === "toolbar" ? sendControl : null
@@ -183,6 +190,35 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     useStorage("playgroundComposerCasualAdvancedControlsOpen", false)
   const [appendFormattingGuidePrompt, setAppendFormattingGuidePrompt] =
     useStorage(PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY, false)
+  const [systemPromptsOpen, setSystemPromptsOpen] = React.useState(false)
+  const [generationStyleOpen, setGenerationStyleOpen] = React.useState(false)
+
+  const mobileRolePlayActions = React.useMemo<ComposerToolbarRolePlayActions>(
+    () => ({
+      onOpenSystemPrompts:
+        providedRolePlayActions?.onOpenSystemPrompts ??
+        (() => setSystemPromptsOpen(true)),
+      onOpenGenerationStyle:
+        providedRolePlayActions?.onOpenGenerationStyle ??
+        (() => setGenerationStyleOpen(true)),
+      ...(providedRolePlayActions?.onOpenRolePlaySetup
+        ? { onOpenRolePlaySetup: providedRolePlayActions.onOpenRolePlaySetup }
+        : {})
+    }),
+    [
+      providedRolePlayActions?.onOpenGenerationStyle,
+      providedRolePlayActions?.onOpenRolePlaySetup,
+      providedRolePlayActions?.onOpenSystemPrompts
+    ]
+  )
+
+  const handleMobileTemplateSelect = React.useCallback(
+    (template: PromptTemplate) => {
+      onTemplateSelect(template)
+      setSystemPromptsOpen(false)
+    },
+    [onTemplateSelect]
+  )
 
   // --- Shared sub-elements ---
   const ephemeralToggle = React.useMemo(
@@ -831,6 +867,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             onDictationToggle={onDictationToggle}
             temporaryChat={temporaryChat}
             onFocusConnectionCard={onFocusConnectionCard}
+            rolePlayActions={mobileRolePlayActions}
           />
           {researchLaunchButton}
           {voiceChatButton}
@@ -982,6 +1019,20 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     <div
       data-testid="composer-options-panel"
       className="mt-2 flex flex-col gap-1">
+      <SystemPromptTemplatesModal
+        open={systemPromptsOpen}
+        onClose={() => setSystemPromptsOpen(false)}
+        onSelect={handleMobileTemplateSelect}
+      />
+      <Modal
+        title={t("playground:presets.title", "Generation style") as string}
+        open={generationStyleOpen}
+        onCancel={() => setGenerationStyleOpen(false)}
+        footer={null}
+        width={420}
+        className="generation-style-modal">
+        <ParameterPresetsDropdown onChange={() => setGenerationStyleOpen(false)} />
+      </Modal>
       {optionsExpanded ? (
         <>
           {isMobile

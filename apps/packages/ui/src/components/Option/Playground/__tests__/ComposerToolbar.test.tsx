@@ -13,7 +13,14 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("antd", () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>
+  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  Modal: ({
+    open,
+    children
+  }: {
+    open?: boolean
+    children: React.ReactNode
+  }) => (open ? <div data-testid="toolbar-modal">{children}</div> : null)
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({
@@ -49,7 +56,9 @@ vi.mock("@/components/Common/Button", () => ({
 
 vi.mock("../playground-features", () => ({
   ParameterPresets: () => <div data-testid="parameter-presets" />,
+  ParameterPresetsDropdown: () => <div data-testid="parameter-presets-dropdown" />,
   SystemPromptTemplatesButton: () => <button type="button">Templates</button>,
+  SystemPromptTemplatesModal: () => null,
   SessionCostEstimation: () => <div data-testid="session-cost" />
 }))
 

@@ -575,6 +575,9 @@
   "composer_modeCharacterActive": {
     "message": "Active: {{name}}"
   },
+  "composer_rolePlaySetup": {
+    "message": "Role-play setup"
+  },
   "composer_knowledgeSearch": {
     "message": "Search & Context"
   },
