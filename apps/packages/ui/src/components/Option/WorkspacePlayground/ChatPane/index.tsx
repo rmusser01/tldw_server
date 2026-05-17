@@ -167,6 +167,31 @@ const extractStringCandidate = (value: unknown): string => {
   return value.trim()
 }
 
+const normalizeChatModelOption = (model: unknown): ChatModelOption | null => {
+  if (!isRecord(model)) return null
+
+  const details = isRecord(model.details) ? model.details : null
+  const modelId =
+    extractStringCandidate(model.model) ||
+    extractStringCandidate(model.id) ||
+    extractStringCandidate(model.name)
+  if (!modelId) return null
+
+  const provider =
+    extractStringCandidate(model.provider) ||
+    extractStringCandidate(details?.provider)
+  const name = extractStringCandidate(model.name)
+  const nickname = extractStringCandidate(model.nickname)
+  const labelBase =
+    nickname || (name && name !== modelId ? name : "") || modelId
+
+  return {
+    id: modelId,
+    label: provider ? `${provider} · ${labelBase}` : labelBase,
+    provider
+  }
+}
+
 const extractSourceFullText = (detail: unknown): string => {
   if (!isRecord(detail)) return ""
   const content = isRecord(detail.content) ? detail.content : null
@@ -1554,12 +1579,28 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   React.useEffect(() => {
     if (modelsFetchedRef.current) return
+    modelsFetchedRef.current = true
 
     let isMounted = true
+    setLoadingModels(true)
     void fetchChatModels({ returnEmpty: true })
       .then((models) => {
         if (!isMounted) return
-        applyComposerModels(models)
+        if (!Array.isArray(models) || models.length === 0) {
+          setAvailableModels([])
+          return
+        }
+        const uniqueById = new Map<string, ChatModelOption>()
+        for (const model of models) {
+          const option = normalizeChatModelOption(model)
+          if (!option) continue
+          uniqueById.set(option.id, option)
+        }
+        setAvailableModels(
+          Array.from(uniqueById.values()).sort((a, b) =>
+            a.label.localeCompare(b.label, undefined, { sensitivity: "base" })
+          )
+        )
       })
       .catch(() => {
         if (!isMounted) return
@@ -2513,71 +2554,29 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     }
   }, [])
 
-  const handleModelSelect = React.useCallback(
-    (model: string) => {
-      if (typeof setSelectedModel !== "function") return
-      setSelectedModel(model)
-    },
-    [setSelectedModel]
-  )
-  const {
-    modelDropdownOpen,
-    setModelDropdownOpen,
-    modelSearchQuery,
-    setModelSearchQuery,
-    modelSortMode,
-    setModelSortMode,
-    modelListScope,
-    setModelListScope,
-    selectedModelKey,
-    resolvedProviderKey,
-    apiModelLabel,
-    modelSelectorWarning,
-    favoriteModels,
-    favoriteModelsIsLoading,
-    modelDropdownMenuItems
-  } = useModelSelector({
-    composerModels,
-    selectedModel,
-    setSelectedModel: handleModelSelect,
-    navigate: navigateTo
-  })
+  // Model display label (UX-009)
+  const modelDisplayLabel = React.useMemo(() => {
+    if (selectedModel) return selectedModel
+    if (chatApiProvider) return chatApiProvider
+    return null
+  }, [selectedModel, chatApiProvider])
+  const modelSelectOptions = React.useMemo(() => {
+    if (
+      selectedModel &&
+      !availableModels.some((model) => model.id === selectedModel)
+    ) {
+      return [
+        {
+          id: selectedModel,
+          label: selectedModel,
+          provider: ""
+        },
+        ...availableModels
+      ]
+    }
 
-  React.useEffect(() => {
-    const nextModel = resolveStartupSelectedModel({
-      currentModel: selectedModel,
-      models: composerModels,
-      preferredModelIds: favoriteModels,
-      isCurrentModelHydrating: false,
-      arePreferencesHydrating: favoriteModelsIsLoading
-    })
-    if (nextModel && typeof setSelectedModel === "function") {
-      setSelectedModel(nextModel)
-    }
-  }, [
-    composerModels,
-    favoriteModels,
-    favoriteModelsIsLoading,
-    selectedModel,
-    setSelectedModel
-  ])
-
-  const connectionUxState = React.useMemo(
-    () => deriveConnectionUxState(connectionState),
-    [connectionState]
-  )
-  const isConnectionReady = connectionState.phase === ConnectionPhase.CONNECTED
-  const connectionStatusLabel = React.useMemo(() => {
-    if (!isConnectionReady) {
-      return t("playground:composer.providerStatusOffline", "Offline")
-    }
-    if (connectionUxState === "connected_degraded") {
-      return t("playground:composer.providerStatusDegraded", DEGRADED_STATE_LABEL)
-    }
-    return t("playground:composer.providerStatusReady", READY_STATE_LABEL)
-  }, [connectionUxState, isConnectionReady, t])
-  const connectionStatusWarning =
-    !isConnectionReady || connectionUxState === "connected_degraded"
+    return availableModels
+  }, [availableModels, selectedModel])
 
   // Conversation instance ID (use workspace ID or fallback)
   const conversationInstanceId = workspaceSessionId
@@ -3020,30 +3019,44 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             )}
             <div className="ml-auto flex flex-wrap items-center gap-1">
               {provenanceEnabled && (
-                <ChatModelSelectorDropdown
-                  activeModelKey={selectedModelKey ?? selectedModel}
-                  apiModelLabel={apiModelLabel}
-                  catalogControls={
-                    <PlaygroundModelCatalogControls
-                      t={translate}
-                      modelListScope={modelListScope}
-                      setModelListScope={setModelListScope}
-                      modelSearchQuery={modelSearchQuery}
-                      setModelSearchQuery={setModelSearchQuery}
-                      modelSortMode={modelSortMode}
-                      setModelSortMode={setModelSortMode}
-                    />
+                <div
+                  className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-surface/80 px-2 py-1 text-[11px] text-text-muted"
+                  title={
+                    modelDisplayLabel
+                      ? t(
+                          "playground:chat.currentModelTooltip",
+                          "Current model: {{model}}",
+                          { model: modelDisplayLabel }
+                        ).replace("{{model}}", modelDisplayLabel)
+                      : undefined
                   }
-                  connectionStatusLabel={connectionStatusLabel}
-                  connectionStatusWarning={connectionStatusWarning}
-                  modelDropdownMenuItems={modelDropdownMenuItems}
-                  modelDropdownOpen={modelDropdownOpen}
-                  modelSelectorWarning={modelSelectorWarning}
-                  placement="topLeft"
-                  resolvedProviderKey={resolvedProviderKey}
-                  setModelDropdownOpen={setModelDropdownOpen}
-                  setModelSearchQuery={setModelSearchQuery}
-                />
+                >
+                  <Cpu className="h-3 w-3" />
+                  <span>{t("playground:chat.modelPickerLabel", "Model")}</span>
+                  <select
+                    aria-busy={loadingModels}
+                    aria-label={t(
+                      "playground:chat.modelPickerAria",
+                      "Select model"
+                    )}
+                    value={selectedModel ?? ""}
+                    onChange={(event) => {
+                      if (typeof setSelectedModel !== "function") return
+                      const value = event.target.value.trim()
+                      setSelectedModel(value.length > 0 ? value : null)
+                    }}
+                    className="max-w-[180px] truncate bg-transparent text-[11px] text-text focus:outline-none"
+                  >
+                    <option value="">
+                      {t("playground:chat.modelPickerAuto", "Auto")}
+                    </option>
+                    {modelSelectOptions.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               )}
               {/* Share conversation button (UX-044) */}
               {serverChatId && hasMessages && (
