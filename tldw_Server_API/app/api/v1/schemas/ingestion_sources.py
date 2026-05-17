@@ -58,6 +58,12 @@ class IngestionSourceResponse(BaseModel):
     updated_at: str | None = None
 
 
+class IngestionSourceCapabilitiesResponse(BaseModel):
+    """Current-user ingestion source capability flags."""
+
+    can_create_local_directory: bool
+
+
 class IngestionSourceItemResponse(BaseModel):
     """Serialized tracked-item state for a single ingestion source item."""
 

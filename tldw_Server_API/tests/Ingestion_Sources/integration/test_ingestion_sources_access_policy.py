@@ -91,6 +91,7 @@ def ingestion_sources_policy_client(monkeypatch):
 
     return {
         "client": TestClient(app),
+        "app": app,
         "endpoint_module": ep,
         "feature_flags": feature_flags,
         "created_payloads": created_payloads,
@@ -173,6 +174,30 @@ def test_create_local_directory_source_returns_403_without_entitlement(
 
 
 @pytest.mark.integration
+def test_denied_local_directory_create_does_not_validate_path(
+    ingestion_sources_policy_client,
+    monkeypatch,
+):
+    ep = ingestion_sources_policy_client["endpoint_module"]
+    validated_paths: list[dict[str, Any]] = []
+
+    def _spy_validate(config):
+        validated_paths.append(dict(config))
+        return config["path"]
+
+    monkeypatch.setattr(ep, "validate_local_directory_source", _spy_validate)
+
+    response = ingestion_sources_policy_client["client"].post(
+        "/api/v1/ingestion-sources/",
+        json=_create_payload("local_directory", {"path": "/outside/secret"}),
+    )
+
+    assert response.status_code == 403, response.text
+    assert validated_paths == []
+    assert ingestion_sources_policy_client["created_payloads"] == []
+
+
+@pytest.mark.integration
 def test_create_local_directory_source_succeeds_with_entitlement(
     ingestion_sources_policy_client,
 ):
@@ -243,12 +268,49 @@ def test_patch_cannot_change_local_directory_config_without_entitlement(
 
 
 @pytest.mark.integration
+def test_denied_local_directory_patch_does_not_validate_changed_path(
+    ingestion_sources_policy_client,
+    monkeypatch,
+):
+    ep = ingestion_sources_policy_client["endpoint_module"]
+    validated_paths: list[dict[str, Any]] = []
+
+    def _spy_validate(config):
+        validated_paths.append(dict(config))
+        return config["path"]
+
+    monkeypatch.setattr(ep, "validate_local_directory_source", _spy_validate)
+
+    response = ingestion_sources_policy_client["client"].patch(
+        "/api/v1/ingestion-sources/12",
+        json={"config": {"path": "/outside/secret"}},
+    )
+
+    assert response.status_code == 403, response.text
+    assert validated_paths == []
+    assert ingestion_sources_policy_client["updated_patches"] == []
+
+
+@pytest.mark.integration
 def test_patch_null_source_type_still_checks_changed_local_directory_config_without_entitlement(
     ingestion_sources_policy_client,
 ):
     response = ingestion_sources_policy_client["client"].patch(
         "/api/v1/ingestion-sources/12",
         json={"source_type": None, "config": {"path": "/allowed/other-docs"}},
+    )
+
+    assert response.status_code == 403, response.text
+    assert ingestion_sources_policy_client["updated_patches"] == []
+
+
+@pytest.mark.integration
+def test_patch_cannot_change_local_directory_sink_type_without_entitlement(
+    ingestion_sources_policy_client,
+):
+    response = ingestion_sources_policy_client["client"].patch(
+        "/api/v1/ingestion-sources/12",
+        json={"sink_type": "media"},
     )
 
     assert response.status_code == 403, response.text
@@ -333,3 +395,18 @@ def test_capabilities_reports_false_without_applicable_flag(
 
     assert response.status_code == 200, response.text
     assert response.json() == {"can_create_local_directory": False}
+
+
+@pytest.mark.integration
+def test_capabilities_endpoint_uses_explicit_response_model(ingestion_sources_policy_client):
+    from tldw_Server_API.app.api.v1.schemas.ingestion_sources import (
+        IngestionSourceCapabilitiesResponse,
+    )
+
+    route = next(
+        route
+        for route in ingestion_sources_policy_client["app"].routes
+        if getattr(route, "path", None) == "/api/v1/ingestion-sources/capabilities"
+    )
+
+    assert route.response_model is IngestionSourceCapabilitiesResponse
