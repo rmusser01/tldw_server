@@ -27,7 +27,10 @@ Create a text-only remediation design/spec addressing every issue identified in 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Follow-up consistency review aligned the spec's WP11 route and finding coverage
+with the child implementation split: WP11A owns audio routes, WP11B owns
+study/safety/specialized routes, and F9/F18/F19 support rows now point at the
+split execution slices instead of the umbrella label.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

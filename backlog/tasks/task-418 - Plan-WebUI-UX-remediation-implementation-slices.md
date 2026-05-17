@@ -64,6 +64,11 @@ Child plan set recorded after follow-up planning:
 - `TASK-418.9`: Study, safety, and specialized tools.
 - `TASK-418.10`: Route governance QA.
 
+Follow-up consistency review aligned the parent finding owner map with the
+audio/study split: F19 is now owned by Task 11A, Task 11B, and Task 12 because
+deprecated Ant Design cleanup is a touched-surface blocker/noise trigger, not
+only a study/safety route concern.
+
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
