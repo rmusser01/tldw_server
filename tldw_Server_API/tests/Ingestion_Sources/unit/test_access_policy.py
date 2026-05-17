@@ -72,6 +72,18 @@ def test_org_scoped_flag_allows_secondary_org_member(access_policy, monkeypatch)
     ) is True
 
 
+def test_org_scoped_flag_uses_explicit_scope_when_user_has_no_org_attrs(access_policy, monkeypatch):
+    monkeypatch.setattr(access_policy, "list_feature_flags", lambda: [_flag(scope="org", org_id=42)])
+
+    user = type("RealisticUser", (), {"id": 7})()
+
+    assert access_policy.can_create_local_directory_ingestion_source(
+        user,
+        active_org_id=42,
+        org_ids=[41],
+    ) is True
+
+
 def test_disabled_flags_do_not_allow(access_policy, monkeypatch):
     monkeypatch.setattr(
         access_policy,

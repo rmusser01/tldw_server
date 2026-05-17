@@ -11,18 +11,27 @@ from tldw_Server_API.app.services.admin_system_ops_service import list_feature_f
 LOCAL_DIRECTORY_INGESTION_SOURCE_FLAG_KEY = "ingestion_sources.local_directory"
 
 
-def can_create_local_directory_ingestion_source(current_user: Any) -> bool:
+def can_create_local_directory_ingestion_source(
+    current_user: Any,
+    *,
+    org_ids: Any = None,
+    active_org_id: Any = None,
+) -> bool:
     """Return whether the current user may create local-directory sources."""
     if is_single_user_mode():
         return True
     user_id = _user_id(current_user)
     if user_id is None:
         return False
-    org_ids = _org_ids(current_user)
+    org_ids_set = _org_ids(
+        current_user,
+        org_ids=org_ids,
+        active_org_id=active_org_id,
+    )
     for flag in list_feature_flags():
         if flag.get("key") != LOCAL_DIRECTORY_INGESTION_SOURCE_FLAG_KEY:
             continue
-        if _enabled_flag_applies(flag, user_id=user_id, org_ids=org_ids):
+        if _enabled_flag_applies(flag, user_id=user_id, org_ids=org_ids_set):
             return True
     return False
 
@@ -63,11 +72,22 @@ def _user_id(current_user: Any) -> int | None:
     return coerced
 
 
-def _org_ids(current_user: Any) -> set[int]:
-    raw_values = [getattr(current_user, "active_org_id", None)]
-    org_ids = getattr(current_user, "org_ids", None)
-    if isinstance(org_ids, (list, tuple, set)):
-        raw_values.extend(org_ids)
+def _org_ids(
+    current_user: Any,
+    *,
+    org_ids: Any = None,
+    active_org_id: Any = None,
+) -> set[int]:
+    raw_values = [
+        active_org_id
+        if active_org_id is not None
+        else getattr(current_user, "active_org_id", None)
+    ]
+    effective_org_ids = org_ids if org_ids is not None else getattr(current_user, "org_ids", None)
+    if isinstance(effective_org_ids, (list, tuple, set)):
+        raw_values.extend(effective_org_ids)
+    elif effective_org_ids is not None:
+        raw_values.append(effective_org_ids)
     cleaned = {_coerce_int(value) for value in raw_values}
     cleaned.discard(None)
     return {value for value in cleaned if value > 0}
