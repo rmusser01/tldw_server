@@ -1,6 +1,7 @@
 import React from "react"
-import { Alert, Button, Checkbox, List, Radio, Tag, Typography } from "antd"
+import { Button, Checkbox, List, Radio, Typography } from "antd"
 import { ListVideo, Plus, RefreshCw } from "lucide-react"
+import { Alert, Badge } from "@/components/ui/primitives"
 import type { PlaylistPreflightResult } from "@/services/tldw/playlist-preflight"
 import type { ConferenceDuplicatePolicy } from "./types"
 
@@ -61,20 +62,19 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
       </div>
 
       {error && (
-        <Alert
-          className="mt-2"
-          type="warning"
-          showIcon
-          message={error}
-        />
+        <Alert className="mt-2" variant="warning">
+          {error}
+        </Alert>
       )}
 
       {result && (
         <div className="mt-2">
           <div className="flex flex-wrap items-center gap-1.5">
-            <Tag color="blue">{result.itemCount} items</Tag>
-            <Tag color="green">{selectedCount} selected</Tag>
-            {duplicateCount > 0 && <Tag color="warning">{duplicateCount} duplicates</Tag>}
+            <Badge variant="info">{result.itemCount} items</Badge>
+            <Badge variant="success">{selectedCount} selected</Badge>
+            {duplicateCount > 0 && (
+              <Badge variant="warning">{duplicateCount} duplicates</Badge>
+            )}
           </div>
 
           {duplicateCount > 0 && (
@@ -123,9 +123,9 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
                   </Typography.Text>
                 </div>
                 {isDuplicatePreflightStatus(item.duplicateStatus) && (
-                  <Tag color="warning" className="!mr-0">
+                  <Badge variant="warning" className="!mr-0">
                     duplicate
-                  </Tag>
+                  </Badge>
                 )}
               </List.Item>
             )}

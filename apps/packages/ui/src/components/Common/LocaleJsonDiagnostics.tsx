@@ -1,5 +1,5 @@
 import React from "react"
-import { Alert } from "antd"
+import { Alert } from "@/components/ui/primitives"
 
 // Cross-platform dev mode detection (Vite and Next.js compatible)
 const isDevMode = typeof import.meta !== "undefined" && (
@@ -8,12 +8,37 @@ const isDevMode = typeof import.meta !== "undefined" && (
   (typeof process !== "undefined" && process.env.NODE_ENV === "development")
 )
 
-type LocaleIssue = {
+export type LocaleIssue = {
   path: string
   message: string
   line?: number
   column?: number
 }
+
+export interface LocaleJsonDiagnosticsPanelProps {
+  issues: LocaleIssue[]
+}
+
+export const LocaleJsonDiagnosticsPanel: React.FC<
+  LocaleJsonDiagnosticsPanelProps
+> = ({ issues }) => (
+  <div className="mb-4">
+    <Alert variant="error" title="Locale JSON errors detected">
+      <div className="space-y-1 text-xs">
+        {issues.map((issue) => (
+          <div key={issue.path} className="break-all">
+            <span className="font-mono">{issue.path}</span>
+            {issue.line != null && issue.column != null
+              ? ` (line ${issue.line}, col ${issue.column})`
+              : ""}
+            {": "}
+            {issue.message}
+          </div>
+        ))}
+      </div>
+    </Alert>
+  </div>
+)
 
 const findErrorPosition = (message: string): number | null => {
   const match = message.match(/position (\d+)/i)
@@ -66,29 +91,7 @@ export const LocaleJsonDiagnostics: React.FC = () => {
 
   if (!isDevMode || issues.length === 0) return null
 
-  return (
-    <div className="mb-4">
-      <Alert
-        type="error"
-        showIcon
-        title="Locale JSON errors detected"
-        description={
-          <div className="space-y-1 text-xs">
-            {issues.map((issue) => (
-              <div key={issue.path} className="break-all">
-                <span className="font-mono">{issue.path}</span>
-                {issue.line != null && issue.column != null
-                  ? ` (line ${issue.line}, col ${issue.column})`
-                  : ""}
-                {": "}
-                {issue.message}
-              </div>
-            ))}
-          </div>
-        }
-      />
-    </div>
-  )
+  return <LocaleJsonDiagnosticsPanel issues={issues} />
 }
 
 export default LocaleJsonDiagnostics

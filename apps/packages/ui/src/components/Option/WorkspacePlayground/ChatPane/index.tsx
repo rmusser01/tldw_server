@@ -45,6 +45,7 @@ import { buildConversationShareUrl } from "@/components/Layouts/chat-share-links
 import { PlaygroundMessage } from "@/components/Common/Playground/Message"
 import { Link, useNavigate } from "react-router-dom"
 import { EmptyState } from "@/components/ui/feedback/EmptyState"
+import { DEGRADED_STATE_LABEL, READY_STATE_LABEL } from "@/design-system"
 import { ChatModelSelectorDropdown } from "@/components/Option/Playground/ChatModelSelectorDropdown"
 import { PlaygroundModelCatalogControls } from "@/components/Option/Playground/PlaygroundModelCatalogControls"
 import { buildChatLorebookDebugPath } from "@/routes/route-paths"
@@ -2571,9 +2572,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       return t("playground:composer.providerStatusOffline", "Offline")
     }
     if (connectionUxState === "connected_degraded") {
-      return t("playground:composer.providerStatusDegraded", "Degraded")
+      return t("playground:composer.providerStatusDegraded", DEGRADED_STATE_LABEL)
     }
-    return t("playground:composer.providerStatusReady", "Ready")
+    return t("playground:composer.providerStatusReady", READY_STATE_LABEL)
   }, [connectionUxState, isConnectionReady, t])
   const connectionStatusWarning =
     !isConnectionReady || connectionUxState === "connected_degraded"

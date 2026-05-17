@@ -1,8 +1,9 @@
 import React from "react"
-import { Alert, Button, Empty, Form, Input, Modal, Radio, Select, Space, Spin, Switch, Typography } from "antd"
+import { Button, Empty, Form, Input, Modal, Radio, Select, Space, Spin, Switch, Typography } from "antd"
 import { ArrowUp, Check, FolderOpen } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 
 import {
   useCreateIngestionSourceMutation,
@@ -327,7 +328,9 @@ export const SourceForm: React.FC<SourceFormProps> = ({ mode, source, preset }) 
 
   return (
     <div className="space-y-4">
-      {submitError ? <Alert type="error" title={submitError} /> : null}
+      {submitError ? (
+        <DesignSystemAlert variant="error" title={submitError} />
+      ) : null}
 
       <Modal
         destroyOnHidden
@@ -366,15 +369,13 @@ export const SourceForm: React.FC<SourceFormProps> = ({ mode, source, preset }) 
           ) : null}
 
           {browseErrorMessage ? (
-            <Alert
-              showIcon
-              type="warning"
+            <DesignSystemAlert
+              variant="warning"
               title={browseErrorMessage}
-              action={
-                <Button size="small" onClick={() => setBrowsePath(null)}>
-                  Show roots
-                </Button>
-              }
+              action={{
+                label: "Show roots",
+                onClick: () => setBrowsePath(null)
+              }}
             />
           ) : null}
 
@@ -448,40 +449,36 @@ export const SourceForm: React.FC<SourceFormProps> = ({ mode, source, preset }) 
           void handleFinish(values)
         }}>
         {identityLocked && source ? (
-          <Alert
-            type="info"
-            title="Locked after first successful sync"
-            description={
-              <div className="space-y-2">
+          <DesignSystemAlert variant="info" title="Locked after first successful sync">
+            <div className="space-y-2">
+              <div>
+                <Typography.Text strong>
+                  {t("sources:form.sourceType", "Source type")}
+                </Typography.Text>
+                <div>{getSourceTypeLabel(source.source_type)}</div>
+              </div>
+              <div>
+                <Typography.Text strong>Current destination</Typography.Text>
+                <div>{getSinkTypeLabel(source.sink_type)}</div>
+              </div>
+              {typeof source.config?.path === "string" && source.config.path.trim().length > 0 ? (
                 <div>
                   <Typography.Text strong>
-                    {t("sources:form.sourceType", "Source type")}
+                    {t("sources:form.path", "Server directory path")}
                   </Typography.Text>
-                  <div>{getSourceTypeLabel(source.source_type)}</div>
+                  <div>{source.config.path}</div>
                 </div>
+              ) : null}
+              {source.source_type === "git_repository" && typeof source.config?.repo_url === "string" ? (
                 <div>
-                  <Typography.Text strong>Current destination</Typography.Text>
-                  <div>{getSinkTypeLabel(source.sink_type)}</div>
+                  <Typography.Text strong>
+                    {t("sources:form.repoUrl", "GitHub repository URL")}
+                  </Typography.Text>
+                  <div>{source.config.repo_url}</div>
                 </div>
-                {typeof source.config?.path === "string" && source.config.path.trim().length > 0 ? (
-                  <div>
-                    <Typography.Text strong>
-                      {t("sources:form.path", "Server directory path")}
-                    </Typography.Text>
-                    <div>{source.config.path}</div>
-                  </div>
-                ) : null}
-                {source.source_type === "git_repository" && typeof source.config?.repo_url === "string" ? (
-                  <div>
-                    <Typography.Text strong>
-                      {t("sources:form.repoUrl", "GitHub repository URL")}
-                    </Typography.Text>
-                    <div>{source.config.repo_url}</div>
-                  </div>
-                ) : null}
-              </div>
-            }
-          />
+              ) : null}
+            </div>
+          </DesignSystemAlert>
         ) : (
           <>
             <Form.Item
@@ -534,14 +531,17 @@ export const SourceForm: React.FC<SourceFormProps> = ({ mode, source, preset }) 
         {effectiveSourceType === "local_directory" && !identityLocked ? (
           <>
             {mode === "create" && !capabilitiesLoading && localDirectoryCreateKnownFalse ? (
-              <Alert
-                type="warning"
-                showIcon
+              <DesignSystemAlert
+                variant="warning"
                 title="Server folder sync is disabled"
-                description={localDirectoryCapabilityMessage}
-              />
+              >
+                {localDirectoryCapabilityMessage}
+              </DesignSystemAlert>
             ) : mode === "create" && capabilitiesLoading ? (
-              <Alert type="info" showIcon title={localDirectoryCapabilityMessage} />
+              <DesignSystemAlert
+                variant="info"
+                title={localDirectoryCapabilityMessage}
+              />
             ) : null}
             <Form.Item
               label={t("sources:form.path", "Server directory path")}
@@ -666,14 +666,17 @@ export const SourceForm: React.FC<SourceFormProps> = ({ mode, source, preset }) 
             </Form.Item>
           </>
         ) : effectiveSourceType === "archive_snapshot" ? (
-          <Alert
-            type="info"
+          <DesignSystemAlert
+            variant="info"
             title={t("sources:form.archiveHint", "Upload archive after creation")}
           />
         ) : (
-          <Alert
-            type="info"
-            title={t("sources:form.gitRepositoryHint", "Git repository details are configured below.")}
+          <DesignSystemAlert
+            variant="info"
+            title={t(
+              "sources:form.gitRepositoryHint",
+              "Git repository details are configured below."
+            )}
           />
         )}
 
