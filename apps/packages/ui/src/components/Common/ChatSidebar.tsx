@@ -89,6 +89,8 @@ export function ChatSidebar({
   const serverHistoryOverviewEnabled = useChatSurfaceCoordinatorStore(
     (state) => shouldEnableOptionalResource(state, "server-history")
   )
+  const serverHistoryPanelVisible =
+    !collapsed && recentHistoryVisible && currentTab === "server"
 
   const clearChat = useClearChat()
   const temporaryChat = useStoreMessageOption((state) => state.temporaryChat)
@@ -103,7 +105,7 @@ export function ChatSidebar({
 
   // Server chat count for tab badge
   const { total: serverChatCount = 0 } = useServerChatHistory("", {
-    enabled: serverHistoryOverviewEnabled,
+    enabled: serverHistoryPanelVisible && serverHistoryOverviewEnabled,
     mode: "overview",
     page: 1,
     limit: SERVER_CHAT_HISTORY_OVERVIEW_PAGE_SIZE,
@@ -244,12 +246,18 @@ export function ChatSidebar({
   }, [currentTab, selectionMode])
 
   React.useEffect(() => {
-    setPanelVisible("server-history", currentTab === "server" && !collapsed)
+    setPanelVisible("server-history", serverHistoryPanelVisible)
 
     return () => {
       setPanelVisible("server-history", false)
     }
-  }, [collapsed, currentTab, setPanelVisible])
+  }, [serverHistoryPanelVisible, setPanelVisible])
+
+  React.useEffect(() => {
+    if (serverHistoryPanelVisible) {
+      markPanelEngaged("server-history")
+    }
+  }, [markPanelEngaged, serverHistoryPanelVisible])
 
   const previousPathRef = React.useRef(location.pathname)
   React.useEffect(() => {
