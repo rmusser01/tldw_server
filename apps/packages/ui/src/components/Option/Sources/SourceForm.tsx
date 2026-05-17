@@ -1,15 +1,18 @@
 import React from "react"
-import { Alert, Button, Form, Input, Radio, Select, Space, Switch, Typography } from "antd"
+import { Alert, Button, Empty, Form, Input, Modal, Radio, Select, Space, Spin, Switch, Typography } from "antd"
+import { ArrowUp, Check, FolderOpen } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 
 import {
   useCreateIngestionSourceMutation,
+  useIngestionSourceDirectoryBrowseQuery,
   useUpdateIngestionSourceMutation
 } from "@/hooks/use-ingestion-sources"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import type {
   CreateIngestionSourceRequest,
+  IngestionSourceDirectoryEntry,
   UpdateIngestionSourceRequest,
   IngestionSourceSummary,
   IngestionSourceType
@@ -89,6 +92,8 @@ export const SourceForm: React.FC<SourceFormProps> = ({ mode, source, preset }) 
   const [gitRepositoryMode, setGitRepositoryMode] =
     React.useState<GitRepositoryMode>(initialGitRepositoryMode)
   const [submitError, setSubmitError] = React.useState<string | null>(null)
+  const [pathPickerOpen, setPathPickerOpen] = React.useState(false)
+  const [browsePath, setBrowsePath] = React.useState<string | null>(null)
   const { capabilities, loading: capabilitiesLoading } = useServerCapabilities()
 
   const createMutation = useCreateIngestionSourceMutation()
@@ -153,6 +158,67 @@ export const SourceForm: React.FC<SourceFormProps> = ({ mode, source, preset }) 
   const localDirectoryCapabilityMessage = capabilitiesLoading
     ? "Checking whether this server allows folder sync."
     : "The administrator must enable server folder sync before you can create a local directory source."
+  const directoryBrowseQuery = useIngestionSourceDirectoryBrowseQuery(
+    browsePath,
+    undefined,
+    {
+      enabled:
+        pathPickerOpen &&
+        effectiveSourceType === "local_directory" &&
+        !localDirectoryCreateBlocked
+    }
+  )
+  const browseErrorMessage =
+    directoryBrowseQuery.error instanceof Error
+      ? directoryBrowseQuery.error.message
+      : directoryBrowseQuery.data?.error || null
+  const directoryEntries = directoryBrowseQuery.data?.entries ?? []
+
+  const openPathPicker = React.useCallback(() => {
+    const currentPath = String(form.getFieldValue("path") || "").trim()
+    setBrowsePath(currentPath || null)
+    setPathPickerOpen(true)
+  }, [form])
+
+  const handleUseDirectory = React.useCallback(
+    (path: string) => {
+      form.setFieldValue("path", path)
+      setBrowsePath(path)
+      setPathPickerOpen(false)
+    },
+    [form]
+  )
+
+  const renderDirectoryEntry = React.useCallback(
+    (entry: IngestionSourceDirectoryEntry) => (
+      <li className="flex items-center gap-3 px-3 py-2" key={entry.path}>
+        <div className="min-w-0 flex-1">
+          <Button
+            aria-label={`Open ${entry.name}`}
+            className="min-w-0 px-0"
+            icon={<FolderOpen className="h-3.5 w-3.5 shrink-0" />}
+            type="link"
+            onClick={() => setBrowsePath(entry.path)}>
+            <span className="truncate">{entry.name}</span>
+          </Button>
+          <div>
+            <Typography.Text className="break-all text-xs" type="secondary">
+              {entry.path}
+            </Typography.Text>
+          </div>
+        </div>
+        <Button
+          aria-label={`Use ${entry.name} folder`}
+          icon={<Check className="h-3.5 w-3.5" />}
+          size="small"
+          type="link"
+          onClick={() => handleUseDirectory(entry.path)}>
+          Use
+        </Button>
+      </li>
+    ),
+    [handleUseDirectory]
+  )
 
   React.useEffect(() => {
     if (identityLocked) {
@@ -257,6 +323,85 @@ export const SourceForm: React.FC<SourceFormProps> = ({ mode, source, preset }) 
   return (
     <div className="space-y-4">
       {submitError ? <Alert type="error" title={submitError} /> : null}
+
+      <Modal
+        destroyOnHidden
+        footer={null}
+        open={pathPickerOpen}
+        title="Browse server folders"
+        width={680}
+        onCancel={() => setPathPickerOpen(false)}>
+        <div className="space-y-4">
+          <Typography.Text type="secondary">
+            Only configured ingestion source roots and their folders are shown.
+          </Typography.Text>
+
+          {directoryBrowseQuery.data?.current_path ? (
+            <div className="space-y-3">
+              <Typography.Text className="block break-all" strong>
+                {directoryBrowseQuery.data.current_path}
+              </Typography.Text>
+              <Space wrap>
+                <Button
+                  disabled={!directoryBrowseQuery.data.parent_path}
+                  icon={<ArrowUp className="h-3.5 w-3.5" />}
+                  onClick={() => setBrowsePath(directoryBrowseQuery.data?.parent_path ?? null)}>
+                  Up
+                </Button>
+                <Button
+                  icon={<Check className="h-3.5 w-3.5" />}
+                  type="primary"
+                  onClick={() =>
+                    handleUseDirectory(String(directoryBrowseQuery.data?.current_path || ""))
+                  }>
+                  Use this folder
+                </Button>
+              </Space>
+            </div>
+          ) : null}
+
+          {browseErrorMessage ? (
+            <Alert
+              showIcon
+              type="warning"
+              title={browseErrorMessage}
+              action={
+                <Button size="small" onClick={() => setBrowsePath(null)}>
+                  Show roots
+                </Button>
+              }
+            />
+          ) : null}
+
+          {directoryBrowseQuery.isLoading ? (
+            <div className="flex min-h-32 items-center justify-center">
+              <Spin />
+            </div>
+          ) : directoryEntries.length > 0 ? (
+            <div className="space-y-2">
+              {directoryBrowseQuery.isFetching ? (
+                <div className="flex justify-end">
+                  <Spin size="small" />
+                </div>
+              ) : null}
+              <ul className="m-0 max-h-80 list-none divide-y divide-gray-200 overflow-auto rounded border border-solid border-gray-200 p-0 dark:divide-gray-700 dark:border-gray-700">
+                {directoryEntries.map(renderDirectoryEntry)}
+              </ul>
+            </div>
+          ) : (
+            <div className="rounded border border-solid border-gray-200 p-4 dark:border-gray-700">
+              <Empty
+                description={
+                  browseErrorMessage
+                    ? "No folders available for this path."
+                    : "No folders available."
+                }
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+              />
+            </div>
+          )}
+        </div>
+      </Modal>
 
       <Form<SourceFormValues>
         form={form}
@@ -394,15 +539,29 @@ export const SourceForm: React.FC<SourceFormProps> = ({ mode, source, preset }) 
               <Alert type="info" showIcon title={localDirectoryCapabilityMessage} />
             ) : null}
             <Form.Item
-              name="path"
               label={t("sources:form.path", "Server directory path")}
-              rules={[
-                {
-                  required: true,
-                  message: t("sources:form.path", "Server directory path")
-                }
-              ]}>
-              <Input />
+              required>
+              <Space.Compact block>
+                <Form.Item
+                  name="path"
+                  noStyle
+                  rules={[
+                    {
+                      required: true,
+                      message: t("sources:form.path", "Server directory path")
+                    }
+                  ]}>
+                  <Input aria-label={t("sources:form.path", "Server directory path")} />
+                </Form.Item>
+                <Button
+                  aria-label="Browse server folders"
+                  disabled={localDirectoryCreateBlocked}
+                  htmlType="button"
+                  icon={<FolderOpen className="h-3.5 w-3.5" />}
+                  onClick={openPathPicker}>
+                  Browse
+                </Button>
+              </Space.Compact>
             </Form.Item>
             <Typography.Text type="secondary">
               {t(

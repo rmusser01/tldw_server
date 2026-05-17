@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const hookMocks = vi.hoisted(() => ({
   useCreateIngestionSourceMutation: vi.fn(),
+  useIngestionSourceDirectoryBrowseQuery: vi.fn(),
   useUpdateIngestionSourceMutation: vi.fn()
 }))
 
@@ -41,6 +42,8 @@ vi.mock("react-router-dom", async () => {
 vi.mock("@/hooks/use-ingestion-sources", () => ({
   useCreateIngestionSourceMutation: (...args: unknown[]) =>
     hookMocks.useCreateIngestionSourceMutation(...args),
+  useIngestionSourceDirectoryBrowseQuery: (...args: unknown[]) =>
+    hookMocks.useIngestionSourceDirectoryBrowseQuery(...args),
   useUpdateIngestionSourceMutation: (...args: unknown[]) =>
     hookMocks.useUpdateIngestionSourceMutation(...args)
 }))
@@ -61,6 +64,18 @@ describe("SourceForm", () => {
     hookMocks.useUpdateIngestionSourceMutation.mockReturnValue({
       mutateAsync: vi.fn(async () => ({ id: "42" })),
       isPending: false
+    })
+    hookMocks.useIngestionSourceDirectoryBrowseQuery.mockReturnValue({
+      data: {
+        roots: [],
+        current_path: null,
+        parent_path: null,
+        entries: [],
+        error: null
+      },
+      isFetching: false,
+      isLoading: false,
+      error: null
     })
     capabilityMocks.useServerCapabilities.mockReturnValue({
       capabilities: { canCreateLocalDirectoryIngestionSource: true },
@@ -183,6 +198,53 @@ describe("SourceForm", () => {
       expect(screen.queryByLabelText("Server directory path")).not.toBeInTheDocument()
     })
     expect(screen.getByText("Upload archive after creation")).toBeInTheDocument()
+  })
+
+  it("opens the server directory picker and writes the selected path", async () => {
+    hookMocks.useIngestionSourceDirectoryBrowseQuery.mockImplementation((path: string | null) => {
+      if (path === "/srv/tldw/imports") {
+        return {
+          data: {
+            roots: [{ name: "imports", path: "/srv/tldw/imports", is_root: true }],
+            current_path: "/srv/tldw/imports",
+            parent_path: null,
+            entries: [
+              { name: "notes", path: "/srv/tldw/imports/notes", is_root: false }
+            ],
+            error: null
+          },
+          isFetching: false,
+          isLoading: false,
+          error: null
+        }
+      }
+      return {
+        data: {
+          roots: [{ name: "imports", path: "/srv/tldw/imports", is_root: true }],
+          current_path: null,
+          parent_path: null,
+          entries: [{ name: "imports", path: "/srv/tldw/imports", is_root: true }],
+          error: null
+        },
+        isFetching: false,
+        isLoading: false,
+        error: null
+      }
+    })
+
+    render(<SourceForm mode="create" />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Browse server folders" }))
+    expect(await screen.findByRole("dialog", { name: "Browse server folders" })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Open imports" }))
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Use notes folder" })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Use notes folder" }))
+
+    expect(screen.getByLabelText("Server directory path")).toHaveValue("/srv/tldw/imports/notes")
   })
 
   it("switches git repository fields between local and remote modes", async () => {

@@ -64,6 +64,24 @@ class IngestionSourceCapabilitiesResponse(BaseModel):
     can_create_local_directory: bool
 
 
+class IngestionSourceDirectoryEntryResponse(BaseModel):
+    """One directory entry exposed by the ingestion source path browser."""
+
+    name: str
+    path: str
+    is_root: bool = False
+
+
+class IngestionSourceDirectoryBrowseResponse(BaseModel):
+    """Directory browser response scoped to ingestion source allowed roots."""
+
+    roots: list[IngestionSourceDirectoryEntryResponse] = Field(default_factory=list)
+    current_path: str | None = None
+    parent_path: str | None = None
+    entries: list[IngestionSourceDirectoryEntryResponse] = Field(default_factory=list)
+    error: str | None = None
+
+
 class IngestionSourceItemResponse(BaseModel):
     """Serialized tracked-item state for a single ingestion source item."""
 

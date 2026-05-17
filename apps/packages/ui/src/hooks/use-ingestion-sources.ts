@@ -10,6 +10,7 @@ import { useTldwApiClient } from "@/hooks/useTldwApiClient"
 import type { TldwApiClient } from "@/services/tldw/TldwApiClient"
 import type {
   CreateIngestionSourceRequest,
+  IngestionSourceDirectoryBrowseResponse,
   IngestionSourceItem,
   IngestionSourceItemFilters,
   IngestionSourceItemsListResponse,
@@ -23,6 +24,7 @@ type IngestionSourceApiMethodName =
   | "listIngestionSources"
   | "getIngestionSource"
   | "listIngestionSourceItems"
+  | "browseIngestionSourceDirectories"
   | "createIngestionSource"
   | "updateIngestionSource"
   | "syncIngestionSource"
@@ -45,7 +47,9 @@ export const ingestionSourceKeys = {
   itemsRoot: (sourceId: string) =>
     [...ingestionSourceKeys.all(), "items", String(sourceId)] as const,
   items: (sourceId: string, filters?: IngestionSourceItemFilters) =>
-    [...ingestionSourceKeys.itemsRoot(sourceId), filters ?? {}] as const
+    [...ingestionSourceKeys.itemsRoot(sourceId), filters ?? {}] as const,
+  directoryBrowse: (path: string | null) =>
+    [...ingestionSourceKeys.all(), "directory-browse", path ?? "roots"] as const
 }
 
 const useResolvedApiClient = (api?: IngestionSourcesApiClient): IngestionSourcesApiClient => {
@@ -89,6 +93,20 @@ export const useIngestionSourceItemsQuery = (
     queryKey: ingestionSourceKeys.items(sourceId ?? "unknown", filters),
     queryFn: () => client.listIngestionSourceItems(String(sourceId), filters),
     enabled: Boolean(sourceId) && (options?.enabled ?? true)
+  })
+}
+
+export const useIngestionSourceDirectoryBrowseQuery = (
+  path?: string | null,
+  api?: IngestionSourcesApiClient,
+  options?: { enabled?: boolean }
+): UseQueryResult<IngestionSourceDirectoryBrowseResponse, Error> => {
+  const client = useResolvedApiClient(api)
+  const normalizedPath = typeof path === "string" && path.trim().length > 0 ? path.trim() : null
+  return useQuery({
+    queryKey: ingestionSourceKeys.directoryBrowse(normalizedPath),
+    queryFn: () => client.browseIngestionSourceDirectories(normalizedPath),
+    enabled: options?.enabled ?? true
   })
 }
 

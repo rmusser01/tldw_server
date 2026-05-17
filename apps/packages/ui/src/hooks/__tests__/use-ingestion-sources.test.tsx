@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   ingestionSourceKeys,
   useCreateIngestionSourceMutation,
+  useIngestionSourceDirectoryBrowseQuery,
   useIngestionSourceDetailQuery,
   useIngestionSourceItemsQuery,
   useIngestionSourcesQuery,
@@ -25,6 +26,7 @@ const createMockClient = () => ({
   listIngestionSources: vi.fn(),
   getIngestionSource: vi.fn(),
   listIngestionSourceItems: vi.fn(),
+  browseIngestionSourceDirectories: vi.fn(),
   createIngestionSource: vi.fn(),
   updateIngestionSource: vi.fn(),
   syncIngestionSource: vi.fn(),
@@ -81,6 +83,33 @@ describe("use-ingestion-sources", () => {
     expect(client.listIngestionSourceItems).toHaveBeenCalledWith("12", {
       sync_status: "conflict_detached"
     })
+  })
+
+  it("loads directory browse results by server path", async () => {
+    const client = createMockClient()
+    client.browseIngestionSourceDirectories.mockResolvedValueOnce({
+      roots: [{ name: "imports", path: "/srv/tldw/imports", is_root: true }],
+      current_path: "/srv/tldw/imports",
+      parent_path: null,
+      entries: [{ name: "notes", path: "/srv/tldw/imports/notes", is_root: false }],
+      error: null
+    })
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    const wrapper = buildWrapper(queryClient)
+
+    const browseQuery = renderHook(
+      () => useIngestionSourceDirectoryBrowseQuery("/srv/tldw/imports", client as any),
+      { wrapper }
+    )
+
+    await waitFor(() => {
+      expect(browseQuery.result.current.isSuccess).toBe(true)
+    })
+
+    expect(client.browseIngestionSourceDirectories).toHaveBeenCalledWith("/srv/tldw/imports")
+    expect(browseQuery.result.current.data?.entries[0]?.path).toBe("/srv/tldw/imports/notes")
   })
 
   it("invalidates the list query after creating a source", async () => {

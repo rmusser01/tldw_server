@@ -15,6 +15,8 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from tldw_Server_API.app.api.v1.schemas.ingestion_sources import (
     IngestionSourceCapabilitiesResponse,
     IngestionSourceCreateRequest,
+    IngestionSourceDirectoryBrowseResponse,
+    IngestionSourceDirectoryEntryResponse,
     IngestionSourceItemResponse,
     IngestionSourcePatchRequest,
     IngestionSourceResponse,
@@ -37,6 +39,7 @@ from tldw_Server_API.app.core.Ingestion_Sources.local_directory import validate_
 from tldw_Server_API.app.core.Ingestion_Sources.access_policy import (
     can_create_local_directory_ingestion_source,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
 from tldw_Server_API.app.core.Ingestion_Sources.service import (
     create_source_snapshot,
     create_source,
@@ -50,6 +53,7 @@ from tldw_Server_API.app.core.Ingestion_Sources.service import (
     update_source_snapshot,
     validate_source_sink_pair,
 )
+from tldw_Server_API.app.core.config import get_ingestion_source_allowed_roots
 from tldw_Server_API.app.core.exceptions import IngestionSourceValidationError
 
 router = APIRouter(prefix="/ingestion-sources", tags=["ingestion-sources"])
@@ -200,6 +204,75 @@ def _can_create_local_directory_ingestion_source_for_request(
     )
 
 
+def _directory_display_name(path: Path) -> str:
+    return path.name or str(path)
+
+
+def _directory_entry(
+    path: Path,
+    *,
+    is_root: bool = False,
+) -> IngestionSourceDirectoryEntryResponse:
+    return IngestionSourceDirectoryEntryResponse(
+        name=_directory_display_name(path),
+        path=str(path),
+        is_root=is_root,
+    )
+
+
+def _browseable_allowed_roots() -> list[Path]:
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for root in get_ingestion_source_allowed_roots():
+        resolved = Path(root).expanduser().resolve(strict=False)
+        marker = str(resolved)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        if resolved.exists() and resolved.is_dir():
+            roots.append(resolved)
+    return roots
+
+
+def _resolve_browse_directory(raw_path: str, roots: list[Path]) -> tuple[Path | None, Path | None]:
+    candidate = Path(str(raw_path or "").strip()).expanduser()
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    for root in roots:
+        safe_path = resolve_safe_local_path(candidate, root)
+        if safe_path is not None:
+            return safe_path, root
+    return None, None
+
+
+def _parent_path_within_root(path: Path, root: Path) -> str | None:
+    if path == root:
+        return None
+    parent = resolve_safe_local_path(path.parent, root)
+    if parent is None or parent == path:
+        return None
+    return str(parent)
+
+
+def _list_browse_directory_entries(
+    directory: Path,
+) -> tuple[list[IngestionSourceDirectoryEntryResponse], str | None]:
+    try:
+        children = list(directory.iterdir())
+    except OSError:
+        return [], "Unable to read directory"
+
+    entries: list[IngestionSourceDirectoryEntryResponse] = []
+    for child in sorted(children, key=lambda value: value.name.casefold()):
+        try:
+            if child.is_symlink() or not child.is_dir():
+                continue
+        except OSError:
+            continue
+        entries.append(_directory_entry(child))
+    return entries, None
+
+
 def _local_directory_identity_changed(
     *,
     existing: dict[str, Any],
@@ -320,6 +393,55 @@ async def get_ingestion_source_capabilities(
             current_user=current_user,
             request=request,
         ),
+    )
+
+
+@router.get(
+    "/browse-directories",
+    response_model=IngestionSourceDirectoryBrowseResponse,
+)
+async def browse_ingestion_source_directories(
+    request: Request,
+    path: str | None = None,
+    current_user: User = Depends(get_request_user),
+) -> IngestionSourceDirectoryBrowseResponse:
+    """List server directories available for local ingestion source creation."""
+    if not _can_create_local_directory_ingestion_source_for_request(
+        current_user=current_user,
+        request=request,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Local directory ingestion sources are not enabled for this user",
+        )
+
+    roots = _browseable_allowed_roots()
+    root_entries = [_directory_entry(root, is_root=True) for root in roots]
+    if not path or not str(path).strip():
+        return IngestionSourceDirectoryBrowseResponse(
+            roots=root_entries,
+            entries=root_entries,
+        )
+
+    current_path, matched_root = _resolve_browse_directory(path, roots)
+    if current_path is None or matched_root is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Directory path is outside configured ingestion source roots",
+        )
+    if not current_path.exists() or not current_path.is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Directory path is not a readable directory",
+        )
+
+    entries, browse_error = _list_browse_directory_entries(current_path)
+    return IngestionSourceDirectoryBrowseResponse(
+        roots=root_entries,
+        current_path=str(current_path),
+        parent_path=_parent_path_within_root(current_path, matched_root),
+        entries=entries,
+        error=browse_error,
     )
 
 
