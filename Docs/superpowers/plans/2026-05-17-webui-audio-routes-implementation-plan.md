@@ -26,7 +26,8 @@
 - `F9 support`: Missing, unsupported, unavailable, unauthorized, degraded, and not-configured audio states are inconsistent.
 - `F15 support`: Advanced model, voice, comparison, and output controls need to stay available without dominating first-use flows.
 - `F18 support`: Hosted, beta, placeholder, unsupported, and debug states need explicit visibility language.
-- `F19 support`: Audio routes need resilient responsive behavior and consistent landmarks.
+- `F19 support`: Deprecated Ant Design usage is tracked only when it blocks
+  a touched audio UX fix or creates verification noise in touched audio routes.
 
 ## Route Inventory And Ownership
 
