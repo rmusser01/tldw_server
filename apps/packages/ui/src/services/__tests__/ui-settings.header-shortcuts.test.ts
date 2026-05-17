@@ -16,10 +16,36 @@ const LEGACY_SELECTION = [
 ]
 
 describe("header shortcut defaults", () => {
+  it("includes Sources in the default selection", () => {
+    expect(DEFAULT_HEADER_SHORTCUT_SELECTION).toContain("sources")
+  })
+
   it("includes the integrations control-plane shortcuts in the default selection", () => {
     expect(DEFAULT_HEADER_SHORTCUT_SELECTION).toContain("integrations")
     expect(DEFAULT_HEADER_SHORTCUT_SELECTION).toContain("scheduled-tasks")
     expect(DEFAULT_HEADER_SHORTCUT_SELECTION).toContain("admin-integrations")
+  })
+
+  it("adds Sources to legacy full-default persisted selections missing only Sources", () => {
+    const legacyFullDefaultSelection = DEFAULT_HEADER_SHORTCUT_SELECTION.filter(
+      (id) => id !== "sources"
+    )
+
+    const normalized = normalizeSettingValue(
+      HEADER_SHORTCUT_SELECTION_SETTING,
+      legacyFullDefaultSelection
+    )
+
+    expect(normalized).toContain("sources")
+  })
+
+  it("does not add Sources to custom persisted selections", () => {
+    const normalized = normalizeSettingValue(
+      HEADER_SHORTCUT_SELECTION_SETTING,
+      ["chat", "notes", "settings"]
+    )
+
+    expect(normalized).not.toContain("sources")
   })
 
   it("adds the integrations control-plane shortcuts to persisted legacy selections", () => {

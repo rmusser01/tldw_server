@@ -342,6 +342,10 @@ export function PageHelpModal() {
             keys: formatShortcut(defaultShortcuts.modePlayground)
           },
           {
+            label: t("common:shortcuts.goToSources", "Go to Sources"),
+            keys: formatShortcut(defaultShortcuts.modeSources)
+          },
+          {
             label: t("common:shortcuts.goToMedia", "Go to Media"),
             keys: formatShortcut(defaultShortcuts.modeMedia)
           },
