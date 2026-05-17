@@ -250,16 +250,18 @@ def validate_profile_server_args(
         raise ServerError(f"Unsupported llama.cpp server args: {sorted(invalid)}")
 
     for key, value in args.items():
-        if key in core_keys:
+        if key in allowed_structured_args:
             continue
         formatter = formatters.get(key)
-        if formatter is None:
+        if formatter is not None:
+            _validate_config_arg_path(config, key, value)
+            try:
+                formatter(value)
+            except (IndexError, TypeError, ValueError) as exc:
+                raise ServerError(f"Invalid value for llama.cpp server arg '{key}'.") from exc
             continue
-        _validate_config_arg_path(config, key, value)
-        try:
-            formatter(value)
-        except (IndexError, TypeError, ValueError) as exc:
-            raise ServerError(f"Invalid value for llama.cpp server arg '{key}'.") from exc
+        if key in core_keys:
+            continue
 
 
 def _clean_server_args(server_args: dict[str, Any]) -> dict[str, Any]:
@@ -283,10 +285,18 @@ def _validate_config_arg_path(config: LlamaCppConfig, key: str, value: Any) -> N
             if not _is_config_path_allowed(config, _coerce_path_arg(key, item)):
                 raise ServerError("LoRA path must be under allowed directories.")
     if key == "lora_scaled":
-        paths = [value[0]] if isinstance(value, (list, tuple)) and value else [value]
+        paths = _lora_scaled_path_values(value)
         for item in paths:
             if item is not None and not _is_config_path_allowed(config, _coerce_path_arg(key, item)):
                 raise ServerError("LoRA path must be under allowed directories.")
+
+
+def _lora_scaled_path_values(value: Any) -> list[Any]:
+    if isinstance(value, (list, tuple)):
+        if len(value) != 2:
+            raise ServerError("lora_scaled must be a path/scale pair.")
+        return [value[0]]
+    return [value]
 
 
 def _coerce_path_arg(key: str, value: Any) -> Path:

@@ -33,12 +33,13 @@ Implement Task 2 from the llama.cpp managed runtime closeout plan: fail closed f
 - Existing profile-store/profile-capability/process-runner coverage already covered duplicate explicit ports, wildcard conflicts, disabled duplicate ports, and launch-time mmproj/path validation.
 - Added supervisor persistence-time regression coverage for vision profiles without mmproj, conflicting `mmproj_model_id`/`server_args["mmproj"]` selections, path-like server args outside allowlist, reserved model arg overrides even when unvalidated args are allowed, and invalid server_args updates preserving the stored profile.
 - Shared server-arg validation now runs before supervisor create/update/default persistence and before launch.
+- PR review follow-up: fixed persistence-time validation for core numeric server args such as `ctx_size`, and added clearer rejection for malformed `lora_scaled` sequences.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Centralized llama.cpp profile launch validation before supervisor persistence and start by reusing launch asset resolution plus shared server_arg validation. The shared validation now rejects reserved structured args, unsupported args when unvalidated args are disabled, denylisted secret flags, invalid formatter values, and path-bearing args outside allowed paths. Focused backend tests pass; production Bandit scope passes. Full touched-scope Bandit including pytest files only reports the repository-standard B101 assert warnings in tests.
+Centralized llama.cpp profile launch validation before supervisor persistence and start by reusing launch asset resolution plus shared server_arg validation. The shared validation now rejects reserved structured args, unsupported args when unvalidated args are disabled, denylisted secret flags, invalid formatter values including core numeric aliases, malformed `lora_scaled` pairs, and path-bearing args outside allowed paths. Focused backend tests pass; production Bandit scope passes. Full touched-scope Bandit including pytest files only reports the repository-standard B101 assert warnings in tests.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

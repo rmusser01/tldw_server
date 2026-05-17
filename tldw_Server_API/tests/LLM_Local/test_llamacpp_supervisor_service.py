@@ -365,6 +365,44 @@ async def test_supervisor_rejects_path_arg_outside_allowlist_before_persisting(t
 
 
 @pytest.mark.asyncio
+async def test_supervisor_rejects_invalid_core_numeric_arg_before_persisting(tmp_path: Path):
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+
+    with pytest.raises(ServerError, match="ctx_size"):
+        await supervisor.create_profile(
+            LlamaCppProfileCreateRequest(
+                profile_id="bad-core",
+                name="Bad Core",
+                model_path=str(model_path),
+                server_args={"ctx_size": "not-an-int"},
+            )
+        )
+
+    assert supervisor.store.get("bad-core") is None
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejects_malformed_lora_scaled_before_persisting(tmp_path: Path):
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    lora_path = config.models_dir / "adapter.gguf"
+    lora_path.write_text("adapter", encoding="utf-8")
+
+    with pytest.raises(ServerError, match="lora_scaled"):
+        await supervisor.create_profile(
+            LlamaCppProfileCreateRequest(
+                profile_id="bad-lora-scaled",
+                name="Bad LoRA",
+                model_path=str(model_path),
+                server_args={"lora_scaled": [str(lora_path)]},
+            )
+        )
+
+    assert supervisor.store.get("bad-lora-scaled") is None
+
+
+@pytest.mark.asyncio
 async def test_supervisor_rejects_reserved_model_arg_before_persisting_even_when_unvalidated_args_allowed(
     tmp_path: Path,
 ):
