@@ -6,7 +6,8 @@
     "new": "New source",
     "sync": "Sync now",
     "uploadArchive": "Upload archive",
-    "reattach": "Reattach"
+    "reattach": "Reattach",
+    "showRoots": "Show roots"
   },
   "states": {
     "unsupported": "This server does not advertise ingestion source support.",
@@ -18,6 +19,11 @@
     "archiveSnapshot": "Archive snapshot",
     "path": "Server directory path",
     "pathHelp": "This is a path on the tldw server host, not a local browser or extension folder.",
-    "archiveHint": "Upload archive after creation"
+    "archiveHint": "Upload archive after creation",
+    "checkingFolderSync": "Checking whether this server allows folder sync.",
+    "currentDestination": "Current destination",
+    "folderSyncDisabledDescription": "The administrator must enable server folder sync before you can create a local directory source.",
+    "lockedAfterSync": "Locked after first successful sync",
+    "serverFolderSyncDisabled": "Server folder sync is disabled"
   }
 }

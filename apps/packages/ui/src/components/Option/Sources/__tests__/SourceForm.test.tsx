@@ -16,18 +16,22 @@ const routerMocks = vi.hoisted(() => ({
   navigate: vi.fn()
 }))
 
+const translationMocks = vi.hoisted(() => ({
+  t: vi.fn((
+    key: string,
+    fallbackOrOptions?: string | { defaultValue?: string }
+  ) => {
+    if (typeof fallbackOrOptions === "string") return fallbackOrOptions
+    if (fallbackOrOptions && typeof fallbackOrOptions === "object") {
+      return fallbackOrOptions.defaultValue || key
+    }
+    return key
+  })
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (
-      key: string,
-      fallbackOrOptions?: string | { defaultValue?: string }
-    ) => {
-      if (typeof fallbackOrOptions === "string") return fallbackOrOptions
-      if (fallbackOrOptions && typeof fallbackOrOptions === "object") {
-        return fallbackOrOptions.defaultValue || key
-      }
-      return key
-    }
+    t: translationMocks.t
   })
 }))
 
@@ -422,6 +426,14 @@ describe("SourceForm", () => {
     expect(
       screen.getByText("Locked after first successful sync")
     ).toBeInTheDocument()
+    expect(translationMocks.t).toHaveBeenCalledWith(
+      "sources:form.lockedAfterSync",
+      "Locked after first successful sync"
+    )
+    expect(translationMocks.t).toHaveBeenCalledWith(
+      "sources:form.currentDestination",
+      "Current destination"
+    )
     expect(screen.getByText("/srv/tldw/notes")).toBeInTheDocument()
     expect(screen.queryByRole("radio", { name: "Archive snapshot" })).not.toBeInTheDocument()
     expect(screen.queryByLabelText("Server directory path")).not.toBeInTheDocument()

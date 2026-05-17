@@ -1,16 +1,5 @@
 [
   {
-    "id": "antd-product-state-import:src/components/Common/LocaleJsonDiagnostics.tsx:Alert",
-    "path": "src/components/Common/LocaleJsonDiagnostics.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Common/LocaleJsonDiagnostics.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Common/PromptInsertModal.tsx:Alert",
     "path": "src/components/Common/PromptInsertModal.tsx",
     "rule": "antd-product-state-import",
@@ -3054,50 +3043,6 @@
     "state": "allowed_legacy_exception",
     "owner": "design-system",
     "reason": "Existing AntD Empty product-state UI in src/components/Option/SharedWithMe/index.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Sources/SourceForm.tsx:Alert#antd-alert-sourceform-type-error-line-230-1953zxe",
-    "path": "src/components/Option/Sources/SourceForm.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Sources/SourceForm.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Sources/SourceForm.tsx:Alert#antd-alert-sourceform-type-info-line-457-1avu05z",
-    "path": "src/components/Option/Sources/SourceForm.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Sources/SourceForm.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Sources/SourceForm.tsx:Alert#antd-alert-sourceform-type-info-line-462-17tv81b",
-    "path": "src/components/Option/Sources/SourceForm.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Sources/SourceForm.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Sources/SourceForm.tsx:Alert#antd-alert-sourceform-type-info-locked-after-first-succe-10k3a9g",
-    "path": "src/components/Option/Sources/SourceForm.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Sources/SourceForm.tsx before the stable duplicate-id guard.",
     "replacement": "tldw design-system state primitive",
     "migrationQueue": "shared-product-state"
   },

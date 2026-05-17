@@ -76,4 +76,37 @@ describe("PlaylistPreflightPanel", () => {
 
     expect(onDuplicatePolicyChange).toHaveBeenCalledWith("include_existing")
   })
+
+  it("renders playlist preflight state indicators through design-system primitives", () => {
+    const result = buildResult()
+    result.duplicateCount = 1
+    result.items[1] = {
+      ...result.items[1],
+      duplicateStatus: "duplicate_existing",
+      selected: false
+    }
+
+    render(
+      <PlaylistPreflightPanel
+        candidateUrl="https://www.youtube.com/playlist?list=PLtest"
+        error="Unable to preview playlist metadata"
+        result={result}
+        duplicatePolicy="skip"
+        onPreview={vi.fn()}
+        onAddItems={vi.fn()}
+      />
+    )
+
+    const warning = screen.getByText("Unable to preview playlist metadata")
+    expect(warning.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+    expect(warning).toHaveClass("font-medium")
+
+    const duplicateSummary = screen.getByText("1 duplicates")
+    expect(
+      duplicateSummary.closest('[data-ds-component="Badge"]')
+    ).toBeInTheDocument()
+
+    const duplicateItem = screen.getByText("duplicate")
+    expect(duplicateItem.closest('[data-ds-component="Badge"]')).toBeInTheDocument()
+  })
 })
