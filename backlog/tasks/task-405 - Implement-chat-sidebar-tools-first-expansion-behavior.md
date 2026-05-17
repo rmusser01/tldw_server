@@ -47,9 +47,7 @@ Implement the shared ChatSidebar tools-first expansion behavior: shortcuts expan
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 3 completed: kept server history overview loading behind the Recent conversations disclosure while preserving active-search reset behavior and debounced ServerChatList query flow. Focused verification passed: bunx vitest run src/components/Common/ChatSidebar/__tests__/ChatSidebar.tools-first.test.tsx src/components/Common/ChatSidebar/__tests__/ChatSidebar.lazy-history.test.tsx src/components/Common/__tests__/ChatSidebar.coordinator.test.tsx (3 files, 11 tests). git diff --check passed for Task 3 touched files. Bandit skipped: frontend-only TS/TSX change.
-
-Task 4 completed: added already-expanded openResetKey regression coverage and wired shared Layout plus Next.js WebLayout to maintain a monotonic chatSidebarOpenResetKey for explicit open/foreground actions. Focused verification passed: bunx vitest run src/components/Common/ChatSidebar/__tests__/ChatSidebar.tools-first.test.tsx src/components/Layouts/__tests__/Layout.chat-sidebar-reset-signal.guard.test.ts (2 files, 9 tests) from apps/packages/ui; bunx vitest run __tests__/components/layout/WebLayout.chat-scroll-contract.test.tsx (1 file, 3 tests) from apps/tldw-frontend; git diff --check passed for Task 4 touched files. Bandit skipped: frontend-only TS/TSX changes.
+Task 4 completed and review fixes applied: wired openResetKey through shared Layout and WebLayout, added ChatSidebar openResetKey reset coverage, guarded WebLayout tldw:open-chat-sidebar so the legacy sidebar path is unchanged while showChatSidebar is false, and made source-guard tests module-relative instead of cwd-relative. Focused verification passed: package UI sidebar/layout tests (4 files, 14 tests) and WebLayout test (1 file, 4 tests). git diff --check passed for Task 4 follow-up files. Bandit skipped: frontend-only TS/TSX change.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

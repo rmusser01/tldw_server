@@ -1,9 +1,21 @@
+// @vitest-environment jsdom
 import React from 'react';
 import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import OptionLayout from '../../../components/layout/WebLayout';
+
+const testModulePath = import.meta.url.startsWith('file:')
+  ? fileURLToPath(import.meta.url)
+  : import.meta.url;
+const webLayoutSourcePath = resolve(
+  dirname(testModulePath),
+  '../../../components/layout/WebLayout.tsx'
+);
 
 const routerState = vi.hoisted(() => ({
   location: {
@@ -329,6 +341,10 @@ describe('WebLayout /chat scroll contract', () => {
     chatSidebarMockState.props = [];
   });
 
+  afterEach(() => {
+    cleanup();
+  });
+
   it('marks the /chat route shell as transcript-owned when sticky chat input is active', () => {
     const html = renderToStaticMarkup(
       <OptionLayout hideSidebar>
@@ -358,7 +374,7 @@ describe('WebLayout /chat scroll contract', () => {
   });
 
   it('mirrors shared layout reset-key wiring for desktop and mobile mounts', () => {
-    const source = readFileSync('components/layout/WebLayout.tsx', 'utf8');
+    const source = readFileSync(webLayoutSourcePath, 'utf8');
 
     expect(source).toContain('chatSidebarOpenResetKey');
     expect(source.match(/openResetKey=\{chatSidebarOpenResetKey\}/g)).toHaveLength(2);
@@ -367,5 +383,26 @@ describe('WebLayout /chat scroll contract', () => {
     expect(source).toContain('if (!sidebarOpen) signalChatSidebarOpen()');
     expect(source).toContain('if (chatSidebarCollapsed) signalChatSidebarOpen()');
     expect(source).toContain("window.addEventListener('tldw:open-chat-sidebar', handler)");
+    expect(source).toContain("if (typeof window === 'undefined' || !showChatSidebar) return;");
+  });
+
+  it('ignores chat sidebar open events when the shared ChatSidebar feature is disabled', async () => {
+    featureFlagState.showChatSidebar = false;
+
+    render(
+      <OptionLayout>
+        <div data-testid="chat-route-content">Chat route</div>
+      </OptionLayout>
+    );
+
+    expect(screen.queryByTestId('drawer')).toBeNull();
+
+    await act(async () => undefined);
+    act(() => {
+      window.dispatchEvent(new CustomEvent('tldw:open-chat-sidebar'));
+    });
+
+    expect(screen.queryByTestId('drawer')).toBeNull();
+    expect(chatSidebarMockState.props).toHaveLength(0);
   });
 });

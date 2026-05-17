@@ -270,19 +270,15 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   }, [isMobileViewport, showChatSidebar, sidebarOpen, location.pathname]);
 
   React.useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !showChatSidebar) return;
     const handler = () => {
       if (hideSidebar) return;
-      if (showChatSidebar) {
-        signalChatSidebarOpen();
-        if (isMobileViewport) {
-          setSidebarOpen(true);
-          return;
-        }
-        setChatSidebarCollapsed(false);
+      signalChatSidebarOpen();
+      if (isMobileViewport) {
+        setSidebarOpen(true);
         return;
       }
-      setSidebarOpen(true);
+      setChatSidebarCollapsed(false);
     };
     window.addEventListener('tldw:open-chat-sidebar', handler);
     return () => {
