@@ -1,27 +1,22 @@
 import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import * as ts from "typescript"
 import { describe, expect, it } from "vitest"
 
 import { getRouteMetadata, ROUTE_METADATA } from "../route-metadata"
-import {
-  CHAT_WORKSPACE_PATH,
-  DOCUMENT_WORKSPACE_PATH,
-  MODERATION_PLAYGROUND_LEGACY_PATH,
-  MODERATION_REVIEW_PATH,
-  MODERATION_RULES_PATH,
-  PROTOTYPE_WORKSPACES_PATH,
-  RESEARCH_STUDIO_PATH,
-  REPO2TXT_PATH,
-  WORKSPACE_PLAYGROUND_PATH,
-  WORKSPACE_STUDIO_PATH
-} from "../route-paths"
+import * as routePathExports from "../route-paths"
 
 const isDynamicRoutePath = (routePath: string): boolean =>
   routePath.includes(":") || routePath.includes("*")
 
+const testDir = path.dirname(fileURLToPath(import.meta.url))
+const routePathConstants = routePathExports as Record<string, unknown>
+
 const routeRegistryPathCandidates = [
+  path.resolve(testDir, "../route-registry.tsx"),
   "src/routes/route-registry.tsx",
+  "packages/ui/src/routes/route-registry.tsx",
   "../packages/ui/src/routes/route-registry.tsx",
   "apps/packages/ui/src/routes/route-registry.tsx"
 ]
@@ -35,29 +30,98 @@ if (!routeRegistryPath) {
 }
 
 const routeRegistrySource = readFileSync(routeRegistryPath, "utf8")
-const testDir = path.dirname(fileURLToPath(import.meta.url))
-const ROUTE_PATH_PATTERN = /path\s*:\s*["']([^"']+)["']/g
 
-const literalRoutePaths = Array.from(
-  routeRegistrySource.matchAll(ROUTE_PATH_PATTERN),
-  (match) => match[1]
-)
+const getPropertyNameText = (name: ts.PropertyName): string | undefined => {
+  if (
+    ts.isIdentifier(name) ||
+    ts.isStringLiteral(name) ||
+    ts.isNumericLiteral(name)
+  ) {
+    return name.text
+  }
 
-const constantRoutePaths = [
-  CHAT_WORKSPACE_PATH,
-  DOCUMENT_WORKSPACE_PATH,
-  MODERATION_PLAYGROUND_LEGACY_PATH,
-  MODERATION_REVIEW_PATH,
-  MODERATION_RULES_PATH,
-  PROTOTYPE_WORKSPACES_PATH,
-  RESEARCH_STUDIO_PATH,
-  REPO2TXT_PATH,
-  WORKSPACE_PLAYGROUND_PATH,
-  WORKSPACE_STUDIO_PATH
-]
+  return undefined
+}
 
-const optionRegistryPaths = Array.from(
-  new Set([...literalRoutePaths, ...constantRoutePaths])
+const getObjectProperty = (
+  objectLiteral: ts.ObjectLiteralExpression,
+  propertyName: string
+): ts.PropertyAssignment | undefined =>
+  objectLiteral.properties.find(
+    (property): property is ts.PropertyAssignment =>
+      ts.isPropertyAssignment(property) &&
+      getPropertyNameText(property.name) === propertyName
+  )
+
+const readRoutePathExpression = (
+  expression: ts.Expression,
+  context: string
+): string => {
+  if (
+    ts.isStringLiteral(expression) ||
+    ts.isNoSubstitutionTemplateLiteral(expression)
+  ) {
+    return expression.text
+  }
+
+  if (ts.isIdentifier(expression)) {
+    const value = routePathConstants[expression.text]
+
+    if (typeof value === "string") {
+      return value
+    }
+
+    throw new Error(
+      `Unable to resolve route path constant ${expression.text} in ${context}`
+    )
+  }
+
+  throw new Error(
+    `Unsupported route path expression ${expression.getText()} in ${context}`
+  )
+}
+
+const extractRoutePathsFromRouteObjects = (
+  source: string,
+  fileName: string
+): string[] => {
+  const sourceFile = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX
+  )
+  const routePaths: string[] = []
+
+  const visit = (node: ts.Node) => {
+    if (ts.isObjectLiteralExpression(node)) {
+      const pathProperty = getObjectProperty(node, "path")
+
+      if (pathProperty) {
+        const { line } = sourceFile.getLineAndCharacterOfPosition(
+          pathProperty.getStart(sourceFile)
+        )
+        routePaths.push(
+          readRoutePathExpression(
+            pathProperty.initializer,
+            `${fileName}:${line + 1}`
+          )
+        )
+      }
+    }
+
+    ts.forEachChild(node, visit)
+  }
+
+  visit(sourceFile)
+
+  return Array.from(new Set(routePaths)).sort()
+}
+
+const optionRegistryPaths = extractRoutePathsFromRouteObjects(
+  routeRegistrySource,
+  routeRegistryPath
 )
 
 const nonDynamicOptionRegistryPaths = optionRegistryPaths.filter(

@@ -9,6 +9,7 @@ import {
   type ShortcutModifier
 } from "@/hooks/useKeyboardShortcuts"
 import type { ShortcutConfig } from "@/hooks/keyboard/useShortcutConfig"
+import { CHAT_PATH } from "@/routes/route-paths"
 
 const mockShortcutConfig: ShortcutConfig = {
   focusTextarea: { key: "Escape", shiftKey: true },
@@ -97,11 +98,11 @@ describe("CommandPalette shortcut hints", () => {
     const goToChat = await screen.findByRole("option", { name: /Go to Chat/i })
 
     expect(goToChat).toHaveAttribute("data-command-id", "nav-chat")
-    expect(goToChat).toHaveAttribute("data-target-path", "/chat")
+    expect(goToChat).toHaveAttribute("data-target-path", CHAT_PATH)
 
     fireEvent.click(goToChat)
 
-    expect(screen.getByTestId("current-route")).toHaveTextContent("/chat")
+    expect(screen.getByTestId("current-route")).toHaveTextContent(CHAT_PATH)
   })
 
   it("shows configured shortcut hints only for actions with real keyboard bindings", async () => {

@@ -1,12 +1,14 @@
 import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import * as ts from "typescript"
 import { describe, expect, it } from "vitest"
 
 import {
   getRouteMetadata,
   isRouteVisibleForSurface
 } from "../route-metadata"
+import * as routePathExports from "../route-paths"
 
 const readFirstExistingSource = (
   candidates: string[],
@@ -22,6 +24,7 @@ const readFirstExistingSource = (
 }
 
 const testDir = path.dirname(fileURLToPath(import.meta.url))
+const routePathConstants = routePathExports as Record<string, unknown>
 
 const sharedSidepanelRegistrySource = readFirstExistingSource(
   [
@@ -60,26 +63,115 @@ const extensionOptionRegistrySource = readFirstExistingSource(
   "extension route-registry.tsx"
 )
 
-const extractLiteralRoutePaths = (source: string): string[] =>
-  Array.from(
-    source.matchAll(/path\s*:\s*["']([^"']+)["']/g),
-    (match) => match[1]
-  )
-
 const uniqueSorted = (values: string[]): string[] =>
   Array.from(new Set(values)).sort()
 
+const getPropertyNameText = (name: ts.PropertyName): string | undefined => {
+  if (
+    ts.isIdentifier(name) ||
+    ts.isStringLiteral(name) ||
+    ts.isNumericLiteral(name)
+  ) {
+    return name.text
+  }
+
+  return undefined
+}
+
+const getObjectProperty = (
+  objectLiteral: ts.ObjectLiteralExpression,
+  propertyName: string
+): ts.PropertyAssignment | undefined =>
+  objectLiteral.properties.find(
+    (property): property is ts.PropertyAssignment =>
+      ts.isPropertyAssignment(property) &&
+      getPropertyNameText(property.name) === propertyName
+  )
+
+const readRoutePathExpression = (
+  expression: ts.Expression,
+  context: string
+): string => {
+  if (
+    ts.isStringLiteral(expression) ||
+    ts.isNoSubstitutionTemplateLiteral(expression)
+  ) {
+    return expression.text
+  }
+
+  if (ts.isIdentifier(expression)) {
+    const value = routePathConstants[expression.text]
+
+    if (typeof value === "string") {
+      return value
+    }
+
+    throw new Error(
+      `Unable to resolve route path constant ${expression.text} in ${context}`
+    )
+  }
+
+  throw new Error(
+    `Unsupported route path expression ${expression.getText()} in ${context}`
+  )
+}
+
+const extractRoutePathsFromRouteObjects = (
+  source: string,
+  fileName: string,
+  options: { requireNav?: boolean } = {}
+): string[] => {
+  const sourceFile = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX
+  )
+  const routePaths: string[] = []
+
+  const visit = (node: ts.Node) => {
+    if (ts.isObjectLiteralExpression(node)) {
+      const pathProperty = getObjectProperty(node, "path")
+      const navProperty = getObjectProperty(node, "nav")
+
+      if (pathProperty && (!options.requireNav || navProperty)) {
+        const { line } = sourceFile.getLineAndCharacterOfPosition(
+          pathProperty.getStart(sourceFile)
+        )
+        routePaths.push(
+          readRoutePathExpression(
+            pathProperty.initializer,
+            `${fileName}:${line + 1}`
+          )
+        )
+      }
+    }
+
+    ts.forEachChild(node, visit)
+  }
+
+  visit(sourceFile)
+
+  return uniqueSorted(routePaths)
+}
+
 const sidepanelRoutePaths = uniqueSorted([
-  ...extractLiteralRoutePaths(sharedSidepanelRegistrySource),
-  ...extractLiteralRoutePaths(extensionSidepanelRegistrySource)
+  ...extractRoutePathsFromRouteObjects(
+    sharedSidepanelRegistrySource,
+    "shared sidepanel-route-registry.tsx"
+  ),
+  ...extractRoutePathsFromRouteObjects(
+    extensionSidepanelRegistrySource,
+    "extension sidepanel-route-registry.tsx"
+  )
 ])
 
 const extensionOptionNavPaths = uniqueSorted(
-  Array.from(
-    extensionOptionRegistrySource.matchAll(
-      /path\s*:\s*["']([^"']+)["'][\s\S]{0,500}?nav\s*:\s*{/g
-    ),
-    (match) => match[1]
+  extractRoutePathsFromRouteObjects(
+    extensionOptionRegistrySource,
+    "extension route-registry.tsx",
+    { requireNav: true }
   ).filter(
     (routePath) =>
       !routePath.includes(":") && !sidepanelRoutePaths.includes(routePath)
