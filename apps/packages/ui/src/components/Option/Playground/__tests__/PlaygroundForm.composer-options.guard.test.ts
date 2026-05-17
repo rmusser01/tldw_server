@@ -1,6 +1,6 @@
-import fs from "node:fs"
-import path from "node:path"
-import { describe, expect, it } from "vitest"
+import fs from "node:fs";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
 
 describe("PlaygroundForm composer options guard", () => {
   it("keeps the chevron toggle, persisted collapse state, and inline send row", () => {
@@ -16,6 +16,8 @@ describe("PlaygroundForm composer options guard", () => {
     expect(source).toContain('data-testid="composer-options-toggle"')
     expect(source).toContain('data-testid="composer-inline-send-control"')
     expect(sendControlSource).toContain("playground:actions.attachImage")
+    expect(source).toContain("<PlaygroundAttachmentButton")
+    expect(source).toContain("attachmentButton={attachmentButton}")
     expect(sendControlSource).toContain("min-h-[44px] min-w-[44px]")
     expect(source).toContain('id="composer-options-panel"')
     expect(source).toContain("optionsExpanded={composerOptionsExpanded}")

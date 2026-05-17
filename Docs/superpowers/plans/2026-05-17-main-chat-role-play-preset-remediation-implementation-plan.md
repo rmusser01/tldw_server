@@ -346,7 +346,7 @@ git commit -m "fix: stabilize chat role-play starter controls"
 - Modify: `apps/packages/ui/src/public/_locales/en/playground.json`
 - Modify: `apps/packages/ui/src/assets/locale/en/playground.json`
 
-- [ ] **Step 1: Write role-play state tests**
+- [x] **Step 1: Write role-play state tests**
 
 Create `role-play-state.test.ts`.
 
@@ -360,7 +360,7 @@ Test cases:
 - clearing generation style resets to `Balanced`;
 - pinned/context state is summarized but does not expose source management actions.
 
-- [ ] **Step 2: Implement derived state helper**
+- [x] **Step 2: Implement derived state helper**
 
 Create `role-play-state.ts`.
 
@@ -385,14 +385,14 @@ Rules:
 - no storage;
 - no API calls.
 
-- [ ] **Step 3: Export template lookup metadata**
+- [x] **Step 3: Export template lookup metadata**
 
 In `SystemPromptTemplates.tsx`:
 - export `PROMPT_TEMPLATES` or add `getPromptTemplateById(id)`;
 - preserve icons as UI-only where practical;
 - expose category/title/content for role-play state and saved setup detection.
 
-- [ ] **Step 4: Preserve behavior template identity after apply**
+- [x] **Step 4: Preserve behavior template identity after apply**
 
 In `PlaygroundForm.tsx`:
 - when `SystemPromptTemplatesModal` applies a template, store template id/title/category alongside `systemPrompt`;
@@ -401,7 +401,7 @@ In `PlaygroundForm.tsx`:
 
 Do not convert this into a backend object.
 
-- [ ] **Step 5: Write active chip tests**
+- [x] **Step 5: Write active chip tests**
 
 Extend or create tests around `usePlaygroundContextItems`.
 
@@ -412,7 +412,7 @@ Test cases:
 - character chip remove calls the existing selected-character clear path;
 - generation style chip clear/reset uses `Balanced`.
 
-- [ ] **Step 6: Render role-play chips from adapter**
+- [x] **Step 6: Render role-play chips from adapter**
 
 In `usePlaygroundContextItems.ts`:
 - accept `rolePlayState` or input fields needed to derive it;
@@ -421,7 +421,7 @@ In `usePlaygroundContextItems.ts`:
 - add safe clear/remove actions where handlers already exist.
 - when clearing generation style, apply `getPresetByKey("balanced")` settings.
 
-- [ ] **Step 7: Clarify labels and update i18n**
+- [x] **Step 7: Clarify labels and update i18n**
 
 Update user-facing copy through locale keys:
 - `Templates` -> `System prompts` or `Behavior templates`;
@@ -434,7 +434,7 @@ apps/packages/ui/src/public/_locales/en/playground.json
 apps/packages/ui/src/assets/locale/en/playground.json
 ```
 
-- [ ] **Step 8: Run Stage 2 focused tests**
+- [x] **Step 8: Run Stage 2 focused tests**
 
 Run:
 ```bash
@@ -446,7 +446,7 @@ bunx vitest run \
 
 Expected: pass.
 
-- [ ] **Step 9: Browser verify Stage 2**
+- [x] **Step 9: Browser verify Stage 2**
 
 On `/chat`:
 - apply `Character Actor`;
@@ -455,7 +455,11 @@ On `/chat`:
 - clear behavior without clearing character;
 - verify changed labels are not hard-coded English in components.
 
-- [ ] **Step 10: Commit Stage 2**
+Result:
+- Focused tests, locale parsing, and diff whitespace checks were completed.
+- Browser verification was attempted, but the in-app browser policy blocked `http://127.0.0.1:3001/chat` and explicitly prohibited raw CDP or alternate-browser workarounds for that target.
+
+- [x] **Step 10: Commit Stage 2**
 
 ```bash
 git add \

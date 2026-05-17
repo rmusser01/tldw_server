@@ -1,39 +1,39 @@
-import React from "react"
-import { Popover } from "antd"
-import { Settings2 } from "lucide-react"
-import { Button as TldwButton } from "@/components/Common/Button"
-import type { KnowledgeTab } from "@/components/Knowledge"
+import React from "react";
+import { Popover } from "antd";
+import { Settings2 } from "lucide-react";
+import { Button as TldwButton } from "@/components/Common/Button";
+import type { KnowledgeTab } from "@/components/Knowledge";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export interface PlaygroundModeLauncherProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 
-  compareModeActive: boolean
-  compareFeatureEnabled: boolean
-  onToggleCompare: () => void
+  compareModeActive: boolean;
+  compareFeatureEnabled: boolean;
+  onToggleCompare: () => void;
 
-  selectedCharacterName: string | null
-  onOpenActorSettings: () => void
+  selectedCharacterName: string | null;
+  onOpenActorSettings: () => void;
 
-  contextToolsOpen: boolean
-  onToggleKnowledgePanel: () => void
+  contextToolsOpen: boolean;
+  onToggleKnowledgePanel: () => void;
 
-  voiceChatEnabled: boolean
-  voiceChatAvailable: boolean
-  voiceChatUnavailableReason?: string | null
-  isSending: boolean
-  onVoiceChatToggle: () => void
+  voiceChatEnabled: boolean;
+  voiceChatAvailable: boolean;
+  voiceChatUnavailableReason?: string | null;
+  isSending: boolean;
+  onVoiceChatToggle: () => void;
 
-  webSearch: boolean
-  hasWebSearch: boolean
-  onToggleWebSearch: () => void
+  webSearch: boolean;
+  hasWebSearch: boolean;
+  onToggleWebSearch: () => void;
 
-  onModeAnnouncement: (msg: string) => void
-  t: (key: string, defaultValue?: string, options?: any) => any
+  onModeAnnouncement: (msg: string) => void;
+  t: (key: string, defaultValue?: string, options?: any) => any;
 }
 
 // ---------------------------------------------------------------------------
@@ -61,8 +61,8 @@ export const PlaygroundModeLauncher: React.FC<PlaygroundModeLauncherProps> =
       hasWebSearch,
       onToggleWebSearch,
       onModeAnnouncement,
-      t
-    } = props
+      t,
+    } = props;
 
     const content = (
       <div className="flex w-72 flex-col gap-1 p-1">
@@ -72,20 +72,20 @@ export const PlaygroundModeLauncher: React.FC<PlaygroundModeLauncherProps> =
         <button
           type="button"
           onClick={() => {
-            const next = !compareModeActive
-            onToggleCompare()
+            const next = !compareModeActive;
+            onToggleCompare();
             onModeAnnouncement(
               next
                 ? t(
                     "playground:composer.modeCompareEnabled",
-                    "Compare mode enabled."
+                    "Compare mode enabled.",
                   )
                 : t(
                     "playground:composer.modeCompareDisabled",
-                    "Compare mode disabled."
-                  )
-            )
-            onOpenChange(false)
+                    "Compare mode disabled.",
+                  ),
+            );
+            onOpenChange(false);
           }}
           disabled={!compareFeatureEnabled}
           className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm text-text transition hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50"
@@ -94,34 +94,32 @@ export const PlaygroundModeLauncher: React.FC<PlaygroundModeLauncherProps> =
             {t("playground:composer.modeCompare", "Compare responses")}
           </span>
           <span className="text-xs text-text-muted">
-            {compareModeActive
-              ? t("common:on", "On")
-              : t("common:off", "Off")}
+            {compareModeActive ? t("common:on", "On") : t("common:off", "Off")}
           </span>
         </button>
         <button
           type="button"
           onClick={() => {
-            onOpenActorSettings()
+            onOpenActorSettings();
             onModeAnnouncement(
               t(
                 "playground:composer.modeCharacterNotice",
-                "Character settings opened."
-              )
-            )
-            onOpenChange(false)
+                "Character / scene settings opened.",
+              ),
+            );
+            onOpenChange(false);
           }}
           className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm text-text transition hover:bg-surface2"
         >
           <span>
-            {t("playground:composer.modeCharacter", "Character mode")}
+            {t("playground:composer.modeCharacter", "Character / Scene")}
           </span>
           <span className="truncate text-xs text-text-muted">
             {selectedCharacterName
               ? t(
                   "playground:composer.modeCharacterActive",
                   "Active: {{name}}",
-                  { name: selectedCharacterName }
+                  { name: selectedCharacterName },
                 )
               : t("common:off", "Off")}
           </span>
@@ -129,20 +127,20 @@ export const PlaygroundModeLauncher: React.FC<PlaygroundModeLauncherProps> =
         <button
           type="button"
           onClick={() => {
-            const nextOpen = !contextToolsOpen
-            onToggleKnowledgePanel()
+            const nextOpen = !contextToolsOpen;
+            onToggleKnowledgePanel();
             onModeAnnouncement(
               nextOpen
                 ? t(
                     "playground:composer.modeKnowledgeOpened",
-                    "Search & Context panel opened."
+                    "Search & Context panel opened.",
                   )
                 : t(
                     "playground:composer.modeKnowledgeClosed",
-                    "Search & Context panel closed."
-                  )
-            )
-            onOpenChange(false)
+                    "Search & Context panel closed.",
+                  ),
+            );
+            onOpenChange(false);
           }}
           className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm text-text transition hover:bg-surface2"
         >
@@ -158,69 +156,61 @@ export const PlaygroundModeLauncher: React.FC<PlaygroundModeLauncherProps> =
         <button
           type="button"
           onClick={() => {
-            onVoiceChatToggle()
+            onVoiceChatToggle();
             onModeAnnouncement(
               voiceChatEnabled
                 ? t(
                     "playground:composer.modeVoiceDisabled",
-                    "Voice mode disabled."
+                    "Voice mode disabled.",
                   )
                 : t(
                     "playground:composer.modeVoiceEnabled",
-                    "Voice mode enabled."
-                  )
-            )
-            onOpenChange(false)
+                    "Voice mode enabled.",
+                  ),
+            );
+            onOpenChange(false);
           }}
           disabled={!voiceChatAvailable || isSending}
           title={
             !voiceChatAvailable
-              ? voiceChatUnavailableReason ?? undefined
+              ? (voiceChatUnavailableReason ?? undefined)
               : undefined
           }
           className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm text-text transition hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          <span>
-            {t("playground:composer.modeVoice", "Voice mode")}
-          </span>
+          <span>{t("playground:composer.modeVoice", "Voice mode")}</span>
           <span className="text-xs text-text-muted">
-            {voiceChatEnabled
-              ? t("common:on", "On")
-              : t("common:off", "Off")}
+            {voiceChatEnabled ? t("common:on", "On") : t("common:off", "Off")}
           </span>
         </button>
         <button
           type="button"
           onClick={() => {
-            if (!hasWebSearch) return
-            onToggleWebSearch()
+            if (!hasWebSearch) return;
+            onToggleWebSearch();
             onModeAnnouncement(
               webSearch
                 ? t(
                     "playground:composer.modeWebSearchDisabled",
-                    "Web search disabled."
+                    "Web search disabled.",
                   )
                 : t(
                     "playground:composer.modeWebSearchEnabled",
-                    "Web search enabled."
-                  )
-            )
-            onOpenChange(false)
+                    "Web search enabled.",
+                  ),
+            );
+            onOpenChange(false);
           }}
           disabled={!hasWebSearch}
           className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm text-text transition hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          <span>
-            {t("playground:composer.modeWebSearch", "Web search")}
-          </span>
+          <span>{t("playground:composer.modeWebSearch", "Web search")}</span>
           <span className="text-xs text-text-muted">
-            {webSearch
-              ? t("common:on", "On")
-              : t("common:off", "Off")}
+            {webSearch ? t("common:on", "On") : t("common:off", "Off")}
           </span>
         </button>
       </div>
-    )
+    );
 
     return (
       <Popover
@@ -244,5 +234,5 @@ export const PlaygroundModeLauncher: React.FC<PlaygroundModeLauncherProps> =
           </span>
         </TldwButton>
       </Popover>
-    )
-  })
+    );
+  });

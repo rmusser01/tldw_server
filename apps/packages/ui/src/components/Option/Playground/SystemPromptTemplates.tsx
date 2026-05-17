@@ -1,7 +1,7 @@
-import React from "react"
-import { Modal, Input, Tabs, Empty, Tooltip } from "antd"
-import { useTranslation } from "react-i18next"
-import { useStoreChatModelSettings } from "@/store/model"
+import React from "react";
+import { Modal, Input, Tabs, Empty, Tooltip } from "antd";
+import { useTranslation } from "react-i18next";
+import { useStoreChatModelSettings } from "@/store/model";
 import {
   BookText,
   Code2,
@@ -18,8 +18,8 @@ import {
   Briefcase,
   Bot,
   Copy,
-  Check
-} from "lucide-react"
+  Check,
+} from "lucide-react";
 
 export type PromptCategory =
   | "general"
@@ -27,17 +27,19 @@ export type PromptCategory =
   | "writing"
   | "analysis"
   | "roleplay"
-  | "specialized"
+  | "specialized";
 
 export type PromptTemplate = {
-  id: string
-  title: string
-  description: string
-  category: PromptCategory
-  content: string
-  icon: React.ReactNode
-  tags: string[]
-}
+  id: string;
+  title: string;
+  description: string;
+  category: PromptCategory;
+  content: string;
+  icon: React.ReactNode;
+  tags: string[];
+};
+
+export type PromptTemplateMetadata = Omit<PromptTemplate, "icon">;
 
 const PROMPT_TEMPLATES: PromptTemplate[] = [
   // General
@@ -55,7 +57,7 @@ Guidelines:
 - Ask clarifying questions if the request is ambiguous
 - Be respectful and professional`,
     icon: <Bot className="h-4 w-4" />,
-    tags: ["default", "general", "helpful"]
+    tags: ["default", "general", "helpful"],
   },
   {
     id: "concise-responder",
@@ -70,7 +72,7 @@ Rules:
 - Skip pleasantries unless specifically asked
 - If a simple yes/no suffices, provide just that with brief reasoning`,
     icon: <Target className="h-4 w-4" />,
-    tags: ["concise", "direct", "minimal"]
+    tags: ["concise", "direct", "minimal"],
   },
   {
     id: "socratic-teacher",
@@ -86,7 +88,7 @@ Approach:
 - Provide hints when the user is stuck, but let them connect the dots
 - Celebrate when they reach insights on their own`,
     icon: <GraduationCap className="h-4 w-4" />,
-    tags: ["teaching", "learning", "socratic"]
+    tags: ["teaching", "learning", "socratic"],
   },
 
   // Coding
@@ -105,7 +107,7 @@ Guidelines:
 - Suggest improvements and optimizations
 - Use appropriate data structures and algorithms`,
     icon: <Code2 className="h-4 w-4" />,
-    tags: ["programming", "development", "code"]
+    tags: ["programming", "development", "code"],
   },
   {
     id: "code-reviewer",
@@ -122,7 +124,7 @@ Guidelines:
 
 Provide specific, actionable feedback with examples of improved code.`,
     icon: <Search className="h-4 w-4" />,
-    tags: ["review", "quality", "bugs"]
+    tags: ["review", "quality", "bugs"],
   },
   {
     id: "debugging-assistant",
@@ -140,7 +142,7 @@ Process:
 
 Ask clarifying questions about error messages, stack traces, and reproduction steps.`,
     icon: <Target className="h-4 w-4" />,
-    tags: ["debugging", "bugs", "troubleshooting"]
+    tags: ["debugging", "bugs", "troubleshooting"],
   },
 
   // Writing
@@ -159,7 +161,7 @@ Capabilities:
 - Offer constructive feedback on writing
 - Adapt to various genres and styles`,
     icon: <Sparkles className="h-4 w-4" />,
-    tags: ["creative", "fiction", "storytelling"]
+    tags: ["creative", "fiction", "storytelling"],
   },
   {
     id: "technical-writer",
@@ -176,7 +178,7 @@ Standards:
 - Use consistent formatting and terminology
 - Consider the target audience's expertise level`,
     icon: <BookText className="h-4 w-4" />,
-    tags: ["documentation", "technical", "clarity"]
+    tags: ["documentation", "technical", "clarity"],
   },
   {
     id: "editor-proofreader",
@@ -193,7 +195,7 @@ Standards:
 
 Provide tracked changes with explanations, or offer suggestions while preserving the author's voice.`,
     icon: <Pen className="h-4 w-4" />,
-    tags: ["editing", "proofreading", "polish"]
+    tags: ["editing", "proofreading", "polish"],
   },
 
   // Analysis
@@ -212,7 +214,7 @@ Approach:
 - Note limitations and caveats
 - Suggest follow-up analyses`,
     icon: <Target className="h-4 w-4" />,
-    tags: ["data", "statistics", "insights"]
+    tags: ["data", "statistics", "insights"],
   },
   {
     id: "research-assistant",
@@ -229,7 +231,7 @@ Capabilities:
 - Help formulate research questions
 - Note limitations and biases in sources`,
     icon: <Search className="h-4 w-4" />,
-    tags: ["research", "academic", "literature"]
+    tags: ["research", "academic", "literature"],
   },
 
   // Roleplay
@@ -248,7 +250,7 @@ Capabilities:
 
 Signal clearly when breaking character if needed for clarification.`,
     icon: <Users className="h-4 w-4" />,
-    tags: ["roleplay", "character", "acting"]
+    tags: ["roleplay", "character", "acting"],
   },
   {
     id: "interview-prep",
@@ -264,7 +266,7 @@ Modes:
 
 Provide constructive feedback on communication, content, and confidence.`,
     icon: <Briefcase className="h-4 w-4" />,
-    tags: ["interview", "career", "practice"]
+    tags: ["interview", "career", "practice"],
   },
 
   // Specialized
@@ -284,7 +286,7 @@ Requirements:
 
 If the request is unclear, ask for the expected schema first.`,
     icon: <FileJson className="h-4 w-4" />,
-    tags: ["json", "structured", "data"]
+    tags: ["json", "structured", "data"],
   },
   {
     id: "security-reviewer",
@@ -303,7 +305,7 @@ Focus areas:
 
 Provide severity ratings and remediation guidance.`,
     icon: <Shield className="h-4 w-4" />,
-    tags: ["security", "vulnerabilities", "audit"]
+    tags: ["security", "vulnerabilities", "audit"],
   },
   {
     id: "prompt-engineer",
@@ -320,9 +322,9 @@ Guidance:
 - Structure complex prompts logically
 - Iterate and refine based on results`,
     icon: <Wand2 className="h-4 w-4" />,
-    tags: ["prompts", "ai", "engineering"]
-  }
-]
+    tags: ["prompts", "ai", "engineering"],
+  },
+];
 
 const CATEGORY_INFO: Record<
   PromptCategory,
@@ -333,55 +335,68 @@ const CATEGORY_INFO: Record<
   writing: { label: "Writing", icon: <Pen className="h-4 w-4" /> },
   analysis: { label: "Analysis", icon: <Search className="h-4 w-4" /> },
   roleplay: { label: "Roleplay", icon: <Users className="h-4 w-4" /> },
-  specialized: { label: "Specialized", icon: <Wand2 className="h-4 w-4" /> }
-}
+  specialized: { label: "Specialized", icon: <Wand2 className="h-4 w-4" /> },
+};
+
+const toPromptTemplateMetadata = ({
+  icon: _icon,
+  ...template
+}: PromptTemplate): PromptTemplateMetadata => template;
+
+export const getPromptTemplateById = (
+  id: string | null | undefined,
+): PromptTemplateMetadata | null => {
+  if (!id) return null;
+  const template = PROMPT_TEMPLATES.find((entry) => entry.id === id);
+  return template ? toPromptTemplateMetadata(template) : null;
+};
 
 type Props = {
-  open: boolean
-  onClose: () => void
-  onSelect: (template: PromptTemplate) => void
-}
+  open: boolean;
+  onClose: () => void;
+  onSelect: (template: PromptTemplate) => void;
+};
 
 export const SystemPromptTemplatesModal: React.FC<Props> = ({
   open,
   onClose,
-  onSelect
+  onSelect,
 }) => {
-  const { t } = useTranslation(["playground", "common"])
-  const [searchQuery, setSearchQuery] = React.useState("")
-  const [activeCategory, setActiveCategory] = React.useState<string>("all")
-  const [copiedId, setCopiedId] = React.useState<string | null>(null)
+  const { t } = useTranslation(["playground", "common"]);
+  const [searchQuery, setSearchQuery] = React.useState("");
+  const [activeCategory, setActiveCategory] = React.useState<string>("all");
+  const [copiedId, setCopiedId] = React.useState<string | null>(null);
 
   const filteredTemplates = React.useMemo(() => {
-    let templates = PROMPT_TEMPLATES
+    let templates = PROMPT_TEMPLATES;
 
     if (activeCategory !== "all") {
-      templates = templates.filter((t) => t.category === activeCategory)
+      templates = templates.filter((t) => t.category === activeCategory);
     }
 
     if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase()
+      const query = searchQuery.toLowerCase();
       templates = templates.filter(
         (t) =>
           t.title.toLowerCase().includes(query) ||
           t.description.toLowerCase().includes(query) ||
-          t.tags.some((tag) => tag.includes(query))
-      )
+          t.tags.some((tag) => tag.includes(query)),
+      );
     }
 
-    return templates
-  }, [activeCategory, searchQuery])
+    return templates;
+  }, [activeCategory, searchQuery]);
 
   const handleCopy = async (template: PromptTemplate) => {
-    await navigator.clipboard.writeText(template.content)
-    setCopiedId(template.id)
-    setTimeout(() => setCopiedId(null), 2000)
-  }
+    await navigator.clipboard.writeText(template.content);
+    setCopiedId(template.id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
 
   const handleSelect = (template: PromptTemplate) => {
-    onSelect(template)
-    onClose()
-  }
+    onSelect(template);
+    onClose();
+  };
 
   const tabItems = [
     { key: "all", label: t("playground:templates.all", "All") },
@@ -392,28 +407,29 @@ export const SystemPromptTemplatesModal: React.FC<Props> = ({
           {icon}
           <span>{t(`playground:templates.category.${key}`, label)}</span>
         </div>
-      )
-    }))
-  ]
+      ),
+    })),
+  ];
 
   return (
     <Modal
       title={
         <div className="flex items-center gap-2">
           <BookText className="h-5 w-5 text-primary" />
-          {t("playground:templates.title", "System Prompt Templates")}
+          {t("playground:templates.title", "System prompts")}
         </div>
       }
       open={open}
       onCancel={onClose}
       footer={null}
       width={700}
-      className="prompt-templates-modal">
+      className="prompt-templates-modal"
+    >
       <div className="space-y-4">
         <Input
           placeholder={t(
             "playground:templates.search",
-            "Search templates..."
+            "Search system prompts...",
           )}
           prefix={<Search className="h-4 w-4 text-text-subtle" />}
           value={searchQuery}
@@ -433,14 +449,15 @@ export const SystemPromptTemplatesModal: React.FC<Props> = ({
             <Empty
               description={t(
                 "playground:templates.noResults",
-                "No templates found"
+                "No system prompts found",
               )}
             />
           ) : (
             filteredTemplates.map((template) => (
               <div
                 key={template.id}
-                className="group rounded-lg border border-border bg-surface p-3 transition-colors hover:border-primary/50 hover:bg-surface-hover">
+                className="group rounded-lg border border-border bg-surface p-3 transition-colors hover:border-primary/50 hover:bg-surface-hover"
+              >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-start gap-3">
                     <div className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary">
@@ -455,7 +472,8 @@ export const SystemPromptTemplatesModal: React.FC<Props> = ({
                         {template.tags.map((tag) => (
                           <span
                             key={tag}
-                            className="rounded bg-surface-hover px-1.5 py-0.5 text-[10px] text-text-subtle">
+                            className="rounded bg-surface-hover px-1.5 py-0.5 text-[10px] text-text-subtle"
+                          >
                             {tag}
                           </span>
                         ))}
@@ -464,11 +482,13 @@ export const SystemPromptTemplatesModal: React.FC<Props> = ({
                   </div>
                   <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                     <Tooltip
-                      title={t("playground:templates.copy", "Copy to clipboard")}>
+                      title={t("playground:templates.copy", "Copy prompt")}
+                    >
                       <button
                         type="button"
                         onClick={() => handleCopy(template)}
-                        className="rounded p-1.5 text-text-muted hover:bg-surface hover:text-text">
+                        className="rounded p-1.5 text-text-muted hover:bg-surface hover:text-text"
+                      >
                         {copiedId === template.id ? (
                           <Check className="h-4 w-4 text-success" />
                         ) : (
@@ -476,11 +496,14 @@ export const SystemPromptTemplatesModal: React.FC<Props> = ({
                         )}
                       </button>
                     </Tooltip>
-                    <Tooltip title={t("playground:templates.use", "Use template")}>
+                    <Tooltip
+                      title={t("playground:templates.use", "Use prompt")}
+                    >
                       <button
                         type="button"
                         onClick={() => handleSelect(template)}
-                        className="rounded bg-primary px-2 py-1 text-xs font-medium text-surface hover:bg-primaryStrong">
+                        className="rounded bg-primary px-2 py-1 text-xs font-medium text-surface hover:bg-primaryStrong"
+                      >
                         {t("common:use", "Use")}
                       </button>
                     </Tooltip>
@@ -492,31 +515,32 @@ export const SystemPromptTemplatesModal: React.FC<Props> = ({
         </div>
       </div>
     </Modal>
-  )
-}
+  );
+};
 
 type TemplatesButtonProps = {
-  onSelect: (template: PromptTemplate) => void
-  className?: string
-}
+  onSelect: (template: PromptTemplate) => void;
+  className?: string;
+};
 
 export const SystemPromptTemplatesButton: React.FC<TemplatesButtonProps> = ({
   onSelect,
-  className
+  className,
 }) => {
-  const { t } = useTranslation(["playground"])
-  const [open, setOpen] = React.useState(false)
+  const { t } = useTranslation(["playground"]);
+  const [open, setOpen] = React.useState(false);
 
   return (
     <>
-      <Tooltip title={t("playground:templates.title", "System Prompt Templates")}>
+      <Tooltip title={t("playground:templates.title", "System prompts")}>
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className={`flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-text-muted transition-colors hover:border-primary/50 hover:bg-surface-hover hover:text-text ${className || ""}`}>
+          className={`flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-text-muted transition-colors hover:border-primary/50 hover:bg-surface-hover hover:text-text ${className || ""}`}
+        >
           <BookText className="h-4 w-4" />
           <span className="hidden sm:inline">
-            {t("playground:templates.button", "Templates")}
+            {t("playground:templates.button", "System prompts")}
           </span>
         </button>
       </Tooltip>
@@ -526,7 +550,7 @@ export const SystemPromptTemplatesButton: React.FC<TemplatesButtonProps> = ({
         onSelect={onSelect}
       />
     </>
-  )
-}
+  );
+};
 
-export { PROMPT_TEMPLATES, CATEGORY_INFO }
+export { PROMPT_TEMPLATES, CATEGORY_INFO };

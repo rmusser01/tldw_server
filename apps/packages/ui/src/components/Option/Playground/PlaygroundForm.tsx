@@ -39,6 +39,7 @@ import type { DictationModePreference } from "@/hooks/useDictationStrategy";
 import { useMcpTools } from "@/hooks/useMcpTools";
 import { useMobile } from "@/hooks/useMediaQuery";
 // isMac moved to PlaygroundSendControl
+import { useSelectedAssistant } from "@/hooks/useSelectedAssistant";
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter";
 import { useServerCapabilities } from "@/hooks/useServerCapabilities";
 import { useTldwAudioStatus } from "@/hooks/useTldwAudioStatus";
@@ -188,6 +189,8 @@ import {
   type McpSettingsOpenDetail,
   type ModelSettingsOpenDetail,
 } from "./playground-cockpit-actions";
+import { deriveRolePlayState, type RolePlayIdentity } from "./role-play-state";
+import { getPromptTemplateById } from "./SystemPromptTemplates";
 // buildImagePromptRefineMessages, extractImagePromptRefineCandidate moved to usePlaygroundImageGen
 // QueuedRequest moved to usePlaygroundQueueManagement
 // WeightedImagePromptContextEntry moved to usePlaygroundImageGen
@@ -435,7 +438,11 @@ export const PlaygroundForm = ({
   const { t: translate } = useTranslation(["playground", "common", "option"]);
   const t = React.useCallback(
     (key: string, defaultValueOrOptions?: any, options?: any) =>
-      translate(key as any, defaultValueOrOptions as any, options as any) as string,
+      translate(
+        key as any,
+        defaultValueOrOptions as any,
+        options as any,
+      ) as string,
     [translate],
   );
   const notificationApi = useAntdNotification();
@@ -617,6 +624,7 @@ export const PlaygroundForm = ({
     llamaGrammarInline: state.llamaGrammarInline,
     llamaGrammarOverride: state.llamaGrammarOverride,
     jsonMode: state.jsonMode,
+    systemPromptTemplateId: state.systemPromptTemplateId,
   }));
   const numCtx = useStoreChatModelSettings((state) => state.numCtx);
   const updateChatModelSetting = useStoreChatModelSettings(
@@ -933,6 +941,7 @@ export const PlaygroundForm = ({
   const [sttSegEmbeddingsModel] = useStorage("sttSegEmbeddingsModel", "");
   const [selectedCharacter, setSelectedCharacter] =
     useSelectedCharacter<Character | null>(null);
+  const [selectedAssistant] = useSelectedAssistant(null);
   const [defaultCharacter, setDefaultCharacter] = useStorage<Character | null>(
     {
       key: DEFAULT_CHARACTER_STORAGE_KEY,
@@ -1924,6 +1933,31 @@ export const PlaygroundForm = ({
     setSelectedSystemPrompt("");
     setSystemPrompt("");
   }, [setSelectedQuickPrompt, setSelectedSystemPrompt, setSystemPrompt]);
+  const clearBehaviorTemplateIdentity = React.useCallback(() => {
+    updateChatModelSetting("systemPromptTemplateId", undefined);
+  }, [updateChatModelSetting]);
+  const setSelectedSystemPromptForComposer = React.useCallback(
+    (id: string | undefined) => {
+      clearBehaviorTemplateIdentity();
+      setSelectedSystemPrompt(id);
+    },
+    [clearBehaviorTemplateIdentity, setSelectedSystemPrompt],
+  );
+  const setSelectedQuickPromptForComposer = React.useCallback(
+    (prompt: string | undefined) => {
+      clearBehaviorTemplateIdentity();
+      setSelectedQuickPrompt(prompt);
+    },
+    [clearBehaviorTemplateIdentity, setSelectedQuickPrompt],
+  );
+  const clearRolePlayIdentity = React.useCallback(() => {
+    void setSelectedCharacter(null);
+  }, [setSelectedCharacter]);
+  const resetRolePlayGenerationStyle = React.useCallback(() => {
+    const preset = getPresetByKey("balanced");
+    if (!preset) return;
+    updateChatModelSettings(preset.settings);
+  }, [updateChatModelSettings]);
   const clearPinnedSourceContext = React.useCallback(() => {
     setRagPinnedResults([]);
   }, [setRagPinnedResults]);
@@ -3761,6 +3795,81 @@ export const PlaygroundForm = ({
     ],
   );
 
+  const behaviorTemplateMetadata = React.useMemo(
+    () =>
+      getPromptTemplateById(currentChatModelSettings.systemPromptTemplateId),
+    [currentChatModelSettings.systemPromptTemplateId],
+  );
+  const rolePlayIdentity = React.useMemo<RolePlayIdentity | null>(() => {
+    if (
+      selectedAssistant?.kind === "character" ||
+      selectedAssistant?.kind === "persona"
+    ) {
+      return {
+        kind: selectedAssistant.kind,
+        id: selectedAssistant.id,
+        name: selectedAssistant.name,
+      };
+    }
+    if (selectedCharacter?.id || selectedCharacter?.name) {
+      return {
+        kind: "character",
+        id:
+          selectedCharacter?.id != null
+            ? String(selectedCharacter.id)
+            : undefined,
+        name: selectedCharacter?.name,
+      };
+    }
+    return null;
+  }, [selectedAssistant, selectedCharacter]);
+  const rolePlayState = React.useMemo(
+    () =>
+      deriveRolePlayState({
+        identity: rolePlayIdentity,
+        systemPrompt,
+        selectedSystemPrompt,
+        selectedQuickPrompt,
+        behaviorTemplate: behaviorTemplateMetadata,
+        generationStyle:
+          currentPreset && currentPreset.key !== "custom"
+            ? {
+                key: currentPreset.key,
+                label: toText(
+                  t(
+                    `playground:presets.${currentPreset.key}.label`,
+                    currentPreset.label,
+                  ),
+                ),
+              }
+            : null,
+        context: {
+          pinnedCount: ragPinnedResults.length,
+          hasExternalContext:
+            selectedDocuments.length > 0 ||
+            uploadedFiles.length > 0 ||
+            contextFiles.length > 0 ||
+            documentContext.length > 0 ||
+            Boolean(attachedResearchContext),
+        },
+      }),
+    [
+      attachedResearchContext,
+      behaviorTemplateMetadata,
+      contextFiles.length,
+      currentPreset,
+      documentContext.length,
+      ragPinnedResults.length,
+      rolePlayIdentity,
+      selectedDocuments.length,
+      selectedQuickPrompt,
+      selectedSystemPrompt,
+      systemPrompt,
+      t,
+      uploadedFiles.length,
+    ],
+  );
+
   const contextItems = usePlaygroundContextItems({
     selectedModel,
     modelSummaryLabel,
@@ -3798,6 +3907,10 @@ export const PlaygroundForm = ({
     openContextWindowModal,
     openSessionInsightsModal,
     updateChatModelSetting,
+    rolePlayState,
+    onClearRolePlayIdentity: clearRolePlayIdentity,
+    onClearRolePlayBehavior: clearPromptContext,
+    onResetRolePlayGenerationStyle: resetRolePlayGenerationStyle,
     t,
   });
 
@@ -5258,9 +5371,11 @@ export const PlaygroundForm = ({
                                 systemPrompt={systemPrompt}
                                 setSystemPrompt={setSystemPrompt}
                                 setSelectedSystemPrompt={
-                                  setSelectedSystemPrompt
+                                  setSelectedSystemPromptForComposer
                                 }
-                                setSelectedQuickPrompt={setSelectedQuickPrompt}
+                                setSelectedQuickPrompt={
+                                  setSelectedQuickPromptForComposer
+                                }
                                 temporaryChat={temporaryChat}
                                 onToggleTemporaryChat={
                                   handleToggleTemporaryChat

@@ -507,7 +507,26 @@
     "compareErrorTitle": "Response failed",
     "compareRetry": "Retry",
     "compareNoticesCollapse": "Show fewer",
-    "compareNoticesExpand": "{{count}} more notes"
+    "compareNoticesExpand": "{{count}} more notes",
+    "modeCharacter": "Character / Scene",
+    "modeCharacterNotice": "Character / scene settings opened.",
+    "modeCharacterActive": "Active: {{name}}",
+    "context": {
+      "character": "Character",
+      "persona": "Persona",
+      "assistant": "Assistant",
+      "systemPrompt": "System prompt",
+      "behavior": "Behavior",
+      "customSystemPrompt": "Custom",
+      "modifiedBehaviorTemplate": "{{title}} modified",
+      "scene": "Scene",
+      "sceneActive": "Active",
+      "generationStyle": "Generation style",
+      "context": "Context",
+      "rolePlayPinnedExternal": "{{count}} pinned + external",
+      "rolePlayPinnedCount": "{{count}} pinned",
+      "rolePlayExternal": "External"
+    }
   },
   "tour": {
     "modelTitle": "Choose a Model",
@@ -719,7 +738,8 @@
     "loadLocalHistoryDefault": "Something went wrong while loading local chat history."
   },
   "presets": {
-    "title": "Parameter Presets",
+    "title": "Generation style",
+    "generationStyle": "Generation style",
     "creative": {
       "label": "Creative",
       "description": "Higher temperature for creative writing, brainstorming, and varied responses"
@@ -776,13 +796,13 @@
     "activeHint": "Responses will be formatted as valid JSON"
   },
   "templates": {
-    "title": "System Prompt Templates",
-    "button": "Templates",
-    "search": "Search templates...",
+    "title": "System prompts",
+    "button": "System prompts",
+    "search": "Search system prompts...",
     "all": "All",
-    "noResults": "No templates found",
-    "copy": "Copy to clipboard",
-    "use": "Use template",
+    "noResults": "No system prompts found",
+    "copy": "Copy prompt",
+    "use": "Use prompt",
     "category": {
       "general": "General",
       "coding": "Coding",

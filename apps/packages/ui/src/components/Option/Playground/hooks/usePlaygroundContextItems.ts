@@ -1,50 +1,55 @@
-import React from "react"
-import type { ComposerContextItem } from "../ComposerToolbar"
-import type { KnowledgeTab } from "@/components/Knowledge"
-import { toText } from "./utils"
+import React from "react";
+import type { ComposerContextItem } from "../ComposerToolbar";
+import type { KnowledgeTab } from "@/components/Knowledge";
+import { toText } from "./utils";
+import type { RolePlayState } from "../role-play-state";
 
 export type UsePlaygroundContextItemsDeps = {
-  selectedModel: string | null | undefined
-  modelSummaryLabel: string
-  isSessionDegraded: boolean
-  connectionStatusLabel: string
-  compareModeActive: boolean
-  compareSelectedModels: string[]
-  currentPreset: { key: string; label: string } | null | undefined
-  selectedCharacterName: string | null
-  characterPendingApply: boolean
-  contextToolsOpen: boolean
-  ragPinnedResultsLength: number
-  webSearch: boolean
-  sessionUsageTotalTokens: number
-  sessionUsageLabel: string
-  selectedSystemPrompt: string | null | undefined
-  selectedQuickPrompt: string | null | undefined
-  systemPrompt: string | null | undefined
-  promptSummaryLabel: string
-  jsonMode: boolean
-  showTokenBudgetWarning: boolean
-  tokenBudgetRiskLevel: string
-  tokenBudgetRiskLabel: string
-  projectedBudgetUtilizationPercent: number | null | undefined
-  nonMessageContextPercent: number | null | undefined
-  showNonMessageContextWarning: boolean
-  temporaryChat: boolean
-  openModelApiSelector: () => void
-  focusConnectionCard: () => void
-  setOpenModelSettings: (open: boolean) => void
-  setOpenActorSettings: (open: boolean) => void
-  setContextToolsOpen: (open: boolean) => void
-  handleToggleWebSearch: () => void
-  openKnowledgePanel: (tab: KnowledgeTab) => void
-  openContextWindowModal: () => void
-  openSessionInsightsModal: () => void
-  updateChatModelSetting: (key: string, value: any) => void
-  t: (key: string, defaultValueOrOptions?: any, options?: any) => string
-}
+  selectedModel: string | null | undefined;
+  modelSummaryLabel: string;
+  isSessionDegraded: boolean;
+  connectionStatusLabel: string;
+  compareModeActive: boolean;
+  compareSelectedModels: string[];
+  currentPreset: { key: string; label: string } | null | undefined;
+  selectedCharacterName: string | null;
+  characterPendingApply: boolean;
+  contextToolsOpen: boolean;
+  ragPinnedResultsLength: number;
+  webSearch: boolean;
+  sessionUsageTotalTokens: number;
+  sessionUsageLabel: string;
+  selectedSystemPrompt: string | null | undefined;
+  selectedQuickPrompt: string | null | undefined;
+  systemPrompt: string | null | undefined;
+  promptSummaryLabel: string;
+  jsonMode: boolean;
+  showTokenBudgetWarning: boolean;
+  tokenBudgetRiskLevel: string;
+  tokenBudgetRiskLabel: string;
+  projectedBudgetUtilizationPercent: number | null | undefined;
+  nonMessageContextPercent: number | null | undefined;
+  showNonMessageContextWarning: boolean;
+  temporaryChat: boolean;
+  openModelApiSelector: () => void;
+  focusConnectionCard: () => void;
+  setOpenModelSettings: (open: boolean) => void;
+  setOpenActorSettings: (open: boolean) => void;
+  setContextToolsOpen: (open: boolean) => void;
+  handleToggleWebSearch: () => void;
+  openKnowledgePanel: (tab: KnowledgeTab) => void;
+  openContextWindowModal: () => void;
+  openSessionInsightsModal: () => void;
+  updateChatModelSetting: (key: string, value: any) => void;
+  rolePlayState?: RolePlayState | null;
+  onClearRolePlayIdentity?: () => void;
+  onClearRolePlayBehavior?: () => void;
+  onResetRolePlayGenerationStyle?: () => void;
+  t: (key: string, defaultValueOrOptions?: any, options?: any) => string;
+};
 
 export function usePlaygroundContextItems(
-  deps: UsePlaygroundContextItemsDeps
+  deps: UsePlaygroundContextItemsDeps,
 ): ComposerContextItem[] {
   const {
     selectedModel,
@@ -83,26 +88,31 @@ export function usePlaygroundContextItems(
     openContextWindowModal,
     openSessionInsightsModal,
     updateChatModelSetting,
-    t
-  } = deps
+    rolePlayState,
+    onClearRolePlayIdentity,
+    onClearRolePlayBehavior,
+    onResetRolePlayGenerationStyle,
+    t,
+  } = deps;
 
   return React.useMemo<ComposerContextItem[]>(() => {
-    const items: ComposerContextItem[] = []
+    const items: ComposerContextItem[] = [];
+    const hasRolePlayState = Boolean(rolePlayState?.active);
     items.push({
       id: "model",
       label: t("playground:composer.context.model", "Model"),
       value: selectedModel ? modelSummaryLabel : t("common:none", "None"),
       tone: selectedModel ? "active" : "warning",
-      onClick: openModelApiSelector
-    })
+      onClick: openModelApiSelector,
+    });
     if (isSessionDegraded) {
       items.push({
         id: "sessionStatus",
         label: t("playground:composer.context.sessionStatus", "Session status"),
         value: connectionStatusLabel,
         tone: "warning",
-        onClick: focusConnectionCard
-      })
+        onClick: focusConnectionCard,
+      });
     }
 
     if (compareModeActive) {
@@ -114,31 +124,161 @@ export function usePlaygroundContextItems(
             ? String(
                 t("playground:composer.context.compareCount", {
                   defaultValue: "{{count}} models",
-                  count: compareSelectedModels.length
-                } as any)
+                  count: compareSelectedModels.length,
+                } as any),
               )
             : String(t("playground:composer.context.compareOn", "On")),
         tone: "active",
-        onClick: () => setOpenModelSettings(true)
-      })
+        onClick: () => setOpenModelSettings(true),
+      });
     }
 
-    if (currentPreset && currentPreset.key !== "custom") {
+    if (hasRolePlayState && rolePlayState?.identity) {
+      const identityLabelKey =
+        rolePlayState.identity.kind === "persona"
+          ? "playground:composer.context.persona"
+          : rolePlayState.identity.kind === "assistant"
+            ? "playground:composer.context.assistant"
+            : "playground:composer.context.character";
+      const identityLabelFallback =
+        rolePlayState.identity.kind === "persona"
+          ? "Persona"
+          : rolePlayState.identity.kind === "assistant"
+            ? "Assistant"
+            : "Character";
+      const identityValue = characterPendingApply
+        ? toText(
+            t(
+              "playground:composer.context.characterNextTurn",
+              "{{name}} (next turn)",
+              {
+                name: rolePlayState.identity.name || identityLabelFallback,
+              } as any,
+            ),
+          )
+        : rolePlayState.identity.name ||
+          rolePlayState.identity.id ||
+          identityLabelFallback;
+      items.push({
+        id: "rolePlayIdentity",
+        label: toText(t(identityLabelKey, identityLabelFallback)),
+        value: identityValue,
+        tone: "active",
+        onClick: onClearRolePlayIdentity ?? (() => setOpenActorSettings(true)),
+      });
+    }
+
+    if (hasRolePlayState && rolePlayState?.behavior) {
+      const isCustomBehavior = rolePlayState.behavior.source === "custom";
+      const behaviorTitle =
+        rolePlayState.behavior.title ||
+        (isCustomBehavior
+          ? toText(
+              t("playground:composer.context.customSystemPrompt", "Custom"),
+            )
+          : toText(t("playground:composer.context.behavior", "Behavior")));
+      const behaviorValue = rolePlayState.behavior.modified
+        ? toText(
+            t(
+              "playground:composer.context.modifiedBehaviorTemplate",
+              "{{title}} modified",
+              { title: behaviorTitle } as any,
+            ),
+          )
+        : behaviorTitle;
+      items.push({
+        id: "rolePlayBehavior",
+        label: toText(
+          t(
+            isCustomBehavior
+              ? "playground:composer.context.systemPrompt"
+              : "playground:composer.context.behavior",
+            isCustomBehavior ? "System prompt" : "Behavior",
+          ),
+        ),
+        value: behaviorValue,
+        tone: "active",
+        ...(onClearRolePlayBehavior
+          ? { onClick: onClearRolePlayBehavior }
+          : {}),
+      });
+    }
+
+    if (hasRolePlayState && rolePlayState?.scene) {
+      items.push({
+        id: "rolePlayScene",
+        label: toText(t("playground:composer.context.scene", "Scene")),
+        value:
+          rolePlayState.scene.summary ||
+          toText(t("playground:composer.context.sceneActive", "Active")),
+        tone: "active",
+        onClick: () => setOpenActorSettings(true),
+      });
+    }
+
+    if (hasRolePlayState && rolePlayState?.generationStyle) {
+      items.push({
+        id: "rolePlayGenerationStyle",
+        label: toText(
+          t("playground:composer.context.generationStyle", "Generation style"),
+        ),
+        value: rolePlayState.generationStyle.label,
+        tone: "active",
+        ...(onResetRolePlayGenerationStyle
+          ? { onClick: onResetRolePlayGenerationStyle }
+          : {}),
+      });
+    }
+
+    if (
+      hasRolePlayState &&
+      rolePlayState?.context &&
+      (rolePlayState.context.pinnedCount > 0 ||
+        rolePlayState.context.hasExternalContext)
+    ) {
+      const { pinnedCount, hasExternalContext } = rolePlayState.context;
+      const contextValue =
+        pinnedCount > 0 && hasExternalContext
+          ? toText(
+              t("playground:composer.context.rolePlayPinnedExternal", {
+                defaultValue: "{{count}} pinned + external",
+                count: pinnedCount,
+              } as any),
+            )
+          : pinnedCount > 0
+            ? toText(
+                t("playground:composer.context.rolePlayPinnedCount", {
+                  defaultValue: "{{count}} pinned",
+                  count: pinnedCount,
+                } as any),
+              )
+            : toText(
+                t("playground:composer.context.rolePlayExternal", "External"),
+              );
+      items.push({
+        id: "rolePlayContext",
+        label: toText(t("playground:composer.context.context", "Context")),
+        value: contextValue,
+        tone: "active",
+      });
+    }
+
+    if (!hasRolePlayState && currentPreset && currentPreset.key !== "custom") {
       items.push({
         id: "preset",
         label: toText(t("playground:composer.context.preset", "Preset")),
         value: toText(
           t(
             `playground:presets.${currentPreset.key}.label`,
-            currentPreset.label
-          )
+            currentPreset.label,
+          ),
         ),
         tone: "active",
-        onClick: () => setOpenModelSettings(true)
-      })
+        onClick: () => setOpenModelSettings(true),
+      });
     }
 
-    if (selectedCharacterName) {
+    if (!hasRolePlayState && selectedCharacterName) {
       items.push({
         id: "character",
         label: toText(t("playground:composer.context.character", "Character")),
@@ -147,13 +287,13 @@ export function usePlaygroundContextItems(
               t(
                 "playground:composer.context.characterNextTurn",
                 "{{name}} (next turn)",
-                { name: selectedCharacterName } as any
-              )
+                { name: selectedCharacterName } as any,
+              ),
             )
           : selectedCharacterName,
         tone: "active",
-        onClick: () => setOpenActorSettings(true)
-      })
+        onClick: () => setOpenActorSettings(true),
+      });
     }
 
     if (contextToolsOpen) {
@@ -162,23 +302,23 @@ export function usePlaygroundContextItems(
         label: toText(t("playground:composer.context.knowledge", "Knowledge")),
         value: toText(t("common:open", "Open")),
         tone: "active",
-        onClick: () => setContextToolsOpen(false)
-      })
+        onClick: () => setContextToolsOpen(false),
+      });
     }
 
-    if (ragPinnedResultsLength > 0) {
+    if (!hasRolePlayState && ragPinnedResultsLength > 0) {
       items.push({
         id: "ragPinned",
         label: toText(t("playground:composer.context.pinnedSources", "Pinned")),
         value: toText(
           t("playground:composer.context.pinnedCount", {
             defaultValue: "{{count}} sources",
-            count: ragPinnedResultsLength
-          } as any)
+            count: ragPinnedResultsLength,
+          } as any),
         ),
         tone: "active",
-        onClick: () => openKnowledgePanel("search")
-      })
+        onClick: () => openKnowledgePanel("search"),
+      });
     }
 
     if (webSearch) {
@@ -187,8 +327,8 @@ export function usePlaygroundContextItems(
         label: toText(t("playground:composer.context.webSearch", "Web search")),
         value: toText(t("common:on", "On")),
         tone: "active",
-        onClick: handleToggleWebSearch
-      })
+        onClick: handleToggleWebSearch,
+      });
     }
     if (sessionUsageTotalTokens > 0) {
       items.push({
@@ -196,20 +336,21 @@ export function usePlaygroundContextItems(
         label: toText(t("playground:composer.context.session", "Session")),
         value: sessionUsageLabel,
         tone: "neutral",
-        onClick: openSessionInsightsModal
-      })
+        onClick: openSessionInsightsModal,
+      });
     }
     if (
-      selectedSystemPrompt ||
-      selectedQuickPrompt ||
-      String(systemPrompt || "").trim().length > 0
+      !hasRolePlayState &&
+      (selectedSystemPrompt ||
+        selectedQuickPrompt ||
+        String(systemPrompt || "").trim().length > 0)
     ) {
       items.push({
         id: "prompt",
         label: toText(t("playground:composer.context.prompt", "Prompt")),
         value: promptSummaryLabel,
-        tone: "active"
-      })
+        tone: "active",
+      });
     }
 
     if (jsonMode) {
@@ -217,14 +358,11 @@ export function usePlaygroundContextItems(
         id: "json",
         label: toText(t("playground:composer.context.json", "JSON mode")),
         value: toText(
-          t(
-            "playground:composer.context.jsonShort",
-            "Object responses"
-          )
+          t("playground:composer.context.jsonShort", "Object responses"),
         ),
         tone: "active",
-        onClick: () => updateChatModelSetting("jsonMode", undefined)
-      })
+        onClick: () => updateChatModelSetting("jsonMode", undefined),
+      });
     }
 
     if (showTokenBudgetWarning) {
@@ -237,37 +375,41 @@ export function usePlaygroundContextItems(
             : ""
         }`,
         tone: "warning",
-        onClick: openContextWindowModal
-      })
+        onClick: openContextWindowModal,
+      });
     }
     if (tokenBudgetRiskLevel !== "unknown" && !showTokenBudgetWarning) {
       items.push({
         id: "truncationRisk",
-        label: toText(t("playground:composer.context.truncationRisk", "Truncation")),
+        label: toText(
+          t("playground:composer.context.truncationRisk", "Truncation"),
+        ),
         value: tokenBudgetRiskLabel,
         tone:
           tokenBudgetRiskLevel === "high" || tokenBudgetRiskLevel === "critical"
             ? "warning"
             : "neutral",
-        onClick: openContextWindowModal
-      })
+        onClick: openContextWindowModal,
+      });
     }
     if (nonMessageContextPercent != null) {
       items.push({
         id: "contextMix",
-        label: toText(t("playground:composer.context.contextMix", "Context mix")),
+        label: toText(
+          t("playground:composer.context.contextMix", "Context mix"),
+        ),
         value: toText(
           t(
             "playground:composer.context.nonMessageShare",
             "{{percent}}% non-message",
             {
-              percent: Math.max(0, Math.round(nonMessageContextPercent))
-            } as any
-          )
+              percent: Math.max(0, Math.round(nonMessageContextPercent)),
+            } as any,
+          ),
         ),
         tone: showNonMessageContextWarning ? "warning" : "neutral",
-        onClick: openContextWindowModal
-      })
+        onClick: openContextWindowModal,
+      });
     }
 
     if (temporaryChat) {
@@ -275,17 +417,18 @@ export function usePlaygroundContextItems(
         id: "temporary",
         label: toText(t("playground:composer.context.temporary", "Temporary")),
         value: toText(t("playground:composer.context.notSaved", "Not saved")),
-        tone: "warning"
-      })
+        tone: "warning",
+      });
     }
 
-    return items
+    return items;
   }, [
     compareModeActive,
     compareSelectedModels.length,
     connectionStatusLabel,
     contextToolsOpen,
     currentPreset,
+    rolePlayState,
     jsonMode,
     focusConnectionCard,
     handleToggleWebSearch,
@@ -316,6 +459,9 @@ export function usePlaygroundContextItems(
     systemPrompt,
     t,
     temporaryChat,
-    updateChatModelSetting
-  ])
+    updateChatModelSetting,
+    onClearRolePlayIdentity,
+    onClearRolePlayBehavior,
+    onResetRolePlayGenerationStyle,
+  ]);
 }
