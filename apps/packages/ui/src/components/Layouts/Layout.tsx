@@ -123,6 +123,10 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
 }) => {
   const confirmDanger = useConfirmDanger()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [chatSidebarOpenResetKey, setChatSidebarOpenResetKey] = useState(0)
+  const signalChatSidebarOpen = React.useCallback(() => {
+    setChatSidebarOpenResetKey((value) => value + 1)
+  }, [])
   const chatSidebarCollapsed = useLayoutUiStore(
     (state) => state.chatSidebarCollapsed
   )
@@ -174,9 +178,11 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     if (hideSidebar) return
     if (showChatSidebar && !hideHeader) {
       if (isMobile) {
+        if (!sidebarOpen) signalChatSidebarOpen()
         setSidebarOpen((prev) => !prev)
         return
       }
+      if (chatSidebarCollapsed) signalChatSidebarOpen()
       setChatSidebarCollapsed((prev) => !prev)
       return
     }
@@ -206,6 +212,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     const handler = () => {
       if (hideSidebar) return
       if (showChatSidebar) {
+        signalChatSidebarOpen()
         if (isMobile) {
           setSidebarOpen(true)
           return
@@ -219,7 +226,13 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     return () => {
       window.removeEventListener("tldw:open-chat-sidebar", handler)
     }
-  }, [hideSidebar, isMobile, setChatSidebarCollapsed, showChatSidebar])
+  }, [
+    hideSidebar,
+    isMobile,
+    setChatSidebarCollapsed,
+    showChatSidebar,
+    signalChatSidebarOpen
+  ])
 
   const handleIngestPage = () => {
     requestQuickIngestOpen()
@@ -358,7 +371,11 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
       {showChatSidebar && !hideHeader && !hideSidebar && !isMobile && (
         <ChatSidebar
           collapsed={chatSidebarCollapsed}
-          onToggleCollapse={() => setChatSidebarCollapsed((prev) => !prev)}
+          openResetKey={chatSidebarOpenResetKey}
+          onToggleCollapse={() => {
+            if (chatSidebarCollapsed) signalChatSidebarOpen()
+            setChatSidebarCollapsed((prev) => !prev)
+          }}
           className="sticky top-0 shrink-0 border-r border-border"
         />
       )}
@@ -427,6 +444,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           >
             <ChatSidebar
               collapsed={false}
+              openResetKey={chatSidebarOpenResetKey}
               onToggleCollapse={() => setSidebarOpen(false)}
             />
           </Drawer>

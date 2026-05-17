@@ -249,4 +249,25 @@ describe("ChatSidebar tools-first reset", () => {
     expect(screen.getByTestId("chat-sidebar-search")).toBeInTheDocument()
     expect(screen.getByTestId("server-chat-list")).toBeInTheDocument()
   })
+
+  it("resets to tools-first when openResetKey changes while already expanded", async () => {
+    const { rerender } = renderSidebar({ openResetKey: 1 })
+
+    fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))
+    expect(screen.getByTestId("server-chat-list")).toBeInTheDocument()
+
+    rerender(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <ChatSidebar collapsed={false} openResetKey={2} />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("server-chat-list")).not.toBeInTheDocument()
+    })
+    expect(screen.getByRole("button", { name: /Shortcuts/i })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
+  })
 })
