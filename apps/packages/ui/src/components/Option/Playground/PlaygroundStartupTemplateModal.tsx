@@ -1,7 +1,11 @@
 import React from "react"
 import { Modal } from "antd"
 import { ModalFooter } from "@/components/ui/layout"
-import type { StartupTemplateBundle } from "./startup-template-bundles"
+import {
+  describeRolePlaySetupPreview,
+  isRolePlayRelevantBundle,
+  type StartupTemplateBundle
+} from "./startup-template-bundles"
 import type { ParameterPreset } from "./ParameterPresets"
 import { toText } from "./hooks"
 
@@ -36,6 +40,10 @@ export const PlaygroundStartupTemplateModal: React.FC<PlaygroundStartupTemplateM
       preset,
       t
     } = props
+    const rolePlayPreview =
+      preview && isRolePlayRelevantBundle(preview)
+        ? describeRolePlaySetupPreview(preview)
+        : null
 
     return (
       <Modal
@@ -86,54 +94,88 @@ export const PlaygroundStartupTemplateModal: React.FC<PlaygroundStartupTemplateM
                 "Review active context that will be applied before your next send."
               )}
             </p>
-            <div className="grid gap-2 text-xs text-text sm:grid-cols-2">
-              <div className="rounded-md border border-border bg-surface px-2 py-2">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">
-                  {t("playground:composer.context.model", "Model")}
+            {rolePlayPreview ? (
+              <div className="grid gap-2 text-xs text-text sm:grid-cols-2">
+                <div className="rounded-md border border-border bg-surface px-2 py-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">
+                    {t("playground:composer.context.character", "Character")}
+                  </div>
+                  <div className="mt-1">{rolePlayPreview.identity}</div>
                 </div>
-                <div className="mt-1">
-                  {preview.selectedModel || t("common:none", "None")}
+                <div className="rounded-md border border-border bg-surface px-2 py-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">
+                    {t("playground:composer.context.behavior", "Behavior")}
+                  </div>
+                  <div className="mt-1">{rolePlayPreview.behavior}</div>
                 </div>
-              </div>
-              <div className="rounded-md border border-border bg-surface px-2 py-2">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">
-                  {t("playground:composer.context.prompt", "Prompt")}
+                <div className="rounded-md border border-border bg-surface px-2 py-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">
+                    {t("playground:composer.context.scene", "Scene")}
+                  </div>
+                  <div className="mt-1">{rolePlayPreview.scene}</div>
                 </div>
-                <div className="mt-1">{promptDescription}</div>
-              </div>
-              <div className="rounded-md border border-border bg-surface px-2 py-2">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">
-                  {t("playground:composer.context.preset", "Preset")}
-                </div>
-                <div className="mt-1">
-                  {preset
-                    ? t(
-                        `playground:presets.${preset.key}.label`,
-                        preset.label
-                      )
-                    : t("common:none", "None")}
-                </div>
-              </div>
-              <div className="rounded-md border border-border bg-surface px-2 py-2">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">
-                  {t("playground:composer.context.character", "Character")}
-                </div>
-                <div className="mt-1">
-                  {preview.character?.name || t("common:none", "None")}
+                <div className="rounded-md border border-border bg-surface px-2 py-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">
+                    {t(
+                      "playground:composer.context.generationStyle",
+                      "Generation style"
+                    )}
+                  </div>
+                  <div className="mt-1">{rolePlayPreview.generation}</div>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="grid gap-2 text-xs text-text sm:grid-cols-2">
+                <div className="rounded-md border border-border bg-surface px-2 py-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">
+                    {t("playground:composer.context.model", "Model")}
+                  </div>
+                  <div className="mt-1">
+                    {preview.selectedModel || t("common:none", "None")}
+                  </div>
+                </div>
+                <div className="rounded-md border border-border bg-surface px-2 py-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">
+                    {t("playground:composer.context.prompt", "Prompt")}
+                  </div>
+                  <div className="mt-1">{promptDescription}</div>
+                </div>
+                <div className="rounded-md border border-border bg-surface px-2 py-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">
+                    {t("playground:composer.context.preset", "Preset")}
+                  </div>
+                  <div className="mt-1">
+                    {preset
+                      ? t(
+                          `playground:presets.${preset.key}.label`,
+                          preset.label
+                        )
+                      : t("common:none", "None")}
+                  </div>
+                </div>
+                <div className="rounded-md border border-border bg-surface px-2 py-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">
+                    {t("playground:composer.context.character", "Character")}
+                  </div>
+                  <div className="mt-1">
+                    {preview.character?.name || t("common:none", "None")}
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="rounded-md border border-border bg-surface px-2 py-2 text-xs text-text">
               <div className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">
                 {t("playground:composer.context.pinnedSources", "Pinned")}
               </div>
               <div className="mt-1">
-                {toText(
-                  t("playground:composer.context.pinnedCount", {
-                    defaultValue: "{{count}} sources",
-                    count: preview.ragPinnedResults.length
-                  } as any)
-                )}
+                {rolePlayPreview
+                  ? rolePlayPreview.context
+                  : toText(
+                      t("playground:composer.context.pinnedCount", {
+                        defaultValue: "{{count}} sources",
+                        count: preview.ragPinnedResults.length
+                      } as any)
+                    )}
               </div>
               {promptResolution?.source === "prompt-studio" && (
                 <div className="mt-1 text-[11px] text-text-muted">

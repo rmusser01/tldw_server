@@ -5,8 +5,7 @@ import { shallow } from "zustand/shallow"
 
 import { AssistantSelect } from "@/components/Common/AssistantSelect"
 import { useActorStore } from "@/store/actor"
-import type { ActorSettings } from "@/types/actor"
-import { createDefaultActorSettings } from "@/types/actor"
+import { createDefaultActorSettings, type ActorSettings } from "@/types/actor"
 import {
   getActorSettingsForChatWithCharacterFallback,
   saveActorSettingsForChat
@@ -15,6 +14,7 @@ import {
 import { RolePlaySetupPreview } from "./RolePlaySetupPreview"
 import type { RolePlayState } from "./role-play-state"
 import { getDefaultRolePlayGenerationStyle } from "./role-play-state"
+import { SavedRolePlaySetupsPanel } from "./SavedRolePlaySetupsPanel"
 import {
   PRESETS,
   SystemPromptTemplatesModal,
@@ -26,6 +26,10 @@ import {
   resetRolePlayScene,
   summarizeRolePlayScene
 } from "./role-play-scene"
+import type {
+  StartupTemplateBundle,
+  StartupTemplateRolePlayMetadata
+} from "./startup-template-bundles"
 
 export type RolePlaySetupApplyPayload = {
   clearIdentity?: boolean
@@ -39,14 +43,30 @@ export type RolePlaySetupApplyPayload = {
   sceneSettings?: ActorSettings
 }
 
+export type RolePlaySetupSavePayload = {
+  name: string
+  rolePlay: StartupTemplateRolePlayMetadata
+}
+
 type RolePlaySetupDrawerProps = {
   open: boolean
   beforeState: RolePlayState
   historyId: string | null
   serverChatId: string | null
   characterId?: string | number | null
+  currentSystemPrompt?: string | null
+  ragPinnedResultIds?: string[]
+  savedRolePlaySetups?: StartupTemplateBundle[]
+  savedSetupDraftName?: string
+  savedSetupNameFallback?: string
   onClose: () => void
   onApply: (payload: RolePlaySetupApplyPayload) => void | Promise<void>
+  onSavedSetupDraftNameChange?: (name: string) => void
+  onSaveRolePlaySetup?: (payload: RolePlaySetupSavePayload) => void
+  onPreviewSavedSetup?: (id: string) => void
+  onApplySavedSetup?: (setup: StartupTemplateBundle) => void | Promise<void>
+  onRenameSavedSetup?: (id: string, name: string) => void
+  onDeleteSavedSetup?: (id: string) => void
   returnFocusRef?: React.RefObject<HTMLElement>
 }
 
@@ -74,8 +94,19 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
   historyId,
   serverChatId,
   characterId,
+  currentSystemPrompt,
+  ragPinnedResultIds = [],
+  savedRolePlaySetups = [],
+  savedSetupDraftName = "",
+  savedSetupNameFallback = "New role-play setup",
   onClose,
   onApply,
+  onSavedSetupDraftNameChange,
+  onSaveRolePlaySetup,
+  onPreviewSavedSetup,
+  onApplySavedSetup,
+  onRenameSavedSetup,
+  onDeleteSavedSetup,
   returnFocusRef
 }) => {
   const { t } = useTranslation(["playground", "common"])
@@ -306,6 +337,108 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     setResetGenerationStyle(false)
   }, [])
 
+  const buildRolePlaySetupSavePayload =
+    React.useCallback((): RolePlaySetupSavePayload => {
+      const identity =
+        afterState.identity &&
+        (afterState.identity.kind === "character" ||
+          afterState.identity.kind === "persona") &&
+        afterState.identity.id &&
+        afterState.identity.name
+          ? {
+              kind: afterState.identity.kind,
+              id: afterState.identity.id,
+              name: afterState.identity.name
+            }
+          : null
+      const behavior = afterState.behavior
+        ? {
+            source: afterState.behavior.source,
+            templateId: afterState.behavior.templateId ?? null,
+            templateTitle: afterState.behavior.title ?? null,
+            templateCategory: stagedBehaviorTemplate?.category ?? null,
+            systemPrompt:
+              stagedBehaviorTemplate?.content ??
+              String(currentSystemPrompt || "").trim(),
+            modified: afterState.behavior.modified
+          }
+        : null
+      const generationKey = isPresetKey(afterState.generationStyle?.key)
+        ? afterState.generationStyle.key
+        : null
+      const generationPreset = generationKey
+        ? PRESETS.find((preset) => preset.key === generationKey)
+        : null
+      const context =
+        beforeState.context.pinnedCount > 0
+          ? {
+              ragPinnedCount: beforeState.context.pinnedCount,
+              ragPinnedResultIds: ragPinnedResultIds.slice(0, 12)
+            }
+          : null
+      const rolePlay: StartupTemplateRolePlayMetadata = {
+        source: "role-play-setup",
+        identity,
+        behavior,
+        scene: scenePreview.active ? getDraft(sceneDraft) : null,
+        generation:
+          generationKey && generationPreset
+            ? {
+                presetKey: generationKey,
+                settings: generationPreset.settings
+              }
+            : null,
+        context
+      }
+      return {
+        name: savedSetupDraftName.trim() || savedSetupNameFallback,
+        rolePlay
+      }
+    }, [
+      afterState.behavior,
+      afterState.generationStyle?.key,
+      afterState.identity,
+      beforeState.context.pinnedCount,
+      currentSystemPrompt,
+      ragPinnedResultIds,
+      savedSetupDraftName,
+      savedSetupNameFallback,
+      sceneDraft,
+      scenePreview.active,
+      stagedBehaviorTemplate
+    ])
+
+  const handleSaveCurrentRolePlaySetup = React.useCallback(() => {
+    if (!onSaveRolePlaySetup) return
+    onSaveRolePlaySetup(buildRolePlaySetupSavePayload())
+  }, [buildRolePlaySetupSavePayload, onSaveRolePlaySetup])
+
+  const handleApplySavedSetup = React.useCallback(
+    async (setup: StartupTemplateBundle) => {
+      if (setup.rolePlay?.source === "role-play-setup") {
+        const nextScene = setup.rolePlay.scene ?? createDefaultActorSettings()
+        await saveActorSettingsForChat({
+          historyId,
+          serverChatId,
+          settings: nextScene
+        })
+        setSettings(nextScene)
+        const preview = summarizeRolePlayScene(nextScene)
+        setPreviewAndTokens(preview.prompt, preview.tokenCount)
+      }
+      await onApplySavedSetup?.(setup)
+      closeAndReturnFocus()
+    },
+    [
+      closeAndReturnFocus,
+      historyId,
+      onApplySavedSetup,
+      serverChatId,
+      setPreviewAndTokens,
+      setSettings
+    ]
+  )
+
   const draft = getDraft(sceneDraft)
   const visibleAspects = draft.aspects.slice(0, 4)
   const activeGenerationKey =
@@ -325,6 +458,26 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
         {loading && !sceneDraft ? <Skeleton active /> : null}
 
         <RolePlaySetupPreview before={beforeState} after={afterState} />
+
+        {onSaveRolePlaySetup &&
+        onSavedSetupDraftNameChange &&
+        onPreviewSavedSetup &&
+        onApplySavedSetup &&
+        onRenameSavedSetup &&
+        onDeleteSavedSetup ? (
+          <SavedRolePlaySetupsPanel
+            setups={savedRolePlaySetups}
+            draftName={savedSetupDraftName}
+            nameFallback={savedSetupNameFallback}
+            onDraftNameChange={onSavedSetupDraftNameChange}
+            onSaveCurrent={handleSaveCurrentRolePlaySetup}
+            onPreviewSetup={onPreviewSavedSetup}
+            onApplySetup={handleApplySavedSetup}
+            onRenameSetup={onRenameSavedSetup}
+            onDeleteSetup={onDeleteSavedSetup}
+            t={t}
+          />
+        ) : null}
 
         <section
           aria-label={t("playground:composer.rolePlayLayers", "Role-play layers")}

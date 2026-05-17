@@ -76,6 +76,7 @@ import {
   buildWatchlistChatHint,
   normalizeWatchlistChatHandoffPayload,
 } from "@/services/tldw/watchlist-chat-handoff";
+import { saveActorSettingsForChat } from "@/services/actor-settings";
 import {
   shouldEnableOptionalResource,
   useChatSurfaceCoordinatorStore,
@@ -87,6 +88,7 @@ import {
 } from "@/store/model";
 import { useStoreMessageOption } from "@/store/option";
 import { useUiModeStore } from "@/store/ui-mode";
+import { createDefaultActorSettings } from "@/types/actor";
 import type { Character } from "@/types/character";
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings";
 import { ConnectionPhase, deriveConnectionUxState } from "@/types/connection";
@@ -610,6 +612,10 @@ export const PlaygroundForm = ({
   const [rolePlaySetupOpen, setRolePlaySetupOpen] = React.useState(false);
   const [noticesExpanded, setNoticesExpanded] = React.useState(false);
   const actorSettings = useActorStore((state) => state.settings);
+  const setActorSettings = useActorStore((state) => state.setSettings);
+  const setActorPreviewAndTokens = useActorStore(
+    (state) => state.setPreviewAndTokens,
+  );
   const systemPrompt = useStoreChatModelSettings((state) => state.systemPrompt);
   const setSystemPrompt = useStoreChatModelSettings(
     (state) => state.setSystemPrompt,
@@ -1494,6 +1500,9 @@ export const PlaygroundForm = ({
     handleDeleteStartupTemplate,
     handleTemplateSelect,
     promptSummaryLabel,
+    handleSaveRolePlaySetup,
+    handleApplySavedRolePlaySetup,
+    handleRenameStartupTemplate,
   } = promptTemplates;
   React.useEffect(() => {
     if (previousPresetKeyRef.current == null) {
@@ -1996,6 +2005,35 @@ export const PlaygroundForm = ({
       updateChatModelSettings,
     ],
   );
+  const handleApplyStartupTemplatePreview = React.useCallback(async () => {
+    if (!startupTemplatePreview?.rolePlay) {
+      handleApplyStartupTemplate();
+      return;
+    }
+
+    if (startupTemplatePreview.rolePlay.source === "role-play-setup") {
+      const nextScene =
+        startupTemplatePreview.rolePlay.scene ?? createDefaultActorSettings();
+      await saveActorSettingsForChat({
+        historyId,
+        serverChatId,
+        settings: nextScene,
+      });
+      setActorSettings(nextScene);
+      const preview = summarizeRolePlayScene(nextScene);
+      setActorPreviewAndTokens(preview.prompt, preview.tokenCount);
+    }
+
+    await handleApplySavedRolePlaySetup(startupTemplatePreview);
+  }, [
+    handleApplySavedRolePlaySetup,
+    handleApplyStartupTemplate,
+    historyId,
+    serverChatId,
+    setActorPreviewAndTokens,
+    setActorSettings,
+    startupTemplatePreview,
+  ]);
   const clearPinnedSourceContext = React.useCallback(() => {
     setRagPinnedResults([]);
   }, [setRagPinnedResults]);
@@ -5847,7 +5885,7 @@ export const PlaygroundForm = ({
               preview={startupTemplatePreview}
               onClose={() => setStartupTemplatePreview(null)}
               onDelete={handleDeleteStartupTemplate}
-              onApply={handleApplyStartupTemplate}
+              onApply={handleApplyStartupTemplatePreview}
               promptDescription={startupTemplatePromptDescription}
               promptResolution={startupTemplatePromptResolution}
               preset={startupTemplatePreset}
@@ -5951,8 +5989,21 @@ export const PlaygroundForm = ({
                   ? rolePlayIdentity.id
                   : null)
               }
+              currentSystemPrompt={systemPrompt}
+              ragPinnedResultIds={ragPinnedResults.map((result) =>
+                String(result.id)
+              )}
+              savedRolePlaySetups={startupTemplates}
+              savedSetupDraftName={startupTemplateDraftName}
+              savedSetupNameFallback={startupTemplateNameFallback}
               onClose={() => setRolePlaySetupOpen(false)}
               onApply={handleApplyRolePlaySetup}
+              onSavedSetupDraftNameChange={setStartupTemplateDraftName}
+              onSaveRolePlaySetup={handleSaveRolePlaySetup}
+              onPreviewSavedSetup={handleOpenStartupTemplatePreview}
+              onApplySavedSetup={handleApplySavedRolePlaySetup}
+              onRenameSavedSetup={handleRenameStartupTemplate}
+              onDeleteSavedSetup={handleDeleteStartupTemplate}
             />
           </React.Suspense>
         )}

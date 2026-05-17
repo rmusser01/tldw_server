@@ -736,7 +736,7 @@ git commit -m "feat: add chat role-play setup surface"
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/saved-role-play-setups.test.ts`
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/startup-template-bundles.integration.test.ts`
 
-- [ ] **Step 1: Write saved setup helper tests**
+- [x] **Step 1: Write saved setup helper tests**
 
 Create `saved-role-play-setups.test.ts`.
 
@@ -748,7 +748,7 @@ Test cases:
 - template name substring alone does not make a bundle relevant;
 - preview includes character, behavior, generation values, and context counts.
 
-- [ ] **Step 2: Extend startup bundle metadata minimally**
+- [x] **Step 2: Extend startup bundle metadata minimally**
 
 In `startup-template-bundles.ts`:
 - add optional source marker such as `source: "startup-template" | "role-play-setup"` if compatible with existing storage;
@@ -783,7 +783,7 @@ In `startup-template-bundles.ts`:
 
 Do not break existing startup template tests.
 
-- [ ] **Step 3: Add saved setup panel**
+- [x] **Step 3: Add saved setup panel**
 
 Create `SavedRolePlaySetupsPanel.tsx`.
 
@@ -795,20 +795,20 @@ MVP actions:
 
 Do not add update-current or duplicate unless existing storage already makes it cheap.
 
-- [ ] **Step 4: Wire panel into Role-play setup drawer**
+- [x] **Step 4: Wire panel into Role-play setup drawer**
 
 In `RolePlaySetupDrawer.tsx`:
 - show saved setups when role-play-relevant bundles exist;
 - keep ordinary startup templates out of this list;
 - use `RolePlaySetupPreview` before apply.
 
-- [ ] **Step 5: Update startup template modal preview**
+- [x] **Step 5: Update startup template modal preview**
 
 In `PlaygroundStartupTemplateModal.tsx`:
 - show exact role-play fields when previewing a role-play-relevant bundle;
 - keep generic startup template preview behavior for other bundles.
 
-- [ ] **Step 6: Run saved setup tests**
+- [x] **Step 6: Run saved setup tests**
 
 Run:
 ```bash
@@ -820,7 +820,12 @@ bunx vitest run \
 
 Expected: pass.
 
-- [ ] **Step 7: Browser verify saved setups**
+Recorded verification:
+- Red helper test run failed before implementation on missing role-play bundle helpers and metadata, then passed after implementation.
+- `bunx vitest run ../packages/ui/src/components/Option/Playground/__tests__/saved-role-play-setups.test.ts ../packages/ui/src/components/Option/Playground/__tests__/startup-template-bundles.integration.test.ts ../packages/ui/src/components/Option/Playground/__tests__/startup-template-bundles.prompt-mapping.test.ts ../packages/ui/src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx` passed: 4 files, 23 tests.
+- `bunx tsc --noEmit --pretty false` still fails only on existing unrelated baseline errors in `EmbeddingsModelSelectionConfig.tsx`, `persona-visuals.ts`, and `lib/api/vnPlay.ts`; no new Stage 5 type errors were reported.
+
+- [x] **Step 7: Browser verify saved setups**
 
 On `/chat`:
 - create a role-play setup with character, behavior, scene, generation style;
@@ -830,7 +835,17 @@ On `/chat`:
 - delete it;
 - verify unrelated startup templates do not appear as role-play setups.
 
-- [ ] **Step 8: Commit Stage 5**
+Recorded status: verified through CDP. CDP connected to Chrome on `127.0.0.1:9222` and verified `/chat` at `http://127.0.0.1:3001/chat` with seeded single-user API config. Computer Use was not used.
+
+CDP verification covered:
+- generic startup template remains stored but hidden from the saved role-play setup list;
+- role-play setup saves with `source: "role-play-setup"`;
+- saved setup captures Character Actor behavior, Precise generation, and enabled scene state;
+- preview shows role-play fields;
+- applying from the preview modal persists the saved scene;
+- rename, apply, and delete complete.
+
+- [x] **Step 8: Commit Stage 5**
 
 ```bash
 git add \
@@ -845,6 +860,8 @@ git add \
   apps/packages/ui/src/components/Option/Playground/__tests__/startup-template-bundles.prompt-mapping.test.ts
 git commit -m "feat: save chat role-play setups"
 ```
+
+Committed with message `feat: save chat role-play setups`.
 
 ## Task 6: Stage 6 Compatibility And Request-Inclusion Guardrails
 

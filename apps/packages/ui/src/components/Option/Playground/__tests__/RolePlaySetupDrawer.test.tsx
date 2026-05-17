@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createDefaultActorSettings, type ActorSettings } from "@/types/actor"
 import type { RolePlayState } from "../role-play-state"
 import { RolePlaySetupDrawer } from "../RolePlaySetupDrawer"
+import { createStartupTemplateBundle } from "../startup-template-bundles"
 
 const actorSettingsMocks = vi.hoisted(() => ({
   getActorSettingsForChatWithCharacterFallback: vi.fn(),
@@ -111,13 +112,18 @@ vi.mock("antd", () => ({
   Button: ({
     children,
     onClick,
-    htmlType
+    htmlType,
+    "aria-label": ariaLabel
   }: {
     children: React.ReactNode
     onClick?: () => void
     htmlType?: string
+    "aria-label"?: string
   }) => (
-    <button type={htmlType === "submit" ? "submit" : "button"} onClick={onClick}>
+    <button
+      type={htmlType === "submit" ? "submit" : "button"}
+      aria-label={ariaLabel}
+      onClick={onClick}>
       {children}
     </button>
   ),
@@ -373,5 +379,177 @@ describe("RolePlaySetupDrawer", () => {
 
     expect(onClose).toHaveBeenCalledTimes(1)
     expect(document.activeElement).toBe(returnFocusRef.current)
+  })
+
+  it("shows only role-play relevant saved setups", async () => {
+    const savedSetup = createStartupTemplateBundle(
+      {
+        name: "Mira detective scene",
+        selectedModel: "openai:gpt-4.1",
+        systemPrompt: "Observe everything.",
+        source: "role-play-setup",
+        character: {
+          id: "char-mira",
+          name: "Mira"
+        } as any,
+        rolePlay: {
+          source: "role-play-setup",
+          identity: {
+            kind: "character",
+            id: "char-mira",
+            name: "Mira"
+          },
+          behavior: {
+            source: "template",
+            templateId: "detective",
+            templateTitle: "Detective",
+            templateCategory: "roleplay",
+            systemPrompt: "Observe everything.",
+            modified: false
+          },
+          scene: activeScene(),
+          generation: null,
+          context: null
+        }
+      },
+      { id: "saved-role-play", now: 1 }
+    )
+    const genericTemplate = createStartupTemplateBundle(
+      {
+        name: "Generic writing template",
+        selectedModel: "openai:gpt-4.1",
+        systemPrompt: "",
+        presetKey: "creative"
+      },
+      { id: "generic", now: 2 }
+    )
+    const onPreviewSavedSetup = vi.fn()
+
+    renderDrawer({
+      savedRolePlaySetups: [savedSetup, genericTemplate],
+      savedSetupDraftName: "",
+      savedSetupNameFallback: "Mira setup",
+      onSavedSetupDraftNameChange: vi.fn(),
+      onSaveRolePlaySetup: vi.fn(),
+      onPreviewSavedSetup,
+      onApplySavedSetup: vi.fn(),
+      onRenameSavedSetup: vi.fn(),
+      onDeleteSavedSetup: vi.fn()
+    })
+
+    await screen.findByText(/1 detail/)
+    expect(screen.getByText("Saved role-play setups")).toBeInTheDocument()
+    expect(screen.getByText("Mira detective scene")).toBeInTheDocument()
+    expect(screen.queryByText("Generic writing template")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview Mira detective scene" }))
+    expect(onPreviewSavedSetup).toHaveBeenCalledWith("saved-role-play")
+  })
+
+  it("applies saved role-play setup scene through the actor settings save path", async () => {
+    const savedSetup = createStartupTemplateBundle(
+      {
+        name: "Mira detective scene",
+        selectedModel: "openai:gpt-4.1",
+        systemPrompt: "Observe everything.",
+        source: "role-play-setup",
+        character: {
+          id: "char-mira",
+          name: "Mira"
+        } as any,
+        rolePlay: {
+          source: "role-play-setup",
+          identity: {
+            kind: "character",
+            id: "char-mira",
+            name: "Mira"
+          },
+          behavior: null,
+          scene: activeScene(),
+          generation: null,
+          context: null
+        }
+      },
+      { id: "saved-role-play", now: 1 }
+    )
+    const onApplySavedSetup = vi.fn()
+
+    renderDrawer({
+      savedRolePlaySetups: [savedSetup],
+      savedSetupDraftName: "",
+      savedSetupNameFallback: "Mira setup",
+      onSavedSetupDraftNameChange: vi.fn(),
+      onSaveRolePlaySetup: vi.fn(),
+      onPreviewSavedSetup: vi.fn(),
+      onApplySavedSetup,
+      onRenameSavedSetup: vi.fn(),
+      onDeleteSavedSetup: vi.fn()
+    })
+
+    await screen.findByText(/1 detail/)
+    fireEvent.click(screen.getByRole("button", { name: "Apply Mira detective scene" }))
+
+    await waitFor(() =>
+      expect(actorSettingsMocks.saveActorSettingsForChat).toHaveBeenCalledWith({
+        historyId: "history-1",
+        serverChatId: "server-1",
+        settings: expect.objectContaining({
+          isEnabled: true,
+          notes: "The room smells like ozone."
+        })
+      })
+    )
+    expect(onApplySavedSetup).toHaveBeenCalledWith(savedSetup)
+  })
+
+  it("saves the staged role-play setup metadata", async () => {
+    const onSaveRolePlaySetup = vi.fn()
+    renderDrawer({
+      currentSystemPrompt: "Observe everything.",
+      ragPinnedResultIds: ["source-1", "source-2"],
+      savedRolePlaySetups: [],
+      savedSetupDraftName: "Mira saved",
+      savedSetupNameFallback: "Mira setup",
+      onSavedSetupDraftNameChange: vi.fn(),
+      onSaveRolePlaySetup,
+      onPreviewSavedSetup: vi.fn(),
+      onApplySavedSetup: vi.fn(),
+      onRenameSavedSetup: vi.fn(),
+      onDeleteSavedSetup: vi.fn()
+    })
+
+    await screen.findByText(/1 detail/)
+    fireEvent.click(screen.getByRole("button", { name: "Choose behavior template" }))
+    fireEvent.click(screen.getByRole("button", { name: "Use Detective" }))
+    fireEvent.click(screen.getByRole("button", { name: "Precise" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save setup" }))
+
+    expect(onSaveRolePlaySetup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "Mira saved",
+        rolePlay: expect.objectContaining({
+          source: "role-play-setup",
+          identity: {
+            kind: "character",
+            id: "char-mira",
+            name: "Mira"
+          },
+          behavior: expect.objectContaining({
+            source: "template",
+            templateId: "detective",
+            templateTitle: "Detective",
+            templateCategory: "roleplay",
+            systemPrompt: "Observe everything."
+          }),
+          generation: expect.objectContaining({
+            presetKey: "precise"
+          }),
+          context: {
+            ragPinnedCount: 2,
+            ragPinnedResultIds: ["source-1", "source-2"]
+          }
+        })
+      })
+    )
   })
 })
