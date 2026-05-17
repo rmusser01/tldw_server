@@ -5,7 +5,6 @@
 
 import React from "react"
 import {
-  Alert,
   Button,
   Card,
   Checkbox,
@@ -36,6 +35,7 @@ import { JsonEditor } from "../components"
 import { EmbeddingsModelSelectionConfig } from "./recipe-configs/EmbeddingsModelSelectionConfig"
 import { RagAnswerQualityConfig } from "./recipe-configs/RagAnswerQualityConfig"
 import { RagRetrievalTuningConfig } from "./recipe-configs/RagRetrievalTuningConfig"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives/Alert"
 import type {
   DatasetSample,
   RecipeDatasetValidation,
@@ -1217,10 +1217,9 @@ export const RecipesTab: React.FC = () => {
     return (
       <div className="space-y-3">
         {reportWarnings.map((warning: unknown, index: number) => (
-          <Alert
+          <DesignSystemAlert
             key={`embeddings-warning-${index}`}
-            type="warning"
-            showIcon
+            variant="warning"
             title={String(warning)}
           />
         ))}
@@ -1378,13 +1377,12 @@ export const RecipesTab: React.FC = () => {
         }
       >
         {previewApplyError ? (
-          <Alert type="error" showIcon title={previewApplyError} />
+          <DesignSystemAlert variant="error" title={previewApplyError} />
         ) : previewApplyData ? (
           <div className="space-y-4">
             {isApplied && (
-              <Alert
-                type="success"
-                showIcon
+              <DesignSystemAlert
+                variant="success"
                 title={t("evaluations:recipeRagConfigUpdated", {
                   defaultValue: "RAG config updated"
                 })}
@@ -1442,10 +1440,9 @@ export const RecipesTab: React.FC = () => {
             {warnings.length > 0 && (
               <div className="space-y-2">
                 {warnings.map((warning: unknown, index: number) => (
-                  <Alert
+                  <DesignSystemAlert
                     key={`apply-preview-warning-${index}`}
-                    type="warning"
-                    showIcon
+                    variant="warning"
                     title={String(warning)}
                   />
                 ))}
@@ -1482,14 +1479,14 @@ export const RecipesTab: React.FC = () => {
             <Spin />
           </div>
         ) : manifestsError ? (
-          <Alert
-            type="warning"
-            showIcon
+          <DesignSystemAlert
+            variant="warning"
             title={t("evaluations:recipesLoadErrorTitle", {
               defaultValue: "Unable to load recipes"
             })}
-            description={(manifestsErrorValue as Error | null)?.message}
-          />
+          >
+            {(manifestsErrorValue as Error | null)?.message}
+          </DesignSystemAlert>
         ) : manifests.length === 0 ? (
           <Empty
             description={t("evaluations:recipesEmpty", {
@@ -1551,19 +1548,16 @@ export const RecipesTab: React.FC = () => {
 
             <div className="space-y-3">
               {launchReadiness?.message && (
-                <Alert
-                  type="warning"
-                  showIcon
+                <DesignSystemAlert
+                  variant="warning"
                   title={launchReadiness.message}
-                  description={
-                    canReuseCompletedRuns
-                      ? t("evaluations:recipeLaunchReadinessReuseHint", {
-                          defaultValue:
-                            "You can still try to reuse a matching completed run with the current config."
-                        })
-                      : undefined
-                  }
-                />
+                >
+                  {canReuseCompletedRuns &&
+                    t("evaluations:recipeLaunchReadinessReuseHint", {
+                      defaultValue:
+                        "You can still try to reuse a matching completed run with the current config."
+                    })}
+                </DesignSystemAlert>
               )}
 
               <div>
@@ -1620,44 +1614,44 @@ export const RecipesTab: React.FC = () => {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  <Alert
-                    type="info"
-                    showIcon
+                  <DesignSystemAlert
+                    variant="info"
                     title={t("evaluations:recipeGuidedSetupTitle", {
                       defaultValue: "Guided setup"
                     })}
-                    description={t("evaluations:recipeGuidedSetupDescription", {
+                  >
+                    {t("evaluations:recipeGuidedSetupDescription", {
                       defaultValue:
                         "Use the guided fields below for the common setup path. Advanced JSON is still available if you need to fine-tune the payload."
                     })}
-                  />
+                  </DesignSystemAlert>
 
                   {inlineDatasetEditorInvalid && (
-                    <Alert
-                      type="warning"
-                      showIcon
+                    <DesignSystemAlert
+                      variant="warning"
                       title={t("evaluations:recipeInlineJsonInvalidTitle", {
                         defaultValue: "Inline dataset JSON is invalid."
                       })}
-                      description={t("evaluations:recipeInlineJsonInvalidDescription", {
+                    >
+                      {t("evaluations:recipeInlineJsonInvalidDescription", {
                         defaultValue:
                           "Guided edits will restore a valid inline dataset payload."
                       })}
-                    />
+                    </DesignSystemAlert>
                   )}
 
                   {runConfigEditorInvalid && (
-                    <Alert
-                      type="warning"
-                      showIcon
+                    <DesignSystemAlert
+                      variant="warning"
                       title={t("evaluations:recipeRunConfigInvalidTitle", {
                         defaultValue: "Run config JSON is invalid."
                       })}
-                      description={t("evaluations:recipeRunConfigInvalidDescription", {
+                    >
+                      {t("evaluations:recipeRunConfigInvalidDescription", {
                         defaultValue:
                           "Guided edits will restore a valid run config payload."
                       })}
-                    />
+                    </DesignSystemAlert>
                   )}
 
                   <div>
@@ -1755,17 +1749,17 @@ export const RecipesTab: React.FC = () => {
               {datasetSource === "saved" && (
                 <div className="space-y-3">
                   {runConfigEditorInvalid && (
-                    <Alert
-                      type="warning"
-                      showIcon
+                    <DesignSystemAlert
+                      variant="warning"
                       title={t("evaluations:recipeRunConfigInvalidTitle", {
                         defaultValue: "Run config JSON is invalid."
                       })}
-                      description={t("evaluations:recipeRunConfigInvalidDescription", {
+                    >
+                      {t("evaluations:recipeRunConfigInvalidDescription", {
                         defaultValue:
                           "Guided edits will restore a valid run config payload."
                       })}
-                    />
+                    </DesignSystemAlert>
                   )}
                   {selectedManifest.recipe_id === "rag_retrieval_tuning" ? (
                     <RagRetrievalTuningConfig
@@ -1841,9 +1835,8 @@ export const RecipesTab: React.FC = () => {
               </Checkbox>
 
               {!canEnqueueRuns && forceRerun && (
-                <Alert
-                  type="info"
-                  showIcon
+                <DesignSystemAlert
+                  variant="info"
                   title={t("evaluations:recipeForceRerunUnavailable", {
                     defaultValue: "Force rerun requires the recipe worker to be available."
                   })}
@@ -1851,17 +1844,15 @@ export const RecipesTab: React.FC = () => {
               )}
 
               {localError && (
-                <Alert
-                  type="error"
-                  showIcon
+                <DesignSystemAlert
+                  variant="error"
                   title={localError}
                 />
               )}
 
               {validationResult && (
-                <Alert
-                  type={validationResult.valid ? "success" : "warning"}
-                  showIcon
+                <DesignSystemAlert
+                  variant={validationResult.valid ? "success" : "warning"}
                   title={
                     validationResult.valid
                       ? t("evaluations:recipeValidationValid", {
@@ -1871,46 +1862,45 @@ export const RecipesTab: React.FC = () => {
                           defaultValue: "Dataset format needs attention."
                         })
                   }
-                  description={
-                    <div className="space-y-1 text-xs">
-                      {validationResult.dataset_mode && (
-                        <div>
-                          {t("evaluations:recipeDatasetModeLabel", {
-                            defaultValue: "Dataset mode"
-                          })}
-                          : {validationResult.dataset_mode}
-                        </div>
-                      )}
-                      {typeof validationResult.sample_count === "number" && (
-                        <div>
-                          {t("evaluations:recipeSampleCountLabel", {
-                            defaultValue: "Samples"
-                          })}
-                          : {validationResult.sample_count}
-                        </div>
-                      )}
-                      {!readinessLoading && (
-                        <div>
-                          {t("evaluations:recipeLaunchReadinessLabel", {
-                            defaultValue: "Launch readiness"
-                          })}
-                          :{" "}
-                          {canEnqueueRuns
-                            ? t("evaluations:recipeLaunchReadyNow", {
-                                defaultValue: "ready to start new runs."
-                              })
-                            : t("evaluations:recipeLaunchReuseOnly", {
-                                defaultValue:
-                                  "matching-run reuse only until the worker is enabled."
-                              })}
-                        </div>
-                      )}
-                      {(validationResult.errors || []).map((error, index) => (
-                        <div key={`${error}-${index}`}>{error}</div>
-                      ))}
-                    </div>
-                  }
-                />
+                >
+                  <div className="space-y-1 text-xs">
+                    {validationResult.dataset_mode && (
+                      <div>
+                        {t("evaluations:recipeDatasetModeLabel", {
+                          defaultValue: "Dataset mode"
+                        })}
+                        : {validationResult.dataset_mode}
+                      </div>
+                    )}
+                    {typeof validationResult.sample_count === "number" && (
+                      <div>
+                        {t("evaluations:recipeSampleCountLabel", {
+                          defaultValue: "Samples"
+                        })}
+                        : {validationResult.sample_count}
+                      </div>
+                    )}
+                    {!readinessLoading && (
+                      <div>
+                        {t("evaluations:recipeLaunchReadinessLabel", {
+                          defaultValue: "Launch readiness"
+                        })}
+                        :{" "}
+                        {canEnqueueRuns
+                          ? t("evaluations:recipeLaunchReadyNow", {
+                              defaultValue: "ready to start new runs."
+                            })
+                          : t("evaluations:recipeLaunchReuseOnly", {
+                              defaultValue:
+                                "matching-run reuse only until the worker is enabled."
+                            })}
+                      </div>
+                    )}
+                    {(validationResult.errors || []).map((error, index) => (
+                      <div key={`${error}-${index}`}>{error}</div>
+                    ))}
+                  </div>
+                </DesignSystemAlert>
               )}
 
               <Space>
@@ -1968,33 +1958,31 @@ export const RecipesTab: React.FC = () => {
                 <Spin />
               </div>
             ) : reportError ? (
-              <Alert
-                type="error"
-                showIcon
+              <DesignSystemAlert
+                variant="error"
                 title={t("evaluations:recipeReportLoadErrorTitle", {
                   defaultValue: "Unable to load the recipe report"
                 })}
-                description={(reportErrorValue as Error | null)?.message || undefined}
-              />
+              >
+                {(reportErrorValue as Error | null)?.message || null}
+              </DesignSystemAlert>
             ) : report ? (
               <div className="space-y-4">
                 {report.confidence_summary && (
-                  <Alert
-                    type="info"
-                    showIcon
+                  <DesignSystemAlert
+                    variant="info"
                     title={t("evaluations:recipeConfidenceTitle", {
                       defaultValue: "Confidence summary"
                     })}
-                    description={
-                      <span className="text-xs">
-                        {t("evaluations:recipeConfidenceDescription", {
-                          defaultValue: "Confidence {{confidence}} across {{count}} samples.",
-                          confidence: report.confidence_summary.confidence,
-                          count: report.confidence_summary.sample_count
-                        })}
-                      </span>
-                    }
-                  />
+                  >
+                    <span className="text-xs">
+                      {t("evaluations:recipeConfidenceDescription", {
+                        defaultValue: "Confidence {{confidence}} across {{count}} samples.",
+                        confidence: report.confidence_summary.confidence,
+                        count: report.confidence_summary.sample_count
+                      })}
+                    </span>
+                  </DesignSystemAlert>
                 )}
 
                 {isEmbeddingsRecipeReport ? (

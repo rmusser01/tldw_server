@@ -139,7 +139,21 @@ const recipeManifestState = {
   isError: false,
   error: null as Error | null
 }
-const recipeLaunchReadinessState = {
+type RecipeLaunchReadinessMockState = {
+  data: {
+    data: {
+      recipe_id: string
+      ready: boolean
+      can_enqueue_runs: boolean
+      can_reuse_completed_runs: boolean
+      runtime_checks: Record<string, boolean>
+      message: string | null
+    }
+  }
+  isLoading: boolean
+}
+
+const recipeLaunchReadinessState: RecipeLaunchReadinessMockState = {
   data: {
     data: {
       recipe_id: "summarization_quality",
@@ -189,6 +203,12 @@ const renderRecipesTab = (queryClient = createTestQueryClient()) => ({
     </QueryClientProvider>
   )
 })
+
+const expectDesignSystemAlertForText = (text: string) => {
+  const alert = screen.getByText(text).closest('[data-ds-component="Alert"]')
+  expect(alert).toHaveAttribute("data-ds-component", "Alert")
+  return alert
+}
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -1591,6 +1611,7 @@ describe("RecipesTab recipe launch flow", () => {
     renderRecipesTab()
 
     expect(screen.getByText("Unable to load recipes")).toBeInTheDocument()
+    expectDesignSystemAlertForText("Unable to load recipes")
     expect(
       screen.getByText(
         "Add or update your API key in Settings -> tldw server, then try again."
