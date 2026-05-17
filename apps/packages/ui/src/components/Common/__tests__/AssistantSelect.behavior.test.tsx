@@ -163,10 +163,10 @@ describe("AssistantSelect behavior", () => {
     )
 
     const panel = await screen.findByTestId("assistant-select-panel")
-    expect(panel).toHaveClass("bg-surface")
+    expect(panel).toHaveClass("bg-elevated")
     expect(panel).not.toHaveClass("bg-background")
     expect(await screen.findByRole("button", { name: "Alpha" })).toHaveClass(
-      "bg-bg"
+      "bg-surface"
     )
   })
 
