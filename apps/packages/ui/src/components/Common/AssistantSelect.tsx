@@ -438,7 +438,7 @@ export const AssistantSelect: React.FC<Props> = ({
                   className={`flex min-w-0 flex-1 items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition ${
                     isActive
                       ? "border-primary bg-primary/10 text-text"
-                      : "border-border bg-bg text-text hover:bg-surface2"
+                      : "border-border bg-surface text-text hover:bg-surface2"
                   }`}
                   onClick={() => {
                     void handleSelect(entry)
