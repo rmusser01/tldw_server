@@ -459,4 +459,83 @@ describe("useCharacterGreeting", () => {
     expect(setMessages).toHaveBeenCalledTimes(messageWrites)
     expect(setHistory).toHaveBeenCalledTimes(historyWrites)
   })
+
+  it("refreshes an injected greeting when the same character gains a new name or avatar", async () => {
+    const selectedCharacter = {
+      id: "char-hydrated-greeting",
+      name: "Draft Guide",
+      greeting: "Hello there"
+    } as Character
+    const hydratedCharacter = {
+      ...selectedCharacter,
+      name: "Hydrated Guide",
+      avatar_url: "https://example.com/hydrated.png"
+    } as Character
+
+    mocks.settings = {
+      greetingEnabled: true,
+      greetingSelectionId: null,
+      greetingsChecksum: null,
+      useCharacterDefault: true
+    }
+
+    let messageState: Message[] = []
+    let historyState: ChatHistory = []
+    const setMessages = vi.fn(
+      (next: Message[] | ((prev: Message[]) => Message[])) => {
+        messageState = applyMessageUpdate(messageState, next)
+      }
+    )
+    const setHistory = vi.fn(
+      (next: ChatHistory | ((prev: ChatHistory) => ChatHistory)) => {
+        historyState = applyHistoryUpdate(historyState, next)
+      }
+    )
+    const setSelectedCharacter = vi.fn()
+
+    const { rerender } = renderHook(
+      ({
+        character,
+        messagesLength
+      }: {
+        character: Character
+        messagesLength: number
+      }) =>
+        useCharacterGreeting({
+          playgroundReady: true,
+          selectedCharacter: character,
+          serverChatId: null,
+          historyId: "history-hydrated-greeting",
+          messagesLength,
+          setMessages,
+          setHistory,
+          setSelectedCharacter
+        }),
+      {
+        initialProps: {
+          character: selectedCharacter,
+          messagesLength: 0
+        }
+      }
+    )
+
+    await waitFor(() => {
+      expect(messageState[0]?.name).toBe("Draft Guide")
+      expect(messageState[0]?.message).toBe("Hello there")
+    })
+
+    rerender({
+      character: hydratedCharacter,
+      messagesLength: messageState.length
+    })
+
+    await waitFor(() => {
+      expect(messageState[0]?.name).toBe("Hydrated Guide")
+      expect(messageState[0]?.modelName).toBe("Hydrated Guide")
+      expect(messageState[0]?.modelImage).toBe(
+        "https://example.com/hydrated.png"
+      )
+    })
+    expect(historyState[0]?.content).toBe("Hello there")
+  })
 })

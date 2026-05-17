@@ -149,49 +149,60 @@ export const ParameterPresets: React.FC<Props> = ({
     onChange?.(presetKey)
   }
 
-  const options = PRESETS.map((preset) => ({
-    label: (
-      <Tooltip
-        title={
-          <div className="text-xs">
-            <div className="font-medium">
-              {t(`playground:presets.${preset.key}.label`, preset.label)}
-            </div>
-            <div className="mt-1 text-text-subtle">
-              {t(
-                `playground:presets.${preset.key}.description`,
-                preset.description
+  const options = PRESETS.map((preset) => {
+    const presetLabel = t(
+      `playground:presets.${preset.key}.label`,
+      preset.label
+    )
+
+    return {
+      label: (
+        <Tooltip
+          title={
+            <div className="text-xs">
+              <div className="font-medium">
+                {presetLabel}
+              </div>
+              <div className="mt-1 text-text-subtle">
+                {t(
+                  `playground:presets.${preset.key}.description`,
+                  preset.description
+                )}
+              </div>
+              {preset.key !== "custom" && (
+                <div className="mt-2 space-y-0.5 text-[10px] text-text-muted">
+                  {formatPresetSettingEntries(preset.settings).map((entry) => (
+                    <div key={`${preset.key}-${entry.key}`}>
+                      {entry.label}: {entry.value}
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
-            {preset.key !== "custom" && (
-              <div className="mt-2 space-y-0.5 text-[10px] text-text-muted">
-                {formatPresetSettingEntries(preset.settings).map((entry) => (
-                  <div key={`${preset.key}-${entry.key}`}>
-                    {entry.label}: {entry.value}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        }
-        placement="bottom"
-        mouseEnterDelay={0.3}>
-        <div className="flex items-center gap-1.5">
-          {preset.icon}
-          {!compact && (
-            <span>
-              {t(`playground:presets.${preset.key}.label`, preset.label)}
+          }
+          placement="bottom"
+          mouseEnterDelay={0.3}>
+          <div className="flex items-center gap-1.5">
+            {preset.icon}
+            <span className={compact ? "sr-only" : undefined}>
+              {presetLabel}
             </span>
-          )}
-        </div>
-      </Tooltip>
-    ),
-    value: preset.key
-  }))
+          </div>
+        </Tooltip>
+      ),
+      title: presetLabel,
+      value: preset.key
+    }
+  })
 
   return (
     <div className={className}>
       <Segmented
+        aria-label={
+          compact
+            ? t("playground:presets.generationStyle", "Generation style")
+            : undefined
+        }
         options={options}
         value={currentPreset}
         onChange={handlePresetChange}

@@ -144,12 +144,56 @@ export const PromptSelect: React.FC<Props> = ({
 
   // Group prompts by category: Favorites, System, Quick
   const groupedMenuItems = useMemo<ItemType[]>(() => {
+    const hasCurrentSystemPrompt =
+      typeof systemPrompt === "string" && systemPrompt.trim().length > 0
+    const currentSystemPromptRecoveryItems: ItemType[] = hasCurrentSystemPrompt
+      ? [
+          {
+            key: "__edit_current_system_prompt__",
+            label: t(
+              "promptSelect.editCurrentSystemPrompt",
+              "Edit current system prompt"
+            ),
+            onClick: () => {
+              void openSystemPromptEditor()
+            }
+          },
+          {
+            key: "__clear_current_system_prompt__",
+            label: t(
+              "promptSelect.clearCurrentSystemPrompt",
+              "Clear current system prompt"
+            ),
+            onClick: () => {
+              setSystemPrompt("")
+              setDropdownOpen(false)
+            }
+          }
+        ]
+      : []
+
     if (filteredData.length === 0) {
       return [
         {
-        key: "empty",
-        label: <Empty description={searchText ? t("noMatchingPrompts", "No matching prompts") : undefined} />
-      }
+          key: "empty",
+          label: (
+            <Empty
+              description={
+                searchText
+                  ? t("noMatchingPrompts", "No matching prompts")
+                  : t("promptSelect.noSavedPrompts", "No saved prompts")
+              }
+            />
+          )
+        },
+        ...(currentSystemPromptRecoveryItems.length > 0
+          ? [
+              {
+                type: "divider" as const
+              },
+              ...currentSystemPromptRecoveryItems
+            ]
+          : [])
       ]
     }
 
@@ -244,12 +288,14 @@ export const PromptSelect: React.FC<Props> = ({
     filteredData,
     searchText,
     selectedSystemPrompt,
+    systemPrompt,
     t,
     handlePromptChange,
     openSystemPromptEditor,
     restorePromptSelectFocus,
     setDropdownOpen,
-    setSelectedSystemPrompt
+    setSelectedSystemPrompt,
+    setSystemPrompt
   ])
 
   // Focus search input when dropdown opens

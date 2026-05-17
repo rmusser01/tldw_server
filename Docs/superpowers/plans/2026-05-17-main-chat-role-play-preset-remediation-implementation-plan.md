@@ -218,7 +218,7 @@ git commit -m "chore: track chat role-play preset remediation tasks"
 - Test: `apps/packages/ui/src/components/Common/__tests__/PromptSelect.system-prompt-modal.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/ParameterPresets.guard.test.ts`
 
-- [ ] **Step 1: Write the failing starter regression test**
+- [x] **Step 1: Write the failing starter regression test**
 
 Add `PlaygroundForm.role-play-starter.integration.test.tsx`.
 
@@ -234,7 +234,7 @@ await user.click(screen.getByRole("button", { name: /default assistant|helpful a
 expect(screen.queryByText(/something went wrong/i)).not.toBeInTheDocument()
 ```
 
-- [ ] **Step 2: Run the starter test and verify failure or current pass**
+- [x] **Step 2: Run the starter test and verify failure or current pass**
 
 Run:
 ```bash
@@ -245,7 +245,7 @@ Expected:
 - Fails if the crash or missing test harness is active.
 - If it passes before implementation, record that the browser crash is not currently reproduced by unit coverage and keep the test.
 
-- [ ] **Step 3: Fix the starter/picker crash minimally**
+- [x] **Step 3: Fix the starter/picker crash minimally**
 
 Only change the path that causes the update loop.
 
@@ -256,7 +256,7 @@ Likely fix areas:
 
 Do not add Role-play setup or state adapter in this task.
 
-- [ ] **Step 4: Write prompt recovery tests**
+- [x] **Step 4: Write prompt recovery tests**
 
 Extend `PromptSelect.system-prompt-modal.test.tsx`.
 
@@ -266,7 +266,7 @@ Test cases:
 - Clearing a custom prompt calls `setSystemPrompt("")`.
 - Empty prompt library can still render `No saved prompts` without hiding recovery actions.
 
-- [ ] **Step 5: Implement prompt recovery**
+- [x] **Step 5: Implement prompt recovery**
 
 In `PromptSelect.tsx`:
 - avoid returning early before appending current-prompt recovery actions;
@@ -280,7 +280,7 @@ const recoveryItems = hasCurrentSystemPrompt ? [editCurrentPromptItem, clearCurr
 const menuItems = [...promptItems, ...recoveryItems]
 ```
 
-- [ ] **Step 6: Write parameter preset accessibility tests**
+- [x] **Step 6: Write parameter preset accessibility tests**
 
 Extend `ParameterPresets.guard.test.ts`.
 
@@ -289,14 +289,14 @@ Test cases:
 - Each preset option has an accessible name: Creative, Balanced, Precise, Custom.
 - Tooltip/detail rows still include temperature/top-p/top-k values.
 
-- [ ] **Step 7: Implement parameter preset labels**
+- [x] **Step 7: Implement parameter preset labels**
 
 In `ParameterPresets.tsx`:
 - add `aria-label={t("playground:presets.ariaLabel", "Generation style")}` to the segmented control or wrapper;
 - include visually hidden preset text in compact labels if Ant Design strips accessible names;
 - keep visible labels in non-compact mode.
 
-- [ ] **Step 8: Run Stage 1 focused tests**
+- [x] **Step 8: Run Stage 1 focused tests**
 
 Run:
 ```bash
@@ -309,7 +309,7 @@ bunx vitest run \
 
 Expected: pass.
 
-- [ ] **Step 9: Browser verify Stage 1**
+- [x] **Step 9: Browser verify Stage 1**
 
 Verify on `/chat`:
 - `Chat as a character` opens the selector.
@@ -317,7 +317,7 @@ Verify on `/chat`:
 - an applied custom prompt can be edited/cleared with an empty prompt library.
 - compact generation presets are understandable by keyboard/screen-reader inspection.
 
-- [ ] **Step 10: Commit Stage 1**
+- [x] **Step 10: Commit Stage 1**
 
 ```bash
 git add \

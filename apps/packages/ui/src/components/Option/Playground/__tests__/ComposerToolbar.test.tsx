@@ -1,3 +1,5 @@
+import fs from "node:fs"
+import path from "node:path"
 import { fireEvent, render, screen } from "@testing-library/react"
 import React from "react"
 import { describe, expect, it, vi } from "vitest"
@@ -119,6 +121,16 @@ const createProps = (
 })
 
 describe("ComposerToolbar web search", () => {
+  it("owns the dropdown assistant selector used by chat starter events", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../ComposerToolbar.tsx"),
+      "utf8"
+    )
+
+    expect(source).toContain("<AssistantSelect")
+    expect(source).toContain('variant="dropdown"')
+  })
+
   it("hides the options panel when rendered collapsed for external send placement", () => {
     render(
       <ComposerToolbar
