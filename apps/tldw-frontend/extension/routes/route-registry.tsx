@@ -134,6 +134,7 @@ const OptionTldwSettings = createSettingsRoute(
   "TldwSettings"
 )
 const OptionMedia = lazy(() => import("./option-media"))
+const OptionMediaCollection = lazy(() => import("./option-media-collection"))
 const OptionMediaMulti = lazy(() => import("./option-media-multi"))
 const OptionNotes = lazy(() => import("./option-notes"))
 const OptionWorldBooks = createSettingsRoute(
@@ -727,6 +728,11 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
       icon: Microscope,
       order: 1
     }
+  },
+  {
+    kind: "options",
+    path: "/media-collections/:collectionId",
+    element: <OptionMediaCollection />
   },
   {
     kind: "options",

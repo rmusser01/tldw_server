@@ -29,7 +29,10 @@ import {
   extractCompletedIngestJobError,
   extractCompletedIngestJobMediaId,
 } from "@/services/tldw/ingest-job-results"
-import { DOCUMENT_WORKSPACE_PATH } from "@/routes/route-paths"
+import {
+  DOCUMENT_WORKSPACE_PATH,
+  buildMediaCollectionReviewPath,
+} from "@/routes/route-paths"
 import {
   type PersistedWizardQueueItem,
   type QuickIngestSessionLifecycle,
@@ -1589,6 +1592,15 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     [navigate, onClose]
   )
 
+  const handleOpenCollection = useCallback(
+    (collectionId: string) => {
+      const collectionPath = buildMediaCollectionReviewPath(collectionId)
+      onClose()
+      navigate(collectionPath)
+    },
+    [navigate, onClose]
+  )
+
   // Render the current step
   const stepContent = useMemo(() => {
     switch (currentStep) {
@@ -1626,6 +1638,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
             onOpenMedia={handleOpenMedia}
             onSearchKnowledge={handleSearchKnowledge}
             onOpenWorkspace={handleOpenWorkspace}
+            onOpenCollection={handleOpenCollection}
           />
         )
       default:
@@ -1635,6 +1648,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     connectionRecoveryMessage,
     currentStep,
     handleOpenMedia,
+    handleOpenCollection,
     handleOpenWorkspace,
     handleQuickProcess,
     handleRetryConnection,

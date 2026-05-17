@@ -6,6 +6,7 @@ import type { RouteDefinition } from "./route-registry"
 import OptionMediaMulti from "./option-media-multi"
 
 const OptionContentReview = lazy(() => import("./option-content-review"))
+const OptionMediaCollection = lazy(() => import("./option-media-collection"))
 
 export const optionMediaReviewRoutes: RouteDefinition[] = [
   {
@@ -17,6 +18,11 @@ export const optionMediaReviewRoutes: RouteDefinition[] = [
     kind: "options",
     path: "/media-multi",
     element: <OptionMediaMulti />,
+  },
+  {
+    kind: "options",
+    path: "/media-collections/:collectionId",
+    element: <OptionMediaCollection />,
   },
   {
     kind: "options",

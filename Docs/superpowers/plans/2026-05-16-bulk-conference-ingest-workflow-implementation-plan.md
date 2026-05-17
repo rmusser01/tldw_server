@@ -1233,7 +1233,7 @@ module produced zero findings in `/tmp/bandit_task408.json`. Full frontend
 slice: `EmbeddingsModelSelectionConfig.tsx`, `persona-visuals.ts`, and
 `lib/api/vnPlay.ts`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add \
@@ -1251,6 +1251,8 @@ git add \
 git commit -m "feat: recover duplicate and failed playlist items"
 ```
 
+Committed as `60f40c127 feat: recover duplicate and failed playlist items`.
+
 ## Task 9: Notifications, Full-Path QA, And Documentation
 
 **Files:**
@@ -1261,11 +1263,11 @@ git commit -m "feat: recover duplicate and failed playlist items"
 - Modify if needed: `Docs/API-related/Media_Ingest_Jobs_API.md`
 - Test fixtures as needed under existing frontend/backend test fixture directories.
 
-- [ ] **Step 1: Add mocked 34-item playlist fixture**
+- [x] **Step 1: Add mocked 34-item playlist fixture**
 
 Create a deterministic fixture with 34 metadata-only items, duplicates, and failure permutations. Do not depend on real YouTube or downloads in automated tests.
 
-- [ ] **Step 2: Write full-path WebUI test**
+- [x] **Step 2: Write full-path WebUI test**
 
 Test:
 
@@ -1278,15 +1280,15 @@ Test:
 7. open collection
 8. see readiness counts
 
-- [ ] **Step 3: Write extension handoff test**
+- [x] **Step 3: Write extension handoff test**
 
 Assert active-tab playlist context opens the same preflight state as WebUI paste.
 
-- [ ] **Step 4: Add completion notification**
+- [x] **Step 4: Add completion notification**
 
 Use existing WebUI/extension notification/message patterns. Notification should include collection name and mixed success counts; it should not claim all searchable until readiness counts confirm it.
 
-- [ ] **Step 5: Write user documentation**
+- [x] **Step 5: Write user documentation**
 
 Document:
 
@@ -1297,7 +1299,7 @@ Document:
 - collection review
 - scoped Knowledge QA readiness
 
-- [ ] **Step 6: Run full verification**
+- [x] **Step 6: Run full verification**
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -1320,7 +1322,16 @@ npx playwright test apps/tldw-frontend/e2e/workflows/media-ingest.spec.ts
 git diff --check
 ```
 
-- [ ] **Step 7: Final Bandit touched backend sweep**
+Task 9 verification note:
+
+- Backend focused pytest passed: `46 passed, 9 warnings`.
+- Frontend focused Vitest passed: `7 files passed`, `68 tests passed`.
+- Focused Playwright conference workflow passed: `2 passed` for the mocked 34-talk WebUI flow and extension handoff using the webpack dev server.
+- Full `media-ingest.spec.ts` Playwright file was run with the webpack dev server and ended with `15 passed`, `12 skipped`, `3 failed`; the failures were existing broader-file drift outside the new conference workflow: missing legacy media search textbox, missing legacy empty-state "open quick ingest" trigger, and an unstable legacy review-route link click.
+- `./node_modules/.bin/tsc --noEmit` still fails only on known baseline files outside this slice: `EmbeddingsModelSelectionConfig.tsx`, `persona-visuals.ts`, and `lib/api/vnPlay.ts`.
+- `git diff --check` passed.
+
+- [x] **Step 7: Final Bandit touched backend sweep**
 
 ```bash
 source .venv/bin/activate && python -m bandit \
@@ -1331,7 +1342,9 @@ source .venv/bin/activate && python -m bandit \
   -f json -o /tmp/bandit_bulk_conference_final.json
 ```
 
-- [ ] **Step 8: Commit**
+Bandit reported zero findings in `/tmp/bandit_bulk_conference_final.json`.
+
+- [x] **Step 8: Commit**
 
 ```bash
 git add \
@@ -1345,16 +1358,16 @@ git commit -m "test: verify bulk conference ingest workflow"
 
 ## Cross-Stage Review Checklist
 
-- [ ] Preflight remains read-only: no jobs, no media rows, no collection mutation.
-- [ ] Server capabilities distinguish endpoint presence, worker availability, SSE, durable collection support, playlist preflight, and scoped QA.
-- [ ] Collection identity is stable and not tag-only.
-- [ ] Planned, processing, completed, skipped_existing, `submit_failed`, failed, and cancelled item states are represented.
-- [ ] Submit failures keep source URL, metadata, error, and export/retry path.
-- [ ] Retry is idempotent by collection item and retry attempt.
-- [ ] Synchronous fallback preserves metadata and clearly communicates weaker recovery.
-- [ ] Extension capture hands off to shared preflight and does not duplicate playlist parsing.
-- [ ] Scoped QA is backend-enforced and shows ready/not-ready counts.
-- [ ] One-off Quick Ingest remains unchanged.
+- [x] Preflight remains read-only: no jobs, no media rows, no collection mutation.
+- [x] Server capabilities distinguish endpoint presence, worker availability, SSE, durable collection support, playlist preflight, and scoped QA.
+- [x] Collection identity is stable and not tag-only.
+- [x] Planned, processing, completed, skipped_existing, `submit_failed`, failed, and cancelled item states are represented.
+- [x] Submit failures keep source URL, metadata, error, and export/retry path.
+- [x] Retry is idempotent by collection item and retry attempt.
+- [x] Synchronous fallback preserves metadata and clearly communicates weaker recovery.
+- [x] Extension capture hands off to shared preflight and does not duplicate playlist parsing.
+- [x] Scoped QA is backend-enforced and shows ready/not-ready counts.
+- [x] One-off Quick Ingest remains unchanged.
 
 ## Execution Notes
 

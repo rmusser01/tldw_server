@@ -9,6 +9,7 @@
  * - Content review flow
  */
 import { test, expect, skipIfServerUnavailable, assertNoCriticalErrors } from "../utils/fixtures"
+import type { Page, Route } from "@playwright/test"
 import { MediaPage } from "../utils/page-objects"
 import {
   seedAuth,
@@ -423,6 +424,296 @@ test.describe("Media Ingestion Workflow", () => {
       "e2e/fixtures/media/quick-ingest-sample.mkv"
     )
     const quickIngestFixtureUrl = "https://example.com/e2e/quick-ingest-source.html"
+    const bulkConferencePlaylistUrl =
+      "https://www.youtube.com/watch?v=PrNmmN6qBiw&list=PL0065D9B288E6804B"
+    const bulkConferenceCollectionId = 700
+
+    const fulfillJson = async (
+      route: Route,
+      status: number,
+      body: Record<string, unknown>
+    ) => {
+      await route.fulfill({
+        status,
+        contentType: "application/json",
+        body: JSON.stringify(body),
+      })
+    }
+
+    const buildBulkConferencePreflightFixture = () => {
+      const items = Array.from({ length: 34 }, (_, index) => {
+        const ordinal = index + 1
+        const videoId =
+          ordinal === 18 ? "conference-talk-08" : `conference-talk-${String(ordinal).padStart(2, "0")}`
+        const duplicateStatus =
+          ordinal === 8
+            ? "duplicate_existing"
+            : ordinal === 18
+              ? "duplicate_in_batch"
+              : "new"
+        return {
+          ordinal,
+          source_url: `https://www.youtube.com/watch?v=${videoId}`,
+          normalized_source_id: `youtube:video:${videoId}`,
+          source_kind: "youtube_video",
+          title: `Talk ${ordinal}`,
+          speaker: `Speaker ${ordinal}`,
+          duration_seconds: 1800 + ordinal,
+          published_at: `2010-09-${String(Math.min(ordinal, 28)).padStart(2, "0")}`,
+          thumbnail_url: null,
+          duplicate_status: duplicateStatus,
+          duplicate_of_ordinal: ordinal === 18 ? 8 : null,
+          selected: duplicateStatus === "new",
+        }
+      })
+
+      return {
+        source_url: bulkConferencePlaylistUrl,
+        source_kind: "youtube_watch_playlist",
+        playlist_id: "PL0065D9B288E6804B",
+        playlist_title: "Conference 2010",
+        video_id: "PrNmmN6qBiw",
+        item_count: items.length,
+        selected_count: items.filter((item) => item.selected).length,
+        duplicate_count: items.filter((item) => item.duplicate_status !== "new").length,
+        warnings: [],
+        items,
+      }
+    }
+
+    const mockBulkConferenceApis = async (page: Page) => {
+      const preflight = buildBulkConferencePreflightFixture()
+      const collectionItems = new Map<number, Record<string, any>>()
+      const jobToCollectionItem = new Map<number, number>()
+      let nextCollectionItemId = 900
+      let nextJobId = 1200
+      let submittedJobCount = 0
+
+      await page.route("**/openapi.json", async (route) => {
+        await fulfillJson(route, 200, {
+          openapi: "3.1.0",
+          info: { title: "tldw e2e", version: "e2e" },
+          paths: {
+            "/api/v1/media": { get: {} },
+            "/api/v1/media/playlists/preflight": { post: {} },
+            "/api/v1/media/ingest/jobs": { post: {} },
+            "/api/v1/media/collections": { get: {}, post: {} },
+            "/api/v1/media/collections/{collection_id}": { get: {} },
+            "/api/v1/rag/search": { post: {} },
+          },
+        })
+      })
+      await page.route("**/api/v1/config/docs-info", async (route) => {
+        await fulfillJson(route, 200, {
+          capabilities: {
+            hasMediaPlaylistPreflight: true,
+            hasMediaIngestJobs: true,
+            hasDurableMediaCollections: true,
+            hasKnowledgeQaMediaScope: true,
+          },
+        })
+      })
+      await page.route("**/api/v1/health", async (route) => {
+        await fulfillJson(route, 200, { status: "ok", version: "e2e" })
+      })
+      await page.route(/\/api\/v1\/media\/?(?:\?|$)/, async (route, request) => {
+        if (request.method().toUpperCase() !== "GET") {
+          await route.continue()
+          return
+        }
+        await fulfillJson(route, 200, {
+          items: [],
+          pagination: {
+            page: 1,
+            results_per_page: 20,
+            total_items: 0,
+            total_pages: 1,
+          },
+        })
+      })
+      await page.route("**/api/v1/media/playlists/preflight", async (route, request) => {
+        if (request.method().toUpperCase() !== "POST") {
+          await route.continue()
+          return
+        }
+        await fulfillJson(route, 200, preflight)
+      })
+      await page.route("**/api/v1/media/collections", async (route, request) => {
+        const url = new URL(request.url())
+        if (
+          request.method().toUpperCase() !== "POST" ||
+          url.pathname.replace(/\/+$/, "") !== "/api/v1/media/collections"
+        ) {
+          await route.continue()
+          return
+        }
+        await fulfillJson(route, 200, {
+          id: bulkConferenceCollectionId,
+          name: "Conference 2010 Review",
+          kind: "conference",
+          source_url: bulkConferencePlaylistUrl,
+          metadata: {
+            conference_name: "Conference",
+            event_year: "2010",
+            source_playlist_url: bulkConferencePlaylistUrl,
+          },
+          default_tags: ["conference", "talks"],
+          created_at: "2026-05-16T00:00:00Z",
+          updated_at: "2026-05-16T00:00:00Z",
+          items: [],
+        })
+      })
+      await page.route(
+        `**/api/v1/media/collections/${bulkConferenceCollectionId}/items`,
+        async (route, request) => {
+          if (request.method().toUpperCase() !== "POST") {
+            await route.continue()
+            return
+          }
+          const payload = request.postDataJSON() as Record<string, any>
+          const itemId = nextCollectionItemId++
+          const item = {
+            id: itemId,
+            collection_id: bulkConferenceCollectionId,
+            ordinal: payload.ordinal,
+            source_url: payload.source_url,
+            normalized_source_id: payload.normalized_source_id,
+            source_kind: payload.source_kind,
+            title: payload.title || `Talk ${payload.ordinal}`,
+            speaker: payload.speaker || null,
+            published_at: payload.published_at || null,
+            track: payload.track || null,
+            duplicate_status: payload.duplicate_status || "new",
+            status: payload.status || "planned",
+            media_id:
+              payload.duplicate_status && payload.duplicate_status !== "new"
+                ? 5000 + Number(payload.ordinal || 0)
+                : null,
+            content_item_id: null,
+            latest_job_id: null,
+            latest_run_id: null,
+            idempotency_key: `collection-${itemId}-attempt-0`,
+            retry_count: 0,
+            error_summary: null,
+            warnings: [],
+            metadata: payload.metadata || {},
+            tags: payload.tags || [],
+            created_at: "2026-05-16T00:00:00Z",
+            updated_at: "2026-05-16T00:00:00Z",
+          }
+          collectionItems.set(itemId, item)
+          await fulfillJson(route, 200, item)
+        }
+      )
+      await page.route(
+        `**/api/v1/media/collections/${bulkConferenceCollectionId}/items/*`,
+        async (route, request) => {
+          if (request.method().toUpperCase() !== "PATCH") {
+            await route.continue()
+            return
+          }
+          const url = new URL(request.url())
+          const itemId = Number(url.pathname.split("/").pop())
+          const patch = request.postDataJSON() as Record<string, any>
+          const current = collectionItems.get(itemId) || {
+            id: itemId,
+            collection_id: bulkConferenceCollectionId,
+          }
+          const next = {
+            ...current,
+            ...patch,
+            media_id:
+              patch.media_id != null
+                ? Number(patch.media_id)
+                : current.media_id ?? null,
+            updated_at: "2026-05-16T00:01:00Z",
+          }
+          collectionItems.set(itemId, next)
+          await fulfillJson(route, 200, next)
+        }
+      )
+      await page.route("**/api/v1/media/ingest/jobs", async (route, request) => {
+        const url = new URL(request.url())
+        if (
+          request.method().toUpperCase() !== "POST" ||
+          url.pathname.replace(/\/+$/, "") !== "/api/v1/media/ingest/jobs"
+        ) {
+          await route.continue()
+          return
+        }
+        submittedJobCount += 1
+        const jobId = nextJobId++
+        const form = request.postDataBuffer()
+        const body = form?.toString("utf8") ?? ""
+        const plannedMatch = body.match(/name="media_collection_item_id"\r\n\r\n([^\r\n]+)/)
+        const plannedItemId = plannedMatch ? Number(plannedMatch[1]) : 0
+        if (plannedItemId) {
+          jobToCollectionItem.set(jobId, plannedItemId)
+        }
+        await fulfillJson(route, 200, {
+          batch_id: `bulk-batch-${jobId}`,
+          job_ids: [jobId],
+          jobs: [{ id: jobId, status: "queued" }],
+        })
+      })
+      await page.route("**/api/v1/media/ingest/jobs/*", async (route, request) => {
+        if (request.method().toUpperCase() !== "GET") {
+          await route.continue()
+          return
+        }
+        const url = new URL(request.url())
+        const jobId = Number(url.pathname.split("/").pop())
+        const collectionItemId = jobToCollectionItem.get(jobId)
+        const isFailed = jobId === 1209
+        await fulfillJson(route, 200, {
+          job_id: jobId,
+          status: "completed",
+          progress_percent: 100,
+          result: isFailed
+            ? {
+                status: "Error",
+                error: "Download failed for mocked talk",
+                source_url: `https://www.youtube.com/watch?v=conference-talk-failed`,
+              }
+            : {
+                status: "Success",
+                media_id: collectionItemId ? 7000 + collectionItemId : jobId,
+                source_url: `https://www.youtube.com/watch?v=conference-talk-${jobId}`,
+                title: `Processed talk ${jobId}`,
+              },
+        })
+      })
+      await page.route(
+        `**/api/v1/media/collections/${bulkConferenceCollectionId}`,
+        async (route, request) => {
+          if (request.method().toUpperCase() !== "GET") {
+            await route.continue()
+            return
+          }
+          await fulfillJson(route, 200, {
+            id: bulkConferenceCollectionId,
+            name: "Conference 2010 Review",
+            kind: "conference",
+            description: "Conference talks",
+            source_url: bulkConferencePlaylistUrl,
+            metadata: {
+              conference_name: "Conference",
+              event_year: "2010",
+            },
+            default_tags: ["conference", "talks"],
+            created_at: "2026-05-16T00:00:00Z",
+            updated_at: "2026-05-16T00:01:00Z",
+            items: Array.from(collectionItems.values()).sort(
+              (left, right) => Number(left.ordinal || 0) - Number(right.ordinal || 0)
+            ),
+          })
+        }
+      )
+
+      return {
+        getSubmittedJobCount: () => submittedJobCount,
+      }
+    }
     const createUniqueQuickIngestFixtureCopy = (): string => {
       const fixture = path.parse(quickIngestFixtureFile)
       const uniqueFixtureFile = path.join(
@@ -917,6 +1208,108 @@ test.describe("Media Ingestion Workflow", () => {
       })
       await expect(dialog).toContainText(/processing/i)
       await expect(processQueuedCta).toHaveCount(0)
+
+      await assertNoCriticalErrors(diagnostics)
+    })
+
+    test("quick ingest handles a mocked 34-talk conference playlist through collection review", async ({
+      authedPage,
+      diagnostics
+    }) => {
+      test.setTimeout(180_000)
+      await authedPage.addInitScript(() => {
+        localStorage.removeItem("tldw-quick-ingest-session")
+        localStorage.removeItem("__tldwServerCapabilitiesCacheV3")
+      })
+      const bulkApis = await mockBulkConferenceApis(authedPage)
+
+      await authedPage.goto("/media", { waitUntil: "domcontentloaded" })
+      await waitForConnection(authedPage)
+      const dialog = await openQuickIngestDialog(authedPage)
+      const urlInput = dialog.locator("textarea").first()
+
+      await urlInput.fill(bulkConferencePlaylistUrl)
+      await dialog.getByRole("button", { name: "Preview" }).click()
+
+      await expect(dialog).toContainText("Conference 2010", { timeout: 20_000 })
+      await expect(dialog).toContainText("34 items")
+      await expect(dialog).toContainText("32 selected")
+      await expect(dialog).toContainText("2 duplicates")
+
+      await dialog.getByLabel("Include existing").check()
+      await expect(dialog).toContainText("34 selected")
+      await dialog.getByRole("checkbox", { name: "Select Talk 3", exact: true }).uncheck()
+      await expect(dialog).toContainText("33 selected")
+      await dialog.getByRole("button", { name: "Add 33" }).click()
+
+      const metadataPanel = dialog.getByLabel("Conference batch metadata")
+      await expect(metadataPanel).toContainText("33 selected")
+      await metadataPanel.getByLabel("Collection name").fill("Conference 2010 Review")
+      await metadataPanel.getByLabel("Conference name").fill("Conference")
+      await metadataPanel.getByLabel("Event year").fill("2010")
+      await metadataPanel.getByLabel("Shared tags").fill("conference, talks")
+
+      await dialog.getByRole("button", { name: /configure 33 items/i }).click()
+      await dialog.getByRole("button", { name: "Next" }).click()
+      await expect(dialog).toContainText("Ready to Process")
+      await dialog.getByRole("button", { name: /start processing/i }).click()
+
+      await expect(dialog.getByTestId("wizard-results-step")).toBeVisible({
+        timeout: 120_000,
+      })
+      await expect(dialog).toContainText("Succeeded (30)")
+      await expect(dialog).toContainText("Skipped existing (2)")
+      await expect(dialog).toContainText("Failed during processing (1)")
+      await expect(dialog).toContainText(
+        "Total: 30 succeeded, 2 skipped, 0 not submitted, 1 failed, 0 cancelled"
+      )
+      expect(bulkApis.getSubmittedJobCount()).toBe(31)
+
+      await dialog.getByRole("button", { name: "Open collection" }).click()
+      await expect(authedPage).toHaveURL(/\/media-collections\/700/, {
+        timeout: 20_000,
+      })
+      await expect(
+        authedPage.getByRole("heading", { name: "Conference 2010 Review" })
+      ).toBeVisible({ timeout: 20_000 })
+      await expect(authedPage.getByText("33 talks", { exact: true })).toBeVisible()
+      await expect(authedPage.getByText("32 ready", { exact: true })).toBeVisible()
+      await expect(authedPage.getByText("1 need attention", { exact: true })).toBeVisible()
+      await expect(authedPage.getByText("Talk 1").first()).toBeVisible()
+
+      await assertNoCriticalErrors(diagnostics)
+    })
+
+    test("quick ingest extension playlist handoff opens the shared preflight state", async ({
+      authedPage,
+      diagnostics
+    }) => {
+      await authedPage.addInitScript(() => {
+        localStorage.removeItem("tldw-quick-ingest-session")
+        localStorage.removeItem("__tldwServerCapabilitiesCacheV3")
+      })
+      await mockBulkConferenceApis(authedPage)
+
+      await authedPage.goto("/media", { waitUntil: "domcontentloaded" })
+      await waitForConnection(authedPage)
+      await authedPage.evaluate((url) => {
+        window.dispatchEvent(
+          new CustomEvent("tldw:open-quick-ingest", {
+            detail: {
+              source: "extension_active_tab",
+              action: "playlist_preflight",
+              sourceKind: "youtube_watch_playlist",
+              url,
+            },
+          })
+        )
+      }, bulkConferencePlaylistUrl)
+
+      const dialog = authedPage.getByRole("dialog", { name: /quick ingest/i }).first()
+      await expect(dialog).toBeVisible({ timeout: 20_000 })
+      await expect(dialog).toContainText("Conference 2010", { timeout: 20_000 })
+      await expect(dialog).toContainText("34 items")
+      await expect(dialog).toContainText("32 selected")
 
       await assertNoCriticalErrors(diagnostics)
     })

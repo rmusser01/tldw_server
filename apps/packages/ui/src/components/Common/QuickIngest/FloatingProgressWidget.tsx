@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { AlertTriangle, Loader2, Check, ExternalLink, XCircle } from "lucide-react"
 import { useIngestWizard } from "./IngestWizardContext"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
+import type { WizardResultItem } from "./types"
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -14,6 +15,71 @@ const AUTO_DISMISS_DELAY_MS = 10_000
 
 type WidgetTerminalState = "complete" | "failed" | "cancelled" | "interrupted"
 
+type CompletionSummaryInput = {
+  collectionName?: string | null
+  completedCount: number
+  totalCount: number
+  results: WizardResultItem[]
+}
+
+const plural = (count: number, singular: string, pluralLabel: string): string =>
+  `${count} ${count === 1 ? singular : pluralLabel}`
+
+export const buildFloatingProgressCompletionSummary = ({
+  collectionName,
+  completedCount,
+  totalCount,
+  results,
+}: CompletionSummaryInput): {
+  title: string
+  detail: string | null
+  readinessHint: string | null
+} => {
+  const title = collectionName?.trim() || ""
+  if (results.length === 0) {
+    return {
+      title,
+      detail:
+        totalCount > 0
+          ? `${completedCount}/${totalCount} finished`
+          : null,
+      readinessHint: null,
+    }
+  }
+
+  let succeeded = 0
+  let skipped = 0
+  let failed = 0
+  let cancelled = 0
+  for (const item of results) {
+    if (item.outcome === "cancelled") {
+      cancelled += 1
+    } else if (item.outcome === "skipped") {
+      skipped += 1
+    } else if (item.status === "error" || item.outcome === "failed" || item.outcome === "submit_failed") {
+      failed += 1
+    } else {
+      succeeded += 1
+    }
+  }
+
+  const parts = [
+    succeeded > 0 ? plural(succeeded, "succeeded", "succeeded") : null,
+    skipped > 0 ? plural(skipped, "skipped", "skipped") : null,
+    failed > 0 ? plural(failed, "failed", "failed") : null,
+    cancelled > 0 ? plural(cancelled, "cancelled", "cancelled") : null,
+  ].filter((part): part is string => Boolean(part))
+
+  return {
+    title,
+    detail: parts.length > 0 ? parts.join(", ") : null,
+    readinessHint:
+      collectionName && results.length > 1
+        ? "Open the wizard for collection readiness and retry options."
+        : null,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -21,7 +87,7 @@ type WidgetTerminalState = "complete" | "failed" | "cancelled" | "interrupted"
 export const FloatingProgressWidget: React.FC = () => {
   const { t } = useTranslation(["option"])
   const { state, restore } = useIngestWizard()
-  const { processingState, isMinimized } = state
+  const { processingState, isMinimized, results, conferenceBatchMetadata } = state
   const { sessionVisibility, sessionLifecycle, showSession } = useQuickIngestSessionStore((store) => ({
     sessionLifecycle: store.session?.lifecycle,
     sessionVisibility: store.session?.visibility,
@@ -106,6 +172,18 @@ export const FloatingProgressWidget: React.FC = () => {
     sessionLifecycle,
   ])
 
+  const allDone = terminalState !== null
+  const completionSummary = useMemo(
+    () =>
+      buildFloatingProgressCompletionSummary({
+        collectionName: conferenceBatchMetadata?.collectionName,
+        completedCount,
+        totalCount,
+        results,
+      }),
+    [completedCount, conferenceBatchMetadata?.collectionName, results, totalCount]
+  )
+
   // Auto-dismiss after completion
   useEffect(() => {
     if (!isMinimized) {
@@ -187,7 +265,7 @@ export const FloatingProgressWidget: React.FC = () => {
             {terminalPresentation ? (
               <>
                 {terminalPresentation.icon}
-                <span>{terminalPresentation.label}</span>
+                <span>{completionSummary.title || terminalPresentation.label}</span>
               </>
             ) : (
               <>
@@ -213,6 +291,14 @@ export const FloatingProgressWidget: React.FC = () => {
               "widget.processingHint",
               "Processing and indexing content..."
             )}
+          </p>
+        )}
+
+        {allDone && (completionSummary.detail || completionSummary.readinessHint) && (
+          <p className="text-[11px] leading-tight text-text-muted">
+            {completionSummary.detail}
+            {completionSummary.detail && completionSummary.readinessHint ? " " : ""}
+            {completionSummary.readinessHint}
           </p>
         )}
 

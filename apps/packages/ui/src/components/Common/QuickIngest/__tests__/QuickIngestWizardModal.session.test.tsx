@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   cancelQuickIngestSession: vi.fn(),
   reattachQuickIngestSession: vi.fn(),
   checkConnection: vi.fn(),
+  navigate: vi.fn(),
   runtimeListeners: [] as Array<(message: any) => void>,
 }))
 
@@ -92,11 +93,13 @@ vi.mock("antd", () => ({
 
 vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router-dom")>()
-  return { ...actual, useNavigate: () => vi.fn() }
+  return { ...actual, useNavigate: () => mocks.navigate }
 })
 
 vi.mock("@/routes/route-paths", () => ({
   DOCUMENT_WORKSPACE_PATH: "/document-workspace",
+  buildMediaCollectionReviewPath: (collectionId: string | number) =>
+    `/media-collections/${collectionId}`,
 }))
 
 vi.mock("@/store/connection", () => ({
@@ -270,7 +273,11 @@ vi.mock("@/components/Common/QuickIngest/WizardResultsStep", async () => {
     typeof import("@/components/Common/QuickIngest/IngestWizardContext")
   >("@/components/Common/QuickIngest/IngestWizardContext")
   return {
-    WizardResultsStep: () => {
+    WizardResultsStep: ({
+      onOpenCollection,
+    }: {
+      onOpenCollection?: (collectionId: string) => void
+    }) => {
       const { state } = actual.useIngestWizard()
       return (
         <div data-testid="wizard-results">
@@ -280,6 +287,14 @@ vi.mock("@/components/Common/QuickIngest/WizardResultsStep", async () => {
               {item.id}:{item.outcome}:{item.message || ""}
             </div>
           ))}
+          {onOpenCollection ? (
+            <button
+              type="button"
+              onClick={() => onOpenCollection("7")}
+            >
+              Open collection
+            </button>
+          ) : null}
         </div>
       )
     },
@@ -310,6 +325,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     mocks.cancelQuickIngestSession.mockReset()
     mocks.reattachQuickIngestSession.mockReset()
     mocks.checkConnection.mockReset()
+    mocks.navigate.mockReset()
     mocks.cancelQuickIngestSession.mockResolvedValue({ ok: true })
     useQuickIngestSessionStore.setState({
       session: null,
@@ -1294,6 +1310,48 @@ describe("QuickIngestWizardModal session runtime", () => {
           }),
         ])
       )
+    })
+  })
+
+  it("opens durable conference collections from terminal results", async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "completed",
+      currentStep: 5,
+      highestStep: 5,
+      processingState: {
+        status: "complete",
+        perItemProgress: [],
+        elapsed: 7,
+        estimatedRemaining: 0,
+      },
+      results: [
+        {
+          id: "conference-talk-1",
+          status: "ok",
+          url: "https://youtube.com/watch?v=talk-1",
+          type: "video",
+          mediaId: "101",
+        } as any,
+      ],
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-conference",
+        collectionId: "7",
+        durableMode: "durable_collection",
+        startedAt: 1234,
+      } as any,
+    })
+
+    render(<QuickIngestWizardModal open onClose={onClose} />)
+
+    await user.click(screen.getByRole("button", { name: "Open collection" }))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    await waitFor(() => {
+      expect(mocks.navigate).toHaveBeenCalledWith("/media-collections/7")
     })
   })
 
