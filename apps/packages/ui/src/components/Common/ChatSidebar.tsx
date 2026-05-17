@@ -421,7 +421,7 @@ export function ChatSidebar({
               <Plus className="size-4" />
             </button>
           </Tooltip>
-          {currentTab === "server" && (
+          {recentHistoryVisible && currentTab === "server" && (
             <Tooltip
               title={
                 selectionMode
