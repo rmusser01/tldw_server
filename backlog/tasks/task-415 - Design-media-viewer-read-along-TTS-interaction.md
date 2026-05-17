@@ -36,8 +36,14 @@ Spec review loop:
 - Pass 2 approved after those fixes.
 - Pass 3 approved after advisory clarifications for canonical Read from here behavior and mid-session TTS settings behavior.
 
+Human-requested critique pass:
+- Hardened the spec around the existing annotation selection capture path in ContentViewer so read-along and annotations share mediated selection actions instead of competing listeners.
+- Added lazy/cancellable segmentation requirements for large media items and explicit abort/stale-result suppression for in-flight TTS lookahead.
+- Clarified provider synthesis reuse, request cap splitting, Dexie schema/type migration requirements, storage quota/privacy constraints, autoplay rejection handling, and embedded media preview pause behavior.
+
 Verification:
-- rg found no TODO/TBD/placeholders in the spec.
+- Marker scan found no unfinished-work markers in the spec or task after the critique patch.
+- git diff --check passed for the spec and task files.
 - Bandit is not applicable because this change is docs/task tracking only.
 <!-- SECTION:PLAN:END -->
 
