@@ -884,9 +884,10 @@ Completion notes:
 - Modify: `apps/packages/ui/src/components/Common/QuickIngest/types.ts`
 - Modify: `apps/packages/ui/src/services/tldw/conference-collections.ts`
 - Test: `apps/packages/ui/src/components/Common/QuickIngest/__tests__/WizardResultsStep.navigation.test.tsx`
+- Test: `apps/packages/ui/src/components/Common/QuickIngest/__tests__/ResultsListItem.status.test.tsx`
 - Test: `apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx`
 
-- [ ] **Step 1: Write failing grouped-results test**
+- [x] **Step 1: Write failing grouped-results test**
 
 ```tsx
 render(<WizardResultsStep results={[
@@ -903,7 +904,7 @@ expect(screen.getByText(/Submit failed/i)).toBeInTheDocument()
 expect(screen.getByRole("button", { name: /Open collection/i })).toBeEnabled()
 ```
 
-- [ ] **Step 2: Run failing UI tests**
+- [x] **Step 2: Run failing UI tests**
 
 ```bash
 bunx vitest run \
@@ -911,7 +912,7 @@ bunx vitest run \
   apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx
 ```
 
-- [ ] **Step 3: Implement grouped result model and CTAs**
+- [x] **Step 3: Implement grouped result model and CTAs**
 
 Primary CTA: open conference collection.
 
@@ -923,7 +924,7 @@ Secondary CTAs:
 - ingest more
 - ask this collection only when `hasKnowledgeQaMediaScope` is true and collection readiness is nonzero
 
-- [ ] **Step 4: Separate submit failures from processing failures**
+- [x] **Step 4: Separate submit failures from processing failures**
 
 Use distinct outcome/status copy:
 
@@ -936,12 +937,13 @@ const RESULT_GROUP_LABELS = {
 
 Export should include source URL, title, collection item ID, status, error summary, and retry attempt.
 
-- [ ] **Step 5: Run verification**
+- [x] **Step 5: Run verification**
 
 ```bash
 bunx vitest run \
   apps/packages/ui/src/components/Common/QuickIngest/__tests__/WizardResultsStep.navigation.test.tsx \
   apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx \
+  apps/packages/ui/src/components/Common/QuickIngest/__tests__/ResultsListItem.status.test.tsx \
   apps/packages/ui/src/services/tldw/__tests__/conference-collections.test.ts
 
 git diff --check
@@ -956,9 +958,17 @@ git add \
   apps/packages/ui/src/components/Common/QuickIngest/types.ts \
   apps/packages/ui/src/services/tldw/conference-collections.ts \
   apps/packages/ui/src/components/Common/QuickIngest/__tests__/WizardResultsStep.navigation.test.tsx \
+  apps/packages/ui/src/components/Common/QuickIngest/__tests__/ResultsListItem.status.test.tsx \
   apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx
 git commit -m "feat: hand off bulk ingest results to collections"
 ```
+
+Completion notes:
+
+- Results now group succeeded, skipped existing, not submitted, failed during processing, and cancelled items separately.
+- Durable conference collections now remain the primary handoff CTA even when all items fail, and collection-scoped QA is gated on `hasKnowledgeQaMediaScope` plus at least one ready completed/skipped media item.
+- Failed export rows now include source URL, title, collection item ID, status, error summary, and retry attempt where available.
+- Verification run: focused Vitest suite `40 passed`, `git diff --check` passed. Frontend `tsc --noEmit` remains blocked by pre-existing unrelated type errors in `EmbeddingsModelSelectionConfig.tsx`, `persona-visuals.ts`, and `lib/api/vnPlay.ts`.
 
 ## Task 6: Conference Collection Review And Scoped QA
 

@@ -246,6 +246,8 @@ vi.mock("lucide-react", () => {
     "MessageSquare",
     "RefreshCw",
     "Trash2",
+    "Search",
+    "Download",
   ]
   const mocks: Record<string, any> = {}
   for (const name of iconNames) {
@@ -1188,7 +1190,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
       expect(screen.getByTestId("wizard-results-step")).toBeTruthy()
     })
 
-    expect(screen.getByText("Skipped (1)")).toBeTruthy()
+    expect(screen.getByText("Skipped existing (1)")).toBeTruthy()
     expect(screen.getByText("Existing Article")).toBeTruthy()
     expect(
       screen.getByText(/1 succeeded.*1 skipped.*1 failed/i)

@@ -10,6 +10,7 @@ vi.mock("@/services/background-proxy", () => ({
 }))
 
 import {
+  buildConferenceFailedResultExportText,
   getMediaCollectionStatusCounts,
   normalizeMediaCollectionResponse
 } from "@/services/tldw/conference-collections"
@@ -146,5 +147,42 @@ describe("conference media collection normalizers", () => {
         }
       })
     )
+  })
+
+  it("exports failed conference result rows with collection and retry context", () => {
+    const text = buildConferenceFailedResultExportText([
+      {
+        id: "submit-1",
+        status: "error",
+        outcome: "submit_failed",
+        type: "video",
+        title: "Submit Blocked",
+        url: "https://example.com/submit",
+        collectionItemId: "13",
+        error: "Queue unavailable"
+      } as any,
+      {
+        id: "failed-1",
+        status: "error",
+        outcome: "failed",
+        type: "video",
+        title: "Bad Video",
+        url: "https://example.com/fail",
+        collectionItemId: "14",
+        retryAttempt: 2,
+        error: "Download failed"
+      } as any
+    ])
+
+    expect(text).toContain("Title: Submit Blocked")
+    expect(text).toContain("URL: https://example.com/submit")
+    expect(text).toContain("Collection item: 13")
+    expect(text).toContain("Status: submit_failed")
+    expect(text).toContain("Error: Queue unavailable")
+    expect(text).toContain("Title: Bad Video")
+    expect(text).toContain("Collection item: 14")
+    expect(text).toContain("Status: failed")
+    expect(text).toContain("Retry attempt: 2")
+    expect(text).toContain("Error: Download failed")
   })
 })

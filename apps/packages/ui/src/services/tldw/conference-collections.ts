@@ -2,6 +2,7 @@ import type {
   ConferenceBatchMetadata,
   ConferenceItemMetadataOverride,
   PlaylistQueueMetadata,
+  WizardResultItem,
 } from "@/components/Common/QuickIngest/types"
 
 export type MediaCollectionItemStatus =
@@ -382,3 +383,45 @@ export const getMediaCollectionStatusCounts = (
   }
   return counts
 }
+
+export const getConferenceResultExportStatus = (
+  item: Pick<WizardResultItem, "outcome" | "status">
+): string => {
+  if (item.outcome === "submit_failed") return "submit_failed"
+  if (item.outcome === "cancelled") return "cancelled"
+  if (item.outcome === "failed" || item.status === "error") return "failed"
+  if (item.outcome === "skipped") return "skipped_existing"
+  return item.outcome || "completed"
+}
+
+export const buildConferenceFailedResultExportText = (
+  items: WizardResultItem[]
+): string =>
+  items
+    .map((item, index) => {
+      const title =
+        compactString(item.title) ||
+        compactString(item.fileName) ||
+        compactString(item.url) ||
+        item.id
+      const lines = [`#${index + 1}`, `Title: ${title}`]
+      const url = compactString(item.url)
+      const collectionItemId =
+        item.collectionItemId == null
+          ? undefined
+          : compactString(String(item.collectionItemId))
+      const retryAttempt =
+        typeof item.retryAttempt === "number" && Number.isFinite(item.retryAttempt)
+          ? Math.trunc(item.retryAttempt)
+          : null
+      const errorSummary = compactString(item.error) || compactString(item.message)
+
+      if (url) lines.push(`URL: ${url}`)
+      if (collectionItemId) lines.push(`Collection item: ${collectionItemId}`)
+      lines.push(`Status: ${getConferenceResultExportStatus(item)}`)
+      if (retryAttempt != null) lines.push(`Retry attempt: ${retryAttempt}`)
+      if (errorSummary) lines.push(`Error: ${errorSummary}`)
+
+      return lines.join("\n")
+    })
+    .join("\n\n")

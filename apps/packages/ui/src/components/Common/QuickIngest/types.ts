@@ -34,6 +34,7 @@ export type ResultOutcome =
   | "ingested"
   | "processed"
   | "skipped"
+  | "submit_failed"
   | "failed"
   | "cancelled"
 
@@ -324,6 +325,10 @@ export type WizardResultItem = ResultItem & {
   durationMs?: number
   /** Media ID returned from the server. */
   mediaId?: string | number | null
+  /** Durable collection item ID for bulk conference ingestion handoff. */
+  collectionItemId?: string | number | null
+  /** Retry attempt count associated with the latest ingest attempt. */
+  retryAttempt?: number | null
   /** Title extracted or assigned during processing. */
   title?: string | null
   /** Non-error informational message (e.g., "Already exists in library"). */
