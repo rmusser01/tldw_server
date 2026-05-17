@@ -35,7 +35,7 @@ Design the shared WebUI/extension chat sidebar behavior so every sidebar open/ex
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Design spec written and spec-review approved. Awaiting user review before transitioning to implementation planning.
+Design spec written, spec-review approved, and critique-hardened before implementation planning. Awaiting transition to implementation plan.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
