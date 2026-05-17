@@ -127,11 +127,21 @@ export const PlaygroundCockpitShell = ({
   const { t } = useTranslation("playground");
   const [uncontrolledMobilePanel, setUncontrolledMobilePanel] =
     React.useState<PlaygroundCockpitMobilePanel>("context");
+  const mobilePanelIdPrefix = React.useId();
   const focusMode = mode === "focus";
   const nextMode: PlaygroundCockpitMode = focusMode ? "cockpit" : "focus";
   const toggleLabel = focusMode
     ? t("cockpit.showPanels", "Show cockpit panels")
     : t("cockpit.enterFocus", "Enter focus chat");
+  const mobileReturnToFocusLabel = t(
+    "cockpit.mobileReturnToFocus",
+    "Return to focus chat",
+  );
+  const mobileContextTabId = `${mobilePanelIdPrefix}-mobile-context-tab`;
+  const mobileRuntimeTabId = `${mobilePanelIdPrefix}-mobile-runtime-tab`;
+  const mobileContextPanelId = `${mobilePanelIdPrefix}-mobile-context-panel`;
+  const mobileRuntimePanelId = `${mobilePanelIdPrefix}-mobile-runtime-panel`;
+  const mobilePanelSummaryId = `${mobilePanelIdPrefix}-mobile-panel-summary`;
   const showLeftRail = !focusMode && leftRailVisible;
   const showRightRail = !focusMode && rightRailVisible;
   const resolvedMobilePanel =
@@ -323,6 +333,21 @@ export const PlaygroundCockpitShell = ({
           data-mobile-panel={visibleMobilePanel ?? "none"}
           className="grid shrink-0 grid-cols-1 gap-2 border-b border-border bg-surface2/40 p-2 text-xs lg:hidden"
         >
+          <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-surface px-2.5 py-2">
+            <span className="font-semibold text-text">
+              {t("cockpit.cockpit", "Cockpit")}
+            </span>
+            <button
+              type="button"
+              aria-label={mobileReturnToFocusLabel}
+              aria-pressed={focusMode}
+              onClick={() => onModeChange("focus")}
+              className="inline-flex min-h-[32px] items-center gap-1 rounded-md border border-border bg-surface2 px-2 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>{t("cockpit.focus", "Focus")}</span>
+            </button>
+          </div>
           <div
             role="tablist"
             aria-label={t("cockpit.mobilePanelTabs", "Mobile cockpit panels")}
@@ -330,10 +355,11 @@ export const PlaygroundCockpitShell = ({
           >
             {leftRailVisible ? (
               <button
+                id={mobileContextTabId}
                 type="button"
                 role="tab"
                 aria-selected={visibleMobilePanel === "context"}
-                aria-controls="playground-mobile-context-panel"
+                aria-controls={mobileContextPanelId}
                 onClick={() => setMobilePanel("context")}
                 className={`min-h-[44px] rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
                   visibleMobilePanel === "context"
@@ -346,10 +372,11 @@ export const PlaygroundCockpitShell = ({
             ) : null}
             {rightRailVisible ? (
               <button
+                id={mobileRuntimeTabId}
                 type="button"
                 role="tab"
                 aria-selected={visibleMobilePanel === "runtime"}
-                aria-controls="playground-mobile-runtime-panel"
+                aria-controls={mobileRuntimePanelId}
                 onClick={() => setMobilePanel("runtime")}
                 className={`min-h-[44px] rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
                   visibleMobilePanel === "runtime"
@@ -362,30 +389,38 @@ export const PlaygroundCockpitShell = ({
             ) : null}
           </div>
           <p
-            id="playground-mobile-panel-summary"
+            id={mobilePanelSummaryId}
             data-testid="playground-cockpit-mobile-panel-summary"
             className="rounded-md border border-border bg-bg px-2.5 py-2 text-[11px] leading-4 text-text-muted"
           >
             {mobilePanelSummary}
           </p>
-          {visibleMobilePanel === "context" ? (
+          {leftRailVisible ? (
             <section
-              id="playground-mobile-context-panel"
+              id={mobileContextPanelId}
               role="tabpanel"
-              aria-describedby="playground-mobile-panel-summary"
-              aria-label={t("cockpit.context", "Context")}
-              className="max-h-[42vh] overflow-y-auto rounded-md border border-border bg-surface p-2"
+              aria-labelledby={mobileContextTabId}
+              aria-describedby={mobilePanelSummaryId}
+              hidden={visibleMobilePanel !== "context"}
+              aria-hidden={visibleMobilePanel !== "context"}
+              className={`max-h-[42vh] overflow-y-auto rounded-md border border-border bg-surface p-2 ${
+                visibleMobilePanel !== "context" ? "hidden" : ""
+              }`}
             >
               {leftRail}
             </section>
           ) : null}
-          {visibleMobilePanel === "runtime" ? (
+          {rightRailVisible ? (
             <section
-              id="playground-mobile-runtime-panel"
+              id={mobileRuntimePanelId}
               role="tabpanel"
-              aria-describedby="playground-mobile-panel-summary"
-              aria-label={t("cockpit.runtime", "Runtime")}
-              className="max-h-[42vh] overflow-y-auto rounded-md border border-border bg-surface p-2"
+              aria-labelledby={mobileRuntimeTabId}
+              aria-describedby={mobilePanelSummaryId}
+              hidden={visibleMobilePanel !== "runtime"}
+              aria-hidden={visibleMobilePanel !== "runtime"}
+              className={`max-h-[42vh] overflow-y-auto rounded-md border border-border bg-surface p-2 ${
+                visibleMobilePanel !== "runtime" ? "hidden" : ""
+              }`}
             >
               {rightRail}
             </section>
