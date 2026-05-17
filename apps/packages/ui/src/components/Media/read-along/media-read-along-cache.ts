@@ -54,6 +54,41 @@ const evictLeastRecentlyUsed = async (
   }
 }
 
+const matchesAttemptedWrite = (
+  current: MediaReadAlongAudioCacheEntry | undefined,
+  entry: MediaReadAlongAudioCacheEntry
+): boolean => {
+  return Boolean(
+    current &&
+      current.createdAt === entry.createdAt &&
+      current.lastUsedAt === entry.lastUsedAt &&
+      current.textHash === entry.textHash &&
+      current.settingsSignature === entry.settingsSignature &&
+      current.segmentId === entry.segmentId &&
+      current.sizeBytes === entry.sizeBytes
+  )
+}
+
+const removeAttemptedWriteIfCurrent = async (
+  entry: MediaReadAlongAudioCacheEntry
+): Promise<void> => {
+  const current = await table().get(entry.id)
+  if (matchesAttemptedWrite(current, entry)) {
+    await table().delete(entry.id)
+  }
+}
+
+const putEntryIfCurrent = async (
+  entry: MediaReadAlongAudioCacheEntry,
+  options: SaveOptions
+): Promise<boolean> => {
+  await table().put(entry)
+  if (canContinueSave(options)) return true
+
+  await removeAttemptedWriteIfCurrent(entry)
+  return false
+}
+
 export const resetMediaReadAlongAudioCacheSessionForTests = (): void => {
   cacheDisabledForSession = false
 }
@@ -87,16 +122,14 @@ export const saveMediaReadAlongAudioCacheEntry = async (
   try {
     await evictLeastRecentlyUsed(entry.sizeBytes, maxBytes)
     if (!canContinueSave(options)) return false
-    await table().put(entry)
-    return true
+    return await putEntryIfCurrent(entry, options)
   } catch (error) {
     if (!isQuotaExceededError(error)) return false
 
     try {
       await evictLeastRecentlyUsed(entry.sizeBytes, maxBytes, true)
       if (!canContinueSave(options)) return false
-      await table().put(entry)
-      return true
+      return await putEntryIfCurrent(entry, options)
     } catch (retryError) {
       if (isQuotaExceededError(retryError)) {
         cacheDisabledForSession = true

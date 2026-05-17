@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const { rows, mockTable, putState } = vi.hoisted(() => {
   const rows = new Map<string, any>()
   const putState = {
-    throwQuotaTimes: 0
+    throwQuotaTimes: 0,
+    beforeCommit: undefined as Promise<void> | undefined,
+    afterCommit: undefined as ((row: any) => void) | undefined
   }
 
   const mockTable = {
@@ -14,7 +16,9 @@ const { rows, mockTable, putState } = vi.hoisted(() => {
         error.name = 'QuotaExceededError'
         throw error
       }
+      await putState.beforeCommit
       rows.set(row.id, row)
+      putState.afterCommit?.(row)
       return row.id
     }),
     get: vi.fn(async (id: string) => rows.get(id)),
@@ -81,6 +85,8 @@ describe('media read-along audio cache', () => {
   beforeEach(() => {
     rows.clear()
     putState.throwQuotaTimes = 0
+    putState.beforeCommit = undefined
+    putState.afterCommit = undefined
     vi.clearAllMocks()
     resetMediaReadAlongAudioCacheSessionForTests()
   })
@@ -151,6 +157,52 @@ describe('media read-along audio cache', () => {
     expect(rows.has('guarded')).toBe(false)
   })
 
+  it('removes a row when the save guard fails after a delayed put commits', async () => {
+    const entry = cacheEntry({ id: 'stale-after-put' })
+    let allowSave = true
+    let releasePut!: () => void
+    putState.beforeCommit = new Promise<void>((resolve) => {
+      releasePut = resolve
+    })
+
+    const savePromise = saveMediaReadAlongAudioCacheEntry(entry, {
+      shouldContinue: () => allowSave
+    })
+
+    await vi.waitFor(() => expect(mockTable.put).toHaveBeenCalledWith(entry))
+    allowSave = false
+    releasePut()
+
+    await expect(savePromise).resolves.toBe(false)
+    expect(mockTable.delete).toHaveBeenCalledWith(entry.id)
+    expect(rows.has(entry.id)).toBe(false)
+  })
+
+  it('does not remove a newer matching-key write when cleaning up a stale delayed put', async () => {
+    const entry = cacheEntry({ id: 'shared-key' })
+    const newerEntry = cacheEntry({ id: entry.id, createdAt: 2000, lastUsedAt: 2000 })
+    let allowSave = true
+    let releasePut!: () => void
+    putState.beforeCommit = new Promise<void>((resolve) => {
+      releasePut = resolve
+    })
+    putState.afterCommit = () => {
+      rows.set(entry.id, newerEntry)
+    }
+
+    const savePromise = saveMediaReadAlongAudioCacheEntry(entry, {
+      shouldContinue: () => allowSave
+    })
+
+    await vi.waitFor(() => expect(mockTable.put).toHaveBeenCalledWith(entry))
+    allowSave = false
+    releasePut()
+
+    await expect(savePromise).resolves.toBe(false)
+    expect(mockTable.delete).not.toHaveBeenCalled()
+    expect(rows.get(entry.id)).toBe(newerEntry)
+  })
+
   it('retries once after QuotaExceededError by evicting LRU entries', async () => {
     rows.set('oldest', cacheEntry({ id: 'oldest', lastUsedAt: 10, sizeBytes: 500 }))
     rows.set('newest', cacheEntry({ id: 'newest', lastUsedAt: 20, sizeBytes: 100 }))
@@ -165,6 +217,31 @@ describe('media read-along audio cache', () => {
     expect(mockTable.put).toHaveBeenCalledTimes(2)
     expect(mockTable.bulkDelete).toHaveBeenCalledWith(['oldest'])
     expect(rows.has('incoming')).toBe(true)
+  })
+
+  it('removes a row when the save guard fails after a delayed quota retry put commits', async () => {
+    const entry = cacheEntry({ id: 'stale-retry-after-put', sizeBytes: 100 })
+    rows.set('oldest', cacheEntry({ id: 'oldest', lastUsedAt: 10, sizeBytes: 500 }))
+    putState.throwQuotaTimes = 1
+    let allowSave = true
+    let releasePut!: () => void
+    putState.beforeCommit = new Promise<void>((resolve) => {
+      releasePut = resolve
+    })
+
+    const savePromise = saveMediaReadAlongAudioCacheEntry(entry, {
+      maxBytes: 1000,
+      shouldContinue: () => allowSave
+    })
+
+    await vi.waitFor(() => expect(mockTable.put).toHaveBeenCalledTimes(2))
+    allowSave = false
+    releasePut()
+
+    await expect(savePromise).resolves.toBe(false)
+    expect(mockTable.bulkDelete).toHaveBeenCalledWith(['oldest'])
+    expect(mockTable.delete).toHaveBeenCalledWith(entry.id)
+    expect(rows.has(entry.id)).toBe(false)
   })
 
   it('disables cache for the session after repeated quota failures', async () => {
