@@ -178,7 +178,7 @@ describe('media read-along segmentation', () => {
 
     expect(queue).toEqual([
       expect.objectContaining({
-        id: 'transient-selection:0:22',
+        id: 'm6:0:transient-selection:text-0babd90f:0:22',
         index: 0,
         kind: 'transient-selection',
         text: 'Detached rendered text',
@@ -186,6 +186,104 @@ describe('media read-along segmentation', () => {
         sourceEnd: 22
       })
     ])
+  })
+
+  it('builds deterministic non-colliding transient fallback ids', () => {
+    const firstSegments = buildReadAlongSegments({
+      mediaId: 'media-a',
+      content: 'Alpha one.',
+      displayContent: 'Alpha one.',
+      renderMode: 'plain',
+      hideTranscriptTimings: false
+    })
+    const secondSegments = buildReadAlongSegments({
+      mediaId: 'media-b',
+      content: 'Alpha one.',
+      displayContent: 'Alpha one.',
+      renderMode: 'plain',
+      hideTranscriptTimings: false
+    })
+
+    const firstOffsetQueue = resolveReadAlongScope({
+      scope: 'selection',
+      segments: firstSegments,
+      selection: {
+        selectedText: 'Same',
+        mappingConfidence: 'text-only',
+        sourceStart: 50,
+        sourceEnd: 54,
+        anchorRect: new DOMRect()
+      }
+    })
+    const secondOffsetQueue = resolveReadAlongScope({
+      scope: 'selection',
+      segments: firstSegments,
+      selection: {
+        selectedText: 'Same',
+        mappingConfidence: 'text-only',
+        sourceStart: 60,
+        sourceEnd: 64,
+        anchorRect: new DOMRect()
+      }
+    })
+    const secondMediaQueue = resolveReadAlongScope({
+      scope: 'selection',
+      segments: secondSegments,
+      selection: {
+        selectedText: 'Same',
+        mappingConfidence: 'text-only',
+        sourceStart: 50,
+        sourceEnd: 54,
+        anchorRect: new DOMRect()
+      }
+    })
+    const firstTextOnlyQueue = resolveReadAlongScope({
+      scope: 'selection',
+      segments: firstSegments,
+      selection: {
+        selectedText: 'WXYZ',
+        mappingConfidence: 'text-only',
+        anchorRect: new DOMRect()
+      }
+    })
+    const secondTextOnlyQueue = resolveReadAlongScope({
+      scope: 'selection',
+      segments: firstSegments,
+      selection: {
+        selectedText: 'ABCD',
+        mappingConfidence: 'text-only',
+        anchorRect: new DOMRect()
+      }
+    })
+    const repeatTextOnlyQueue = resolveReadAlongScope({
+      scope: 'selection',
+      segments: firstSegments,
+      selection: {
+        selectedText: 'WXYZ',
+        mappingConfidence: 'text-only',
+        anchorRect: new DOMRect()
+      }
+    })
+
+    expect(firstOffsetQueue[0].id).toBe('media-a:0:transient-selection:50:54')
+    expect(secondOffsetQueue[0].id).toBe('media-a:0:transient-selection:60:64')
+    expect(secondMediaQueue[0].id).toBe('media-b:0:transient-selection:50:54')
+    expect(firstTextOnlyQueue[0].id).toMatch(
+      /^media-a:0:transient-selection:text-[a-f0-9]+:0:4$/
+    )
+    expect(secondTextOnlyQueue[0].id).toMatch(
+      /^media-a:0:transient-selection:text-[a-f0-9]+:0:4$/
+    )
+    expect(firstTextOnlyQueue[0].id).toBe(repeatTextOnlyQueue[0].id)
+    expect(
+      new Set([
+        firstOffsetQueue[0].id,
+        secondOffsetQueue[0].id,
+        secondMediaQueue[0].id,
+        firstTextOnlyQueue[0].id,
+        secondTextOnlyQueue[0].id
+      ]).size
+    ).toBe(5)
   })
 
   it('splits overlong segment requests and preserves parent segment id', () => {

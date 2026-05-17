@@ -24,6 +24,25 @@ const buildSegmentId = (
   sourceEnd: number
 ): string => `${mediaId}:${index}:${kind}:${sourceStart}:${sourceEnd}`
 
+const getMediaIdFromSegments = (segments: ReadAlongSegment[]): string => {
+  const firstSegmentId = segments[0]?.id
+  if (!firstSegmentId) return 'unknown-media'
+
+  const match = firstSegmentId.match(
+    /^(.*):\d+:(?:transcript-line|sentence|paragraph|transient-selection):/
+  )
+  return match?.[1] || 'unknown-media'
+}
+
+const stableTextHash = (text: string): string => {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash.toString(16).padStart(8, '0')
+}
+
 const parseTimestampSeconds = (timestamp: string): number | undefined => {
   const parts = timestamp.split(':').map((part) => Number.parseInt(part, 10))
   if (parts.some((part) => Number.isNaN(part))) return undefined
@@ -212,19 +231,29 @@ export const buildReadAlongSegments = (
 }
 
 const buildTransientSelectionSegment = (
+  segments: ReadAlongSegment[],
   selection: ReadAlongSelection
 ): ReadAlongSegment[] => {
   const text = selection.selectedText.trim()
   if (!text) return []
 
+  const mediaId = getMediaIdFromSegments(segments)
+  const hasSourceOffsets =
+    selection.sourceStart != null && selection.sourceEnd != null
+  const sourceStart = hasSourceOffsets ? selection.sourceStart! : 0
+  const sourceEnd = hasSourceOffsets ? selection.sourceEnd! : text.length
+  const id = hasSourceOffsets
+    ? buildSegmentId(mediaId, 0, 'transient-selection', sourceStart, sourceEnd)
+    : `${mediaId}:0:transient-selection:text-${stableTextHash(text)}:0:${text.length}`
+
   return [
     {
-      id: `transient-selection:0:${text.length}`,
+      id,
       index: 0,
       kind: 'transient-selection',
       text,
-      sourceStart: 0,
-      sourceEnd: text.length
+      sourceStart,
+      sourceEnd
     }
   ]
 }
@@ -292,12 +321,12 @@ export const resolveReadAlongScope = ({
     const selectedSegments = findSelectedSegments(segments, selection)
     return selectedSegments.length > 0
       ? selectedSegments
-      : buildTransientSelectionSegment(selection)
+      : buildTransientSelectionSegment(segments, selection)
   }
 
   const startIndex = findSegmentIndexForSelection(segments, selection)
   if (startIndex < 0) {
-    return buildTransientSelectionSegment(selection)
+    return buildTransientSelectionSegment(segments, selection)
   }
 
   if (scope === 'from-here') {
