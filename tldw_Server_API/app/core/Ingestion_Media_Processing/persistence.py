@@ -2083,6 +2083,29 @@ def sync_media_add_results_to_collections(
             result["collections_item_id"] = item_row.id
             result["collections_origin"] = collections_origin
 
+            planned_item_id_raw = (
+                getattr(form_data, "media_collection_item_id", None)
+                or getattr(form_data, "planned_item_id", None)
+            )
+            try:
+                planned_item_id = int(planned_item_id_raw) if planned_item_id_raw is not None else None
+            except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
+                planned_item_id = None
+            if planned_item_id is not None and planned_item_id > 0:
+                latest_job_id = getattr(form_data, "media_ingest_job_id", None)
+                resolved_status = "completed"
+                status_text = str(result.get("status") or "").strip().lower()
+                message_text = str(result.get("db_message") or result.get("message") or "").lower()
+                if status_text in {"skipped", "duplicate", "skipped_existing"} or "already exists" in message_text:
+                    resolved_status = "skipped_existing"
+                collections_db.resolve_media_collection_item(
+                    planned_item_id,
+                    media_id=media_id,
+                    status=resolved_status,
+                    latest_job_id=str(latest_job_id).strip() if latest_job_id is not None else None,
+                )
+                result["media_collection_item_id"] = planned_item_id
+
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning("Collections dual-write failed: {}", exc)
         for result in results:

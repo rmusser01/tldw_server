@@ -2048,7 +2048,11 @@ export default defineBackground({
         if (!planned) return;
         fields.media_collection_id = planned.collectionId;
         fields.media_collection_item_id = planned.itemId;
-        if (planned.idempotencyKey) fields.idempotency_key = planned.idempotencyKey;
+        fields.planned_item_ids = [String(planned.itemId)];
+        if (planned.idempotencyKey) {
+          fields.idempotency_key = planned.idempotencyKey;
+          fields.idempotency_keys = [planned.idempotencyKey];
+        }
       };
 
       const processWebScrape = async (url: string, entry?: any) => {
@@ -2330,6 +2334,9 @@ export default defineBackground({
               if (!shouldFallbackToPersistentAdd(toFallbackCandidate(resp))) {
                 const msg = resp?.error || `Upload failed: ${resp?.status}`;
                 throw new Error(msg);
+              }
+              if (typeof latestJobId === "number") {
+                fields.media_ingest_job_id = String(latestJobId);
               }
               data = await submitPersistentAddFallback({ fields });
             } else {

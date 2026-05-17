@@ -757,7 +757,7 @@ git commit -m "feat: add conference metadata to quick ingest"
 - Test: `apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx`
 - Test: `apps/packages/ui/src/services/__tests__/quick-ingest-batch.test.ts`
 
-- [ ] **Step 1: Write failing backend tests for planned item binding**
+- [x] **Step 1: Write failing backend tests for planned item binding**
 
 Test that job payload/status includes planned item ID:
 
@@ -780,7 +780,7 @@ def test_submit_jobs_preserves_collection_item_binding(client):
 
 Then fetch job and assert payload-derived `collection_id` and `planned_item_id` appear in status.
 
-- [ ] **Step 2: Run failing backend tests**
+- [x] **Step 2: Run failing backend tests**
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -789,7 +789,7 @@ source .venv/bin/activate && python -m pytest \
   -v
 ```
 
-- [ ] **Step 3: Extend job payload contract**
+- [x] **Step 3: Extend job payload contract**
 
 Accept optional collection/run form fields in `AddMediaForm` or endpoint-specific parsing, validate lengths match URL count, and write:
 
@@ -803,7 +803,7 @@ payload.update({
 
 Do not put secrets or cookies in the job payload.
 
-- [ ] **Step 4: Resolve item statuses in worker**
+- [x] **Step 4: Resolve item statuses in worker**
 
 On terminal result:
 
@@ -814,7 +814,7 @@ On terminal result:
 
 For job creation failures in the submit endpoint, mark planned item `submit_failed` with source URL/error.
 
-- [ ] **Step 5: Update frontend tracking**
+- [x] **Step 5: Update frontend tracking**
 
 Extend `PersistedQuickIngestTracking` with collection/run IDs and planned item mapping. Ensure refresh restore can show:
 
@@ -823,7 +823,7 @@ Extend `PersistedQuickIngestTracking` with collection/run IDs and planned item m
 - retry all retryable failures
 - export failed URLs
 
-- [ ] **Step 6: Run verification**
+- [x] **Step 6: Run verification**
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -839,7 +839,7 @@ bunx vitest run \
 git diff --check
 ```
 
-- [ ] **Step 7: Bandit**
+- [x] **Step 7: Bandit**
 
 ```bash
 source .venv/bin/activate && python -m bandit \
@@ -849,7 +849,7 @@ source .venv/bin/activate && python -m bandit \
   -f json -o /tmp/bandit_bulk_conference_jobs.json
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add \
@@ -868,6 +868,13 @@ git add \
   apps/packages/ui/src/services/__tests__/quick-ingest-batch.test.ts
 git commit -m "feat: track conference ingest runs through media jobs"
 ```
+
+Completion notes:
+
+- Implemented planned item binding through `/api/v1/media/ingest/jobs`, worker terminal status sync, synchronous fallback resolution, persisted Quick Ingest run tracking, and Processing Step durable tracking/export affordances.
+- Submit-time job creation failures now mark planned items `submit_failed`; terminal job results without a media id fail closed instead of leaving planned items stuck in `processing`.
+- `ingest-jobs-orchestrator.ts`, `ingest-job-results.ts`, and `FloatingProgressWidget.tsx` were left unchanged after review because the active direct-job path for this slice is handled by `quick-ingest-batch.ts`, the persisted session store, `ProcessingStep.tsx`, and the existing Results Panel retry/export controls.
+- Verification run: focused backend pytest `33 passed`, focused frontend Vitest `73 passed`, `git diff --check` passed, and Bandit reported zero findings for touched backend files.
 
 ## Task 5: Results And Collection Handoff
 

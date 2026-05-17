@@ -142,11 +142,15 @@ export type PersistedQuickIngestTracking = {
   sessionId?: string
   batchId?: string
   batchIds?: string[]
+  collectionId?: string
+  plannedItemIds?: string[]
   jobIds?: number[]
   submittedItemIds?: string[]
   /** @deprecated use submittedItemIds */
   itemIds?: string[]
   jobIdToItemId?: Record<string, string>
+  jobIdToCollectionItemId?: Record<string, string>
+  durableMode?: "durable_collection" | "degraded" | "unknown"
   startedAt?: number
 }
 

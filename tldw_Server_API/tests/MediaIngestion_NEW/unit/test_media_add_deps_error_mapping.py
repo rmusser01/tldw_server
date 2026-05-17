@@ -152,6 +152,22 @@ async def test_get_add_media_form_sanitizes_urls_json_fallback_debug_log():
 
 
 @pytest.mark.asyncio
+async def test_get_add_media_form_carries_collection_fallback_binding_fields():
+    form = await media_add_deps.get_add_media_form(
+        **_form_kwargs(
+            urls=["https://example.test/watch"],
+            media_collection_id="42",
+            media_collection_item_id="88",
+            media_ingest_job_id="1234",
+        )
+    )
+
+    assert form.media_collection_id == "42"
+    assert form.media_collection_item_id == "88"
+    assert form.media_ingest_job_id == "1234"
+
+
+@pytest.mark.asyncio
 async def test_get_add_media_form_sanitizes_context_window_fallback_debug_log():
     raw_context_window_size = "/private/tmp/raw-secret-value?token=secret-token"
 

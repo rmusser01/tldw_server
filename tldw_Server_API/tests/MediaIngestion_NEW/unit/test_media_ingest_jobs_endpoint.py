@@ -1,3 +1,4 @@
+import json
 import shutil
 from pathlib import Path
 
@@ -118,6 +119,116 @@ def test_submit_media_ingest_jobs_creates_one_job_per_item(
     assert Path(file_payload["source"]).exists()
 
     shutil.rmtree(file_payload["temp_dir"], ignore_errors=True)
+
+
+def test_submit_media_ingest_jobs_preserves_collection_item_binding(
+    media_ingest_jobs_client,
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+
+    captured: list[dict] = []
+
+    from tldw_Server_API.app.core.Jobs import manager as jobs_manager
+
+    def fake_create_job(
+        self,
+        *,
+        payload,
+        batch_group=None,
+        **_kwargs,
+    ):
+        captured.append({"payload": payload, "batch_group": batch_group})
+        return {"id": len(captured), "uuid": f"u{len(captured)}", "status": "queued"}
+
+    def fake_get_job(self, job_id):
+        payload = captured[int(job_id) - 1]["payload"]
+        return {
+            "id": int(job_id),
+            "domain": "media_ingest",
+            "job_type": "media_ingest_item",
+            "owner_user_id": "1",
+            "status": "queued",
+            "created_at": "2026-01-01T00:00:00Z",
+            "started_at": None,
+            "completed_at": None,
+            "cancelled_at": None,
+            "cancellation_reason": None,
+            "progress_percent": 0.0,
+            "progress_message": "queued",
+            "payload": payload,
+            "result": None,
+            "error_message": None,
+        }
+
+    monkeypatch.setattr(jobs_manager.JobManager, "create_job", fake_create_job, raising=True)
+    monkeypatch.setattr(jobs_manager.JobManager, "get_job", fake_get_job, raising=True)
+
+    resp = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "video",
+            "urls": "https://www.youtube.com/watch?v=talk-1",
+            "media_collection_id": "42",
+            "planned_item_ids": json.dumps(["101"]),
+            "idempotency_keys": json.dumps(["conference-42-101-0"]),
+        },
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    job = body["jobs"][0]
+    assert job["collection_id"] == "42"
+    assert job["planned_item_id"] == "101"
+    assert job["idempotency_key"] == "conference-42-101-0"
+    assert captured[0]["payload"]["collection_id"] == "42"
+    assert captured[0]["payload"]["planned_item_id"] == "101"
+    assert captured[0]["payload"]["idempotency_key"] == "conference-42-101-0"
+
+    status_resp = media_ingest_jobs_client.get(
+        "/api/v1/media/ingest/jobs/1",
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert status_resp.status_code == 200, status_resp.text
+    status_body = status_resp.json()
+    assert status_body["collection_id"] == "42"
+    assert status_body["planned_item_id"] == "101"
+    assert status_body["idempotency_key"] == "conference-42-101-0"
+
+
+def test_submit_media_ingest_jobs_rejects_mismatched_collection_item_bindings(
+    media_ingest_jobs_client,
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+
+    from tldw_Server_API.app.core.Jobs import manager as jobs_manager
+
+    def fake_create_job(self, **_kwargs):
+        raise AssertionError("job creation should not run when binding arrays do not match urls")
+
+    monkeypatch.setattr(jobs_manager.JobManager, "create_job", fake_create_job, raising=True)
+
+    resp = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "video",
+            "urls": [
+                "https://www.youtube.com/watch?v=talk-1",
+                "https://www.youtube.com/watch?v=talk-2",
+            ],
+            "media_collection_id": "42",
+            "planned_item_ids": json.dumps(["101"]),
+        },
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert resp.status_code == 422, resp.text
+    assert "planned_item_ids must match the number of URL items" in resp.text
 
 
 def test_submit_media_ingest_jobs_sanitizes_upload_staging_failure(
@@ -297,6 +408,58 @@ def test_submit_media_ingest_jobs_returns_429_for_concurrent_job_limit(
 
     assert resp.status_code == 429, resp.text
     assert resp.json()["detail"] == "User 1 has reached the maximum concurrent job limit (5)"
+
+
+def test_submit_media_ingest_jobs_marks_planned_item_submit_failed_on_job_error(
+    media_ingest_jobs_client,
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+    from tldw_Server_API.app.core.Jobs import manager as jobs_manager
+
+    status_updates: list[dict] = []
+
+    class _FakeCollectionsDatabase:
+        @classmethod
+        def for_user(cls, user_id):  # noqa: ARG003
+            return cls()
+
+        def update_media_collection_item_status(self, item_id, **kwargs):
+            status_updates.append({"item_id": item_id, **kwargs})
+
+        def close(self):
+            return None
+
+    def fake_create_job(self, **_kwargs):
+        raise BadRequestError("queue unavailable")
+
+    monkeypatch.setattr(ingest_jobs, "CollectionsDatabase", _FakeCollectionsDatabase, raising=False)
+    monkeypatch.setattr(jobs_manager.JobManager, "create_job", fake_create_job, raising=True)
+
+    resp = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "video",
+            "urls": "https://example.com/talk-submit-fails",
+            "media_collection_id": "42",
+            "planned_item_ids": json.dumps(["101"]),
+        },
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"] == "queue unavailable"
+    assert status_updates == [
+        {
+            "item_id": 101,
+            "status": "submit_failed",
+            "latest_job_id": None,
+            "error_summary": "queue unavailable",
+        }
+    ]
 
 
 def test_submit_media_ingest_jobs_routes_heavy_request_to_default_queue_when_heavy_worker_unavailable(

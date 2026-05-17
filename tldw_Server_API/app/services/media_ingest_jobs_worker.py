@@ -14,6 +14,7 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
 from tldw_Server_API.app.core.Chunking.templates import TemplateClassifier
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database
@@ -125,6 +126,128 @@ def _normalize_payload(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _coerce_positive_int(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _planned_collection_item_id(payload: dict[str, Any]) -> int | None:
+    return _coerce_positive_int(
+        payload.get("planned_item_id") or payload.get("media_collection_item_id")
+    )
+
+
+def _truncate_collection_error(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    return text[:1000]
+
+
+def _with_collections_db(user_id: str, callback) -> None:
+    collections_db = None
+    try:
+        collections_db = CollectionsDatabase.for_user(user_id=user_id)
+        callback(collections_db)
+    except Exception as exc:
+        logger.warning("Media collection item sync failed for user {}: {}", user_id, exc)
+    finally:
+        if collections_db is not None:
+            with contextlib.suppress(Exception):
+                collections_db.close()
+
+
+def _mark_collection_item_status(
+    *,
+    user_id: str,
+    item_id: int | None,
+    status: str,
+    latest_job_id: str,
+    error_summary: str | None = None,
+) -> None:
+    if item_id is None:
+        return
+
+    def _update(collections_db):
+        kwargs: dict[str, Any] = {
+            "status": status,
+            "latest_job_id": latest_job_id,
+        }
+        if error_summary is not None:
+            kwargs["error_summary"] = _truncate_collection_error(error_summary)
+        collections_db.update_media_collection_item_status(item_id, **kwargs)
+
+    _with_collections_db(user_id, _update)
+
+
+def _is_skipped_existing_result(result_item: dict[str, Any]) -> bool:
+    status = str(result_item.get("status") or "").strip().lower()
+    if status in {"skipped", "duplicate", "skipped_existing"}:
+        return True
+    message = str(result_item.get("db_message") or result_item.get("message") or "").lower()
+    return "already exists" in message or "duplicate" in message
+
+
+def _is_failed_result(result_item: dict[str, Any]) -> bool:
+    status = str(result_item.get("status") or "").strip().lower()
+    if status in {"error", "failed", "failure", "quarantined", "timeout"}:
+        return True
+    return bool(str(result_item.get("error") or "").strip())
+
+
+def _sync_collection_item_terminal_result(
+    *,
+    user_id: str,
+    item_id: int | None,
+    latest_job_id: str,
+    result_item: dict[str, Any],
+) -> None:
+    if item_id is None:
+        return
+
+    media_id = _coerce_positive_int(result_item.get("db_id") or result_item.get("media_id"))
+    if media_id is not None and not _is_failed_result(result_item):
+        resolved_status = "skipped_existing" if _is_skipped_existing_result(result_item) else "completed"
+
+        def _resolve(collections_db):
+            collections_db.resolve_media_collection_item(
+                item_id,
+                media_id=media_id,
+                status=resolved_status,
+                latest_job_id=latest_job_id,
+            )
+
+        _with_collections_db(user_id, _resolve)
+        return
+
+    if _is_failed_result(result_item):
+        error_summary = (
+            result_item.get("error")
+            or result_item.get("db_message")
+            or result_item.get("message")
+            or "Media ingest failed"
+        )
+        _mark_collection_item_status(
+            user_id=user_id,
+            item_id=item_id,
+            status="failed",
+            latest_job_id=latest_job_id,
+            error_summary=str(error_summary),
+        )
+        return
+
+    _mark_collection_item_status(
+        user_id=user_id,
+        item_id=item_id,
+        status="failed",
+        latest_job_id=latest_job_id,
+        error_summary="No media id returned",
+    )
+
+
 def _resolve_user_id(job: dict[str, Any], payload: dict[str, Any]) -> str:
     owner = job.get("owner_user_id") or payload.get("user_id")
     if owner is None or str(owner).strip() == "":
@@ -216,11 +339,13 @@ async def _schedule_embeddings(
 
 async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressState) -> dict[str, Any]:
     job_id = int(job.get("id"))
+    latest_job_id = str(job_id)
     payload = _normalize_payload(job.get("payload"))
     if str(job.get("job_type") or "").lower() != _MEDIA_JOB_TYPE:
         raise MediaIngestJobError("unsupported job_type", retryable=False)
 
     user_id = _resolve_user_id(job, payload)
+    planned_item_id = _planned_collection_item_id(payload)
     source = payload.get("source")
     if not source:
         raise MediaIngestJobError("missing source", retryable=False)
@@ -239,8 +364,22 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
     db = None
     try:
         if _should_cancel(jm, job_id):
+            _mark_collection_item_status(
+                user_id=user_id,
+                item_id=planned_item_id,
+                status="cancelled",
+                latest_job_id=latest_job_id,
+                error_summary="cancel requested before start",
+            )
             jm.finalize_cancelled(job_id, reason="cancel requested before start")
             return {}
+
+        _mark_collection_item_status(
+            user_id=user_id,
+            item_id=planned_item_id,
+            status="processing",
+            latest_job_id=latest_job_id,
+        )
 
         progress.percent = 5.0
         progress.message = "prepare"
@@ -319,6 +458,13 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
             results = [result]
 
         if _should_cancel(jm, job_id):
+            _mark_collection_item_status(
+                user_id=user_id,
+                item_id=planned_item_id,
+                status="cancelled",
+                latest_job_id=latest_job_id,
+                error_summary="cancel requested during processing",
+            )
             jm.finalize_cancelled(job_id, reason="cancel requested during processing")
             return {}
 
@@ -361,9 +507,31 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
             }
             if final_chunking_plan is not None:
                 job_result["chunking_plan"] = final_chunking_plan
+            _sync_collection_item_terminal_result(
+                user_id=user_id,
+                item_id=planned_item_id,
+                latest_job_id=latest_job_id,
+                result_item=result_item,
+            )
             return job_result
+        _mark_collection_item_status(
+            user_id=user_id,
+            item_id=planned_item_id,
+            status="failed",
+            latest_job_id=latest_job_id,
+            error_summary="No result produced",
+        )
         return {"status": "Error", "error": "No result produced"}
 
+    except Exception as exc:
+        _mark_collection_item_status(
+            user_id=user_id,
+            item_id=planned_item_id,
+            status="failed",
+            latest_job_id=latest_job_id,
+            error_summary=str(exc) or "Media ingest failed",
+        )
+        raise
     finally:
         if db is not None:
             with contextlib.suppress(Exception):

@@ -372,6 +372,7 @@ vi.stubGlobal(
 import {
   IngestWizardProvider,
   useIngestWizard,
+  type IngestWizardState,
 } from "@/components/Common/QuickIngest/IngestWizardContext"
 import { AddContentStep } from "@/components/Common/QuickIngest/AddContentStep"
 import { WizardConfigureStep } from "@/components/Common/QuickIngest/WizardConfigureStep"
@@ -469,6 +470,7 @@ const WizardTestHarness: React.FC<{
   isCheckingConnection?: boolean
   onRetryConnection?: () => void
   onQuickProcess?: () => void
+  initialState?: Partial<IngestWizardState>
 }> = ({
   onClose,
   isOnlineForIngest,
@@ -476,9 +478,10 @@ const WizardTestHarness: React.FC<{
   isCheckingConnection,
   onRetryConnection,
   onQuickProcess,
+  initialState,
 }) => {
   return (
-    <IngestWizardProvider>
+    <IngestWizardProvider initialState={initialState}>
       <ContextSpy />
       <InnerWizardContent
         onClose={onClose}
@@ -537,6 +540,10 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
   beforeEach(() => {
     onClose = vi.fn()
     ctxRef = null
+    useQuickIngestSessionStore.setState({
+      session: null,
+      triggerSummary: { count: 0, label: null, hadFailure: false },
+    })
   })
 
   // -------------------------------------------------------------------------
@@ -893,6 +900,102 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
 
     // Cancel All button should be present
     expect(screen.getByText("Cancel All")).toBeTruthy()
+  })
+
+  it("Step 4 — shows durable collection tracking and exports failed URLs", async () => {
+    const user = userEvent.setup()
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+
+    useQuickIngestSessionStore.getState().createDraftSession({
+      lifecycle: "processing",
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-test",
+        batchId: "batch-1",
+        collectionId: "7",
+        plannedItemIds: ["11", "12"],
+        jobIds: [501, 502],
+        jobIdToCollectionItemId: {
+          "501": "11",
+          "502": "12",
+        },
+        durableMode: "durable_collection",
+        startedAt: 1234,
+      },
+    })
+
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        initialState={{
+          currentStep: 4,
+          highestStep: 4,
+          queueItems: [
+            {
+              id: "talk-1",
+              kind: "url",
+              url: "https://example.com/fail",
+              detectedType: "video",
+              icon: "Video",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+            {
+              id: "talk-2",
+              kind: "url",
+              url: "https://example.com/processing",
+              detectedType: "video",
+              icon: "Video",
+              fileSize: 0,
+              validation: { valid: true },
+            },
+          ],
+          processingState: {
+            status: "running",
+            elapsed: 42,
+            estimatedRemaining: 120,
+            perItemProgress: [
+              {
+                id: "talk-1",
+                status: "failed",
+                progressPercent: 100,
+                currentStage: "processing",
+                estimatedRemaining: 0,
+                error: "Timed out while downloading",
+              },
+              {
+                id: "talk-2",
+                status: "processing",
+                progressPercent: 50,
+                currentStage: "processing",
+                estimatedRemaining: 120,
+              },
+            ],
+          },
+        }}
+      />
+    )
+
+    const trackingPanel = screen.getByTestId("quick-ingest-run-tracking")
+    expect(trackingPanel).toHaveTextContent("Durable collection tracking")
+    expect(trackingPanel).toHaveTextContent("Collection 7")
+    expect(trackingPanel).toHaveTextContent("2 planned items")
+    expect(trackingPanel).toHaveTextContent("2 jobs")
+
+    await user.click(
+      screen.getByRole("button", { name: "Export failed items list" })
+    )
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(
+        expect.stringContaining("https://example.com/fail")
+      )
+    })
+    expect(writeText.mock.calls[0]?.[0]).toContain("Timed out while downloading")
   })
 
   // -------------------------------------------------------------------------

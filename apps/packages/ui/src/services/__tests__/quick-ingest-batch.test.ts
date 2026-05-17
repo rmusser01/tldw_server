@@ -1135,6 +1135,8 @@ describe("submitQuickIngestBatch", () => {
   })
 
   it("creates planned conference collection items before direct job submission", async () => {
+    const onTrackingMetadata = vi.fn()
+
     mocks.bgUpload
       .mockResolvedValueOnce({
         batch_id: "batch-talk-1",
@@ -1261,7 +1263,9 @@ describe("submitQuickIngestBatch", () => {
         perform_chunking: false,
         overwrite_existing: false
       },
-      advancedValues: {}
+      advancedValues: {},
+      __quickIngestSessionId: "qi-direct-conference-run",
+      onTrackingMetadata
     } as any)
 
     expect(mocks.bgRequest).toHaveBeenCalledWith(
@@ -1303,6 +1307,20 @@ describe("submitQuickIngestBatch", () => {
           media_collection_item_id: 11,
           idempotency_key: "conference-7-1"
         })
+      })
+    )
+    expect(onTrackingMetadata).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        mode: "webui-direct",
+        sessionId: "qi-direct-conference-run",
+        batchId: "batch-talk-1",
+        collectionId: "7",
+        plannedItemIds: ["11"],
+        jobIdToCollectionItemId: {
+          "501": "11"
+        },
+        durableMode: "durable_collection"
       })
     )
   })

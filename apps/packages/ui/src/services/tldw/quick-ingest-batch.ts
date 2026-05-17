@@ -190,6 +190,16 @@ const buildJobIdToItemId = (
 ): Record<string, string> =>
   Object.fromEntries(jobIds.map((jobId) => [String(jobId), sourceItemId]));
 
+const buildJobIdToCollectionItemId = (
+  jobIds: number[],
+  planned: PlannedConferenceCollectionItem | undefined,
+): Record<string, string> | undefined => {
+  if (!planned) return undefined;
+  return Object.fromEntries(
+    jobIds.map((jobId) => [String(jobId), String(planned.itemId)]),
+  );
+};
+
 const ensureDirectSessionTracker = (
   sessionId: string | undefined,
 ): DirectQuickIngestTracker | undefined => {
@@ -657,8 +667,10 @@ const applyPlannedConferenceFields = (
   if (!planned) return;
   fields.media_collection_id = planned.collectionId;
   fields.media_collection_item_id = planned.itemId;
+  fields.planned_item_ids = [String(planned.itemId)];
   if (planned.idempotencyKey) {
     fields.idempotency_key = planned.idempotencyKey;
+    fields.idempotency_keys = [planned.idempotencyKey];
   }
 };
 
@@ -788,10 +800,21 @@ const runDirectQuickIngestBatch = async (
               sessionId: directSessionId,
               batchId,
               batchIds: [batchId],
+              collectionId: plannedConferenceItem
+                ? String(plannedConferenceItem.collectionId)
+                : undefined,
+              plannedItemIds: plannedConferenceItem
+                ? [String(plannedConferenceItem.itemId)]
+                : undefined,
               jobIds,
               submittedItemIds: [entry.id],
               itemIds: [entry.id],
               jobIdToItemId: buildJobIdToItemId(jobIds, entry.id),
+              jobIdToCollectionItemId: buildJobIdToCollectionItemId(
+                jobIds,
+                plannedConferenceItem,
+              ),
+              durableMode: plannedConferenceItem ? "durable_collection" : undefined,
               startedAt: Date.now(),
             });
             const pollResult = await pollIngestJobStatus(
@@ -818,6 +841,9 @@ const runDirectQuickIngestBatch = async (
               error_summary:
                 error instanceof Error ? error.message : String(error || "Submit failed"),
             });
+            if (typeof latestJobId === "number") {
+              fields.media_ingest_job_id = String(latestJobId);
+            }
             data = await submitPersistentAdd({ fields });
           }
         } else if (resolvedType === "html") {

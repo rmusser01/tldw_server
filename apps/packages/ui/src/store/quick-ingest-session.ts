@@ -30,11 +30,15 @@ export type PersistedQuickIngestTracking = {
   sessionId?: string
   batchId?: string
   batchIds?: string[]
+  collectionId?: string
+  plannedItemIds?: string[]
   jobIds?: number[]
   submittedItemIds?: string[]
   /** @deprecated use submittedItemIds */
   itemIds?: string[]
   jobIdToItemId?: Record<string, string>
+  jobIdToCollectionItemId?: Record<string, string>
+  durableMode?: "durable_collection" | "degraded" | "unknown"
   startedAt?: number
 }
 
@@ -233,7 +237,15 @@ const sanitizeTracking = (
       : []),
     ...(Array.isArray(tracking.itemIds) ? tracking.itemIds : []),
   ])
+  const plannedItemIds = normalizeStringIds(
+    Array.isArray(tracking.plannedItemIds) ? tracking.plannedItemIds : []
+  )
   const jobIdToItemIdEntries = Object.entries(tracking.jobIdToItemId || {})
+    .map(([jobId, itemId]) => [String(jobId || "").trim(), String(itemId || "").trim()] as const)
+    .filter(([jobId, itemId]) => jobId && itemId)
+  const jobIdToCollectionItemIdEntries = Object.entries(
+    tracking.jobIdToCollectionItemId || {}
+  )
     .map(([jobId, itemId]) => [String(jobId || "").trim(), String(itemId || "").trim()] as const)
     .filter(([jobId, itemId]) => jobId && itemId)
   const normalizedMode =
@@ -250,6 +262,8 @@ const sanitizeTracking = (
       tracking.batchId?.trim() ||
       (batchIds.length > 0 ? batchIds[batchIds.length - 1] : undefined),
     batchIds: batchIds.length > 0 ? batchIds : undefined,
+    collectionId: tracking.collectionId?.trim() || undefined,
+    plannedItemIds: plannedItemIds.length > 0 ? plannedItemIds : undefined,
     jobIds: jobIds && jobIds.length > 0 ? Array.from(new Set(jobIds)) : undefined,
     submittedItemIds:
       submittedItemIds.length > 0 ? submittedItemIds : undefined,
@@ -257,6 +271,16 @@ const sanitizeTracking = (
     jobIdToItemId:
       jobIdToItemIdEntries.length > 0
         ? Object.fromEntries(jobIdToItemIdEntries)
+        : undefined,
+    jobIdToCollectionItemId:
+      jobIdToCollectionItemIdEntries.length > 0
+        ? Object.fromEntries(jobIdToCollectionItemIdEntries)
+        : undefined,
+    durableMode:
+      tracking.durableMode === "durable_collection" ||
+      tracking.durableMode === "degraded" ||
+      tracking.durableMode === "unknown"
+        ? tracking.durableMode
         : undefined,
     startedAt:
       typeof tracking.startedAt === "number" && Number.isFinite(tracking.startedAt)
@@ -284,6 +308,11 @@ const mergeTracking = (
     sessionId: next.sessionId || base.sessionId,
     batchId: next.batchId || base.batchId,
     batchIds: [...(base.batchIds || []), ...(next.batchIds || [])],
+    collectionId: next.collectionId || base.collectionId,
+    plannedItemIds: [
+      ...(base.plannedItemIds || []),
+      ...(next.plannedItemIds || []),
+    ],
     jobIds: [...(base.jobIds || []), ...(next.jobIds || [])],
     submittedItemIds: [
       ...(base.submittedItemIds || base.itemIds || []),
@@ -293,6 +322,11 @@ const mergeTracking = (
       ...(base.jobIdToItemId || {}),
       ...(next.jobIdToItemId || {}),
     },
+    jobIdToCollectionItemId: {
+      ...(base.jobIdToCollectionItemId || {}),
+      ...(next.jobIdToCollectionItemId || {}),
+    },
+    durableMode: next.durableMode || base.durableMode,
     startedAt: base.startedAt || next.startedAt,
   })
 }

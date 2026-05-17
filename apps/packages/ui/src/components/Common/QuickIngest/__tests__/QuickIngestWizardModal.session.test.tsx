@@ -530,9 +530,13 @@ describe("QuickIngestWizardModal session runtime", () => {
         batchId: "batch-77",
         batchIds: ["batch-77"],
         jobIds: [77],
+        collectionId: "7",
+        plannedItemIds: ["11"],
         itemIds: ["queued-url-1"],
         submittedItemIds: ["queued-url-1"],
         jobIdToItemId: { "77": "queued-url-1" },
+        jobIdToCollectionItemId: { "77": "11" },
+        durableMode: "durable_collection",
         startedAt: Date.now(),
       })
       return new Promise(() => {})
@@ -567,6 +571,10 @@ describe("QuickIngestWizardModal session runtime", () => {
           sessionId: "qi-direct-late-tracking",
           batchIds: ["batch-77"],
           jobIds: [77],
+          collectionId: "7",
+          plannedItemIds: ["11"],
+          jobIdToCollectionItemId: { "77": "11" },
+          durableMode: "durable_collection",
         })
       )
     })
