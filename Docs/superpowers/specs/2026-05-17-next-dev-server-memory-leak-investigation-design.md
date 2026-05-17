@@ -9,11 +9,14 @@ The suspected memory leak is in the WebUI/extension frontend development server,
 
 The workflow that caused the growth is unknown, so the investigation must start with measurement instead of route or component guesses.
 
+Because the target is a live dev-server process, the implementation plan must not hard-code the historical PID, port, or log path. It must first rediscover the active process, its process tree, its current working directory, and the port it is serving.
+
 ## Scope
 
 In scope:
 
 - Investigate the running Next dev server process and its immediate frontend development environment.
+- Include the Next parent/child process tree, not only the single high-RSS child process.
 - Correlate memory growth with idle time, file watching, HMR, route compilation, browser requests, extension background traffic, and API request pressure.
 - Inspect frontend and extension code paths only after evidence points to a likely trigger.
 - Produce a ranked root-cause hypothesis list and a concrete next investigation or fix plan.
@@ -29,11 +32,12 @@ Out of scope for the first pass:
 
 Use an observation-first sequence.
 
-1. Capture process telemetry for the active `next-server` PID every 10 to 15 seconds over a short idle window.
-2. Inspect dev-server evidence from terminal output and `.next/dev/logs/next-development.log`.
-3. Correlate memory changes with browser and request activity only after the idle baseline.
-4. Run focused workflow probes if the idle baseline does not explain the growth.
-5. Move into code audit only after identifying a route, request type, build loop, or extension background path.
+1. Rediscover the target process from the process table: PID, parent PID, command line, current working directory, child processes, observed port, and whether the command is using default Turbopack dev mode or an explicit Webpack fallback.
+2. Capture process telemetry for the active `next-server` process tree every 10 to 15 seconds over a short idle window.
+3. Inspect dev-server evidence from terminal output and the `.next/dev/logs/next-development.log` under the process working directory, not the main checkout unless they are the same directory.
+4. Correlate memory changes with browser and request activity only after the idle baseline.
+5. Run focused workflow probes if the idle baseline does not explain the growth.
+6. Move into code audit only after identifying a route, request type, build loop, or extension background path.
 
 This sequence prevents guessing between Next/Turbopack behavior, HMR churn, frontend polling, streaming cleanup, route compilation cache growth, or extension background messaging.
 
@@ -43,8 +47,9 @@ Collect a small evidence table with one row per sample:
 
 - Timestamp.
 - PID and command line.
+- Current working directory and serving port.
 - RSS and CPU.
-- Parent process and elapsed runtime.
+- Parent process, child processes, and elapsed runtime.
 - Open file count when available.
 - Listening ports and active connections when available.
 - Recent dev-server log lines.
@@ -58,11 +63,13 @@ The first milestone is a memory slope, not a fix. The result should show whether
 If RSS rises while idle with no browser requests:
 
 - Investigate Next/Turbopack dev-server behavior, file watching, workspace symlinks, `.next` cache churn, repeated route compilation, and source-map or HMR loops.
+- Check for self-watch loops or generated-output churn in `.next`, test output, docs output, or Playwright output directories before blaming application code.
 
 If RSS rises only after route loads:
 
 - Replay a small route set and isolate the triggering route.
 - Inspect that route's server-side imports, dynamic imports, SSR-incompatible browser libraries, heavy shared UI imports, and route compilation output.
+- Distinguish one-time route compilation/cache growth from unbounded growth after repeated visits to the same route.
 
 If RSS rises with request storms:
 
@@ -73,6 +80,10 @@ If RSS rises only with extension sidepanel or background traffic:
 
 - Focus on WXT/background proxy behavior, stream ports, quick-ingest session runtime, extension route mounting, and background request fanout.
 
+If RSS growth appears tied to dev tooling rather than app behavior:
+
+- Compare the observed dev-server mode with a smaller isolation matrix before changing app code: current Turbopack dev mode, explicit Webpack dev mode, and production build/start when feasible.
+
 ## Guardrails
 
 - Do not make application code changes during first-pass evidence gathering.
@@ -80,6 +91,7 @@ If RSS rises only with extension sidepanel or background traffic:
 - Keep user-owned dirty worktree changes untouched.
 - If fixes become necessary, create or update a Backlog task before editing runtime code.
 - Prefer a dedicated worktree for implementation if the main checkout remains dirty.
+- Treat any historical PID, port, or path as stale until the implementation plan rechecks it.
 
 ## Expected Output
 
@@ -89,7 +101,7 @@ The investigation pass should produce:
 - Idle baseline memory slope.
 - Correlation notes for logs, requests, file watchers, route loads, and extension activity.
 - Ranked root-cause hypotheses with evidence for each.
-- A durable evidence artifact, likely under `Docs/superpowers/reviews/` or `Docs/superpowers/plans/`, selected during implementation planning so the samples and hypotheses are easy to find later.
+- A durable evidence artifact at `Docs/superpowers/reviews/2026-05-17-next-dev-server-memory-leak-investigation.md`, unless implementation planning identifies a stronger repo-local convention.
 - A next step selected from:
   - minimal reproduction script,
   - route-specific code audit,
