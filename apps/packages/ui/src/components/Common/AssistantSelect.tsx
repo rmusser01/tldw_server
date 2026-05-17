@@ -497,7 +497,7 @@ export const AssistantSelect: React.FC<Props> = ({
   const content = (
     <div
       data-testid="assistant-select-panel"
-      className="w-[320px] rounded-lg border border-border bg-surface shadow-lg"
+      className="w-[320px] rounded-lg border border-border bg-elevated shadow-lg"
     >
       <div className="border-b border-border p-2">
         <Input
