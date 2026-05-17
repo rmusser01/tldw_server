@@ -11,7 +11,8 @@ import {
   Gauge,
   Globe,
   MicIcon,
-  Search
+  Search,
+  Users
 } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
@@ -530,6 +531,29 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     [isProMode]
   )
 
+  const rolePlaySetupButton = React.useMemo(() => {
+    if (!providedRolePlayActions?.onOpenRolePlaySetup) return null
+
+    const label = t(
+      "playground:composer.rolePlaySetup",
+      "Role-play setup"
+    ) as string
+
+    return (
+      <Tooltip title={label}>
+        <button
+          type="button"
+          onClick={providedRolePlayActions.onOpenRolePlaySetup}
+          aria-label={label}
+          data-testid="composer-role-play-setup"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-text-muted transition hover:bg-surface2 hover:text-text">
+          <Users className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>{label}</span>
+        </button>
+      </Tooltip>
+    )
+  }, [providedRolePlayActions?.onOpenRolePlaySetup, t])
+
   const hiddenContextItemIds = React.useMemo(
     () =>
       new Set([
@@ -835,11 +859,11 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       </div>
       <div
         data-playground-toolbar-row="actions"
-        className="flex items-center justify-between gap-2">
+        className="flex flex-wrap items-center justify-between gap-2">
         <div
           role="group"
           aria-label={mobileContextGroupLabel}
-          className="flex items-center gap-2">
+          className="flex min-w-0 flex-wrap items-center gap-2">
           {ephemeralToggle}
           {searchContextButton}
           {webSearchButton}
@@ -847,7 +871,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         <div
           role="group"
           aria-label={mobileRunInputGroupLabel}
-          className="flex items-center gap-2">
+          className="flex min-w-0 flex-wrap items-center justify-end gap-2">
           {modelUsageBadge}
           <ComposerToolbarOverflow
             isProMode={isProMode}
@@ -895,6 +919,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           {searchContextButton}
           {promptSelectControl}
           {characterSelectControl}
+          {rolePlaySetupButton}
         </div>
         <div
           role="group"
@@ -964,6 +989,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {promptSelectControl}
             {characterSelectControl}
+            {rolePlaySetupButton}
           </div>
         </section>
         <section

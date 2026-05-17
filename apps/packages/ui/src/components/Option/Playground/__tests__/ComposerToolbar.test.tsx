@@ -258,6 +258,29 @@ describe("ComposerToolbar web search", () => {
     ).toHaveAttribute("id", "composer-casual-advanced-controls-row")
   })
 
+  it("exposes role-play setup directly in the desktop casual toolbar", () => {
+    const onOpenRolePlaySetup = vi.fn()
+    render(
+      <ComposerToolbar
+        {...createProps({
+          rolePlayActions: {
+            onOpenRolePlaySetup
+          }
+        })}
+      />
+    )
+
+    const setupButton = screen.getByRole("button", {
+      name: "Role-play setup"
+    })
+    fireEvent.click(setupButton)
+
+    expect(onOpenRolePlaySetup).toHaveBeenCalledTimes(1)
+    expect(
+      setupButton.closest('[data-playground-toolbar-row="actions"]')
+    ).not.toBeNull()
+  })
+
   it("places token usage in the casual bottom context chip row", () => {
     render(
       <ComposerToolbar

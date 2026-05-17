@@ -555,11 +555,14 @@ git commit -m "feat: expose chat role-play presets on mobile"
 - Modify: `apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Playground/ComposerToolbar.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Playground/ComposerToolbarOverflow.tsx`
+- Modify: `apps/packages/ui/src/components/Layouts/ChatHeader.tsx`
 - Modify as needed: `apps/packages/ui/src/components/Option/Playground/role-play-state.ts`
 - Create: `apps/packages/ui/src/components/Option/Playground/role-play-scene.ts`
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/role-play-scene.test.ts`
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/ComposerToolbar.role-play-mobile.test.tsx`
+- Test: `apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx`
+- Test: `apps/packages/ui/src/components/Layouts/__tests__/ChatHeader.test.tsx`
 
 - [x] **Step 1: Write setup drawer tests**
 
@@ -678,16 +681,18 @@ Expected: pass.
 
 Recorded verification:
 - `bunx vitest run ../packages/ui/src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/role-play-scene.test.ts ../packages/ui/src/components/Option/Playground/__tests__/ComposerToolbar.role-play-mobile.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/ComposerToolbar.test.tsx --reporter=verbose` passed: 4 files, 37 tests.
+- Follow-up CDP regression pass found and fixed a null `documentContext` crash, missing desktop setup trigger, mobile overflow first-click failure, and chat header horizontal overflow. `bunx vitest run ../packages/ui/src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/role-play-scene.test.ts ../packages/ui/src/components/Option/Playground/__tests__/ComposerToolbar.role-play-mobile.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/ComposerToolbar.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx ../packages/ui/src/components/Layouts/__tests__/ChatHeader.test.tsx --reporter=verbose` passed: 6 files, 53 tests.
 - `node -e "JSON.parse(require('fs').readFileSync('../packages/ui/src/assets/locale/en/playground.json','utf8')); JSON.parse(require('fs').readFileSync('../packages/ui/src/public/_locales/en/playground.json','utf8')); console.log('json ok')"` passed.
 - `git diff --check` passed.
 - `bunx tsc --noEmit --pretty false` still fails only on the existing unrelated baseline errors in `EmbeddingsModelSelectionConfig.tsx`, `persona-visuals.ts`, and `lib/api/vnPlay.ts`; no new Stage 4 type errors were reported.
 
 - [x] **Step 9: Browser verify setup flow**
 
-Recorded status: blocked by the existing browser/CDP target-policy conflict for `/chat`. The user requested CDP rather than Computer Use, and the available policy state from this thread prohibits raw-CDP or alternate-browser workaround use for the blocked `http://127.0.0.1:3001/chat` target without a clearer override. No Computer Use verification was attempted.
+Recorded status: verified through CDP after explicit user override. CDP connected to `Chrome/145.0.7632.6` with `webSocketDebuggerUrl` present and verified `/chat` on `http://127.0.0.1:3001/chat` with seeded single-user API config. Computer Use was not used.
 
 Desktop:
-- open Role-play setup;
+- direct Role-play setup trigger is present;
+- Role-play setup opens the drawer;
 - choose character/persona;
 - choose behavior template;
 - add scene context;
@@ -695,9 +700,10 @@ Desktop:
 - preview and apply.
 
 Mobile:
-- open Role-play setup from overflow/chip;
-- verify full-height sheet/drawer does not hide recovery path;
-- apply and clear one layer.
+- More options opens on the first click while the composer textarea is focused;
+- Role-play setup is present in overflow;
+- setup drawer exposes preview, Character, Behavior, Scene, Generation style, Apply, and Cancel;
+- `/chat` at 390px has `scrollWidth` equal to `clientWidth` and no horizontal overflow offenders.
 
 - [x] **Step 10: Commit Stage 4**
 

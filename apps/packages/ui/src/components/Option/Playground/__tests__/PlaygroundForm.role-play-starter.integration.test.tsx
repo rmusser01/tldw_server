@@ -979,6 +979,16 @@ const renderRolePlayStarterHarness = () =>
   )
 
 describe("PlaygroundForm role-play starter", () => {
+  it("does not crash role-play state derivation when document context is null", () => {
+    playgroundFormMessageOptionState.value = {
+      ...createMessageOptionState(),
+      documentContext: null
+    }
+
+    expect(() => render(<PlaygroundForm droppedFiles={[]} />)).not.toThrow()
+    expect(document.querySelector("#composer-options-panel")).toBeInTheDocument()
+  })
+
   it("opens character selection from the starter and returns focus after selecting the default assistant", async () => {
     const user = userEvent.setup()
     renderRolePlayStarterHarness()

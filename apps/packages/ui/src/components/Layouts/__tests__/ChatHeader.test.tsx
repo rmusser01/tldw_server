@@ -167,6 +167,21 @@ describe("ChatHeader shortcut toggle", () => {
     )
   })
 
+  it("allows the chat header control row to wrap on narrow screens", () => {
+    const props = createProps()
+    render(<ChatHeader {...props} />)
+
+    const headerRow = screen
+      .getByRole("button", { name: "New saved chat" })
+      .closest("header > div")
+    const actionsRow = screen
+      .getByRole("button", { name: "New saved chat" })
+      .parentElement
+
+    expect(headerRow?.className).toContain("flex-wrap")
+    expect(actionsRow?.className).toContain("flex-wrap")
+  })
+
   it("shows mode badges for temporary and active character", () => {
     const props = createProps({
       temporaryChat: true,

@@ -3842,6 +3842,9 @@ export const PlaygroundForm = ({
     () => summarizeRolePlayScene(actorSettings),
     [actorSettings],
   );
+  const rolePlayDocumentContextCount = Array.isArray(documentContext)
+    ? documentContext.length
+    : 0;
   const rolePlayIdentity = React.useMemo<RolePlayIdentity | null>(() => {
     if (
       selectedAssistant?.kind === "character" ||
@@ -3897,7 +3900,7 @@ export const PlaygroundForm = ({
             selectedDocuments.length > 0 ||
             uploadedFiles.length > 0 ||
             contextFiles.length > 0 ||
-            documentContext.length > 0 ||
+            rolePlayDocumentContextCount > 0 ||
             Boolean(attachedResearchContext),
         },
       }),
@@ -3906,8 +3909,8 @@ export const PlaygroundForm = ({
       behaviorTemplateMetadata,
       contextFiles.length,
       currentPreset,
-      documentContext.length,
       ragPinnedResults.length,
+      rolePlayDocumentContextCount,
       rolePlayIdentity,
       rolePlayScenePreview.active,
       rolePlayScenePreview.summary,

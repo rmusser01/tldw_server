@@ -214,7 +214,9 @@ export const ComposerToolbarOverflow = React.memo(function ComposerToolbarOverfl
     >
       <button
         type="button"
+        onMouseDown={(event) => event.preventDefault()}
         aria-label={t("common:moreActions", "More options") as string}
+        aria-expanded={overflowOpen}
         className="inline-flex h-9 w-9 items-center justify-center rounded-md text-text-muted transition hover:bg-surface2 hover:text-text"
       >
         <SlidersHorizontal className="h-4 w-4" />

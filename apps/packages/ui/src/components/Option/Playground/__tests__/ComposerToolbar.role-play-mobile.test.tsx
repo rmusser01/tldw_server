@@ -267,4 +267,47 @@ describe("ComposerToolbar mobile role-play parity", () => {
 
     expect(onOpenRolePlaySetup).toHaveBeenCalledTimes(1)
   })
+
+  it("keeps the mobile role-play overflow in a wrapping actions row", () => {
+    render(
+      <ComposerToolbar
+        {...createToolbarProps({
+          rolePlayActions: {
+            onOpenRolePlaySetup: vi.fn()
+          },
+          modelUsageBadge: <span>0 tokens</span>,
+          voiceChatButton: <button type="button">Voice chat</button>
+        })}
+      />
+    )
+
+    const overflowButton = screen.getByRole("button", { name: "More options" })
+    const actionsRow = overflowButton.closest(
+      '[data-playground-toolbar-row="actions"]'
+    )
+
+    expect(actionsRow?.className).toContain("flex-wrap")
+  })
+
+  it("keeps the overflow trigger from stealing focus before click", () => {
+    render(
+      <ComposerToolbar
+        {...createToolbarProps({
+          rolePlayActions: {
+            onOpenRolePlaySetup: vi.fn()
+          }
+        })}
+      />
+    )
+
+    const overflowButton = screen.getByRole("button", { name: "More options" })
+    const mouseDown = new MouseEvent("mousedown", {
+      bubbles: true,
+      cancelable: true
+    })
+
+    overflowButton.dispatchEvent(mouseDown)
+
+    expect(mouseDown.defaultPrevented).toBe(true)
+  })
 })
