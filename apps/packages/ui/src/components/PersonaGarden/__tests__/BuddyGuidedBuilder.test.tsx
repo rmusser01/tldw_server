@@ -185,13 +185,13 @@ describe("BuddyGuidedBuilder", () => {
           }
         },
         animations: {
-          idle: { id: "idle", mode: "frame_sequence", frames: [] },
-          "move-left": { id: "move-left", mode: "frame_sequence", frames: [] }
+          idle: { frames: [] },
+          "move-left": { frames: [] }
         },
         state_catalog: {
           [asPersonaVisualCustomStateId("moving_left")]: {
             label: "Moving left",
-            kind: "movement"
+            kind: "live_variant"
           }
         }
       }

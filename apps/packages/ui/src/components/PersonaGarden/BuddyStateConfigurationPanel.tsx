@@ -1,8 +1,10 @@
 import React from "react"
-import { Button, Tag } from "antd"
+import { Button } from "antd"
 import { Save, Settings2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { EmptyState as DesignSystemEmptyState } from "@/components/ui/feedback/EmptyState"
+import { Badge, type BadgeVariant } from "@/components/ui/primitives"
 import type { PersonaVisualManifest } from "@/types/persona-visuals"
 
 import {
@@ -21,6 +23,9 @@ export type BuddyStateConfigurationPanelProps = {
 const formatAnimationLabel = (state: BuddyStateConfigurationState): string =>
   `${state.label} animation`
 
+const getStateBadgeVariant = (state: BuddyStateConfigurationState): BadgeVariant =>
+  state.animationId ? "success" : "warning"
+
 const StateRow: React.FC<{
   state: BuddyStateConfigurationState
   showDescription?: boolean
@@ -34,8 +39,16 @@ const StateRow: React.FC<{
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-1.5 text-xs font-medium text-text">
           <span>{state.label}</span>
-          {state.required ? <Tag color="red">required</Tag> : null}
-          {state.kind ? <Tag color="blue">{state.kind}</Tag> : null}
+          {state.required ? (
+            <Badge variant="danger" size="sm">
+              required
+            </Badge>
+          ) : null}
+          {state.kind ? (
+            <Badge variant="info" size="sm">
+              {state.kind}
+            </Badge>
+          ) : null}
         </div>
         {showDescription && state.description ? (
           <div className="mt-1 text-xs leading-5 text-text-muted">
@@ -45,14 +58,16 @@ const StateRow: React.FC<{
         {state.tags.length ? (
           <div className="mt-1 flex flex-wrap gap-1">
             {state.tags.map((tag) => (
-              <Tag key={`${state.id}-${tag}`}>{tag}</Tag>
+              <Badge key={`${state.id}-${tag}`} size="sm">
+                {tag}
+              </Badge>
             ))}
           </div>
         ) : null}
       </div>
-      <Tag color={state.animationId ? "green" : "orange"}>
+      <Badge variant={getStateBadgeVariant(state)} size="sm">
         {state.animationId ? "mapped" : "missing"}
-      </Tag>
+      </Badge>
     </div>
     <div className="mt-2 grid gap-2 sm:grid-cols-2">
       <label className="text-xs text-text-muted">
@@ -77,10 +92,13 @@ const StateRow: React.FC<{
   </li>
 )
 
-const EmptyState: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="rounded border border-dashed border-border bg-bg px-3 py-2 text-xs text-text-muted">
-    {children}
-  </div>
+const EmptySection: React.FC<{ title: string }> = ({ title }) => (
+  <DesignSystemEmptyState
+    title={title}
+    variant="inline"
+    size="sm"
+    className="rounded border border-dashed border-border bg-bg px-3 py-2"
+  />
 )
 
 const StateSection: React.FC<{
@@ -105,7 +123,7 @@ const StateSection: React.FC<{
         ))}
       </ul>
     ) : (
-      <EmptyState>{emptyText}</EmptyState>
+      <EmptySection title={emptyText} />
     )}
   </section>
 )
@@ -129,7 +147,9 @@ const TriggerList: React.FC<{
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="font-medium text-text">{trigger.match}</div>
-              <Tag color="purple">{trigger.source}</Tag>
+              <Badge variant="primary" size="sm">
+                {trigger.source}
+              </Badge>
             </div>
             <div className="mt-1 text-text-muted">
               {trigger.stateLabel} ({trigger.durationMs}ms, priority{" "}
@@ -139,7 +159,7 @@ const TriggerList: React.FC<{
         ))}
       </ul>
     ) : (
-      <EmptyState>{emptyText}</EmptyState>
+      <EmptySection title={emptyText} />
     )}
   </section>
 )

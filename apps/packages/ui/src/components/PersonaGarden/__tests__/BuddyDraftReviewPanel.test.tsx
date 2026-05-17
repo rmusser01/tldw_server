@@ -36,25 +36,22 @@ const manifest: PersonaVisualManifest = {
   },
   animations: {
     idle: {
-      id: "idle",
-      mode: "frame_sequence",
       frames: [{ asset_id: "idle-frame", duration_ms: 1000 }]
     },
-    listening: { id: "listening", mode: "frame_sequence", frames: [] },
-    thinking: { id: "thinking", mode: "frame_sequence", frames: [] },
-    speaking: { id: "speaking", mode: "frame_sequence", frames: [] },
-    error: { id: "error", mode: "frame_sequence", frames: [] },
-    "move-r": { id: "move-r", mode: "frame_sequence", frames: [] }
+    listening: { frames: [] },
+    thinking: { frames: [] },
+    speaking: { frames: [] },
+    error: { frames: [] },
+    "move-r": { frames: [] }
   },
   state_catalog: {
     [asPersonaVisualCustomStateId("moving_right")]: {
       label: "Moving right",
-      kind: "movement"
+      kind: "live_variant"
     },
     [asPersonaVisualCustomStateId("sparkle_review")]: {
       label: "Sparkle review",
-      kind: "tool_response",
-      fallback: "review"
+      kind: "tool_variant"
     }
   }
 }

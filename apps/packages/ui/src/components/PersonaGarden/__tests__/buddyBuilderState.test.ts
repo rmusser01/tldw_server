@@ -192,12 +192,12 @@ describe("buddyBuilderState", () => {
     manifest.state_catalog = {
       [asPersonaVisualCustomStateId("moving_right")]: {
         label: "Moving right",
-        kind: "movement",
+        kind: "live_variant",
         description: "Drag movement to the right"
       },
       [asPersonaVisualCustomStateId("moving_left")]: {
         label: "Moving left",
-        kind: "movement",
+        kind: "live_variant",
         description: "Drag movement to the left"
       }
     }

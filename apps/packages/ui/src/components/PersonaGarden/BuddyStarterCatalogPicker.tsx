@@ -1,8 +1,9 @@
 import React from "react"
-import { Button, Tag } from "antd"
+import { Button } from "antd"
 import { Copy, PackageCheck } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { Badge, type BadgeVariant } from "@/components/ui/primitives"
 import type { PersonaVisualStarterPackSummary } from "@/types/persona-visuals"
 
 import {
@@ -53,34 +54,40 @@ const renderStarterTags = (
     t
   )
   const complexityTier = getStarterComplexityTierLabel(starter.complexity_tier, t)
+  const productionVariant: BadgeVariant =
+    starter.production_status === "art_ready" ? "success" : "warning"
   return (
     <div className="mt-2 flex flex-wrap gap-1">
       {starter.recommended ? (
-        <Tag color="green">
+        <Badge variant="success" size="sm">
           {t("sidepanel:personaGarden.visuals.builder.recommendedStarter", {
             defaultValue: "Recommended"
           })}
-        </Tag>
+        </Badge>
       ) : null}
       {!starter.recommended ? (
-        <Tag color={starter.production_status === "art_ready" ? "blue" : "orange"}>
+        <Badge variant={productionVariant} size="sm">
           {t("sidepanel:personaGarden.visuals.builder.productionPacket", {
             defaultValue: "Production packet"
           })}
-        </Tag>
+        </Badge>
       ) : null}
       {productionStatus ? (
-        <Tag color={starter.production_status === "art_ready" ? "green" : "orange"}>
+        <Badge variant={productionVariant} size="sm">
           {productionStatus}
-        </Tag>
+        </Badge>
       ) : null}
-      {complexityTier ? <Tag>{complexityTier}</Tag> : null}
+      {complexityTier ? (
+        <Badge variant="secondary" size="sm">
+          {complexityTier}
+        </Badge>
+      ) : null}
       {starter.neutral_anchor_required ? (
-        <Tag color="blue">
+        <Badge variant="info" size="sm">
           {t("sidepanel:personaGarden.visuals.setup.neutralAnchorRequired", {
             defaultValue: "Neutral anchor required"
           })}
-        </Tag>
+        </Badge>
       ) : null}
     </div>
   )
@@ -107,7 +114,7 @@ export const BuddyStarterCatalogPicker: React.FC<
             defaultValue: "Choose a bundled default"
           })}
         </div>
-        {loading ? <Tag>loading</Tag> : null}
+        {loading ? <Badge size="sm">loading</Badge> : null}
       </div>
       {error ? (
         <div className="rounded border border-state-error/50 bg-state-error/10 p-2 text-xs text-state-error">
@@ -157,7 +164,7 @@ export const BuddyStarterCatalogPicker: React.FC<
                           {starter.description}
                         </div>
                       </div>
-                      <Tag>{starter.renderer_type}</Tag>
+                      <Badge size="sm">{starter.renderer_type}</Badge>
                     </div>
                     {renderStarterTags(starter, t)}
                     {expectedAssetGroups ? (
