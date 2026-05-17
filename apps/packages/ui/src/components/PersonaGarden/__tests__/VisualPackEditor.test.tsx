@@ -2337,6 +2337,66 @@ describe("VisualPackEditor", () => {
     })
   })
 
+  it("delegates guided builder state configuration saving to the manifest save endpoint", async () => {
+    const savedManifests: any[] = []
+    let pack = makeVisualPack({ status: "draft" })
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse([pack])
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (path.endsWith("/generated-candidates") && method === "GET") {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/pack-1/manifest" &&
+        method === "PATCH"
+      ) {
+        const body = parseJsonBody(init?.body)
+        savedManifests.push(body.manifest)
+        pack = { ...pack, manifest: body.manifest, version: 4 }
+        return okResponse(pack)
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    expect(await screen.findByTestId("buddy-state-configuration-panel")).toHaveTextContent(
+      "Configure visual states"
+    )
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save visual state configuration" })
+    )
+
+    await waitFor(() => expect(savedManifests).toHaveLength(1))
+    expect(savedManifests[0].states.idle.animation_id).toBe("idle")
+  })
+
   it("blocks activation when required states are missing, then saves, activates, and deactivates", async () => {
     const calls: string[] = []
     let pack = {

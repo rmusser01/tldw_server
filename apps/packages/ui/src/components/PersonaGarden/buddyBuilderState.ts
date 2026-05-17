@@ -1,4 +1,5 @@
 import type {
+  PersonaVisualAuthoredTrigger,
   PersonaVisualBuiltinStateId,
   PersonaVisualCustomStateId,
   PersonaVisualImportBundleAssetSummary,
@@ -127,6 +128,18 @@ export const BUDDY_REQUIRED_STATES: PersonaVisualBuiltinStateId[] = [
   "error"
 ]
 
+export const BUDDY_OPTIONAL_CORE_STATES: PersonaVisualBuiltinStateId[] = [
+  "wake_armed",
+  "tool_running",
+  "approval_needed",
+  "offline"
+]
+
+export const BUDDY_CORE_STATE_ORDER: PersonaVisualBuiltinStateId[] = [
+  ...BUDDY_REQUIRED_STATES,
+  ...BUDDY_OPTIONAL_CORE_STATES
+]
+
 export const BUDDY_MOVEMENT_STATES = ["moving_left", "moving_right"] as const
 
 export type BuddyMovementStateId = (typeof BUDDY_MOVEMENT_STATES)[number]
@@ -149,6 +162,36 @@ export type BuddyDraftReadinessSummary = {
   blockers: string[]
   warnings: string[]
   canActivate: boolean
+}
+
+export type BuddyStateConfigurationState = {
+  id: string
+  label: string
+  kind?: string | null
+  description?: string | null
+  tags: string[]
+  animationId: string | null
+  fallbackIds: string[]
+  required: boolean
+}
+
+export type BuddyStateConfigurationTrigger = {
+  id: string
+  source: PersonaVisualAuthoredTrigger["source"]
+  match: string
+  state: string
+  stateLabel: string
+  durationMs: number
+  priority: number
+}
+
+export type BuddyStateConfigurationSummary = {
+  coreStates: BuddyStateConfigurationState[]
+  movementStates: BuddyStateConfigurationState[]
+  customStates: BuddyStateConfigurationState[]
+  toolNameTriggers: BuddyStateConfigurationTrigger[]
+  toolCategoryTriggers: BuddyStateConfigurationTrigger[]
+  runtimeTriggers: BuddyStateConfigurationTrigger[]
 }
 
 export type SummarizeBuddyDraftReadinessInput = {
@@ -190,10 +233,120 @@ const hasManifestState = (
       ?.animation_id
   )
 
+const getManifestStateAnimationId = (
+  manifest: PersonaVisualManifest | null | undefined,
+  stateId: string
+): string | null => {
+  const stateMapping =
+    manifest?.states?.[stateId as keyof PersonaVisualManifest["states"]]
+  return stateMapping?.animation_id || null
+}
+
+const getManifestFallbackIds = (
+  manifest: PersonaVisualManifest | null | undefined,
+  stateId: string
+): string[] => {
+  const fallbacks =
+    manifest?.fallbacks?.[stateId as keyof PersonaVisualManifest["fallbacks"]]
+  return Array.isArray(fallbacks) ? fallbacks.map(String) : []
+}
+
 const getStateCatalog = (
   manifest: PersonaVisualManifest | null | undefined
 ): Record<PersonaVisualCustomStateId, NonNullable<PersonaVisualManifest["state_catalog"]>[PersonaVisualCustomStateId]> =>
   manifest?.state_catalog || {}
+
+export const formatBuddyStateLabel = (stateId: string): string => {
+  const label = stateId
+    .replace(/[._:-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+  return label
+    ? label.charAt(0).toUpperCase() + label.slice(1).toLowerCase()
+    : stateId
+}
+
+const getConfiguredStateLabel = (
+  manifest: PersonaVisualManifest | null | undefined,
+  stateId: string
+): string =>
+  getStateCatalog(manifest)[stateId as PersonaVisualCustomStateId]?.label ||
+  formatBuddyStateLabel(stateId)
+
+const summarizeConfigurationState = (
+  manifest: PersonaVisualManifest | null | undefined,
+  stateId: string,
+  required = false
+): BuddyStateConfigurationState => {
+  const catalogEntry =
+    getStateCatalog(manifest)[stateId as PersonaVisualCustomStateId]
+  return {
+    id: stateId,
+    label: catalogEntry?.label || getConfiguredStateLabel(manifest, stateId),
+    kind: catalogEntry?.kind || null,
+    description: catalogEntry?.description || null,
+    tags: catalogEntry?.tags || [],
+    animationId: getManifestStateAnimationId(manifest, stateId),
+    fallbackIds: getManifestFallbackIds(manifest, stateId),
+    required
+  }
+}
+
+const summarizeConfigurationTriggers = (
+  manifest: PersonaVisualManifest | null | undefined,
+  source: PersonaVisualAuthoredTrigger["source"]
+): BuddyStateConfigurationTrigger[] =>
+  (manifest?.authored_triggers || [])
+    .filter((trigger) => trigger.source === source)
+    .map((trigger) => ({
+      id: trigger.id,
+      source: trigger.source,
+      match: trigger.match,
+      state: String(trigger.state),
+      stateLabel: getConfiguredStateLabel(manifest, String(trigger.state)),
+      durationMs: trigger.duration_ms,
+      priority: trigger.priority
+    }))
+    .sort((left, right) => {
+      if (left.priority !== right.priority) return right.priority - left.priority
+      return left.match.localeCompare(right.match)
+    })
+
+export const summarizeBuddyStateConfiguration = (
+  manifest: PersonaVisualManifest | null | undefined
+): BuddyStateConfigurationSummary => {
+  const stateCatalog = getStateCatalog(manifest)
+  const movementStateIds = BUDDY_MOVEMENT_STATES.filter(
+    (id) =>
+      hasManifestState(manifest, id) ||
+      Boolean(stateCatalog[id as PersonaVisualCustomStateId])
+  )
+  const customStateIds = Object.keys(stateCatalog)
+    .filter((id) => !(BUDDY_MOVEMENT_STATES as readonly string[]).includes(id))
+    .sort((left, right) => left.localeCompare(right))
+
+  return {
+    coreStates: BUDDY_CORE_STATE_ORDER.map((id) =>
+      summarizeConfigurationState(
+        manifest,
+        id,
+        BUDDY_REQUIRED_STATES.includes(id)
+      )
+    ),
+    movementStates: movementStateIds.map((id) =>
+      summarizeConfigurationState(manifest, id)
+    ),
+    customStates: customStateIds.map((id) =>
+      summarizeConfigurationState(manifest, id)
+    ),
+    toolNameTriggers: summarizeConfigurationTriggers(manifest, "tool_name"),
+    toolCategoryTriggers: summarizeConfigurationTriggers(manifest, "tool_category"),
+    runtimeTriggers: [
+      ...summarizeConfigurationTriggers(manifest, "live_state"),
+      ...summarizeConfigurationTriggers(manifest, "mcp_runtime")
+    ]
+  }
+}
 
 const summarizeRequiredStates = (
   manifest: PersonaVisualManifest | null | undefined
@@ -226,7 +379,7 @@ const summarizeCustomStates = (
       id,
       label: entry.label || id,
       kind: entry.kind || "custom",
-      fallback: entry.fallback
+      fallback: getManifestFallbackIds(manifest, id).join(", ") || undefined
     }))
 }
 

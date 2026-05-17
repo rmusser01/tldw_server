@@ -1408,5 +1408,53 @@
   },
   "personaGarden_visuals_builder_review_activationPath": {
     "message": "Continue to activation"
+  },
+  "personaGarden_visuals_builder_configure_heading": {
+    "message": "Configure visual states"
+  },
+  "personaGarden_visuals_builder_configure_description": {
+    "message": "Review the draft state map, movement states, and authored triggers before activation."
+  },
+  "personaGarden_visuals_builder_configure_save": {
+    "message": "Save visual state configuration"
+  },
+  "personaGarden_visuals_builder_configure_coreStates": {
+    "message": "Core states"
+  },
+  "personaGarden_visuals_builder_configure_noCoreStates": {
+    "message": "No core states available."
+  },
+  "personaGarden_visuals_builder_configure_movementStates": {
+    "message": "Movement states"
+  },
+  "personaGarden_visuals_builder_configure_noMovementStates": {
+    "message": "No movement states configured."
+  },
+  "personaGarden_visuals_builder_configure_customStates": {
+    "message": "Custom states"
+  },
+  "personaGarden_visuals_builder_configure_noCustomStates": {
+    "message": "No custom states configured."
+  },
+  "personaGarden_visuals_builder_configure_toolNameTriggers": {
+    "message": "Exact tool-name triggers"
+  },
+  "personaGarden_visuals_builder_configure_noToolNameTriggers": {
+    "message": "No exact tool-name triggers."
+  },
+  "personaGarden_visuals_builder_configure_toolCategoryTriggers": {
+    "message": "Tool-category triggers"
+  },
+  "personaGarden_visuals_builder_configure_noToolCategoryTriggers": {
+    "message": "No tool-category triggers."
+  },
+  "personaGarden_visuals_builder_configure_runtimeTriggers": {
+    "message": "Live/runtime triggers"
+  },
+  "personaGarden_visuals_builder_configure_noRuntimeTriggers": {
+    "message": "No live/runtime triggers."
+  },
+  "personaGarden_visuals_builder_configure_advancedHint": {
+    "message": "Use the advanced manifest controls below for inline edits to animations, fallbacks, and trigger rows."
   }
 }

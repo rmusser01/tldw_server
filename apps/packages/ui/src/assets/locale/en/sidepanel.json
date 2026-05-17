@@ -572,6 +572,24 @@
           "blockers": "Activation blockers",
           "activationPath": "Continue to activation"
         },
+        "configure": {
+          "heading": "Configure visual states",
+          "description": "Review the draft state map, movement states, and authored triggers before activation.",
+          "save": "Save visual state configuration",
+          "coreStates": "Core states",
+          "noCoreStates": "No core states available.",
+          "movementStates": "Movement states",
+          "noMovementStates": "No movement states configured.",
+          "customStates": "Custom states",
+          "noCustomStates": "No custom states configured.",
+          "toolNameTriggers": "Exact tool-name triggers",
+          "noToolNameTriggers": "No exact tool-name triggers.",
+          "toolCategoryTriggers": "Tool-category triggers",
+          "noToolCategoryTriggers": "No tool-category triggers.",
+          "runtimeTriggers": "Live/runtime triggers",
+          "noRuntimeTriggers": "No live/runtime triggers.",
+          "advancedHint": "Use the advanced manifest controls below for inline edits to animations, fallbacks, and trigger rows."
+        },
         "importUnsupportedExtension": "Choose a .tldw-persona-vpack or Codex/Petdex .zip archive.",
         "importUnsupportedMimeType": "Choose a Persona Visual or Codex/Petdex archive with a supported zip media type."
       },

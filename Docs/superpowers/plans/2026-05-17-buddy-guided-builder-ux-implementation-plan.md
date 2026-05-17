@@ -744,9 +744,9 @@ git commit -m "feat: add Buddy draft review diagnostics"
 - Modify: `apps/packages/ui/src/assets/locale/en/sidepanel.json`
 - Modify: `apps/packages/ui/src/public/_locales/en/sidepanel.json`
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] **Step 1: Write configuration panel tests**
+- [x] **Step 1: Write configuration panel tests**
 
 Create `BuddyStateConfigurationPanel.test.tsx` covering:
 
@@ -757,7 +757,7 @@ Create `BuddyStateConfigurationPanel.test.tsx` covering:
 - controls have accessible names,
 - saving delegates to the existing manifest save callback.
 
-- [ ] **Step 2: Run configuration panel tests and verify they fail**
+- [x] **Step 2: Run configuration panel tests and verify they fail**
 
 Run:
 
@@ -768,7 +768,7 @@ bunx vitest run src/components/PersonaGarden/__tests__/BuddyStateConfigurationPa
 
 Expected: FAIL because the panel does not exist.
 
-- [ ] **Step 3: Implement `BuddyStateConfigurationPanel`**
+- [x] **Step 3: Implement `BuddyStateConfigurationPanel`**
 
 Use the existing manifest data. Do not create a new manifest schema. Render:
 
@@ -780,15 +780,15 @@ Use the existing manifest data. Do not create a new manifest schema. Render:
 
 Prefer read/edit controls that call existing `VisualPackEditor` manifest update handlers. If full inline editing is too large for one task, keep low-risk controls read-only and route edits to existing advanced sections, but tests must prove the grouped sections and save path are present.
 
-- [ ] **Step 4: Integrate Configure step**
+- [x] **Step 4: Integrate Configure step**
 
 Wire `BuddyStateConfigurationPanel` into the builder Configure step. Preserve existing raw manifest editor controls under an advanced section.
 
-- [ ] **Step 5: Add i18n keys**
+- [x] **Step 5: Add i18n keys**
 
 Add configuration keys under `personaGarden.visuals.builder.configure`.
 
-- [ ] **Step 6: Run focused configuration tests**
+- [x] **Step 6: Run focused configuration tests**
 
 Run:
 
@@ -799,7 +799,7 @@ bunx vitest run src/components/PersonaGarden/__tests__/BuddyStateConfigurationPa
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Task 4**
+- [x] **Step 7: Commit Task 4**
 
 ```bash
 git add apps/packages/ui/src/components/PersonaGarden/BuddyStateConfigurationPanel.tsx apps/packages/ui/src/components/PersonaGarden/__tests__/BuddyStateConfigurationPanel.test.tsx apps/packages/ui/src/components/PersonaGarden/BuddyGuidedBuilder.tsx apps/packages/ui/src/components/PersonaGarden/buddyBuilderState.ts apps/packages/ui/src/components/PersonaGarden/__tests__/BuddyGuidedBuilder.test.tsx apps/packages/ui/src/components/PersonaGarden/VisualPackEditor.tsx apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx apps/packages/ui/src/assets/locale/en/sidepanel.json apps/packages/ui/src/public/_locales/en/sidepanel.json

@@ -13,6 +13,7 @@ import type {
 import { BuddyDraftReviewPanel } from "./BuddyDraftReviewPanel"
 import { BuddyImportFormatPanel } from "./BuddyImportFormatPanel"
 import { BuddySourcePicker } from "./BuddySourcePicker"
+import { BuddyStateConfigurationPanel } from "./BuddyStateConfigurationPanel"
 import { BuddyStarterCatalogPicker } from "./BuddyStarterCatalogPicker"
 import {
   BUDDY_BUILDER_STEPS,
@@ -37,10 +38,12 @@ export type BuddyGuidedBuilderProps = {
   assetsById?: Record<string, PersonaVisualAsset>
   importPreview?: PersonaVisualImportPreviewResponse | null
   activationBlockers?: string[]
+  savingManifest?: boolean
   onCopyStarterPack: (starterPackId: string) => void
   onStartBlank?: () => void
   onOpenLibrary?: () => void
   onOpenDuplicate?: () => void
+  onSaveManifest?: () => void
 }
 
 const INITIAL_BUILDER_STATE: BuddyBuilderState = {
@@ -96,10 +99,12 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
   assetsById = {},
   importPreview = null,
   activationBlockers = [],
+  savingManifest = false,
   onCopyStarterPack,
   onStartBlank,
   onOpenLibrary,
-  onOpenDuplicate
+  onOpenDuplicate,
+  onSaveManifest
 }) => {
   const { t } = useTranslation(["sidepanel", "common"])
   const [builderState, setBuilderState] =
@@ -210,6 +215,15 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
           assetsById={assetsById}
           importPreview={importPreview}
           activationBlockers={activationBlockers}
+        />
+      ) : null}
+
+      {draftManifest ? (
+        <BuddyStateConfigurationPanel
+          manifest={draftManifest}
+          canSave={Boolean(onSaveManifest)}
+          saving={savingManifest}
+          onSaveManifest={onSaveManifest}
         />
       ) : null}
 

@@ -29,6 +29,8 @@ modified_files:
 - apps/packages/ui/src/components/PersonaGarden/BuddyDraftReviewPanel.tsx
 - apps/packages/ui/src/components/PersonaGarden/__tests__/BuddyGuidedBuilder.test.tsx
 - apps/packages/ui/src/components/PersonaGarden/__tests__/BuddyDraftReviewPanel.test.tsx
+- apps/packages/ui/src/components/PersonaGarden/BuddyStateConfigurationPanel.tsx
+- apps/packages/ui/src/components/PersonaGarden/__tests__/BuddyStateConfigurationPanel.test.tsx
 - apps/packages/ui/src/components/PersonaGarden/VisualPackEditor.tsx
 - apps/packages/ui/src/components/PersonaGarden/VisualBuddySetupChoiceCard.tsx
 - apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx
@@ -37,6 +39,7 @@ modified_files:
 - apps/packages/ui/src/services/__tests__/persona-visuals.test.ts
 - apps/packages/ui/src/assets/locale/en/sidepanel.json
 - apps/packages/ui/src/public/_locales/en/sidepanel.json
+- Docs/superpowers/plans/2026-05-17-buddy-guided-builder-ux-implementation-plan.md
 ---
 
 ## Description
@@ -139,6 +142,7 @@ Verification:
 Task 1 implementation completed: added shared Buddy import archive admission helpers, wired VisualPackEditor import preview gating to admit native Persona Visual archives and Codex/Petdex .zip archives, refreshed default starter fixtures to search-lens-basic, and added English builder import error copy. Focused verification passed: `bunx vitest run src/components/PersonaGarden/__tests__/buddyBuilderArchive.test.ts src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx src/services/__tests__/persona-visuals.test.ts src/routes/__tests__/sidepanel-persona-locale-keys.test.ts --testTimeout=30000` (4 files, 76 tests). Bandit is not applicable to this frontend-only TypeScript/JSON slice.
 Task 2 implementation completed: added the Buddy builder state helpers, source picker, tiered starter catalog, import-format panel, and top-level guided builder shell; wired the shell into VisualPackEditor as the primary Visuals surface while preserving existing editor-owned mutations and draft/import controls; updated compact Assistant Setup copy to open the Buddy builder. Focused verification passed: `bunx vitest run src/components/PersonaGarden/__tests__/buddyBuilderState.test.ts src/components/PersonaGarden/__tests__/BuddyGuidedBuilder.test.tsx src/components/PersonaGarden/__tests__/VisualBuddySetupChoiceCard.test.tsx src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx src/routes/__tests__/sidepanel-persona.test.tsx --testTimeout=30000` (5 files, 150 tests). Locale guard passed: `bunx vitest run src/routes/__tests__/sidepanel-persona-locale-keys.test.ts --testTimeout=30000` (1 file, 3 tests). `jq empty` on English sidepanel locale JSON and `git diff --check` both passed. Bandit is not applicable to this frontend-only TypeScript/JSON slice.
 Task 3 implementation completed: added pure Buddy draft readiness summarizers for source labels, atlas metadata, required-state blockers, movement states, custom states, warnings, and activation readiness; added BuddyDraftReviewPanel with backend-preview source semantics and SpriteFrameRenderer-backed draft previews; integrated the review panel into BuddyGuidedBuilder. Focused verification passed: `bunx vitest run src/components/PersonaGarden/__tests__/buddyBuilderState.test.ts src/components/PersonaGarden/__tests__/BuddyDraftReviewPanel.test.tsx src/components/PersonaGarden/__tests__/BuddyGuidedBuilder.test.tsx src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx --testTimeout=30000` (4 files, 74 tests). Locale guard passed: `bunx vitest run src/routes/__tests__/sidepanel-persona-locale-keys.test.ts --testTimeout=30000` (1 file, 3 tests). `jq empty` on English sidepanel locale JSON and `git diff --check` both passed. Bandit is not applicable to this frontend-only TypeScript/JSON slice.
+Task 4 implementation completed: added BuddyStateConfigurationPanel with core state ordering, separate movement states, custom state metadata/fallbacks, grouped tool-name/tool-category/runtime triggers, accessible read-only state controls, and a Save visual state configuration action wired through the existing VisualPackEditor manifest save callback. Focused verification passed: `bunx vitest run src/components/PersonaGarden/__tests__/BuddyStateConfigurationPanel.test.tsx src/components/PersonaGarden/__tests__/BuddyGuidedBuilder.test.tsx src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx --testTimeout=30000` (3 files, 69 tests). Shared helper and locale verification passed: `bunx vitest run src/components/PersonaGarden/__tests__/buddyBuilderState.test.ts src/routes/__tests__/sidepanel-persona-locale-keys.test.ts --testTimeout=30000` (2 files, 9 tests). `jq empty` on English sidepanel locale JSON and `git diff --check` passed. Bandit is not applicable to this frontend-only TypeScript/JSON/docs slice.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

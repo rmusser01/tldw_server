@@ -54,6 +54,7 @@ const renderBuilder = (
   const onStartBlank = vi.fn()
   const onOpenLibrary = vi.fn()
   const onOpenDuplicate = vi.fn()
+  const onSaveManifest = vi.fn()
   const result = render(
     <BuddyGuidedBuilder
       selectedPersonaId="persona-1"
@@ -67,6 +68,7 @@ const renderBuilder = (
       onStartBlank={onStartBlank}
       onOpenLibrary={onOpenLibrary}
       onOpenDuplicate={onOpenDuplicate}
+      onSaveManifest={onSaveManifest}
       {...overrides}
     />
   )
@@ -75,7 +77,8 @@ const renderBuilder = (
     onCopyStarterPack,
     onStartBlank,
     onOpenLibrary,
-    onOpenDuplicate
+    onOpenDuplicate,
+    onSaveManifest
   }
 }
 
@@ -171,7 +174,7 @@ describe("BuddyGuidedBuilder", () => {
   })
 
   it("renders draft review diagnostics inside the builder when a draft manifest exists", () => {
-    renderBuilder({
+    const { onSaveManifest } = renderBuilder({
       draftManifest: {
         manifest_version: 1,
         renderer_type: "sprite_frames",
@@ -200,5 +203,14 @@ describe("BuddyGuidedBuilder", () => {
     expect(screen.getByTestId("buddy-draft-review-movement-states")).toHaveTextContent(
       "moving_left"
     )
+    expect(screen.getByTestId("buddy-state-configuration-panel")).toHaveTextContent(
+      "Configure visual states"
+    )
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save visual state configuration" })
+    )
+
+    expect(onSaveManifest).toHaveBeenCalledTimes(1)
   })
 })

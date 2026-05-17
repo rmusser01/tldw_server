@@ -3441,12 +3441,14 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           assetsById={assetsById}
           importPreview={fullImportPreview}
           activationBlockers={validationErrors}
+          savingManifest={saving}
           onCopyStarterPack={(starterPackId) =>
             void handleCopyStarterPack(starterPackId)
           }
           onStartBlank={focusDraftTitleInput}
           onOpenLibrary={focusLibraryPanel}
           onOpenDuplicate={focusDuplicateControls}
+          onSaveManifest={() => void handleSaveManifest()}
         />
       ) : null}
 
