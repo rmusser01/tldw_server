@@ -1350,7 +1350,7 @@ const ExistingTab: React.FC<{
   const [currentPage, setCurrentPage] = React.useState(1)
   const [totalCount, setTotalCount] = React.useState(0)
   const [hasMore, setHasMore] = React.useState(false)
-  const mediaRef = React.useRef<MediaLibraryItem[]>([])
+  const mediaRef = React.useRef<any[]>([])
 
   // Already added source media IDs
   const sources = useWorkspaceStore((s) => s.sources)
@@ -1359,19 +1359,17 @@ const ExistingTab: React.FC<{
     [sources]
   )
 
-  const setMediaList = React.useCallback((items: MediaLibraryItem[]) => {
+  const setMediaList = React.useCallback((items: any[]) => {
     mediaRef.current = items
     setMedia(items)
   }, [])
 
   const dedupeMediaItems = React.useCallback((items: unknown[]) => {
-    const itemMap = new Map<string, MediaLibraryItem>()
+    const itemMap = new Map<string, any>()
     for (const item of items) {
-      const mediaItem = asMediaLibraryItem(item)
-      if (!mediaItem) continue
-      const key = getMediaLibraryItemKey(mediaItem)
+      const key = getMediaLibraryItemKey(item)
       if (key == null) continue
-      itemMap.set(key, mediaItem)
+      itemMap.set(key, item)
     }
     return Array.from(itemMap.values())
   }, [])
@@ -1386,7 +1384,6 @@ const ExistingTab: React.FC<{
         setIsLoading(true)
       }
       setLoadError(null)
-      setError(null)
       const page = options?.page || 1
       const append = Boolean(options?.append)
 
@@ -1426,8 +1423,14 @@ const ExistingTab: React.FC<{
         setCurrentPage(page)
         setHasMore(dedupedItems.length < normalizedTotal)
 
-      } catch (err) {
-        console.error("Failed to fetch media from server:", err)
+        if (!trimmedQuery && page === 1) {
+          existingMediaCache = {
+            items: dedupedItems,
+            totalCount: normalizedTotal,
+            cachedAt: Date.now()
+          }
+        }
+      } catch {
         setLoadError("Unable to load media. Please try again.")
       } finally {
         if (shouldShowLoading) {
@@ -1435,23 +1438,28 @@ const ExistingTab: React.FC<{
         }
       }
     },
-    [dedupeMediaItems, setError, setMediaList]
+    [dedupeMediaItems, setMediaList]
   )
 
   const loadMedia = React.useCallback(
-    async (filters?: ExistingMediaFilters) => {
-      const nextFilters =
-        filters || {
-          query: searchQuery,
-          mediaType: mediaTypeFilter,
-          keywords: keywordFilterInput,
-          sortBy
+    async (query?: string) => {
+      const trimmedQuery = query?.trim()
+      if (!trimmedQuery && existingMediaCache) {
+        const cacheIsFresh =
+          Date.now() - existingMediaCache.cachedAt < EXISTING_MEDIA_CACHE_TTL_MS
+        if (cacheIsFresh) {
+          setLoadError(null)
+          setMediaList(existingMediaCache.items)
+          setTotalCount(existingMediaCache.totalCount)
+          setCurrentPage(1)
+          setHasMore(existingMediaCache.items.length < existingMediaCache.totalCount)
+          return
         }
       setCurrentPage(1)
       setSelectedMediaKeys(new Set())
-      await fetchMediaFromServer(nextFilters, { page: 1 })
+      await fetchMediaFromServer(trimmedQuery, { page: 1 })
     },
-    [fetchMediaFromServer, keywordFilterInput, mediaTypeFilter, searchQuery, sortBy]
+    [fetchMediaFromServer, setMediaList]
   )
 
   React.useEffect(() => {
@@ -1495,21 +1503,19 @@ const ExistingTab: React.FC<{
   const handleAddSelected = () => {
     const selectedItems = media.filter((m) => {
       const key = getMediaLibraryItemKey(m)
-      const mediaId = getMediaLibraryIdNumber(m)
+      const mediaId = Number(m.media_id ?? m.id)
       return (
         key != null &&
-        mediaId != null &&
+        Number.isFinite(mediaId) &&
         selectedMediaKeys.has(key) &&
         !existingMediaIds.has(key)
       )
     })
 
     const newSources = selectedItems.map((m) => ({
-      mediaId: getMediaLibraryIdNumber(m) as number,
-      title: getMediaLibraryTitle(m),
-      type: getSourceTypeFromMediaType(
-        toOptionalString(m.type) || toOptionalString(m.media_type) || ""
-      ) as WorkspaceSourceType,
+      mediaId: Number(m.media_id ?? m.id),
+      title: m.title || m.name || "Untitled",
+      type: getSourceTypeFromMediaType(m.type || m.media_type) as WorkspaceSourceType,
       status: "ready" as const,
       url: toOptionalString(m.url) || toOptionalString(m.source_url),
       fileSize: toOptionalNumber(m.file_size ?? m.filesize ?? m.size),
@@ -1662,8 +1668,7 @@ const ExistingTab: React.FC<{
               renderItem={(item) => {
                 const key = getMediaLibraryItemKey(item)
                 if (key == null) return null
-                const title = getMediaLibraryTitle(item)
-                const keywords = getMediaLibraryKeywords(item)
+                const title = item.title || item.name || "Untitled"
                 return (
                   <List.Item
                     className={`cursor-pointer transition hover:bg-surface2 ${

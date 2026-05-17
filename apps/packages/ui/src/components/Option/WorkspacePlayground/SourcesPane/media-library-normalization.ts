@@ -91,13 +91,11 @@ export const normalizeMediaLibraryResponse = (
       response.count,
       response.results_count,
       rootPagination?.total,
-      rootPagination?.total_items,
       nestedData?.total_count,
       nestedData?.total,
       nestedData?.count,
       nestedData?.results_count,
-      nestedPagination?.total,
-      nestedPagination?.total_items
+      nestedPagination?.total
     ) ?? normalizeTotal(fallbackTotal)
 
   return {

@@ -24,6 +24,12 @@ modified_files:
 - apps/packages/ui/src/components/Option/WorkspacePlayground/index.tsx
 - apps/packages/ui/src/routes/option-workspace-playground.tsx
 - apps/tldw-frontend/extension/routes/option-workspace-playground.tsx
+- apps/packages/ui/src/components/Option/WorkspacePlayground/SourcesPane/index.tsx
+- apps/packages/ui/src/components/Option/WorkspacePlayground/SourcesPane/AddSourceModal.tsx
+- apps/packages/ui/src/components/Option/WorkspacePlayground/SourcesPane/media-library-normalization.ts
+- apps/packages/ui/src/components/Option/WorkspacePlayground/__tests__/SourcesPane.stage2.test.tsx
+- apps/packages/ui/src/components/Option/WorkspacePlayground/__tests__/AddSourceModal.stage2.intake.test.tsx
+- apps/packages/ui/src/components/Option/WorkspacePlayground/__tests__/media-library-normalization.test.ts
 - backlog/tasks/task-409 - Implement-Workspace-Playground-UX-remediation.md
 ---
 

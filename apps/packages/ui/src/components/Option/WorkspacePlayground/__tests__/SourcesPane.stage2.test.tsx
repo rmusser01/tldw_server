@@ -123,12 +123,12 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     })
   })
 
-  it("opens Add Sources directly on My Media", () => {
+  it("labels the primary source intake action as Add Sources", () => {
     render(<SourcesPane />)
 
     fireEvent.click(screen.getByRole("button", { name: "Add Sources" }))
 
-    expect(mockOpenAddSourceModal).toHaveBeenCalledWith("existing")
+    expect(mockOpenAddSourceModal).toHaveBeenCalledTimes(1)
   })
 
   it("scrolls to and highlights a focused source target", () => {

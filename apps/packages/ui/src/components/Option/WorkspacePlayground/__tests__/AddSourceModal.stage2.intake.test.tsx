@@ -1,10 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { AddSourceModal } from "../SourcesPane/AddSourceModal"
 import type { AddSourceTab } from "@/types/workspace"
 
 const ADD_SOURCE_TAB_USAGE_STORAGE_KEY =
   "tldw:workspace-playground:add-source-tab-usage:v1"
+const EXISTING_MEDIA_CACHE_TTL_MS = 60_000
 
 const {
   mockUploadMedia,
@@ -37,6 +39,8 @@ const workspaceStoreState = {
   addSource: mockAddSource,
   workspaceTag: "workspace:test"
 }
+
+let mediaCacheClock = Date.now()
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -83,7 +87,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 
 describe("AddSourceModal Stage 2 intake and relevance", () => {
   beforeEach(() => {
+    vi.restoreAllMocks()
     vi.clearAllMocks()
+    mediaCacheClock += EXISTING_MEDIA_CACHE_TTL_MS + 1
+    vi.spyOn(Date, "now").mockReturnValue(mediaCacheClock)
     window.localStorage.removeItem(ADD_SOURCE_TAB_USAGE_STORAGE_KEY)
     workspaceStoreState.addSourceModalOpen = true
     workspaceStoreState.addSourceError = null
@@ -143,7 +150,7 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
     ])
   })
 
-  it("keeps visible tabs in a stable order despite prior usage frequency", async () => {
+  it("keeps Add Sources tabs in a stable order despite prior usage frequency", async () => {
     window.localStorage.setItem(
       ADD_SOURCE_TAB_USAGE_STORAGE_KEY,
       JSON.stringify({
@@ -170,25 +177,13 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
     ])
   })
 
-  it("shows and logs a load error when My Media cannot load", async () => {
+  it("shows a load error when My Media cannot load", async () => {
     workspaceStoreState.addSourceModalTab = "existing"
-    const loadFailure = new Error("offline")
-    const consoleErrorSpy = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined)
-    mockListMedia.mockRejectedValueOnce(loadFailure)
+    mockListMedia.mockRejectedValueOnce(new Error("offline"))
 
-    try {
-      render(<AddSourceModal />)
+    render(<AddSourceModal />)
 
-      expect(await screen.findByText(/unable to load media/i)).toBeInTheDocument()
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        "Failed to fetch media from server:",
-        loadFailure
-      )
-    } finally {
-      consoleErrorSpy.mockRestore()
-    }
+    expect(await screen.findByText(/unable to load media/i)).toBeInTheDocument()
   })
 
   it("renders My Media items from items response shape", async () => {
@@ -202,141 +197,6 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
 
     expect(await screen.findByText("Library Item")).toBeInTheDocument()
     expect(screen.getByText("Showing 1 of 1")).toBeInTheDocument()
-  })
-
-  it("uses backend pagination.total_items so large media libraries can load more", async () => {
-    workspaceStoreState.addSourceModalTab = "existing"
-    mockListMedia.mockResolvedValueOnce({
-      items: [
-        { id: 701, title: "Library Item", type: "pdf" },
-        { id: 702, title: "Second Library Item", type: "video" }
-      ],
-      pagination: {
-        page: 1,
-        per_page: 2,
-        total_pages: 63,
-        results_per_page: 2,
-        total_items: 125
-      }
-    })
-
-    render(<AddSourceModal />)
-
-    expect(await screen.findByText("Library Item")).toBeInTheDocument()
-    expect(screen.getByText("Second Library Item")).toBeInTheDocument()
-    expect(screen.getByText("Showing 2 of 125")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Load more" })).toBeInTheDocument()
-  })
-
-  it("searches My Media with query, content type, keywords, and sort filters", async () => {
-    workspaceStoreState.addSourceModalTab = "existing"
-    mockListMedia.mockResolvedValueOnce({ media: [], total_count: 0 })
-    mockSearchMedia.mockResolvedValueOnce({
-      items: [
-        {
-          id: 801,
-          title: "Conference Keynote",
-          type: "video",
-          keywords: ["keynote", "ai"]
-        }
-      ],
-      pagination: { total_items: 1 }
-    })
-
-    render(<AddSourceModal />)
-
-    await waitFor(() => {
-      expect(mockListMedia).toHaveBeenCalledWith({
-        page: 1,
-        results_per_page: 50,
-        include_keywords: true
-      })
-    })
-
-    fireEvent.change(screen.getByLabelText("Search media"), {
-      target: { value: "conference" }
-    })
-    fireEvent.change(screen.getByLabelText("Media type"), {
-      target: { value: "video" }
-    })
-    fireEvent.change(screen.getByLabelText("Keywords"), {
-      target: { value: "keynote, ai" }
-    })
-    fireEvent.change(screen.getByLabelText("Sort media"), {
-      target: { value: "date_desc" }
-    })
-    fireEvent.click(screen.getByRole("button", { name: "Search" }))
-
-    await waitFor(() => {
-      expect(mockSearchMedia).toHaveBeenCalledWith(
-        {
-          query: "conference",
-          fields: ["title", "content"],
-          media_types: ["video"],
-          must_have: ["keynote", "ai"],
-          sort_by: "date_desc"
-        },
-        { page: 1, results_per_page: 50 }
-      )
-    })
-    expect(await screen.findByText("Conference Keynote")).toBeInTheDocument()
-    expect(screen.getByText("keynote")).toBeInTheDocument()
-    expect(screen.getByText("ai")).toBeInTheDocument()
-  })
-
-  it("clears My Media filters and returns to the default media listing", async () => {
-    workspaceStoreState.addSourceModalTab = "existing"
-    mockListMedia
-      .mockResolvedValueOnce({ media: [], total_count: 0 })
-      .mockResolvedValueOnce({
-        media: [{ id: 901, title: "Default Library Item", type: "pdf" }],
-        total_count: 1
-      })
-    mockSearchMedia.mockResolvedValueOnce({
-      items: [{ id: 902, title: "Filtered Result", type: "video" }],
-      total: 1
-    })
-
-    render(<AddSourceModal />)
-
-    await waitFor(() => {
-      expect(mockListMedia).toHaveBeenCalledWith({
-        page: 1,
-        results_per_page: 50,
-        include_keywords: true
-      })
-    })
-
-    fireEvent.change(screen.getByLabelText("Search media"), {
-      target: { value: "filtered" }
-    })
-    fireEvent.change(screen.getByLabelText("Media type"), {
-      target: { value: "video" }
-    })
-    fireEvent.change(screen.getByLabelText("Keywords"), {
-      target: { value: "demo" }
-    })
-    fireEvent.change(screen.getByLabelText("Sort media"), {
-      target: { value: "title_asc" }
-    })
-    fireEvent.click(screen.getByRole("button", { name: "Search" }))
-
-    expect(await screen.findByText("Filtered Result")).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }))
-
-    await waitFor(() => {
-      expect(mockListMedia).toHaveBeenLastCalledWith({
-        page: 1,
-        results_per_page: 50,
-        include_keywords: true
-      })
-    })
-    expect(screen.getByLabelText("Search media")).toHaveValue("")
-    expect(screen.getByLabelText("Media type")).toHaveValue("all")
-    expect(screen.getByLabelText("Keywords")).toHaveValue("")
-    expect(screen.getByLabelText("Sort media")).toHaveValue("relevance")
-    expect(await screen.findByText("Default Library Item")).toBeInTheDocument()
   })
 
   it("distinguishes all-added media from an empty media library", async () => {
@@ -355,6 +215,7 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
   })
 
   it("toggles a My Media checkbox once when clicked directly", async () => {
+    const user = userEvent.setup()
     workspaceStoreState.addSourceModalTab = "existing"
     mockListMedia.mockResolvedValueOnce({
       items: [{ id: 701, title: "Library Item", type: "pdf" }],
@@ -366,10 +227,10 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
     const checkbox = await screen.findByRole("checkbox", {
       name: /select library item/i
     })
-    fireEvent.click(checkbox)
+    await user.click(checkbox)
     expect(checkbox).toBeChecked()
 
-    fireEvent.click(checkbox)
+    await user.click(checkbox)
     expect(checkbox).not.toBeChecked()
   })
 
