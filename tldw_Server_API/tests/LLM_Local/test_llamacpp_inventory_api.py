@@ -294,6 +294,38 @@ def test_import_folder_persists_allowlisted_folder_and_returns_folder_asset(monk
 
 
 @pytest.mark.unit
+def test_import_folder_preview_returns_summary_without_persisting(monkeypatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+
+    models_dir = tmp_path / "models"
+    imported = tmp_path / "imported"
+    models_dir.mkdir()
+    imported.mkdir()
+    (imported / "chat.Q4_K_M.gguf").write_text("base")
+    (imported / "mmproj-chat-f16.gguf").write_text("projector")
+    updates: list[dict[str, dict[str, str]]] = []
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(models_dir, allowed_paths=str(imported), imported_asset_folders=""),
+    )
+    monkeypatch.setattr(llamacpp_inventory_service.setup_manager, "update_config", updates.append)
+    monkeypatch.setattr(llamacpp_inventory_service, "refresh_config_cache", lambda: None)
+    app = _make_app_with_manager(_Manager())
+
+    with TestClient(app) as client:
+        response = client.post("/api/v1/llamacpp/assets/import-folder/preview", json={"path": str(imported)})
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["folder"]["kind"] == "folder"
+    assert body["asset_counts"] == {"gguf": 1, "mmproj": 1}
+    assert {asset["kind"] for asset in body["assets"]} == {"gguf", "mmproj"}
+    assert body["will_persist"] is False
+    assert updates == []
+
+
+@pytest.mark.unit
 def test_asset_endpoints_offload_blocking_inventory_work_to_threadpool(monkeypatch):
     calls: list[tuple[Any, tuple[Any, ...], dict[str, Any]]] = []
     config_state = {
@@ -342,6 +374,17 @@ def test_asset_endpoints_offload_blocking_inventory_work_to_threadpool(monkeypat
         assert path == Path("/models")
         return asset_payload
 
+    def fake_preview_import_asset_folder(path: Path) -> dict[str, Any]:
+        assert path == Path("/models")
+        return {
+            "folder": asset_payload,
+            "assets": [],
+            "asset_counts": {},
+            "warnings": [],
+            "scan_limited": False,
+            "will_persist": False,
+        }
+
     async def fake_run_in_threadpool(func: Any, *args: Any, **kwargs: Any) -> Any:
         calls.append((func, args, kwargs))
         return func(*args, **kwargs)
@@ -351,20 +394,28 @@ def test_asset_endpoints_offload_blocking_inventory_work_to_threadpool(monkeypat
     monkeypatch.setattr(lp.llamacpp_inventory_service, "scan_assets", fake_scan_assets)
     monkeypatch.setattr(lp.llamacpp_inventory_service, "register_asset_path", fake_register_asset_path)
     monkeypatch.setattr(lp.llamacpp_inventory_service, "import_asset_folder", fake_import_asset_folder)
+    monkeypatch.setattr(
+        lp.llamacpp_inventory_service,
+        "preview_import_asset_folder",
+        fake_preview_import_asset_folder,
+    )
     app = _make_app_with_manager(_Manager())
 
     with TestClient(app) as client:
         list_response = client.get("/api/v1/llamacpp/assets")
         register_response = client.post("/api/v1/llamacpp/assets/register-path", json={"path": "/models/base.gguf"})
+        preview_response = client.post("/api/v1/llamacpp/assets/import-folder/preview", json={"path": "/models"})
         import_response = client.post("/api/v1/llamacpp/assets/import-folder", json={"path": "/models"})
 
     assert list_response.status_code == 200, list_response.text
     assert register_response.status_code == 200, register_response.text
+    assert preview_response.status_code == 200, preview_response.text
     assert import_response.status_code == 200, import_response.text
     assert [call[0] for call in calls] == [
         fake_get_config_state,
         fake_scan_assets,
         fake_register_asset_path,
+        fake_preview_import_asset_folder,
         fake_import_asset_folder,
     ]
 

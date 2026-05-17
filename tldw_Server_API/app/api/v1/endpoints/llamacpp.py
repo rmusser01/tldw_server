@@ -14,6 +14,7 @@ from starlette.concurrency import run_in_threadpool
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, RequireRole, User
 from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
     LlamaCppAsset,
+    LlamaCppAssetImportPreviewResponse,
     LlamaCppAssetsResponse,
     LlamaCppConfigResponse,
     LlamaCppConfigUpdateRequest,
@@ -418,6 +419,23 @@ async def import_llamacpp_asset_folder_endpoint(
     _ = llm_manager
     try:
         return await run_in_threadpool(llamacpp_inventory_service.import_asset_folder, Path(payload.path))
+    except ServerError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post(
+    "/llamacpp/assets/import-folder/preview",
+    summary="Preview a llama.cpp Asset Folder Import",
+    response_model=LlamaCppAssetImportPreviewResponse,
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
+async def preview_llamacpp_asset_folder_endpoint(
+    payload: LlamaCppImportAssetFolderRequest,
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+) -> LlamaCppAssetImportPreviewResponse:
+    _ = llm_manager
+    try:
+        return await run_in_threadpool(llamacpp_inventory_service.preview_import_asset_folder, Path(payload.path))
     except ServerError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
