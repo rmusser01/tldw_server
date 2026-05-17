@@ -44,7 +44,6 @@ Documentation-only child implementation plan for the approved WebUI/extension UX
   - `/tts` uses `SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher` while `TtsPlaygroundPage` remains present as a non-route-owner component.
   - `/audiobook-studio` uses `AudiobookStudioPage`.
 - Added explicit implementation guidance to protect route ownership, extension parity decisions, hosted and capability states, beta route treatment, and responsive verification.
-- Follow-up consistency review corrected the plan's `F19 support` wording so it matches the source spec: deprecated Ant Design cleanup is a blocker/noise trigger for touched audio UX work, not a responsive-landmark finding.
 - Bandit was not run because this task touched only Markdown planning and Backlog task files.
 - Verification performed for the plan artifact:
   - `rg -n "T[O]D[O]|T[B]D|F[I]XME|\\.\\.\\.|\\bm[a]ybe\\b|\\bpr[o]bably\\b|\\bshould c[o]nsider\\b" Docs/superpowers/plans/2026-05-17-webui-audio-routes-implementation-plan.md`
