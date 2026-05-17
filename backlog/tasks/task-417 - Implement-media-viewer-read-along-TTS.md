@@ -58,6 +58,12 @@ Guardrail anchors:
 
 Known baseline concern:
 - The annotation panel create/update/sync/delete test is already failing before implementation changes. Task 4 will intentionally update this annotation-selection surface, so keep this failure visible in verification until the mediated selection task replaces or fixes the expectation.
+
+Task 2 completed:
+- Added pure read-along segment types, canonical segmentation/scope helpers, and focused tests under `apps/packages/ui/src/components/Media/read-along/`.
+- Red verification: `cd apps/packages/ui && bunx vitest run src/components/Media/read-along/__tests__/media-read-along-segments.test.ts --maxWorkers=1` failed because `../media-read-along-segments` did not exist.
+- Green verification: same command passed with 7 tests after implementation.
+- `git diff --check` passed for the Task 2 files.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
