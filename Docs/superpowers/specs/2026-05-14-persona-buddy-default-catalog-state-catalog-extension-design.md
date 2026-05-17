@@ -5,12 +5,20 @@ Status: Approved direction; design slice for TASK-347
 Owner: Codex brainstorming pass
 Backlog: TASK-347
 
+Supersession note: later asset-production work expanded the basic tier from the
+initial three-pack concept to the six Codex Buddy defaults: `search-lens-basic`,
+`index-card-basic`, `archive-cube-basic`, `paperclip-basic`,
+`terminal-tile-basic`, and `migu-marker-basic`. This document remains useful
+for the neutral-anchor pipeline and state-catalog design, but the current
+catalog list is the twelve starter IDs documented in
+`Docs/Code_Documentation/Persona_Visual_Packs.md`.
+
 ## Summary
 
-Define the next Persona/Buddy visual-pack design slice: a nine-pack default
-catalog, a user-facing asset creation flow based on a neutral identity anchor,
-and a V1-compatible state catalog extension that supports a large bounded set
-of custom state IDs and per-tool animation variants.
+Define the next Persona/Buddy visual-pack design slice: a bundled default
+starter catalog, a user-facing asset creation flow based on a neutral identity
+anchor, and a V1-compatible state catalog extension that supports a large
+bounded set of custom state IDs and per-tool animation variants.
 
 This is not a new renderer. It extends the existing Persona Visual Pack contract
 that uses `renderer_type: "sprite_frames"`, state-to-animation mappings,
@@ -62,7 +70,7 @@ review outputs, and only then compile accepted frames into runtime assets.
 
 ## Goals
 
-1. Define nine bundled default buddies across basic, intermediate, and intricate
+1. Define bundled default buddies across basic, intermediate, and intricate
    complexity tiers.
 2. Preserve a neutral-pose-first creation workflow for defaults and user-created
    buddies.
@@ -101,8 +109,8 @@ review outputs, and only then compile accepted frames into runtime assets.
   from that anchor.
 - Static expression sheets are for talking and reactive pose selection. They are
   not the animation system.
-- There should be nine bundled defaults: three basic, three intermediate, and
-  three intricate.
+- The current bundled starter catalog has twelve IDs: six basic Codex Buddy
+  defaults plus three intermediate and three intricate scaffold entries.
 - The sprite manifest should support custom state IDs and per-tool animation
   variants at a large but bounded scale without redefining repo-wide Manifest
   V2 terminology.
@@ -166,13 +174,16 @@ with optional steps for simpler designs.
 | Intermediate | Demonstrate richer authoring without high art cost | Neutral model sheet, expression sheet, several state strips | Required built-ins, optional built-ins, several custom tool/reaction states |
 | Intricate | Show the ceiling for expressive buddies | Full model sheet, static sheet, keyframes, validated strips, compiled atlas | Required built-ins, optional built-ins, many custom states and per-tool variants |
 
-## Nine Default Starter Buddies
+## Bundled Default Starter Buddies
 
 | ID | Tier | Concept | What It Demonstrates |
 | --- | --- | --- | --- |
-| `research-buddy-basic` | Basic | Clean assistant mascot/robot, close to the earlier mockup direction | Low-risk default with readable silhouette, simple idle/listening/thinking/speaking/error loops |
+| `search-lens-basic` | Basic | Friendly search-lens object Buddy | Low-risk Codex Buddy default with readable silhouette, simple idle/listening/thinking/speaking/error loops |
+| `index-card-basic` | Basic | Friendly tabbed-card object Buddy | Low-risk Codex Buddy default with readable silhouette and simple required-state loops |
+| `archive-cube-basic` | Basic | Friendly archive/storage cube Buddy | Object-based basic default with readable state changes |
+| `paperclip-basic` | Basic | Friendly paperclip object Buddy | Simple object Buddy proving low-complexity art can be expressive |
+| `terminal-tile-basic` | Basic | Friendly terminal-window tile Buddy | CLI-flavored object Buddy with simple required-state coverage |
 | `migu-marker-basic` | Basic | Rough marker-line "Migu" inspired buddy with teal twin-tail silhouette and playful wobble | User-art-friendly style; shows simple drawings can become usable buddies |
-| `minimal-helper-basic` | Basic | Simple geometric helper or object buddy | Lowest-complexity path for users who want a quick custom pack |
 | `study-desk-intermediate` | Intermediate | Original desk/study companion with calm posture and props | Neutral seated anchor, static talking sheet, short writing/listening/thinking loops |
 | `tool-helper-intermediate` | Intermediate | Utility-themed assistant with visual tool affordances | Per-tool variants for search, import, summarize, and approval-needed without high art complexity |
 | `object-creature-intermediate` | Intermediate | Non-human expressive creature or object | Confirms the format is not limited to humanoid characters |
@@ -180,8 +191,8 @@ with optional steps for simpler designs.
 | `action-guide-intricate` | Intricate | Energetic guide with anticipation, reaction, success, and error beats | More dynamic animation timing and expressive state transitions |
 | `elaborate-persona-intricate` | Intricate | High-detail fantasy or sci-fi persona buddy | Full high-ceiling pack with many custom states, atlas layout, and strict review/validation |
 
-All nine defaults should be bundled as starter packs and copied into user-owned
-inactive drafts when selected. They should not auto-activate on copy.
+All bundled defaults should be copied into user-owned inactive drafts when
+selected. They should not auto-activate on copy.
 
 Starter art production notes:
 
@@ -546,7 +557,7 @@ MCP:
 
 Catalog:
 
-- List all nine defaults with stable IDs and complexity metadata.
+- List all bundled defaults with stable IDs and complexity metadata.
 - Copy each starter into an inactive user-owned draft.
 - Ensure bundled defaults do not reuse protected character likenesses directly.
 

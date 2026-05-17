@@ -151,7 +151,7 @@ screen-position movement, not generic tool activity. They are declared in the
 pack `state_catalog`, so runtimes that do not know those states can still fall
 back through normal state resolution.
 
-### Simple Buddy Creator Reference
+### Buddy Creator Reference
 
 tldw's user-facing Buddy creation flow should use the hatch-pet workflow as a
 reference model, retuned around the Persona Visual functionality available in
@@ -163,19 +163,22 @@ inactive draft creation, optional library reuse, MCP-triggerable custom states,
 and explicit activation.
 
 The goal is not to require users to understand Codex pet internals before they
-can make a Buddy. The simple path should guide users through the smallest useful
-asset workflow and then store the result as a normal Persona Visual draft pack.
-The full Codex-compatible path should remain available when users want import,
-export, or reuse with Codex pets.
+can make a Buddy. The simple path is a UX path over the same Persona Visual
+draft/review model: it guides users through the smallest useful asset workflow
+and stores the result as a normal Persona Visual draft pack. It is not a
+separate lower compatibility contract for bundled defaults. When users want
+import, export, or reuse with Codex pets, the full Codex-compatible path remains
+first-class.
 
 The tldw-retuned creation modes are:
 
-1. **Simple Buddy mode**: user provides a name, description, optional reference
+1. **Guided Buddy mode**: user provides a name, description, optional reference
    image, and style notes. tldw helps create one neutral anchor and the minimum
    runtime states needed for a usable Buddy: `idle`, `listening`, `thinking`,
    `speaking`, and `error`. If the Buddy can move around the screen, it can also
    add `moving_right` and `moving_left`. The output is a Persona Visual draft
-   pack with review evidence.
+   pack with review evidence, and can later be upgraded or exported through the
+   Codex-compatible atlas path.
 2. **Codex-compatible mode**: user creates the full nine-row Codex atlas:
    `idle`, `running-right`, `running-left`, `waving`, `jumping`, `failed`,
    `waiting`, `running`, and `review`. tldw imports the result as a Persona
@@ -240,11 +243,12 @@ they are clearer:
 8. `review` maps to focused thinking or approval review.
 
 Basic defaults and simple user-created Buddies can stay visually simple, but
-their final production packets should still pass the same identity,
-transparency, state semantics, and review process. The earlier 3x4 source sheets
-are acceptable as concept review evidence; they should be converted into either
-the simple tldw draft-pack contract or the full Codex-compatible atlas contract
-before the pack is treated as a final bundled default.
+their production packets should still pass the same identity, transparency,
+state semantics, and review process. The earlier 3x4 source sheets are
+acceptable as concept review evidence. For bundled defaults, the current 96x96
+Persona Visual packets are accepted runtime assets, and Codex Buddy reuse should
+upgrade or package them through the Codex-compatible atlas contract instead of
+creating a separate simple-only default format.
 
 ## Sprite Atlas Packs
 
@@ -377,8 +381,10 @@ recovery flows. They are not global Persona Visual pack rows or shared library
 entries. Listing the catalog returns safe fixture metadata only, and copying a
 starter always creates a normal user-owned draft pack before activation.
 
-The current bundled catalog exposes twelve starter IDs in stable order while the
-basic tier is being rebuilt into the six approved defaults:
+The current bundled catalog exposes twelve starter IDs in stable order. The
+basic tier is the six bundled Codex Buddy defaults; the intermediate and
+intricate tiers remain bundled scaffold entries until their reviewed production
+assets are authored:
 
 1. `search-lens-basic`
 2. `index-card-basic`
@@ -393,21 +399,22 @@ basic tier is being rebuilt into the six approved defaults:
 11. `action-guide-intricate`
 12. `elaborate-persona-intricate`
 
-These map to the approved basic, intermediate, and intricate tiers from the
-Persona Buddy default catalog design. The bundled basic tier is Search Lens,
-Index Card, Archive Cube, Paperclip, Terminal Tile, and Migu. The approved 3x4
-basic sheets are retained as review evidence and Simple Buddy production
-packets. Full Codex-pet-compatible atlas packets can be produced from the same
-neutral-anchor process when a bundled default or user-created Buddy needs the
-Codex import/export pathway.
+The bundled basic tier is Search Lens, Index Card, Archive Cube, Paperclip,
+Terminal Tile, and Migu. Earlier tracker text that described only three basic
+defaults is stale; this six-pack is the current basic tier. The existing
+package-backed 96x96 frame packets are accepted art-ready Persona Visual
+runtime assets for those six defaults, with neutral/preview assets and required
+state coverage. They are not the final interchange ceiling. When a default pack
+needs cross-app portability or Codex Buddy parity, the production target is the
+Codex/Petdex-compatible path: `pet.json` plus a 1536x1872, 8x9
+`spritesheet.webp`/PNG atlas imported through the Codex pet adapter.
 
-Each final basic starter should include a neutral anchor, preview asset, and
-required state coverage for `idle`, `listening`, `thinking`, `speaking`, and
-`error`. When the starter targets the full Codex-compatible path, it should also
-include atlas-backed movement coverage for `moving_right` and `moving_left`. The
-existing 96x96 frame packets remain useful review artifacts and bundled Simple
-Buddy assets. New full-compatibility packets should use the Codex atlas
-interchange path.
+The approved 3x4 basic sheets and processed 96x96 frame packets remain review
+evidence and current bundled runtime assets. They should be treated as source
+or interim production evidence for any later Codex-compatible atlas upgrade,
+not as a separate lower-tier contract that overrides the Codex/Petdex
+compatibility direction. Codex `running-right` and `running-left` rows continue
+to map to tldw `moving_right` and `moving_left` movement states.
 
 The Search Lens source-sheet checkpoint is stored with its processed frame
 review packet:
@@ -445,9 +452,12 @@ The basic tier intentionally models the simplest user-facing creation process:
 start with one neutral anchor, preserve that silhouette, and author only the
 smallest state deltas needed for expressive runtime feedback. The bundled basic
 packs do not require a separate static talking sheet, reaction sheet, or
-tool-specific variants. For production import parity with Codex pets, a full
-compatibility packet can be a single 8x9 atlas derived from that same neutral
-anchor and reviewed with the hatch-style contact-sheet and motion-preview bar.
+tool-specific variants. For bundled defaults and users who want Codex Buddy
+reuse, the compatible production packet is a single 8x9 atlas derived from that
+same neutral anchor and reviewed with the hatch-style contact-sheet and
+motion-preview bar. The current two-frame 96x96 loops are the accepted tldw
+runtime packet for the merged basic slice; they do not replace the Codex atlas
+interchange path.
 
 #### `search-lens-basic`
 

@@ -36,6 +36,8 @@ Create a repo-backed design spec for the Persona Buddy default visual catalog an
 <!-- SECTION:NOTES:BEGIN -->
 Created Docs/superpowers/specs/2026-05-14-persona-buddy-default-catalog-state-catalog-extension-design.md. The design keeps `sprite_frames` as the renderer, keeps sprite manifests on `manifest_version: 1`, treats `sprite_sheet` as an asset role, defines a neutral-anchor-first creation pipeline adapted from Puzzle Attack, documents the 9 default starter buddy catalog, and stages state catalog work across backend validation, frontend resolver/editor, MCP/generation jobs, asset pipeline, starter fixtures, docs, and verification.
 
+Supersession note from TASK-419: later asset-production work expanded the basic tier from the initial three-pack concept to the six Codex Buddy defaults (`search-lens-basic`, `index-card-basic`, `archive-cube-basic`, `paperclip-basic`, `terminal-tile-basic`, and `migu-marker-basic`). The current starter catalog source of truth is the twelve-ID catalog documented in `Docs/Code_Documentation/Persona_Visual_Packs.md`; this task remains the historical design record for the neutral-anchor pipeline and V1-compatible state catalog extension.
+
 Verification recorded: `git diff --check` passed for the new docs/task files; ASCII scan passed with no non-ASCII matches. Bandit is not applicable because this slice only changes Markdown documentation.
 
 PR review follow-up: addressed Qodo and Gemini feedback by reframing the work as a `sprite_frames` Manifest V1 state catalog extension instead of overloading repo-wide Manifest V2, changing the example manifest to `manifest_version: 1`, making Puzzle Attack references portable, removing the redundant lowercase rule, making `state_catalog.kind` mandatory, adding fallback-depth cap 8 to Stage 2 success criteria, and requiring state catalog capability advertisement only after validation and Buddy runtime support exist.
@@ -44,7 +46,7 @@ PR review follow-up: addressed Qodo and Gemini feedback by reframing the work as
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Designed the Persona/Buddy default visual catalog and V1-compatible state catalog extension. The spec defines 3 basic, 3 intermediate, and 3 intricate starter buddies, a neutral-pose-first asset pipeline, static talking sheet versus animation-strip boundaries, bounded custom state IDs, exact per-tool trigger matching, MCP/runtime behavior, editor UX, implementation stages, and verification expectations.
+Designed the Persona/Buddy default visual catalog and V1-compatible state catalog extension. The original spec defined 3 basic, 3 intermediate, and 3 intricate starter buddies, later superseded by the six-basic Codex Buddy catalog noted above. The still-current design pieces are the neutral-pose-first asset pipeline, static talking sheet versus animation-strip boundaries, bounded custom state IDs, exact per-tool trigger matching, MCP/runtime behavior, editor UX, implementation stages, and verification expectations.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

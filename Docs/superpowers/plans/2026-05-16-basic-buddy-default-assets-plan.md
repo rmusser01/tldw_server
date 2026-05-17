@@ -8,7 +8,7 @@
 
 ## Stage 2: Replace Basic Scaffold Art
 **Goal**: Replace the basic tier's placeholder fixtures one approved Buddy at a time with Codex-pet-compatible atlas packets derived from one neutral-anchor identity per pack.
-**Success Criteria**: `search-lens-basic`, `index-card-basic`, `archive-cube-basic`, `paperclip-basic`, `terminal-tile-basic`, and `migu-marker-basic` each provide reviewed required-state loops plus neutral/preview assets before the six-pack basic tier is complete. Final production packets should fit the user-facing Simple Buddy Creator contract first, and can additionally target the Codex pet 8x9 atlas contract when full compatibility is needed. The creation process follows the hatch-style bar retuned for tldw: canonical neutral anchor, state rows/frames, deterministic assembly, contact-sheet review, motion-preview review when animated, inactive draft import, and explicit activation. The already approved 3x4 packets remain review/concept evidence until converted.
+**Success Criteria**: `search-lens-basic`, `index-card-basic`, `archive-cube-basic`, `paperclip-basic`, `terminal-tile-basic`, and `migu-marker-basic` each provide reviewed required-state loops plus neutral/preview assets before the six-pack basic tier is complete. The six basic defaults are the current basic tier. The merged 96x96 frame packets are accepted tldw runtime assets for the basic slice, while the final cross-app/interchange target is the Codex/Petdex-compatible 8x9 atlas contract when a default or user-created Buddy needs Codex Buddy parity. The creation process follows the hatch-style bar retuned for tldw: canonical neutral anchor, state rows/frames, deterministic assembly, contact-sheet review, motion-preview review when animated, inactive draft import, and explicit activation. The already approved 3x4 packets remain review/concept evidence for any later atlas upgrade instead of defining a separate lower-tier contract.
 **Tests**:
 - `python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py -q`
 - `python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_portability.py -q -k 'codex_pet'`
@@ -16,7 +16,7 @@
 
 ## Stage 3: Documentation And Review Evidence
 **Goal**: Document approved basic defaults, Codex-pet import compatibility, and review evidence for each accepted source sheet and processed frame packet.
-**Success Criteria**: Persona Visual docs distinguish bundled basic art-ready defaults from unfinished starters, preserve draft-first activation semantics, define the `moving_right` / `moving_left` movement-state translation for Codex pet running rows, and record hatch-pet as the reference workflow for a tldw-native Simple Buddy Creator flow with a simple draft-pack mode and a full Codex-compatible mode.
+**Success Criteria**: Persona Visual docs distinguish bundled basic art-ready defaults from unfinished starters, preserve draft-first activation semantics, define the `moving_right` / `moving_left` movement-state translation for Codex pet running rows, and record hatch-pet as the reference workflow for a tldw-native Buddy creation flow whose simple UX path still converges on the same Persona Visual draft/review contract and can produce or import full Codex-compatible packets.
 **Tests**: `git diff --check`
 **Status**: Complete
 

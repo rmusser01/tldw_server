@@ -59,7 +59,7 @@ Verification: focused Persona Visual starter/API pytest passed 94 tests; py_comp
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Persona Visual starter catalog responses now include structured production recipes for all nine bundled starter scaffolds. The recipes make the neutral-anchor-first authored-asset handoff explicit without bundling final art, executing generation, changing renderer support, or auto-activating copied drafts.
+Persona Visual starter catalog responses now include structured production recipes for the bundled starter catalog. The recipes make the neutral-anchor-first authored-asset handoff explicit without bundling final art, executing generation, changing renderer support, or auto-activating copied drafts.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

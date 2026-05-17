@@ -275,7 +275,7 @@ Use this parametrization:
 @pytest.mark.parametrize(
     ("starter_pack_id", "complexity_tier", "required_group", "expected_output"),
     (
-        ("research-buddy-basic", "basic", "required_state_loops", "required_state_loops"),
+        ("search-lens-basic", "basic", "required_state_loops", "required_state_loops"),
         (
             "study-desk-intermediate",
             "intermediate",
