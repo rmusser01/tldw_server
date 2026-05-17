@@ -150,6 +150,7 @@ export interface NotesSidebarProps {
   exportAllCSV: () => Promise<void>
   exportAllJSON: () => Promise<void>
   openImportPicker: () => void
+  onSyncFolder: () => void
   resetEditor: () => void
   renderKeywordLabelWithFrequency: (
     keyword: string,
@@ -278,6 +279,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   exportAllCSV,
   exportAllJSON,
   openImportPicker,
+  onSyncFolder,
   resetEditor,
   renderKeywordLabelWithFrequency,
 
@@ -1184,6 +1186,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   void exportAllJSON()
                 }}
                 onImportNotes={openImportPicker}
+                onSyncFolder={onSyncFolder}
                 importInProgress={importSubmitting}
                 exportProgress={exportProgress}
               />
