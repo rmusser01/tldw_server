@@ -100,6 +100,7 @@ import {
   getStarterProductionStatusLabel,
   VisualBuddySetupChoiceCard
 } from "./VisualBuddySetupChoiceCard"
+import { BuddyGuidedBuilder } from "./BuddyGuidedBuilder"
 import { VisualPackReusePanel } from "./VisualPackReusePanel"
 import {
   BUDDY_IMPORT_ARCHIVE_ACCEPT,
@@ -2980,6 +2981,12 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     !hasActiveVisual &&
     !importPreview &&
     !importCommitJob
+  const showGuidedBuilder =
+    isActive &&
+    Boolean(selectedPersonaId) &&
+    packStateMatchesSelectedPersona &&
+    packsLoaded &&
+    !loading
   const showManagementHeader =
     isActive &&
     Boolean(selectedPersonaId) &&
@@ -2987,6 +2994,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     packsLoaded &&
     !showSetupChoices
   const recommendedStarter = starterPacks[0] ?? null
+  const activePackTitle =
+    selectedActivePack?.title ||
+    visiblePacks.find((pack) => pack.status === "active")?.title ||
+    null
   const importPreviewPanel = (
     <div className="rounded border border-border bg-bg p-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -3406,6 +3417,27 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
 
   return (
     <div className="space-y-3" data-testid="persona-visual-pack-editor">
+      {showGuidedBuilder ? (
+        <BuddyGuidedBuilder
+          selectedPersonaId={selectedPersonaId}
+          selectedPersonaName={selectedPersonaName || selectedPersonaId}
+          hasActiveVisual={hasActiveVisual}
+          packCount={visiblePacks.length}
+          activePackTitle={activePackTitle}
+          starterPacks={starterPacks}
+          starterCatalogLoading={starterCatalogLoading}
+          starterCatalogError={starterCatalogError}
+          copyingStarterId={copyingStarterId}
+          importPreviewPanel={importPreviewPanel}
+          onCopyStarterPack={(starterPackId) =>
+            void handleCopyStarterPack(starterPackId)
+          }
+          onStartBlank={focusDraftTitleInput}
+          onOpenLibrary={focusLibraryPanel}
+          onOpenDuplicate={focusDuplicateControls}
+        />
+      ) : null}
+
       {showSetupChoices ? (
         <VisualBuddySetupChoiceCard
           selectedPersonaId={selectedPersonaId}

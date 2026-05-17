@@ -320,9 +320,9 @@ git commit -m "feat: admit Codex buddy archives in visual import"
 - Modify: `apps/packages/ui/src/assets/locale/en/sidepanel.json`
 - Modify: `apps/packages/ui/src/public/_locales/en/sidepanel.json`
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] **Step 1: Write builder state helper tests**
+- [x] **Step 1: Write builder state helper tests**
 
 Create tests for source reset behavior and starter tier grouping.
 
@@ -412,7 +412,7 @@ describe("buddyBuilderState", () => {
 })
 ```
 
-- [ ] **Step 2: Run state tests and verify they fail**
+- [x] **Step 2: Run state tests and verify they fail**
 
 Run:
 
@@ -423,7 +423,7 @@ bunx vitest run src/components/PersonaGarden/__tests__/buddyBuilderState.test.ts
 
 Expected: FAIL because `buddyBuilderState.ts` does not exist.
 
-- [ ] **Step 3: Implement `buddyBuilderState.ts`**
+- [x] **Step 3: Implement `buddyBuilderState.ts`**
 
 Implement source IDs, step IDs, Basic default ID constants, reset helpers, and tier grouping. Keep this file JSX-free so tests stay cheap.
 
@@ -519,11 +519,11 @@ export const groupBuddyStarterPacksByTier = (
 }
 ```
 
-- [ ] **Step 4: Write builder render tests**
+- [x] **Step 4: Write builder render tests**
 
 Create `BuddyGuidedBuilder.test.tsx` that renders the source step, verifies the six Basic defaults, verifies scaffold copy is visually distinct or primary-disabled, verifies Codex and native import choices are separate, and verifies accessible step navigation labels. Also cover an existing active-pack state so the builder does not regress into a first-run-only surface.
 
-- [ ] **Step 5: Run builder tests and verify they fail**
+- [x] **Step 5: Run builder tests and verify they fail**
 
 Run:
 
@@ -534,7 +534,7 @@ bunx vitest run src/components/PersonaGarden/__tests__/BuddyGuidedBuilder.test.t
 
 Expected: FAIL because the builder components do not exist.
 
-- [ ] **Step 6: Implement source, catalog, and import panels**
+- [x] **Step 6: Implement source, catalog, and import panels**
 
 Implement the components with existing design-system classes/patterns used by Persona Garden panels. Requirements:
 
@@ -546,7 +546,7 @@ Implement the components with existing design-system classes/patterns used by Pe
 - Intermediate/Intricate scaffolds are visible but clearly labeled as production packets,
 - Codex/Petdex `.zip` and native `.tldw-persona-vpack` copy are distinct.
 
-- [ ] **Step 7: Integrate builder into `VisualPackEditor`**
+- [x] **Step 7: Integrate builder into `VisualPackEditor`**
 
 Wire the builder to existing state and handlers:
 
@@ -559,11 +559,11 @@ Wire the builder to existing state and handlers:
 
 Keep `VisualPackEditor` as the data/mutation owner. The builder should receive props and emit callbacks rather than importing services directly.
 
-- [ ] **Step 8: Update compact setup card semantics**
+- [x] **Step 8: Update compact setup card semantics**
 
 Keep `VisualBuddySetupChoiceCard` compact mode in Assistant Setup. Update labels/help so it says it opens Buddy visuals or starts the visual builder, not that the compact card itself is the complete builder.
 
-- [ ] **Step 9: Add i18n keys**
+- [x] **Step 9: Add i18n keys**
 
 Add English keys under `personaGarden.visuals.builder` in:
 
@@ -594,7 +594,7 @@ Use key names that map to actual UI sections, for example:
 
 Preserve existing JSON ordering conventions as much as practical.
 
-- [ ] **Step 10: Run focused source/draft tests**
+- [x] **Step 10: Run focused source/draft tests**
 
 Run:
 
@@ -605,7 +605,7 @@ bunx vitest run src/components/PersonaGarden/__tests__/buddyBuilderState.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 11: Commit Task 2**
+- [x] **Step 11: Commit Task 2**
 
 ```bash
 git add apps/packages/ui/src/components/PersonaGarden/buddyBuilderState.ts apps/packages/ui/src/components/PersonaGarden/BuddyGuidedBuilder.tsx apps/packages/ui/src/components/PersonaGarden/BuddySourcePicker.tsx apps/packages/ui/src/components/PersonaGarden/BuddyStarterCatalogPicker.tsx apps/packages/ui/src/components/PersonaGarden/BuddyImportFormatPanel.tsx apps/packages/ui/src/components/PersonaGarden/__tests__/buddyBuilderState.test.ts apps/packages/ui/src/components/PersonaGarden/__tests__/BuddyGuidedBuilder.test.tsx apps/packages/ui/src/components/PersonaGarden/VisualPackEditor.tsx apps/packages/ui/src/components/PersonaGarden/VisualBuddySetupChoiceCard.tsx apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx apps/packages/ui/src/components/PersonaGarden/__tests__/VisualBuddySetupChoiceCard.test.tsx apps/packages/ui/src/routes/__tests__/sidepanel-persona.test.tsx apps/packages/ui/src/assets/locale/en/sidepanel.json apps/packages/ui/src/public/_locales/en/sidepanel.json

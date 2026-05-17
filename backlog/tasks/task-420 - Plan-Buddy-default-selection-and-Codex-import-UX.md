@@ -20,8 +20,18 @@ documentation:
 modified_files:
 - apps/packages/ui/src/components/PersonaGarden/buddyBuilderArchive.ts
 - apps/packages/ui/src/components/PersonaGarden/__tests__/buddyBuilderArchive.test.ts
+- apps/packages/ui/src/components/PersonaGarden/buddyBuilderState.ts
+- apps/packages/ui/src/components/PersonaGarden/__tests__/buddyBuilderState.test.ts
+- apps/packages/ui/src/components/PersonaGarden/BuddyGuidedBuilder.tsx
+- apps/packages/ui/src/components/PersonaGarden/BuddySourcePicker.tsx
+- apps/packages/ui/src/components/PersonaGarden/BuddyStarterCatalogPicker.tsx
+- apps/packages/ui/src/components/PersonaGarden/BuddyImportFormatPanel.tsx
+- apps/packages/ui/src/components/PersonaGarden/__tests__/BuddyGuidedBuilder.test.tsx
 - apps/packages/ui/src/components/PersonaGarden/VisualPackEditor.tsx
+- apps/packages/ui/src/components/PersonaGarden/VisualBuddySetupChoiceCard.tsx
 - apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx
+- apps/packages/ui/src/components/PersonaGarden/__tests__/VisualBuddySetupChoiceCard.test.tsx
+- apps/packages/ui/src/routes/__tests__/sidepanel-persona.test.tsx
 - apps/packages/ui/src/services/__tests__/persona-visuals.test.ts
 - apps/packages/ui/src/assets/locale/en/sidepanel.json
 - apps/packages/ui/src/public/_locales/en/sidepanel.json
@@ -125,6 +135,7 @@ Verification:
   refinement.
 - Bandit is not applicable yet because this slice is docs/tracker only.
 Task 1 implementation completed: added shared Buddy import archive admission helpers, wired VisualPackEditor import preview gating to admit native Persona Visual archives and Codex/Petdex .zip archives, refreshed default starter fixtures to search-lens-basic, and added English builder import error copy. Focused verification passed: `bunx vitest run src/components/PersonaGarden/__tests__/buddyBuilderArchive.test.ts src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx src/services/__tests__/persona-visuals.test.ts src/routes/__tests__/sidepanel-persona-locale-keys.test.ts --testTimeout=30000` (4 files, 76 tests). Bandit is not applicable to this frontend-only TypeScript/JSON slice.
+Task 2 implementation completed: added the Buddy builder state helpers, source picker, tiered starter catalog, import-format panel, and top-level guided builder shell; wired the shell into VisualPackEditor as the primary Visuals surface while preserving existing editor-owned mutations and draft/import controls; updated compact Assistant Setup copy to open the Buddy builder. Focused verification passed: `bunx vitest run src/components/PersonaGarden/__tests__/buddyBuilderState.test.ts src/components/PersonaGarden/__tests__/BuddyGuidedBuilder.test.tsx src/components/PersonaGarden/__tests__/VisualBuddySetupChoiceCard.test.tsx src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx src/routes/__tests__/sidepanel-persona.test.tsx --testTimeout=30000` (5 files, 150 tests). Locale guard passed: `bunx vitest run src/routes/__tests__/sidepanel-persona-locale-keys.test.ts --testTimeout=30000` (1 file, 3 tests). `jq empty` on English sidepanel locale JSON and `git diff --check` both passed. Bandit is not applicable to this frontend-only TypeScript/JSON slice.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

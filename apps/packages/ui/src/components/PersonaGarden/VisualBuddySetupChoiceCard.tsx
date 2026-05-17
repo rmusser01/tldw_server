@@ -198,7 +198,7 @@ export const VisualBuddySetupChoiceCard: React.FC<
             <Text className="mt-1 block max-w-2xl text-xs leading-5 text-text-muted">
               {t("sidepanel:personaGarden.visuals.setup.compactHelp", {
                 defaultValue:
-                  "Add visuals after the guided assistant setup opens Persona Garden."
+                  "Open the Buddy builder in Persona Garden to choose, import, review, and activate visuals."
               })}
             </Text>
           </div>
@@ -217,7 +217,7 @@ export const VisualBuddySetupChoiceCard: React.FC<
           onClick={onOpenVisuals}
         >
           {t("sidepanel:personaGarden.visuals.setup.openVisuals", {
-            defaultValue: "Set up visual buddy"
+            defaultValue: "Open Buddy builder"
           })}
         </Button>
       </div>

@@ -1400,7 +1400,7 @@ describe("SidepanelPersona", () => {
       expect(screen.getByTestId("assistant-setup-overlay")).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole("button", { name: "Set up visual buddy" }))
+    fireEvent.click(screen.getByRole("button", { name: "Open Buddy builder" }))
 
     await waitFor(() => {
       expect(screen.queryByTestId("assistant-setup-overlay")).not.toBeInTheDocument()

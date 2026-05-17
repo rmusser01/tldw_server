@@ -1369,5 +1369,32 @@
   },
   "personaGarden_visuals_builder_importUnsupportedMimeType": {
     "message": "Choose a Persona Visual or Codex/Petdex archive with a supported zip media type."
+  },
+  "personaGarden_visuals_builder_heading": {
+    "message": "Buddy builder"
+  },
+  "personaGarden_visuals_builder_sourceStep": {
+    "message": "Choose a source"
+  },
+  "personaGarden_visuals_builder_draftStep": {
+    "message": "Create a draft"
+  },
+  "personaGarden_visuals_builder_reviewStep": {
+    "message": "Review readiness"
+  },
+  "personaGarden_visuals_builder_configureStep": {
+    "message": "Configure states"
+  },
+  "personaGarden_visuals_builder_activateStep": {
+    "message": "Activate"
+  },
+  "personaGarden_visuals_builder_bundledSource": {
+    "message": "Bundled Buddy"
+  },
+  "personaGarden_visuals_builder_codexImportSource": {
+    "message": "Import Codex/Petdex pet"
+  },
+  "personaGarden_visuals_builder_nativeImportSource": {
+    "message": "Import Persona Visual pack"
   }
 }

@@ -219,7 +219,7 @@ describe("VisualPackEditor", () => {
     )
   })
 
-  it("shows the setup choice card when there is no active pack and no packs", async () => {
+  it("shows the guided builder when there is no active pack and no packs", async () => {
     mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
       const method = init?.method || "GET"
       if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
@@ -249,6 +249,10 @@ describe("VisualPackEditor", () => {
         isActive
       />
     )
+
+    const builder = await screen.findByTestId("buddy-guided-builder")
+    expect(builder).toHaveTextContent("Buddy builder")
+    expect(builder).toHaveTextContent("Search Lens Buddy")
 
     const setupCard = await screen.findByTestId("visual-buddy-setup-choice-card")
     expect(setupCard).toHaveTextContent("Visual buddy setup")
@@ -1160,7 +1164,8 @@ describe("VisualPackEditor", () => {
       />
     )
 
-    fireEvent.click(await screen.findByRole("button", { name: "Start blank" }))
+    const sourcePicker = await screen.findByTestId("buddy-builder-source-picker")
+    fireEvent.click(within(sourcePicker).getByRole("button", { name: "Start blank" }))
     expect(screen.getByTestId("persona-visual-pack-title-input")).toHaveFocus()
   })
 
