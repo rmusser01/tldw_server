@@ -17,6 +17,7 @@ import type {
 } from "@/types/collections"
 import type {
   CreateIngestionSourceRequest,
+  IngestionSourceDirectoryBrowseResponse,
   IngestionSourceItem,
   IngestionSourceItemFilters,
   IngestionSourceItemsListResponse,
@@ -26,6 +27,7 @@ import type {
   UpdateIngestionSourceRequest
 } from "@/types/ingestion-sources"
 import {
+  normalizeIngestionSourceDirectoryBrowseResponse,
   normalizeIngestionSource,
   normalizeIngestionSourceItem,
   normalizeIngestionSourceItemsListResponse,
@@ -937,6 +939,19 @@ export const collectionsMethods = {
       method: "GET"
     })
     return normalizeIngestionSourceItemsListResponse(response)
+  },
+
+  async browseIngestionSourceDirectories(
+    this: TldwApiClientCore,
+    path?: string | null
+  ): Promise<IngestionSourceDirectoryBrowseResponse> {
+    const normalizedPath = typeof path === "string" ? path.trim() : ""
+    const query = buildQuery(normalizedPath ? { path: normalizedPath } : undefined)
+    const response = await this.request<any>({
+      path: `/api/v1/ingestion-sources/browse-directories${query}`,
+      method: "GET"
+    })
+    return normalizeIngestionSourceDirectoryBrowseResponse(response)
   },
 
   async createIngestionSource(

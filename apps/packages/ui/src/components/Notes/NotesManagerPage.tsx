@@ -35,6 +35,7 @@ import type { NoteListItem } from "@/components/Notes/notes-manager-types"
 import { clearSetting, getSetting } from "@/services/settings/registry"
 import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generate-handoff"
 import { buildStudyPackRoute } from "@/services/tldw/study-pack-handoff"
+import { buildSourcesNewPath } from "@/routes/route-paths"
 import { deriveNoteStudio, getNoteStudioState, regenerateNoteStudio } from "@/services/notes-studio"
 import { useMobile } from "@/hooks/useMediaQuery"
 import {
@@ -2170,6 +2171,7 @@ const NotesManagerPage: React.FC = () => {
         exportAllCSV={exp.exportAllCSV}
         exportAllJSON={exp.exportAllJSON}
         openImportPicker={imp.openImportPicker}
+        onSyncFolder={() => navigate(buildSourcesNewPath({ preset: "notes-folder-sync" }))}
         resetEditor={resetEditorToEmptyState}
         renderKeywordLabelWithFrequency={kw.renderKeywordLabelWithFrequency}
         onOpenSettings={() => navigate('/settings/tldw')}

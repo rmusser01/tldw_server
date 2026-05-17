@@ -48,7 +48,8 @@ import {
   DOCUMENT_WORKSPACE_PATH,
   MODERATION_REVIEW_PATH,
   MODERATION_RULES_PATH,
-  REPO2TXT_PATH
+  REPO2TXT_PATH,
+  SOURCES_PATH
 } from "@/routes/route-paths"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 
@@ -226,6 +227,16 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         labelKey: "option:header.media",
         labelDefault: "Media",
         shortcutIndex: 9
+      },
+      {
+        id: "sources",
+        to: SOURCES_PATH,
+        icon: Layers,
+        labelKey: "option:header.sources",
+        labelDefault: "Sources",
+        descriptionKey: "option:header.sourcesDesc",
+        descriptionDefault:
+          "Manage server folders and archive snapshots that sync into notes or media"
       },
       {
         id: "multi-item-review",

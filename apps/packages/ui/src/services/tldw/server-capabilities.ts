@@ -1,5 +1,6 @@
 import { tldwClient } from "./TldwApiClient"
 import { bgRequest } from "@/services/background-proxy"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import { createSafeStorage } from "@/utils/safe-storage"
 
 export type ServerCapabilities = {
@@ -17,6 +18,7 @@ export type ServerCapabilities = {
   hasPresentationStudio: boolean
   hasPresentationRender: boolean
   hasIngestionSources: boolean
+  canCreateLocalDirectoryIngestionSource: boolean | null
   hasPrompts: boolean
   hasFlashcards: boolean
   hasQuizzes: boolean
@@ -67,6 +69,7 @@ const defaultCapabilities: ServerCapabilities = {
   hasPresentationStudio: false,
   hasPresentationRender: false,
   hasIngestionSources: false,
+  canCreateLocalDirectoryIngestionSource: false,
   hasPrompts: false,
   hasFlashcards: false,
   hasQuizzes: false,
@@ -200,8 +203,12 @@ type DocsInfoResponse = {
   ffmpeg_available?: boolean | null
 }
 
+type IngestionSourceCapabilitiesResponse = {
+  can_create_local_directory?: unknown
+}
+
 const CAPABILITIES_CACHE_TTL_MS = 5 * 60 * 1000
-const CAPABILITIES_STORAGE_KEY = "__tldwServerCapabilitiesCacheV3"
+const CAPABILITIES_STORAGE_KEY = "__tldwServerCapabilitiesCacheV5"
 
 type CapabilitiesCachePayload = {
   key: string
@@ -477,6 +484,22 @@ const applyDocsInfoFeatureGates = (
   }
 }
 
+const applyIngestionSourceCapabilityGates = (
+  capabilities: ServerCapabilities,
+  sourceCapabilities: IngestionSourceCapabilitiesResponse | null | undefined
+): ServerCapabilities => {
+  const canCreateLocalDirectory = parseBooleanish(
+    sourceCapabilities?.can_create_local_directory
+  )
+  if (canCreateLocalDirectory === null) {
+    return capabilities
+  }
+  return {
+    ...capabilities,
+    canCreateLocalDirectoryIngestionSource: canCreateLocalDirectory
+  }
+}
+
 const computeCapabilities = (
   spec: any | null | undefined,
   specSource: "authoritative" | "fallback" = "authoritative"
@@ -516,6 +539,10 @@ const computeCapabilities = (
   const hasMediaIngestJobs = has("/api/v1/media/ingest/jobs")
   const hasMediaIngestJobEvents = has("/api/v1/media/ingest/jobs/events/stream")
   const hasDurableMediaCollections = has("/api/v1/media/collections")
+  const hasIngestionSources =
+    has("/api/v1/ingestion-sources") ||
+    has("/api/v1/ingestion-sources/{source_id}") ||
+    has("/api/v1/ingestion-sources/{source_id}/items")
 
   return {
     hasChat: has("/api/v1/chat/completions"),
@@ -538,10 +565,8 @@ const computeCapabilities = (
     hasSlides,
     hasPresentationStudio,
     hasPresentationRender,
-    hasIngestionSources:
-      has("/api/v1/ingestion-sources") ||
-      has("/api/v1/ingestion-sources/{source_id}") ||
-      has("/api/v1/ingestion-sources/{source_id}/items"),
+    hasIngestionSources,
+    canCreateLocalDirectoryIngestionSource: hasIngestionSources ? null : false,
     hasPrompts: has("/api/v1/prompts") || has("/api/v1/prompts/"),
     hasFlashcards:
       has("/api/v1/flashcards") ||
@@ -684,19 +709,12 @@ const isCapabilitiesCachePayload = (
   )
 }
 
-const normalizeServerUrl = (raw: unknown): string => {
-  if (typeof raw !== "string") return ""
-  return raw.trim().replace(/\/$/, "")
-}
-
 const getCapabilitiesCacheKey = async (): Promise<string> => {
   try {
     const cfg = await tldwClient.getConfig()
-    const base = normalizeServerUrl(cfg?.serverUrl)
-    const authMode = String(cfg?.authMode || "unknown")
-    return `${base || "default"}::${authMode}`
+    return buildChatSurfaceScopeKeyFromConfig(cfg)
   } catch {
-    return "default::unknown"
+    return buildChatSurfaceScopeKeyFromConfig(null)
   }
 }
 
@@ -774,7 +792,28 @@ const fetchCapabilitiesFromServer = async (): Promise<ServerCapabilities> => {
   maybeLogDiagnostics(
     diagnosticsSource === "fallback" ? "fallback-spec" : "network-fetch"
   )
-  return applyDocsInfoFeatureGates(computeCapabilities(spec, specSource), docsInfo)
+  let capabilities = applyDocsInfoFeatureGates(
+    computeCapabilities(spec, specSource),
+    docsInfo
+  )
+
+  if (capabilities.hasIngestionSources) {
+    try {
+      const sourceCapabilities =
+        await bgRequest<IngestionSourceCapabilitiesResponse, any>({
+          path: "/api/v1/ingestion-sources/capabilities" as any,
+          method: "GET" as any
+        })
+      capabilities = applyIngestionSourceCapabilityGates(
+        capabilities,
+        sourceCapabilities
+      )
+    } catch {
+      // Source entitlements are user-scoped. Failure should not hide generic source support.
+    }
+  }
+
+  return capabilities
 }
 
 export const getServerCapabilities = async (

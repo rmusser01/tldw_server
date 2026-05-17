@@ -10,10 +10,13 @@ from pathlib import Path
 import tempfile
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 
 from tldw_Server_API.app.api.v1.schemas.ingestion_sources import (
+    IngestionSourceCapabilitiesResponse,
     IngestionSourceCreateRequest,
+    IngestionSourceDirectoryBrowseResponse,
+    IngestionSourceDirectoryEntryResponse,
     IngestionSourceItemResponse,
     IngestionSourcePatchRequest,
     IngestionSourceResponse,
@@ -33,6 +36,10 @@ from tldw_Server_API.app.core.Ingestion_Sources.git_repository import (
 )
 from tldw_Server_API.app.core.Ingestion_Sources.jobs import enqueue_ingestion_source_job
 from tldw_Server_API.app.core.Ingestion_Sources.local_directory import validate_local_directory_source
+from tldw_Server_API.app.core.Ingestion_Sources.access_policy import (
+    can_create_local_directory_ingestion_source,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
 from tldw_Server_API.app.core.Ingestion_Sources.service import (
     create_source_snapshot,
     create_source,
@@ -46,6 +53,7 @@ from tldw_Server_API.app.core.Ingestion_Sources.service import (
     update_source_snapshot,
     validate_source_sink_pair,
 )
+from tldw_Server_API.app.core.config import get_ingestion_source_allowed_roots
 from tldw_Server_API.app.core.exceptions import IngestionSourceValidationError
 
 router = APIRouter(prefix="/ingestion-sources", tags=["ingestion-sources"])
@@ -130,6 +138,7 @@ def _prepare_create_payload(payload: IngestionSourceCreateRequest) -> dict[str, 
 
 
 def _prepare_source_config(source_type: str, config: dict[str, Any]) -> dict[str, Any]:
+    """Validate and normalize source-type-specific configuration payloads."""
     if source_type == "local_directory":
         normalized = dict(config)
         normalized["path"] = str(validate_local_directory_source(normalized))
@@ -144,6 +153,7 @@ def _prepare_patch_payload(
     existing: dict[str, Any],
     payload: IngestionSourcePatchRequest,
 ) -> dict[str, Any]:
+    """Normalize a patch payload against the existing source row."""
     patch = payload.model_dump(exclude_unset=True)
     effective_source_type = str(
         patch.get("source_type")
@@ -160,6 +170,8 @@ def _prepare_patch_payload(
             source_type=effective_source_type,
             sink_type=effective_sink_type,
         )
+    if patch.get("source_type") is None:
+        patch.pop("source_type", None)
     if any(key in patch for key in ("source_type", "config")):
         effective_config = (
             dict(patch.get("config") or {})
@@ -173,6 +185,205 @@ def _prepare_patch_payload(
     return patch
 
 
+def _requires_local_directory_entitlement(
+    *,
+    source_type: str | None,
+    config_changed: bool = True,
+) -> bool:
+    """Return whether a source mutation needs local-directory entitlement."""
+    return config_changed and str(source_type or "").strip().lower() == "local_directory"
+
+
+def _can_create_local_directory_ingestion_source_for_request(
+    *,
+    current_user: User,
+    request: Request,
+) -> bool:
+    """Evaluate local-directory source entitlement with request-scoped org context."""
+    state = getattr(request, "state", None)
+    return can_create_local_directory_ingestion_source(
+        current_user,
+        active_org_id=getattr(state, "active_org_id", None),
+        org_ids=getattr(state, "org_ids", None),
+    )
+
+
+def _directory_display_name(path: Path) -> str:
+    """Return a human-readable name for a browsable directory path."""
+    return path.name or str(path)
+
+
+def _directory_entry(
+    path: Path,
+    *,
+    is_root: bool = False,
+) -> IngestionSourceDirectoryEntryResponse:
+    """Build a directory-browser response entry for a server path."""
+    return IngestionSourceDirectoryEntryResponse(
+        name=_directory_display_name(path),
+        path=str(path),
+        is_root=is_root,
+    )
+
+
+def _browseable_allowed_roots() -> list[Path]:
+    """Return unique, existing allowed roots that may be exposed to the picker."""
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for root in get_ingestion_source_allowed_roots():
+        resolved = Path(root).expanduser().resolve(strict=False)
+        marker = str(resolved)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        if resolved.exists() and resolved.is_dir():
+            roots.append(resolved)
+    return roots
+
+
+def _resolve_browse_directory(raw_path: str, roots: list[Path]) -> tuple[Path | None, Path | None]:
+    """Resolve a requested browse path to an allowed root-bounded directory."""
+    candidate = Path(str(raw_path or "").strip()).expanduser()
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    for root in roots:
+        safe_path = resolve_safe_local_path(candidate, root)
+        if safe_path is not None:
+            return safe_path, root
+    return None, None
+
+
+def _parent_path_within_root(path: Path, root: Path) -> str | None:
+    """Return the parent path when it remains inside the matched allowed root."""
+    if path == root:
+        return None
+    parent = resolve_safe_local_path(path.parent, root)
+    if parent is None or parent == path:
+        return None
+    return str(parent)
+
+
+def _list_browse_directory_entries(
+    directory: Path,
+) -> tuple[list[IngestionSourceDirectoryEntryResponse], str | None]:
+    """List immediate non-symlink child directories for the server path picker."""
+    try:
+        children = list(directory.iterdir())
+    except OSError:
+        return [], "Unable to read directory"
+
+    entries: list[IngestionSourceDirectoryEntryResponse] = []
+    for child in sorted(children, key=lambda value: value.name.casefold()):
+        try:
+            if child.is_symlink() or not child.is_dir():
+                continue
+        except OSError:
+            continue
+        entries.append(_directory_entry(child))
+    return entries, None
+
+
+def _browse_directory_payload(path: str | None) -> IngestionSourceDirectoryBrowseResponse:
+    """Build the directory-browser payload from blocking filesystem operations."""
+    roots = _browseable_allowed_roots()
+    root_entries = [_directory_entry(root, is_root=True) for root in roots]
+    if not path or not str(path).strip():
+        return IngestionSourceDirectoryBrowseResponse(
+            roots=root_entries,
+            entries=root_entries,
+        )
+
+    current_path, matched_root = _resolve_browse_directory(path, roots)
+    if current_path is None or matched_root is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Directory path is outside configured ingestion source roots",
+        )
+    if not current_path.exists() or not current_path.is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Directory path is not a readable directory",
+        )
+
+    entries, browse_error = _list_browse_directory_entries(current_path)
+    return IngestionSourceDirectoryBrowseResponse(
+        roots=root_entries,
+        current_path=str(current_path),
+        parent_path=_parent_path_within_root(current_path, matched_root),
+        entries=entries,
+        error=browse_error,
+    )
+
+
+def _local_directory_identity_changed(
+    *,
+    existing: dict[str, Any],
+    patch: dict[str, Any],
+) -> bool:
+    """Return whether a normalized patch retargets a local-directory source."""
+    effective_source_type = (
+        patch.get("source_type")
+        if patch.get("source_type") is not None
+        else existing.get("source_type")
+    )
+    if not _requires_local_directory_entitlement(source_type=effective_source_type):
+        return False
+    existing_source_type = str(existing.get("source_type") or "").strip().lower()
+    patch_source_type = str(patch.get("source_type") or "").strip().lower()
+    if "source_type" in patch and patch_source_type != existing_source_type:
+        return True
+    if "sink_type" in patch and patch.get("sink_type") not in (None, existing.get("sink_type")):
+        return True
+    if "config" in patch:
+        return dict(patch.get("config") or {}) != dict(existing.get("config") or {})
+    return False
+
+
+def _raw_local_directory_identity_changed(
+    *,
+    existing: dict[str, Any],
+    patch: dict[str, Any],
+) -> bool:
+    """Return whether a raw patch may retarget a local-directory source."""
+    effective_source_type = (
+        patch.get("source_type")
+        if patch.get("source_type") is not None
+        else existing.get("source_type")
+    )
+    if not _requires_local_directory_entitlement(source_type=effective_source_type):
+        return False
+    if "source_type" in patch and patch.get("source_type") not in (None, existing.get("source_type")):
+        return True
+    if "sink_type" in patch and patch.get("sink_type") not in (None, existing.get("sink_type")):
+        return True
+    if "config" in patch and patch.get("config") is not None:
+        return _raw_local_directory_config_requires_entitlement(
+            existing_config=dict(existing.get("config") or {}),
+            patch_config=dict(patch.get("config") or {}),
+        )
+    return False
+
+
+def _raw_local_directory_config_requires_entitlement(
+    *,
+    existing_config: dict[str, Any],
+    patch_config: dict[str, Any],
+) -> bool:
+    """Return whether raw config changes exceed same-path normalization."""
+    if patch_config == existing_config:
+        return False
+    existing_keys = set(existing_config)
+    patch_keys = set(patch_config)
+    if existing_keys != patch_keys or "path" not in existing_keys:
+        return True
+    for key in existing_keys - {"path"}:
+        if patch_config.get(key) != existing_config.get(key):
+            return True
+    return os.path.normpath(str(patch_config.get("path") or "")) != os.path.normpath(
+        str(existing_config.get("path") or "")
+    )
+
+
 @router.post(
     "/",
     response_model=IngestionSourceResponse,
@@ -180,9 +391,21 @@ def _prepare_patch_payload(
 )
 async def create_ingestion_source(
     payload: IngestionSourceCreateRequest,
+    request: Request,
     current_user: User = Depends(get_request_user),
-):
+) -> IngestionSourceResponse:
     """Create a new ingestion source for the authenticated user."""
+    if (
+        payload.source_type == "local_directory"
+        and not _can_create_local_directory_ingestion_source_for_request(
+            current_user=current_user,
+            request=request,
+        )
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Local directory ingestion sources are not enabled for this user",
+        )
     try:
         prepared_payload = _prepare_create_payload(payload)
     except IngestionSourceValidationError as exc:
@@ -204,6 +427,42 @@ async def list_ingestion_sources(current_user: User = Depends(get_request_user))
     return rows
 
 
+@router.get("/capabilities", response_model=IngestionSourceCapabilitiesResponse)
+async def get_ingestion_source_capabilities(
+    request: Request,
+    current_user: User = Depends(get_request_user),
+) -> IngestionSourceCapabilitiesResponse:
+    """Return ingestion-source capabilities for the authenticated user."""
+    return IngestionSourceCapabilitiesResponse(
+        can_create_local_directory=_can_create_local_directory_ingestion_source_for_request(
+            current_user=current_user,
+            request=request,
+        ),
+    )
+
+
+@router.get(
+    "/browse-directories",
+    response_model=IngestionSourceDirectoryBrowseResponse,
+)
+async def browse_ingestion_source_directories(
+    request: Request,
+    path: str | None = None,
+    current_user: User = Depends(get_request_user),
+) -> IngestionSourceDirectoryBrowseResponse:
+    """List server directories available for local ingestion source creation."""
+    if not _can_create_local_directory_ingestion_source_for_request(
+        current_user=current_user,
+        request=request,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Local directory ingestion sources are not enabled for this user",
+        )
+
+    return await asyncio.to_thread(_browse_directory_payload, path)
+
+
 @router.get("/{source_id}", response_model=IngestionSourceResponse)
 async def get_ingestion_source(source_id: int, current_user: User = Depends(get_request_user)):
     """Fetch a single ingestion source by identifier for the authenticated user."""
@@ -220,8 +479,9 @@ async def get_ingestion_source(source_id: int, current_user: User = Depends(get_
 async def patch_ingestion_source(
     source_id: int,
     payload: IngestionSourcePatchRequest,
+    request: Request,
     current_user: User = Depends(get_request_user),
-):
+) -> IngestionSourceResponse:
     """Update mutable ingestion source settings while enforcing identity immutability."""
     db_pool = await get_db_pool()
     async with db_pool.transaction() as db:
@@ -229,8 +489,31 @@ async def patch_ingestion_source(
         existing = await get_source_by_id(db, source_id=source_id, user_id=int(current_user.id))
         if not existing:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingestion source not found")
+        raw_patch = payload.model_dump(exclude_unset=True)
+        if _raw_local_directory_identity_changed(
+            existing=existing,
+            patch=raw_patch,
+        ) and not _can_create_local_directory_ingestion_source_for_request(
+            current_user=current_user,
+            request=request,
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Local directory ingestion sources are not enabled for this user",
+            )
         try:
             patch = _prepare_patch_payload(existing=existing, payload=payload)
+            if _local_directory_identity_changed(
+                existing=existing,
+                patch=patch,
+            ) and not _can_create_local_directory_ingestion_source_for_request(
+                current_user=current_user,
+                request=request,
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Local directory ingestion sources are not enabled for this user",
+                )
             row = await update_source(
                 db,
                 source_id=source_id,

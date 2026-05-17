@@ -211,6 +211,111 @@ describe("server capabilities docs-info merge", () => {
     expect(capabilities.hasIngestionSources).toBe(true)
   })
 
+  it("merges authenticated local-directory source creation capability", async () => {
+    mocks.getOpenAPISpec.mockResolvedValue({
+      info: { version: "ingestion-sources-local-directory-version" },
+      paths: {
+        "/api/v1/ingestion-sources": {},
+        "/api/v1/ingestion-sources/{source_id}": {},
+        "/api/v1/ingestion-sources/capabilities": {}
+      }
+    })
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path === "/api/v1/ingestion-sources/capabilities") {
+        return { can_create_local_directory: true }
+      }
+      return {}
+    })
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+
+    expect(capabilities.hasIngestionSources).toBe(true)
+    expect(capabilities.canCreateLocalDirectoryIngestionSource).toBe(true)
+    const sourceCapabilityCall = mocks.bgRequest.mock.calls.find(
+      ([request]) =>
+        (request as any)?.path === "/api/v1/ingestion-sources/capabilities"
+    )
+    expect(sourceCapabilityCall?.[0]).toMatchObject({
+      path: "/api/v1/ingestion-sources/capabilities",
+      method: "GET"
+    })
+    expect(sourceCapabilityCall?.[0]).not.toHaveProperty("noAuth")
+  })
+
+  it("keeps generic ingestion sources enabled when authenticated source capabilities fail", async () => {
+    mocks.getOpenAPISpec.mockResolvedValue({
+      info: { version: "ingestion-sources-capabilities-fail" },
+      paths: {
+        "/api/v1/ingestion-sources": {},
+        "/api/v1/ingestion-sources/{source_id}": {},
+        "/api/v1/ingestion-sources/capabilities": {}
+      }
+    })
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path === "/api/v1/ingestion-sources/capabilities") {
+        throw new Error("capability endpoint unavailable")
+      }
+      return {}
+    })
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+
+    expect(capabilities.hasIngestionSources).toBe(true)
+    expect(capabilities.canCreateLocalDirectoryIngestionSource).toBeNull()
+  })
+
+  it("best-effort probes source capabilities for older authoritative source specs", async () => {
+    mocks.getOpenAPISpec.mockResolvedValue({
+      info: { version: "ingestion-sources-without-entitlement-route" },
+      paths: {
+        "/api/v1/ingestion-sources": {},
+        "/api/v1/ingestion-sources/{source_id}": {}
+      }
+    })
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path === "/api/v1/ingestion-sources/capabilities") {
+        throw new Error("capability endpoint unavailable")
+      }
+      return {}
+    })
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+
+    expect(capabilities.hasIngestionSources).toBe(true)
+    expect(capabilities.canCreateLocalDirectoryIngestionSource).toBeNull()
+    expect(
+      mocks.bgRequest.mock.calls.some(
+        ([request]) =>
+          (request as any)?.path === "/api/v1/ingestion-sources/capabilities"
+      )
+    ).toBe(true)
+  })
+
+  it("does not call authenticated source capabilities when ingestion sources are absent", async () => {
+    mocks.getOpenAPISpec.mockResolvedValue({
+      info: { version: "no-ingestion-sources-version" },
+      paths: {
+        "/api/v1/chat/completions": {}
+      }
+    })
+    mocks.bgRequest.mockResolvedValue({})
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+
+    expect(capabilities.hasIngestionSources).toBe(false)
+    expect(capabilities.canCreateLocalDirectoryIngestionSource).toBe(false)
+    expect(
+      mocks.bgRequest.mock.calls.some(
+        ([request]) =>
+          (request as any)?.path === "/api/v1/ingestion-sources/capabilities"
+      )
+    ).toBe(false)
+  })
+
   it("detects web clipper capability from the advertised web clipper routes", async () => {
     mocks.getOpenAPISpec.mockResolvedValue({
       info: { version: "web-clipper-version" },
@@ -255,14 +360,26 @@ describe("server capabilities docs-info merge", () => {
     expect(capabilities.specSource).toBe("fallback")
   })
 
-  it("keeps ingestion source capability available through the bundled fallback spec", async () => {
+  it("checks authenticated source capabilities through the bundled fallback spec", async () => {
     mocks.getOpenAPISpec.mockRejectedValue(new Error("openapi unavailable"))
-    mocks.bgRequest.mockRejectedValue(new Error("docs-info unavailable"))
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path === "/api/v1/ingestion-sources/capabilities") {
+        return { can_create_local_directory: true }
+      }
+      throw new Error("docs-info unavailable")
+    })
 
     const { getServerCapabilities } = await importCapabilitiesModule()
     const capabilities = await getServerCapabilities()
 
     expect(capabilities.hasIngestionSources).toBe(true)
+    expect(capabilities.canCreateLocalDirectoryIngestionSource).toBe(true)
+    expect(
+      mocks.bgRequest.mock.calls.some(
+        ([request]) =>
+          (request as any)?.path === "/api/v1/ingestion-sources/capabilities"
+      )
+    ).toBe(true)
   })
 
   it("derives hasAudio from STT-only support while keeping TTS/voice flags explicit", async () => {
@@ -487,6 +604,60 @@ describe("server capabilities docs-info merge", () => {
     expect(capabilities.specSource).toBe("authoritative")
   })
 
+  it("does not reuse persisted V3 capability payloads after the cache contract changes", async () => {
+    cacheState.values.set("__tldwServerCapabilitiesCacheV3", {
+      key: "http://127.0.0.1:8000::single-user",
+      fetchedAt: Date.now(),
+      capabilities: {
+        hasChat: true
+      }
+    })
+    mocks.getOpenAPISpec.mockResolvedValue({
+      info: { version: "cache-v4-version" },
+      paths: {
+        "/api/v1/chat/completions": {}
+      }
+    })
+    mocks.bgRequest.mockResolvedValue({})
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+
+    expect(mocks.getOpenAPISpec).toHaveBeenCalledTimes(1)
+    expect(capabilities.specVersion).toBe("cache-v4-version")
+    expect(capabilities.specSource).toBe("authoritative")
+  })
+
+  it("does not reuse persisted V4 capability payloads after entitlement unknown-state support", async () => {
+    cacheState.values.set("__tldwServerCapabilitiesCacheV4", {
+      key: "server:17azy7u:auth:single-user:org:none:user:single-user:key:none",
+      fetchedAt: Date.now(),
+      capabilities: {
+        hasIngestionSources: true,
+        canCreateLocalDirectoryIngestionSource: false
+      }
+    })
+    mocks.getOpenAPISpec.mockResolvedValue({
+      info: { version: "cache-v5-entitlement-version" },
+      paths: {
+        "/api/v1/ingestion-sources": {}
+      }
+    })
+    mocks.bgRequest.mockImplementation(async (request: any) => {
+      if (request.path === "/api/v1/ingestion-sources/capabilities") {
+        return { can_create_local_directory: true }
+      }
+      return {}
+    })
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+
+    expect(mocks.getOpenAPISpec).toHaveBeenCalledTimes(1)
+    expect(capabilities.specVersion).toBe("cache-v5-entitlement-version")
+    expect(capabilities.canCreateLocalDirectoryIngestionSource).toBe(true)
+  })
+
   it("detects presentation studio and render capability from docs-info", async () => {
     mocks.getOpenAPISpec.mockResolvedValue({
       info: { version: "presentation-studio-docs-info" },
@@ -583,6 +754,34 @@ describe("server capabilities docs-info merge", () => {
       })
     mocks.getOpenAPISpec.mockResolvedValue({
       info: { version: "multi-server-version" },
+      paths: {
+        "/api/v1/chat/completions": {}
+      }
+    })
+    mocks.bgRequest.mockResolvedValue({})
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    await getServerCapabilities()
+    await getServerCapabilities()
+
+    expect(mocks.getOpenAPISpec).toHaveBeenCalledTimes(2)
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps cache entries isolated by auth scope, not just server URL and auth mode", async () => {
+    mocks.getConfig
+      .mockResolvedValueOnce({
+        serverUrl: "http://127.0.0.1:8000",
+        authMode: "single-user",
+        apiKey: "first-user-key"
+      })
+      .mockResolvedValueOnce({
+        serverUrl: "http://127.0.0.1:8000",
+        authMode: "single-user",
+        apiKey: "second-user-key"
+      })
+    mocks.getOpenAPISpec.mockResolvedValue({
+      info: { version: "auth-scope-cache-version" },
       paths: {
         "/api/v1/chat/completions": {}
       }

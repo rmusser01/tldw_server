@@ -1,7 +1,9 @@
 import React from "react"
 import { describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
-import { KeyboardShortcutsModal } from "../KeyboardShortcutsModal"
+import { MemoryRouter } from "react-router-dom"
+
+import { PageHelpModal } from "../PageHelpModal"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -47,20 +49,19 @@ vi.mock("@/hooks/keyboard/useKeyboardShortcuts", () => ({
   isMac: false
 }))
 
-describe("KeyboardShortcutsModal focus styling", () => {
-  it("applies focus-visible classes to the close button in modal context", async () => {
-    render(<KeyboardShortcutsModal />)
-    window.dispatchEvent(new CustomEvent("tldw:open-shortcuts-modal"))
+vi.mock("@/tutorials", () => ({
+  getTutorialsForRoute: () => []
+}))
 
-    const closeButton = await screen.findByRole("button", { name: "Close" })
-    expect(closeButton.className).toContain("focus-visible:outline")
-    expect(closeButton.className).toContain("focus-visible:outline-2")
-    expect(closeButton.className).toContain("focus-visible:outline-focus")
-  })
+describe("PageHelpModal shortcuts", () => {
+  it("lists the Sources navigation shortcut when opened", async () => {
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <PageHelpModal />
+      </MemoryRouter>
+    )
 
-  it("lists the Sources navigation shortcut", async () => {
-    render(<KeyboardShortcutsModal />)
-    window.dispatchEvent(new CustomEvent("tldw:open-shortcuts-modal"))
+    window.dispatchEvent(new CustomEvent("tldw:open-help-modal"))
 
     expect(await screen.findByText("Go to Sources")).toBeVisible()
     expect(screen.getByText("Alt + 2")).toBeVisible()

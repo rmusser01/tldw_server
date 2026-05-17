@@ -416,6 +416,7 @@ export const HEADER_SHORTCUT_IDS = [
   "deep-research",
   "knowledge-qa",
   "media",
+  "sources",
   "document-workspace",
   "repo2txt",
   "multi-item-review",
@@ -470,6 +471,15 @@ const REQUIRED_HEADER_SHORTCUT_IDS: HeaderShortcutId[] = [
   "admin-integrations"
 ]
 
+const HEADER_SHORTCUT_IDS_WITHOUT_SOURCES = HEADER_SHORTCUT_IDS.filter(
+  (id) => id !== "sources"
+)
+
+const hasExactHeaderShortcutIds = (
+  ids: Set<HeaderShortcutId>,
+  expected: readonly HeaderShortcutId[]
+) => ids.size === expected.length && expected.every((id) => ids.has(id))
+
 const coerceHeaderShortcutSelection = (
   value: unknown,
   fallback: HeaderShortcutId[]
@@ -489,6 +499,9 @@ const coerceHeaderShortcutSelection = (
         unique.add(mapped)
       }
     }
+  }
+  if (hasExactHeaderShortcutIds(unique, HEADER_SHORTCUT_IDS_WITHOUT_SOURCES)) {
+    unique.add("sources")
   }
   for (const requiredId of required) {
     unique.add(requiredId)

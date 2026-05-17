@@ -16,6 +16,7 @@ import {
   useChatShortcuts,
   useSidebarShortcuts,
   useQuickChatShortcuts,
+  useModeNavigationShortcuts,
 } from '@/hooks/keyboard/useKeyboardShortcuts';
 import { useQuickChatStore } from '@/store/quick-chat';
 import { useStoreMessageOption } from '@/store/option';
@@ -287,6 +288,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   useChatShortcuts(clearChat, true);
   useSidebarShortcuts(toggleSidebar, true);
   useQuickChatShortcuts(toggleQuickChat, true);
+  useModeNavigationShortcuts(navigate, !hideHeader);
 
   React.useEffect(() => {
     if (!shortcutLoading) return;

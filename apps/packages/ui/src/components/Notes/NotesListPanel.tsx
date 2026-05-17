@@ -111,7 +111,9 @@ type NotesListPanelProps = {
   onExportAllCsv: () => void
   onExportAllJson: () => void
   onImportNotes?: () => void
+  onSyncFolder?: () => void
   importInProgress?: boolean
+  syncFolderInProgress?: boolean
   exportProgress?: {
     format: 'md' | 'csv' | 'json'
     fetchedNotes: number
@@ -148,7 +150,9 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   onExportAllCsv,
   onExportAllJson,
   onImportNotes,
+  onSyncFolder,
   importInProgress = false,
+  syncFolderInProgress = false,
   exportProgress = null
 }) => {
   const { t } = useTranslation(['option', 'settings'])
@@ -168,6 +172,47 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   const isExporting = exportProgress != null
   const exportDisabled = !isOnline || !hasNotes || isTrashView || isExporting
   const importDisabled = !isOnline || isTrashView || importInProgress
+  const canSyncFolder =
+    isOnline &&
+    !isTrashView &&
+    !capsLoading &&
+    Boolean(capabilities?.hasNotes) &&
+    Boolean(capabilities?.hasIngestionSources) &&
+    capabilities?.canCreateLocalDirectoryIngestionSource !== false
+  const syncFolderDisabled = !canSyncFolder || syncFolderInProgress
+  const syncFolderDisabledReason = (() => {
+    if (syncFolderInProgress) {
+      return t('option:notesSearch.syncFolderOpening', {
+        defaultValue: 'Opening folder sync...'
+      })
+    }
+    if (isTrashView) {
+      return t('option:notesSearch.syncFolderTrashDisabled', {
+        defaultValue: 'Switch to Notes view to sync folders'
+      })
+    }
+    if (!isOnline) {
+      return t('option:notesSearch.syncFolderOfflineDisabled', {
+        defaultValue: 'Connect to sync folders'
+      })
+    }
+    if (capsLoading) {
+      return t('option:notesSearch.syncFolderChecking', {
+        defaultValue: 'Checking folder sync availability'
+      })
+    }
+    if (!capabilities?.hasNotes || !capabilities?.hasIngestionSources) {
+      return t('option:notesSearch.syncFolderSourcesUnsupported', {
+        defaultValue: 'Sources are not available on this server'
+      })
+    }
+    if (capabilities?.canCreateLocalDirectoryIngestionSource === false) {
+      return t('option:notesSearch.syncFolderEntitlementDisabled', {
+        defaultValue: 'Ask an administrator to enable server folder sync for this account'
+      })
+    }
+    return undefined
+  })()
 
   const renderEmptyStateSurface = (
     variant: 'demo' | 'connect' | 'unsupported' | 'empty',
@@ -215,6 +260,21 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
               >
                 {t('option:notesSearch.importMenuTrigger', {
                   defaultValue: 'Import'
+                })}
+              </Button>
+            </Tooltip>
+            <Tooltip title={syncFolderDisabled ? syncFolderDisabledReason : undefined}>
+              <Button
+                size="small"
+                type="text"
+                className="text-xs"
+                disabled={syncFolderDisabled}
+                loading={syncFolderInProgress}
+                title={syncFolderDisabled ? syncFolderDisabledReason : undefined}
+                onClick={() => onSyncFolder?.()}
+              >
+                {t('option:notesSearch.syncFolder', {
+                  defaultValue: 'Sync folder'
                 })}
               </Button>
             </Tooltip>
