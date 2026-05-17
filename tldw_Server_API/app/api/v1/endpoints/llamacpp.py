@@ -12,8 +12,12 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, RequireRole, User
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
+    LlamaCppAcquisitionJobListResponse,
+    LlamaCppAcquisitionJobResponse,
     LlamaCppAsset,
+    LlamaCppAssetDownloadRequest,
     LlamaCppAssetImportPreviewResponse,
     LlamaCppAssetsResponse,
     LlamaCppConfigResponse,
@@ -44,10 +48,12 @@ from tldw_Server_API.app.core.Local_LLM.LlamaCpp_Handler import LlamaCppHandler
 
 #
 # Local Imports
+from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import InferenceError, ModelNotFoundError, ServerError
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Manager import LLMInferenceManager
 from tldw_Server_API.app.core.Local_LLM import (
     http_utils,
+    llamacpp_acquisition_jobs,
     llamacpp_config_service,
     llamacpp_hardware_service,
     llamacpp_inventory_service,
@@ -151,6 +157,13 @@ def _profile_response(profile: LlamaCppProfile) -> LlamaCppProfileResponse:
 
 def _runtime_response(runtime: LlamaCppRuntime) -> LlamaCppRuntimeResponse:
     return LlamaCppRuntimeResponse.model_validate(runtime.model_dump(mode="python"))
+
+
+def _owner_user_id_from_request(request: Request) -> str | None:
+    auth_context = getattr(request.state, "auth", None)
+    principal = getattr(auth_context, "principal", None)
+    user_id = getattr(principal, "user_id", None)
+    return str(user_id) if user_id is not None else None
 
 
 def _get_profile_or_404(supervisor: LlamaCppSupervisor, profile_id: str) -> LlamaCppProfile:
@@ -444,6 +457,90 @@ async def preview_llamacpp_asset_folder_endpoint(
         )
     except ServerError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post(
+    "/llamacpp/assets/downloads",
+    summary="Queue a llama.cpp Asset Download",
+    response_model=LlamaCppAcquisitionJobResponse,
+    dependencies=[
+        Depends(check_rate_limit),
+        Depends(RequireRole("admin")),
+        Depends(_resolve_llm_manager),
+    ],
+)
+async def create_llamacpp_asset_download_endpoint(
+    payload: LlamaCppAssetDownloadRequest,
+    request: Request,
+    job_manager: JobManager = Depends(get_job_manager),
+) -> LlamaCppAcquisitionJobResponse:
+    """Create a sanitized Jobs row for a future llama.cpp asset download worker."""
+    try:
+        return await run_in_threadpool(
+            llamacpp_acquisition_jobs.create_download_job,
+            job_manager,
+            payload,
+            owner_user_id=_owner_user_id_from_request(request),
+        )
+    except (ServerError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.get(
+    "/llamacpp/assets/downloads",
+    summary="List llama.cpp Asset Download Jobs",
+    response_model=LlamaCppAcquisitionJobListResponse,
+    dependencies=[
+        Depends(check_rate_limit),
+        Depends(RequireRole("admin")),
+        Depends(_resolve_llm_manager),
+    ],
+)
+async def list_llamacpp_asset_downloads_endpoint(
+    limit: int = Query(default=100, ge=1, le=500),
+    job_manager: JobManager = Depends(get_job_manager),
+) -> LlamaCppAcquisitionJobListResponse:
+    return await run_in_threadpool(llamacpp_acquisition_jobs.list_download_jobs, job_manager, limit=limit)
+
+
+@router.get(
+    "/llamacpp/assets/downloads/{job_id}",
+    summary="Get a llama.cpp Asset Download Job",
+    response_model=LlamaCppAcquisitionJobResponse,
+    dependencies=[
+        Depends(check_rate_limit),
+        Depends(RequireRole("admin")),
+        Depends(_resolve_llm_manager),
+    ],
+)
+async def get_llamacpp_asset_download_endpoint(
+    job_id: int,
+    job_manager: JobManager = Depends(get_job_manager),
+) -> LlamaCppAcquisitionJobResponse:
+    response = await run_in_threadpool(llamacpp_acquisition_jobs.get_download_job, job_manager, job_id)
+    if response is None:
+        raise HTTPException(status_code=404, detail="Llama.cpp acquisition job was not found.")
+    return response
+
+
+@router.delete(
+    "/llamacpp/assets/downloads/{job_id}",
+    summary="Cancel a llama.cpp Asset Download Job",
+    response_model=LlamaCppAcquisitionJobResponse,
+    dependencies=[
+        Depends(check_rate_limit),
+        Depends(RequireRole("admin")),
+        Depends(_resolve_llm_manager),
+    ],
+)
+async def cancel_llamacpp_asset_download_endpoint(
+    job_id: int,
+    job_manager: JobManager = Depends(get_job_manager),
+) -> LlamaCppAcquisitionJobResponse:
+    response = await run_in_threadpool(llamacpp_acquisition_jobs.cancel_download_job, job_manager, job_id)
+    if response is None:
+        raise HTTPException(status_code=404, detail="Llama.cpp acquisition job was not found.")
+    return response
 
 
 @router.get(
