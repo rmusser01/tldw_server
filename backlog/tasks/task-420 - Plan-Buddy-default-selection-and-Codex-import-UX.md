@@ -94,10 +94,27 @@ Implementation plan:
   not have explicit approval to spawn a reviewer for the new implementation
   plan.
 
+Plan review pass before implementation:
+
+- Moved archive-admission i18n key work into Task 1 so new import error copy
+  cannot land without locale coverage.
+- Tightened builder scope so `VisualPackEditor` renders the guided builder for
+  first-run, draft, review, and active-pack states instead of treating it as
+  only a replacement for the first-run setup card.
+- Grounded Codex/Petdex review diagnostics in the current
+  `PersonaVisualImportPreviewResponse` fields (`schema_version` and
+  `bundle_summary.assets`) instead of assuming a future `source_format` field.
+- Removed loose `as any` guidance from the sample state and movement code and
+  pointed implementers to the existing Persona Visual typed helpers.
+- Added movement-runtime implementation notes for pointer capture and
+  stale-closure risks in `BuddyShellHost`.
+
 Verification:
 
 - `git diff --cached --check` passed for the spec and Backlog task draft.
 - Post-review `git diff --check` passed for the critique refinement.
+- Post-plan-review `git diff --check` passed for the implementation-plan
+  refinement.
 - Bandit is not applicable yet because this slice is docs/tracker only.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

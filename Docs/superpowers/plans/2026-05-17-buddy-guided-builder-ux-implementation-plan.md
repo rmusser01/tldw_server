@@ -24,8 +24,27 @@
 - Render the full builder in `VisualPackEditor` for the Visuals tab. Keep `VisualBuddySetupChoiceCard` as the compact Assistant Setup entry point that opens the Visuals detour.
 - Use `search-lens-basic` as the current default fixture in new/updated tests. Keep `research-buddy-starter` only in explicit legacy compatibility tests.
 - Start blank should continue to route to the existing draft-title/create-draft path for this plan. Do not invent a new blank-pack endpoint.
-- Codex import review should show source format, atlas metadata, state coverage, and draft semantics. Defer a visual atlas row table unless the existing preview data already exposes it cleanly.
+- Codex import review should show source semantics, atlas metadata, state coverage, and draft semantics. Defer a visual atlas row table unless the existing preview data already exposes it cleanly.
 - Include movement runtime follow-through in this plan after the configuration UI lands.
+
+## Plan Review Findings
+
+This critique pass tightened the implementation plan before code starts:
+
+- Task 1 introduces new archive-admission copy, so it must also add the English
+  locale keys in the same commit. Do not wait until the builder shell task.
+- The builder must become the primary Visuals-tab workflow for no-active,
+  draft, review, and active-pack states. It is not only a first-run replacement
+  for `VisualBuddySetupChoiceCard`.
+- Codex/native source labels and atlas details must be derived from the current
+  `PersonaVisualImportPreviewResponse` contract, especially `schema_version`,
+  `bundle_summary.assets`, `asset_group`, `asset_role`, `width`, and `height`.
+  Do not assume a future `source_format` field exists.
+- Example code should use existing typed Persona Visual helpers such as
+  `asPersonaVisualStateId()` and `asPersonaVisualCustomStateId()` instead of
+  `as any`.
+- Movement runtime work should consider pointer capture and stale-closure risk
+  in `BuddyShellHost`, because drag handlers are window-level listeners.
 
 ## File Structure
 
@@ -56,7 +75,7 @@ Create:
 Modify:
 
 - `apps/packages/ui/src/components/PersonaGarden/VisualPackEditor.tsx`
-  - Replace first-run setup card as the main Visuals-tab surface with the guided builder and wire existing handlers into it.
+  - Render the guided builder as the primary Visuals-tab surface for first-run, draft, review, and active-pack states, while wiring existing handlers into it.
 - `apps/packages/ui/src/components/PersonaGarden/VisualBuddySetupChoiceCard.tsx`
   - Keep compact Assistant Setup behavior, but update copy if needed so it opens the builder rather than promising the complete setup UX.
 - `apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx`
@@ -94,6 +113,8 @@ Do not touch:
 - Create: `apps/packages/ui/src/components/PersonaGarden/__tests__/buddyBuilderArchive.test.ts`
 - Modify: `apps/packages/ui/src/components/PersonaGarden/VisualPackEditor.tsx`
 - Modify: `apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx`
+- Modify: `apps/packages/ui/src/assets/locale/en/sidepanel.json`
+- Modify: `apps/packages/ui/src/public/_locales/en/sidepanel.json`
 
 **Status:** Not Started
 
@@ -237,25 +258,47 @@ The upload input should use:
 accept={BUDDY_IMPORT_ARCHIVE_ACCEPT}
 ```
 
-- [ ] **Step 5: Update stale VisualPackEditor starter fixtures**
+- [ ] **Step 5: Add archive admission i18n keys**
+
+Add the new archive error keys used by `getBuddyImportArchiveFileError()` in:
+
+- `apps/packages/ui/src/assets/locale/en/sidepanel.json`
+- `apps/packages/ui/src/public/_locales/en/sidepanel.json`
+
+Required keys:
+
+```json
+{
+  "personaGarden": {
+    "visuals": {
+      "builder": {
+        "importUnsupportedExtension": "Choose a .tldw-persona-vpack or Codex/Petdex .zip archive.",
+        "importUnsupportedMimeType": "Choose a Persona Visual or Codex/Petdex archive with a supported zip media type."
+      }
+    }
+  }
+}
+```
+
+- [ ] **Step 6: Update stale VisualPackEditor starter fixtures**
 
 In `VisualPackEditor.test.tsx`, use `search-lens-basic` for default starter tests and expected copy calls. Keep `research-buddy-starter` only where the test name explicitly says it is testing legacy alias compatibility.
 
-- [ ] **Step 6: Run focused tests**
+- [ ] **Step 7: Run focused tests**
 
 Run:
 
 ```bash
 cd apps/packages/ui
-bunx vitest run src/components/PersonaGarden/__tests__/buddyBuilderArchive.test.ts src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx src/services/__tests__/persona-visuals.test.ts --testTimeout=30000
+bunx vitest run src/components/PersonaGarden/__tests__/buddyBuilderArchive.test.ts src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx src/services/__tests__/persona-visuals.test.ts src/routes/__tests__/sidepanel-persona-locale-keys.test.ts --testTimeout=30000
 ```
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Task 1**
+- [ ] **Step 8: Commit Task 1**
 
 ```bash
-git add apps/packages/ui/src/components/PersonaGarden/buddyBuilderArchive.ts apps/packages/ui/src/components/PersonaGarden/__tests__/buddyBuilderArchive.test.ts apps/packages/ui/src/components/PersonaGarden/VisualPackEditor.tsx apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx
+git add apps/packages/ui/src/components/PersonaGarden/buddyBuilderArchive.ts apps/packages/ui/src/components/PersonaGarden/__tests__/buddyBuilderArchive.test.ts apps/packages/ui/src/components/PersonaGarden/VisualPackEditor.tsx apps/packages/ui/src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx apps/packages/ui/src/assets/locale/en/sidepanel.json apps/packages/ui/src/public/_locales/en/sidepanel.json
 git commit -m "feat: admit Codex buddy archives in visual import"
 ```
 
@@ -288,8 +331,8 @@ import { describe, expect, it } from "vitest"
 
 import {
   BASIC_BUDDY_STARTER_IDS,
-  clearBuddyBuilderDownstreamState,
-  groupBuddyStarterPacksByTier
+  groupBuddyStarterPacksByTier,
+  resetBuddyBuilderForSource
 } from "../buddyBuilderState"
 
 describe("buddyBuilderState", () => {
@@ -304,16 +347,20 @@ describe("buddyBuilderState", () => {
     ])
   })
 
-  it("clears downstream import and draft state when the source changes", () => {
-    const next = clearBuddyBuilderDownstreamState({
-      source: "bundled",
-      selectedStarterId: "search-lens-basic",
-      selectedImportFile: new File(["zip"], "pet.zip"),
-      importPreview: { job_id: "job-1" },
-      selectedDraftPackId: "pack-1",
-      activationReady: true
-    })
+  it("resets downstream import and draft state when the source changes", () => {
+    const next = resetBuddyBuilderForSource(
+      {
+        source: "bundled",
+        selectedStarterId: "search-lens-basic",
+        selectedImportFile: new File(["zip"], "pet.zip"),
+        importPreview: { job_id: "job-1" },
+        selectedDraftPackId: "pack-1",
+        activationReady: true
+      },
+      "codex_import"
+    )
 
+    expect(next.source).toBe("codex_import")
     expect(next.selectedStarterId).toBeNull()
     expect(next.selectedImportFile).toBeNull()
     expect(next.importPreview).toBeNull()
@@ -419,6 +466,8 @@ export const BASIC_BUDDY_STARTER_IDS = [
   "migu-marker-basic"
 ] as const
 
+const BASIC_BUDDY_STARTER_ID_SET = new Set<string>(BASIC_BUDDY_STARTER_IDS)
+
 export type BuddyBuilderState = {
   source: BuddyBuilderSource | null
   selectedStarterId: string | null
@@ -432,10 +481,12 @@ export type BuddyBuilderState = {
   activationReady: boolean
 }
 
-export const clearBuddyBuilderDownstreamState = (
-  state: BuddyBuilderState
+export const resetBuddyBuilderForSource = (
+  state: BuddyBuilderState,
+  source: BuddyBuilderSource
 ): BuddyBuilderState => ({
   ...state,
+  source,
   selectedStarterId: null,
   selectedImportFile: null,
   importPreview: null,
@@ -461,7 +512,7 @@ export const groupBuddyStarterPacksByTier = (
       recommended:
         pack.complexity_tier === "basic" &&
         pack.production_status === "art_ready" &&
-        BASIC_BUDDY_STARTER_IDS.includes(pack.id as any)
+        BASIC_BUDDY_STARTER_ID_SET.has(pack.id)
     })
   }
   return groups
@@ -470,7 +521,7 @@ export const groupBuddyStarterPacksByTier = (
 
 - [ ] **Step 4: Write builder render tests**
 
-Create `BuddyGuidedBuilder.test.tsx` that renders the source step, verifies the six Basic defaults, verifies scaffold copy is visually distinct or primary-disabled, verifies Codex and native import choices are separate, and verifies accessible step navigation labels.
+Create `BuddyGuidedBuilder.test.tsx` that renders the source step, verifies the six Basic defaults, verifies scaffold copy is visually distinct or primary-disabled, verifies Codex and native import choices are separate, and verifies accessible step navigation labels. Also cover an existing active-pack state so the builder does not regress into a first-run-only surface.
 
 - [ ] **Step 5: Run builder tests and verify they fail**
 
@@ -583,7 +634,7 @@ Add tests in `buddyBuilderState.test.ts` for a helper like `summarizeBuddyDraftR
 
 Cases:
 
-- Codex/Petdex preview displays source format and atlas dimensions from backend preview metadata.
+- Codex/Petdex preview displays source semantics and atlas dimensions from current backend preview metadata. Use `schema_version === "codex.pet.v1"` for Codex source semantics and derive atlas dimensions from `bundle_summary.assets[]` entries with `asset_group === "animation_atlas"` or `asset_role === "sprite_sheet"`.
 - Native archive and Codex archive are distinguished by preview payload, not MIME.
 - Missing required states produce activation blockers.
 - `moving_right` and `moving_left` appear under movement states when in `state_catalog`.
@@ -608,6 +659,7 @@ Suggested shape:
 ```ts
 export type BuddyDraftReadinessSummary = {
   sourceLabel: string
+  atlasSummary: Array<{ assetId?: string; width: number | null; height: number | null }>
   requiredStates: Array<{ id: PersonaVisualBuiltinStateId; resolved: boolean }>
   movementStates: Array<{ id: "moving_right" | "moving_left"; resolved: boolean }>
   customStates: Array<{ id: string; label: string; kind: string; fallback?: string }>
@@ -645,7 +697,7 @@ Render:
 - status/source summary,
 - starter production status and tier where available,
 - import preview blockers/warnings/conflicts,
-- Codex/Petdex atlas dimensions if present in backend preview,
+- Codex/Petdex atlas dimensions from `bundle_summary.assets` if present in backend preview,
 - built-in state coverage,
 - custom states,
 - movement states,
@@ -772,13 +824,14 @@ If `BuddyShellHost` needs explicit clearing beyond `clearExpired`, add `clearOve
 import { describe, expect, it } from "vitest"
 
 import { usePersonaVisualRuntimeStore } from "../persona-visual-runtime"
+import { asPersonaVisualStateId } from "@/types/persona-visuals"
 
 describe("persona visual runtime override clearing", () => {
   it("clears the current runtime override without touching diagnostics", () => {
     usePersonaVisualRuntimeStore.getState().setOverride({
       personaId: "persona-1",
       sessionId: null,
-      state: "moving_right" as any,
+      state: asPersonaVisualStateId("moving_right"),
       reason: "buddy_drag",
       expiresAt: Date.now() + 500
     })
@@ -835,14 +888,24 @@ In `BuddyShellHost.tsx`:
 - use reason `buddy_drag`,
 - use short expiry, for example `Date.now() + 300`,
 - clear the override on pointerup.
+- preserve existing window-level pointer listener cleanup and account for stale
+  closures with refs or carefully scoped dependencies.
+- keep or improve pointer capture on the drag handle so release handling stays
+  reliable outside the dock element.
 
 Suggested helper:
 
 ```ts
+import { asPersonaVisualCustomStateId } from "@/types/persona-visuals"
+
 const hasVisualState = (
   manifest: PersonaVisualManifest | null | undefined,
   state: "moving_right" | "moving_left"
-) => Boolean(manifest?.states?.[state] || manifest?.state_catalog?.[state as any])
+) =>
+  Boolean(
+    manifest?.states?.[asPersonaVisualCustomStateId(state)] ||
+      manifest?.state_catalog?.[asPersonaVisualCustomStateId(state)]
+  )
 ```
 
 - [ ] **Step 6: Run runtime tests**
