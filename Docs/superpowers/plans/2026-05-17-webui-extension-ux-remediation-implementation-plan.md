@@ -97,7 +97,7 @@ slice as needed.
 | F6 | Task 6 | Global chrome and chat-context controls. |
 | F10 | Task 8 | Media first-selection and mobile master-detail. |
 | F14 | Task 9 | Ask/Research/Workspace/Transform product ladder. |
-| F19 | Task 11A, Task 11B, and Task 12 | Track deprecated UI cleanup only where it blocks UX remediation. |
+| F19 | Task 11B and Task 12 | Track deprecated UI cleanup only where it blocks UX remediation. |
 
 ### Route Owners By Slice
 
@@ -219,7 +219,7 @@ Expected: each child task links to its before evidence before remediation.
 - Test: `apps/packages/ui/src/components/Common/__tests__/CommandPalette.shortcuts.test.tsx`
 - Test: `apps/tldw-frontend/e2e/smoke/route-contract-stage2.spec.ts`
 
-- [x] **Step 1: Write the child implementation plan**
+- [ ] **Step 1: Write the child implementation plan**
 
 Create `Docs/superpowers/plans/<date>-webui-route-contract-implementation-plan.md`.
 It must enumerate the metadata fields before code work starts:
@@ -446,17 +446,17 @@ Create `Docs/superpowers/plans/<date>-webui-settings-models-implementation-plan.
 The plan must separate routine preferences, provider setup, data management, and
 destructive actions.
 
-- [x] **Step 2: Write failing label and configured-first tests**
+- [ ] **Step 2: Write failing label and configured-first tests**
 
 Test that `providerKeys.navTitle` is never visible and that configured/usable
 providers appear before the full model catalog.
 
-- [x] **Step 3: Implement settings grouping and model readiness summary**
+- [ ] **Step 3: Implement settings grouping and model readiness summary**
 
 Keep full catalog available behind search/filter. Do not remove advanced model
 controls.
 
-- [x] **Step 4: Verify**
+- [ ] **Step 4: Verify**
 
 Run:
 
@@ -472,15 +472,6 @@ bunx playwright test e2e/workflows/settings.spec.ts e2e/workflows/tier-1-critica
 
 Expected: settings routes are task-led, mobile-safe, and free of dotted i18n
 keys.
-
-**Status 2026-05-18:** Completed in child branch
-`codex/webui-settings-models` and tracked by `TASK-418.14`. The slice added
-task-led settings navigation groups, a visible Provider Keys route label,
-separate Data Management settings, configured-first model/provider orientation,
-and prompt route-intent browser guards. Verification recorded on the child task:
-focused Vitest settings/model tests passed, the settings Playwright workflow
-pair passed, and the WP4 responsive landmarks gate passed. The repo-wide
-TypeScript check still fails on existing baseline debt outside this slice.
 
 ## Task 6: Chat, Composer, And Global Chrome
 
