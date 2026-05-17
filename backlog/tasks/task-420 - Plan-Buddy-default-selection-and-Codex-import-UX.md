@@ -62,9 +62,27 @@ The approved design direction is the full guided Buddy builder:
 source selection, draft creation/import/reuse, review diagnostics,
 state/trigger configuration, and explicit activation.
 
+Design review pass before implementation:
+
+- Added responsive guidance so the builder does not assume a wide WebUI rail;
+  sidepanel/narrow layouts need a compact stepper or accordion.
+- Added explicit builder state-machine invariants so persona/source/file
+  changes clear stale preview, copied-draft, review, and activation state.
+- Tightened Codex/native import UX so frontend checks only admit candidate
+  archives and backend preview remains the adapter/source-type authority.
+- Clarified that higher-tier scaffold catalog entries remain visible but must
+  not look like reviewed Basic defaults.
+- Added the missing runtime follow-through risk for `moving_right` and
+  `moving_left`: the builder can configure them, but Buddy drag needs its own
+  short-lived runtime override slice before those states are actually used.
+- Added test expectations for `search-lens-basic` default fixtures, intentional
+  `research-buddy-starter` legacy coverage, i18n/accessibility, and narrow
+  layout behavior.
+
 Verification:
 
 - `git diff --cached --check` passed for the spec and Backlog task draft.
+- Post-review `git diff --check` passed for the critique refinement.
 - Bandit is not applicable yet because this slice is docs/tracker only.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

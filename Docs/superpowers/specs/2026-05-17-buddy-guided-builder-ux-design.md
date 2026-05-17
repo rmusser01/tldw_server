@@ -60,6 +60,32 @@ The current frontend has one important mismatch: import file validation in
 `VisualPackEditor` only accepts `.tldw-persona-vpack`, so Codex/Petdex `.zip`
 archives are rejected before the backend adapter can preview them.
 
+## Design Review Findings
+
+The direction is sound, but implementation planning should account for these
+issues before UI work starts:
+
+1. The builder must work in the sidepanel, not just the wide WebUI. A desktop
+   rail is acceptable, but narrow surfaces need a compact stepper or accordion
+   with a stable action footer.
+2. Codex/Petdex archives and native Persona Visual archives are both ZIP-like.
+   The frontend should only do extension/media-type admission; backend import
+   preview must decide which adapter applies.
+3. Changing persona, source type, selected file, or selected starter must clear
+   downstream preview, commit, review, and activation state so stale results do
+   not apply to the wrong draft.
+4. Higher-tier scaffold packs should stay visible for tracker continuity, but
+   the UI must not present them as equal to reviewed Basic defaults.
+5. `moving_right` and `moving_left` are already importable/custom states, but
+   the current Buddy drag handler only moves the dock. The implementation plan
+   needs a runtime follow-through slice or explicit defer note for temporary
+   drag movement overrides.
+6. Existing frontend tests still contain many `research-buddy-starter`
+   fixtures. The builder work should update stale test defaults to
+   `search-lens-basic` without removing intentional legacy compatibility tests.
+7. New user-facing labels need sidepanel i18n keys and accessible step/button
+   semantics from the start, otherwise review fixes will be predictable.
+
 ## Goals
 
 1. Make the Visuals tab feel like a Buddy builder, not a raw manifest editor.
@@ -103,10 +129,29 @@ state, diagnostics, file uploads, draft selection, and advanced editing. A modal
 would make long review and configuration work cramped, and it would duplicate
 the Visuals tab navigation model.
 
+Responsive behavior matters. Wide WebUI layouts can use a left rail. Sidepanel
+and narrow layouts should collapse to a top stepper or accordion-style flow,
+with the primary action and current blocker kept visible near the bottom of the
+builder.
+
 The current `VisualBuddySetupChoiceCard` should become the first-run entry
 affordance into this builder, not the complete UX. In Assistant Setup, the
 compact card continues to open the visual setup detour and lands the user in
 the builder.
+
+The builder should maintain an explicit local state machine:
+
+- selected persona,
+- selected source,
+- selected starter/library/duplicate source,
+- selected import file,
+- import preview job/result,
+- committed draft pack,
+- active review/configuration step.
+
+Any upstream change clears downstream state. For example, changing the selected
+persona clears selected starter, selected file, import preview, committed draft,
+and activation readiness.
 
 ## Step 1: Source
 
@@ -133,6 +178,11 @@ Do not hide intermediate or intricate rows if the API returns them. They are
 useful tracker visibility. The UI should make their status clear so users do
 not confuse scaffold catalog entries with completed default packs.
 
+The six Basic packs are the recommended selectable defaults. Intermediate and
+Intricate scaffold entries should either disable the primary "use as default"
+action or route through an explicit scaffold-copy affordance that says the pack
+is a production packet, not finished Buddy art.
+
 ## Step 2: Draft
 
 Every source path creates, imports, selects, or reuses a draft.
@@ -154,6 +204,8 @@ Behavior by source:
   depending on implementation slice.
 
 The builder must never make a copied/imported draft active automatically.
+Draft creation, import commit, and duplicate/library reuse should only select
+the resulting draft for review.
 
 ## Step 3: Review
 
@@ -181,6 +233,11 @@ Show:
 Codex/Petdex imports should explicitly show that the `.zip` was adapted into a
 normal Persona Visual draft. The UI should not imply a separate Codex-pet store.
 
+When asset bytes are available, previews should use the existing
+`SpriteFrameRenderer` path against the selected draft. If preview data is not
+available yet, show diagnostics and state coverage instead of a handcrafted
+HTML/image mockup.
+
 ## Step 4: Configure
 
 Configuration should expose common Buddy behavior before raw manifest details.
@@ -203,6 +260,10 @@ Configuration groups:
    - `moving_left`
    - These are Buddy drag/screen movement states, not generic task-running
      states.
+   - The configuration UI can expose and validate these states independently
+     from runtime support, but implementation planning should include a runtime
+     test proving drag movement can request the corresponding temporary visual
+     state when that behavior is wired.
 
 3. Custom states
    - Display `state_catalog` entries with label, kind, description, tags, and
@@ -248,6 +309,9 @@ The import UI should present two supported archive formats:
 
 Frontend file validation should accept both before calling import preview.
 Backend preview remains the source of truth for actual archive validation.
+Do not infer the import adapter from MIME type alone. `.tldw-persona-vpack` may
+arrive with a generic ZIP media type, and Codex/Petdex `.zip` may arrive as
+`application/octet-stream`.
 
 Accepted media types should include normal ZIP types for both formats:
 
@@ -302,24 +366,37 @@ Goal: make the existing import path accept Codex/Petdex `.zip`, update copy so
 the current UI no longer blocks backend-supported imports, and refresh stale
 test fixtures away from `research-buddy-starter`.
 
+This slice is preparatory. If it ships as a standalone PR, it should not be
+described as the full guided builder. Its success condition is that existing
+paths stop contradicting the backend-supported import and starter catalog.
+
 Tests:
 
 - `persona-visuals` service tests for starter catalog normalization using
   `search-lens-basic`.
-- `VisualPackEditor` import-file validation accepts `.zip`.
+- `VisualPackEditor` import-file validation accepts `.zip` with
+  `application/zip`, `application/x-zip-compressed`, and
+  `application/octet-stream`.
+- `VisualPackEditor` import-file validation still accepts
+  `.tldw-persona-vpack` with normal ZIP media types.
 - `VisualPackEditor` still rejects unsupported extensions.
+- stale test fixtures use `search-lens-basic`, while explicit legacy alias
+  coverage still names `research-buddy-starter`.
 - existing import preview tests remain green.
 
 ### Slice 2: Guided Source/Draft Shell
 
 Goal: introduce the builder shell and source picker while wiring actions to
-existing handlers.
+existing handlers. This is the first visible builder slice.
 
 Tests:
 
 - no-active-pack state renders builder source step.
 - basic tier shows six art-ready default IDs.
 - choosing a bundled default copies it as a draft and selects it.
+- changing persona/source clears stale selected file, import preview, copied
+  draft, and activation readiness.
+- narrow layout renders a compact stepper/accordion instead of a cramped rail.
 - Assistant Setup compact card opens the visual detour and renders the builder.
 
 ### Slice 3: Review And Import Diagnostics
@@ -332,6 +409,8 @@ Tests:
   semantics.
 - import blockers disable commit/activation path.
 - native archive and Codex archive copy are distinct.
+- preview source type comes from backend preview data, not from ZIP MIME type.
+- selected draft preview uses existing sprite-frame rendering when renderable.
 - activation remains unavailable when required states do not resolve.
 
 ### Slice 4: Configure States And Triggers
@@ -345,6 +424,22 @@ Tests:
 - `moving_right` and `moving_left` render as movement states.
 - exact `tool_name` trigger editing preserves structured match fields.
 - manifest save still uses the existing update endpoint.
+- user-facing labels use sidepanel i18n keys and controls have accessible names.
+
+### Slice 4B: Movement Runtime Follow-Through
+
+Goal: connect configured `moving_right` and `moving_left` states to Buddy drag
+movement when those states exist for the active pack.
+
+Tests:
+
+- dragging right sets a short-lived runtime override to `moving_right` when the
+  active pack declares it.
+- dragging left sets a short-lived runtime override to `moving_left` when the
+  active pack declares it.
+- releasing the drag clears the movement override back to normal state
+  resolution.
+- packs without movement states keep the current drag behavior.
 
 ### Slice 5: Browser QA
 
@@ -366,9 +461,14 @@ Checks:
 | The builder duplicates backend concepts into a parallel system. | Keep all mutations on existing Persona Visual services and endpoints. |
 | Users confuse scaffold higher-tier entries with ready defaults. | Tier the catalog and label production status prominently. |
 | Codex import appears unsupported because frontend rejects `.zip`. | Accept `.zip` at the file gate and let backend preview validate. |
+| Codex/native import routing is guessed incorrectly from file MIME type. | Treat frontend checks as admission only; render backend preview source type. |
+| A stale import preview or copied draft applies after persona/source changes. | Model builder state explicitly and clear downstream state on upstream changes. |
 | Visuals become required in Assistant Setup. | Keep the wizard card optional and detour-based. |
 | `VisualPackEditor` becomes harder to maintain. | Extract builder panels instead of adding another large inline block. |
 | Movement states are mistaken for `tool_running`. | Label `moving_right`/`moving_left` as drag/screen movement states. |
+| Movement states are configurable but never used at runtime. | Add the movement runtime follow-through slice or document it as deferred. |
+| Sidepanel layout becomes cramped. | Use a compact stepper/accordion on narrow surfaces and browser-QA it. |
+| New copy bypasses localization/accessibility conventions. | Add sidepanel i18n keys and accessible labels in the first UI slice. |
 | Activation happens too early. | Preserve draft-first semantics and final explicit activation. |
 
 ## Open Questions For Implementation Planning
@@ -380,3 +480,5 @@ Checks:
    existing draft title input in the first implementation.
 4. Whether Codex import review should show a generated atlas row table in Slice
    3 or defer that to a later visual QA pass.
+5. Whether movement runtime follow-through should be included with Configure or
+   handled as the next PR after builder configuration lands.
