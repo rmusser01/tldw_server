@@ -99,6 +99,7 @@ describe("PlaylistPreflightPanel", () => {
 
     const warning = screen.getByText("Unable to preview playlist metadata")
     expect(warning.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+    expect(warning).toHaveClass("font-medium")
 
     const duplicateSummary = screen.getByText("1 duplicates")
     expect(

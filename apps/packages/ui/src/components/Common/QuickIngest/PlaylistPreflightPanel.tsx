@@ -62,9 +62,7 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
       </div>
 
       {error && (
-        <Alert className="mt-2" variant="warning">
-          {error}
-        </Alert>
+        <Alert className="mt-2" variant="warning" title={error} />
       )}
 
       {result && (

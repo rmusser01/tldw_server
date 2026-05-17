@@ -25,8 +25,15 @@ export const LocaleJsonDiagnosticsPanel: React.FC<
   <div className="mb-4">
     <Alert variant="error" title="Locale JSON errors detected">
       <div className="space-y-1 text-xs">
-        {issues.map((issue) => (
-          <div key={issue.path} className="break-all">
+        {issues.map((issue, index) => (
+          <div
+            key={[
+              issue.path,
+              issue.line ?? "unknown",
+              issue.column ?? "unknown",
+              index,
+            ].join(":")}
+            className="break-all">
             <span className="font-mono">{issue.path}</span>
             {issue.line != null && issue.column != null
               ? ` (line ${issue.line}, col ${issue.column})`

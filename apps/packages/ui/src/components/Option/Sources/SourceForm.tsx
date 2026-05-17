@@ -162,8 +162,14 @@ export const SourceForm: React.FC<SourceFormProps> = ({ mode, source, preset }) 
     effectiveSourceType === "local_directory" &&
     (capabilitiesLoading || localDirectoryCreateKnownFalse)
   const localDirectoryCapabilityMessage = capabilitiesLoading
-    ? "Checking whether this server allows folder sync."
-    : "The administrator must enable server folder sync before you can create a local directory source."
+    ? t(
+        "sources:form.checkingFolderSync",
+        "Checking whether this server allows folder sync."
+      )
+    : t(
+        "sources:form.folderSyncDisabledDescription",
+        "The administrator must enable server folder sync before you can create a local directory source."
+      )
   const directoryBrowseQuery = useIngestionSourceDirectoryBrowseQuery(
     browsePath,
     undefined,
@@ -373,7 +379,7 @@ export const SourceForm: React.FC<SourceFormProps> = ({ mode, source, preset }) 
               variant="warning"
               title={browseErrorMessage}
               action={{
-                label: "Show roots",
+                label: t("sources:actions.showRoots", "Show roots"),
                 onClick: () => setBrowsePath(null)
               }}
             />
@@ -449,7 +455,12 @@ export const SourceForm: React.FC<SourceFormProps> = ({ mode, source, preset }) 
           void handleFinish(values)
         }}>
         {identityLocked && source ? (
-          <DesignSystemAlert variant="info" title="Locked after first successful sync">
+          <DesignSystemAlert
+            variant="info"
+            title={t(
+              "sources:form.lockedAfterSync",
+              "Locked after first successful sync"
+            )}>
             <div className="space-y-2">
               <div>
                 <Typography.Text strong>
@@ -458,7 +469,9 @@ export const SourceForm: React.FC<SourceFormProps> = ({ mode, source, preset }) 
                 <div>{getSourceTypeLabel(source.source_type)}</div>
               </div>
               <div>
-                <Typography.Text strong>Current destination</Typography.Text>
+                <Typography.Text strong>
+                  {t("sources:form.currentDestination", "Current destination")}
+                </Typography.Text>
                 <div>{getSinkTypeLabel(source.sink_type)}</div>
               </div>
               {typeof source.config?.path === "string" && source.config.path.trim().length > 0 ? (
@@ -533,7 +546,10 @@ export const SourceForm: React.FC<SourceFormProps> = ({ mode, source, preset }) 
             {mode === "create" && !capabilitiesLoading && localDirectoryCreateKnownFalse ? (
               <DesignSystemAlert
                 variant="warning"
-                title="Server folder sync is disabled"
+                title={t(
+                  "sources:form.serverFolderSyncDisabled",
+                  "Server folder sync is disabled"
+                )}
               >
                 {localDirectoryCapabilityMessage}
               </DesignSystemAlert>
