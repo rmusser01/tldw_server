@@ -32,6 +32,7 @@ import { useMobile } from "@/hooks/useMediaQuery"
 import { useConnectionStore } from "@/store/connection"
 import { ConnectionPhase } from "@/types/connection"
 import { DEFAULT_RAG_SETTINGS } from "@/services/rag/unified-rag"
+import { fetchChatModels } from "@/services/tldw-server"
 import { formatCost } from "@/utils/model-pricing"
 import { trackWorkspacePlaygroundTelemetry } from "@/utils/workspace-playground-telemetry"
 import type { WorkspaceSource, WorkspaceSourceType } from "@/types/workspace"
@@ -160,6 +161,31 @@ const normalizeText = (value: unknown): string =>
 const extractStringCandidate = (value: unknown): string => {
   if (typeof value !== "string") return ""
   return value.trim()
+}
+
+const normalizeChatModelOption = (model: unknown): ChatModelOption | null => {
+  if (!isRecord(model)) return null
+
+  const details = isRecord(model.details) ? model.details : null
+  const modelId =
+    extractStringCandidate(model.model) ||
+    extractStringCandidate(model.id) ||
+    extractStringCandidate(model.name)
+  if (!modelId) return null
+
+  const provider =
+    extractStringCandidate(model.provider) ||
+    extractStringCandidate(details?.provider)
+  const name = extractStringCandidate(model.name)
+  const nickname = extractStringCandidate(model.nickname)
+  const labelBase =
+    nickname || (name && name !== modelId ? name : "") || modelId
+
+  return {
+    id: modelId,
+    label: provider ? `${provider} · ${labelBase}` : labelBase,
+    provider
+  }
 }
 
 const extractSourceFullText = (detail: unknown): string => {
@@ -1506,12 +1532,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   React.useEffect(() => {
     if (modelsFetchedRef.current) return
     modelsFetchedRef.current = true
-    if (typeof tldwClient.getModels !== "function") return
 
     let isMounted = true
     setLoadingModels(true)
-    void tldwClient
-      .getModels()
+    void fetchChatModels({ returnEmpty: true })
       .then((models) => {
         if (!isMounted) return
         if (!Array.isArray(models) || models.length === 0) {
@@ -1520,24 +1544,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         }
         const uniqueById = new Map<string, ChatModelOption>()
         for (const model of models) {
-          if (!model || typeof model !== "object") continue
-          const modelId = extractStringCandidate((model as { id?: unknown }).id)
-          if (!modelId) continue
-          const provider = extractStringCandidate(
-            (model as { provider?: unknown }).provider
-          )
-          const modelName = extractStringCandidate(
-            (model as { name?: unknown }).name
-          )
-          const label =
-            modelName && modelName !== modelId
-              ? `${modelName} (${modelId})`
-              : modelName || modelId
-          uniqueById.set(modelId, {
-            id: modelId,
-            label: provider ? `${provider} · ${label}` : label,
-            provider
-          })
+          const option = normalizeChatModelOption(model)
+          if (!option) continue
+          uniqueById.set(option.id, option)
         }
         setAvailableModels(
           Array.from(uniqueById.values()).sort((a, b) =>
@@ -2472,6 +2481,23 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     if (chatApiProvider) return chatApiProvider
     return null
   }, [selectedModel, chatApiProvider])
+  const modelSelectOptions = React.useMemo(() => {
+    if (
+      selectedModel &&
+      !availableModels.some((model) => model.id === selectedModel)
+    ) {
+      return [
+        {
+          id: selectedModel,
+          label: selectedModel,
+          provider: ""
+        },
+        ...availableModels
+      ]
+    }
+
+    return availableModels
+  }, [availableModels, selectedModel])
 
   // Conversation instance ID (use workspace ID or fallback)
   const conversationInstanceId = workspaceSessionId
@@ -2893,8 +2919,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               </label>
             )}
             <div className="ml-auto flex flex-wrap items-center gap-1">
-              {provenanceEnabled && (loadingModels || availableModels.length > 0) && (
-                <label
+              {provenanceEnabled && (
+                <div
                   className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-surface/80 px-2 py-1 text-[11px] text-text-muted"
                   title={
                     modelDisplayLabel
@@ -2909,6 +2935,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   <Cpu className="h-3 w-3" />
                   <span>{t("playground:chat.modelPickerLabel", "Model")}</span>
                   <select
+                    aria-busy={loadingModels}
                     aria-label={t(
                       "playground:chat.modelPickerAria",
                       "Select model"
@@ -2920,18 +2947,17 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                       setSelectedModel(value.length > 0 ? value : null)
                     }}
                     className="max-w-[180px] truncate bg-transparent text-[11px] text-text focus:outline-none"
-                    disabled={loadingModels}
                   >
                     <option value="">
                       {t("playground:chat.modelPickerAuto", "Auto")}
                     </option>
-                    {availableModels.map((model) => (
+                    {modelSelectOptions.map((model) => (
                       <option key={model.id} value={model.id}>
                         {model.label}
                       </option>
                     ))}
                   </select>
-                </label>
+                </div>
               )}
               {/* Share conversation button (UX-044) */}
               {serverChatId && hasMessages && (

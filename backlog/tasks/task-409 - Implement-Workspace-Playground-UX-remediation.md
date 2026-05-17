@@ -30,6 +30,8 @@ modified_files:
 - apps/packages/ui/src/components/Option/WorkspacePlayground/__tests__/SourcesPane.stage2.test.tsx
 - apps/packages/ui/src/components/Option/WorkspacePlayground/__tests__/AddSourceModal.stage2.intake.test.tsx
 - apps/packages/ui/src/components/Option/WorkspacePlayground/__tests__/media-library-normalization.test.ts
+- apps/packages/ui/src/components/Option/WorkspacePlayground/ChatPane/index.tsx
+- apps/packages/ui/src/components/Option/WorkspacePlayground/__tests__/ChatPane.stage2.test.tsx
 - backlog/tasks/task-409 - Implement-Workspace-Playground-UX-remediation.md
 ---
 

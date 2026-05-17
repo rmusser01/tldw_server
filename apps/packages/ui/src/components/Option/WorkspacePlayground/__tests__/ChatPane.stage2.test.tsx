@@ -8,6 +8,7 @@ import { WORKSPACE_SOURCE_DRAG_TYPE } from "../drag-source"
 
 const hoistedMocks = vi.hoisted(() => ({
   setSelectedModel: vi.fn(),
+  fetchChatModels: vi.fn(),
   getModels: vi.fn()
 }))
 
@@ -262,6 +263,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+vi.mock("@/services/tldw-server", () => ({
+  fetchChatModels: hoistedMocks.fetchChatModels
+}))
+
 vi.mock("antd", async () => {
   const actual = await vi.importActual<typeof import("antd")>("antd")
   return {
@@ -318,6 +323,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
     })
     mockGetWorkspaceChatSession.mockReturnValue(null)
     hoistedMocks.setSelectedModel.mockReset()
+    hoistedMocks.fetchChatModels.mockResolvedValue([])
     hoistedMocks.getModels.mockResolvedValue([])
 
     messageOptionState.messages = []
@@ -461,28 +467,67 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
   })
 
   it("renders model picker options and updates selected model", async () => {
-    hoistedMocks.getModels.mockResolvedValue([
+    hoistedMocks.getModels.mockRejectedValue(new Error("legacy models unused"))
+    hoistedMocks.fetchChatModels.mockResolvedValue([
       {
-        id: "gpt-4o",
-        name: "GPT-4o",
+        model: "tldw:openai/gpt-4o",
+        name: "tldw:openai/gpt-4o",
+        nickname: "GPT-4o",
         provider: "openai"
       },
       {
-        id: "claude-3-5-sonnet",
-        name: "Claude 3.5 Sonnet",
+        model: "tldw:anthropic/claude-3-5-sonnet",
+        name: "tldw:anthropic/claude-3-5-sonnet",
+        nickname: "Claude 3.5 Sonnet",
         provider: "anthropic"
       }
     ])
 
     renderChatPane()
 
+    await waitFor(() => {
+      expect(hoistedMocks.fetchChatModels).toHaveBeenCalledWith({
+        returnEmpty: true
+      })
+    })
+    expect(hoistedMocks.getModels).not.toHaveBeenCalled()
+
     const modelSelect = await screen.findByRole("combobox", {
       name: "Select model"
     })
-    fireEvent.change(modelSelect, { target: { value: "gpt-4o" } })
+    expect(modelSelect.closest("label")).toBeNull()
+    fireEvent.change(modelSelect, {
+      target: { value: "tldw:openai/gpt-4o" }
+    })
 
-    expect(hoistedMocks.setSelectedModel).toHaveBeenCalledWith("gpt-4o")
-    expect(screen.getByRole("option", { name: /openai/i })).toBeInTheDocument()
+    expect(hoistedMocks.setSelectedModel).toHaveBeenCalledWith(
+      "tldw:openai/gpt-4o"
+    )
+    expect(
+      screen.getByRole("option", { name: /openai.*GPT-4o/i })
+    ).toBeInTheDocument()
+  })
+
+  it("keeps the model picker selectable with Auto when no models load", async () => {
+    hoistedMocks.getModels.mockRejectedValue(new Error("legacy models unused"))
+    hoistedMocks.fetchChatModels.mockResolvedValue([])
+
+    renderChatPane()
+
+    await waitFor(() => {
+      expect(hoistedMocks.fetchChatModels).toHaveBeenCalledWith({
+        returnEmpty: true
+      })
+    })
+
+    const modelSelect = screen.getByRole("combobox", {
+      name: "Select model"
+    }) as HTMLSelectElement
+    expect(modelSelect).not.toBeDisabled()
+    expect(screen.getByRole("option", { name: "Auto" })).toBeInTheDocument()
+    fireEvent.change(modelSelect, { target: { value: "" } })
+
+    expect(hoistedMocks.setSelectedModel).toHaveBeenCalledWith(null)
   })
 
   it("handles partial retrieval metadata by inferring diagnostics from sources", () => {
