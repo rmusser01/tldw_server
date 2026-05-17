@@ -2,7 +2,14 @@ import React from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ContentViewer } from '../ContentViewer'
+import {
+  ContentViewer,
+  LARGE_PLAIN_CONTENT_CHUNK_CHARS,
+  LARGE_PLAIN_CONTENT_THRESHOLD_CHARS
+} from '../ContentViewer'
+import { MediaReadAlongPopover } from '../read-along/MediaReadAlongPopover'
+import { MediaReadAlongTransport } from '../read-along/MediaReadAlongTransport'
+import * as readAlongSegmentsModule from '../read-along/media-read-along-segments'
 import { useMediaReadingProgress } from '@/hooks/useMediaReadingProgress'
 
 const mocks = vi.hoisted(() => ({
@@ -213,6 +220,51 @@ const renderViewer = (
     />
   )
 
+const makeRect = ({
+  left,
+  top,
+  width,
+  height
+}: {
+  left: number
+  top: number
+  width: number
+  height: number
+}): DOMRect =>
+  ({
+    x: left,
+    y: top,
+    left,
+    top,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
+    toJSON: () => ({})
+  }) as DOMRect
+
+const t = (
+  _key: string,
+  fallbackOrOptions?: string | { defaultValue?: string }
+): string => {
+  if (typeof fallbackOrOptions === 'string') return fallbackOrOptions
+  return fallbackOrOptions?.defaultValue || _key
+}
+
+const buildLargeReadAlongContent = () => {
+  const first = `${'A'.repeat(1_000)}.`
+  const fillers = Array.from(
+    { length: 11 },
+    (_value, index) => `${String.fromCharCode(66 + index).repeat(3_000)}.`
+  )
+  const target = 'Target active sentence.'
+  const tail = `${'C'.repeat(LARGE_PLAIN_CONTENT_THRESHOLD_CHARS)}.`
+  return {
+    content: `${first} ${fillers.join(' ')} ${target} ${tail}`,
+    target
+  }
+}
+
 const selectText = (node: HTMLElement, selectedText: string) => {
   const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT)
   let textNode: Node | null = node.firstChild
@@ -329,6 +381,167 @@ describe('ContentViewer read-along integration', () => {
     )
     expect(screen.getByTestId('media-selection-action-annotate')).toHaveTextContent(
       'Annotate'
+    )
+  })
+
+  it('hides mapped-scope read-along actions for markdown and html text-only selections', async () => {
+    const { unmount } = renderViewer({
+      content: 'Markdown fallback sentence.',
+      contentDisplayMode: 'markdown'
+    })
+
+    selectTextInside('Markdown fallback sentence.')
+
+    await waitFor(() => {
+      expect(screen.getByTestId('media-selection-actions-popover')).toBeInTheDocument()
+    })
+    expect(screen.getByTestId('media-selection-action-read-selection')).toBeInTheDocument()
+    expect(screen.getByTestId('media-selection-action-read-full-item')).toBeInTheDocument()
+    expect(screen.getByTestId('media-selection-action-annotate')).toBeInTheDocument()
+    expect(
+      screen.queryByTestId('media-selection-action-read-from-here')
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId('media-selection-action-read-current-section')
+    ).not.toBeInTheDocument()
+
+    unmount()
+    window.getSelection()?.removeAllRanges()
+
+    renderViewer({
+      content: '<p>HTML fallback sentence.</p>',
+      contentDisplayMode: 'html',
+      allowRichRendering: true
+    })
+
+    selectText(screen.getByText('HTML fallback sentence.'), 'HTML fallback sentence.')
+
+    await waitFor(() => {
+      expect(screen.getByTestId('media-selection-actions-popover')).toBeInTheDocument()
+    })
+    expect(screen.getByTestId('media-selection-action-read-selection')).toBeInTheDocument()
+    expect(screen.getByTestId('media-selection-action-read-full-item')).toBeInTheDocument()
+    expect(screen.getByTestId('media-selection-action-annotate')).toBeInTheDocument()
+    expect(
+      screen.queryByTestId('media-selection-action-read-from-here')
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId('media-selection-action-read-current-section')
+    ).not.toBeInTheDocument()
+  })
+
+  it('segments only the visible plain-content window during lazy rendering', async () => {
+    const buildSegments = vi.spyOn(readAlongSegmentsModule, 'buildReadAlongSegments')
+    const { content } = buildLargeReadAlongContent()
+
+    renderViewer({ content, contentDisplayMode: 'plain' })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('large-content-window-status')).toHaveAttribute(
+        'data-visible-chars',
+        String(LARGE_PLAIN_CONTENT_CHUNK_CHARS)
+      )
+    })
+
+    const maxSegmentedDisplayLength = Math.max(
+      ...buildSegments.mock.calls.map(([input]) =>
+        input.displayContent == null
+          ? input.content.length
+          : input.displayContent.length
+      )
+    )
+    expect(maxSegmentedDisplayLength).toBeLessThanOrEqual(
+      LARGE_PLAIN_CONTENT_CHUNK_CHARS
+    )
+  })
+
+  it('expands a large plain-content window only far enough to show the active read-along segment', async () => {
+    const { content, target } = buildLargeReadAlongContent()
+
+    renderViewer({ content, contentDisplayMode: 'plain' })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('large-content-window-status')).toHaveAttribute(
+        'data-visible-chars',
+        String(LARGE_PLAIN_CONTENT_CHUNK_CHARS)
+      )
+    })
+
+    selectTextInside(`${'A'.repeat(1_000)}.`)
+    fireEvent.click(await screen.findByTestId('media-selection-action-read-full-item'))
+
+    for (let endedCount = 0; endedCount < 12; endedCount += 1) {
+      await waitFor(() => {
+        expect(audioInstances.length).toBeGreaterThanOrEqual(endedCount + 1)
+      })
+      audioInstances[audioInstances.length - 1].dispatchEvent(new Event('ended'))
+    }
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-read-along-active="true"]')).toHaveTextContent(
+        target
+      )
+    })
+
+    const status = screen.getByTestId('large-content-window-status')
+    const visibleChars = Number(status.getAttribute('data-visible-chars'))
+    expect(visibleChars).toBeGreaterThan(LARGE_PLAIN_CONTENT_CHUNK_CHARS)
+    expect(visibleChars).toBeLessThan(content.length)
+  })
+
+  it('clamps selection popover and transport to the provided viewport and exposes polite live status', () => {
+    const viewportRect = makeRect({ left: 100, top: 20, width: 320, height: 300 })
+    render(
+      <>
+        <MediaReadAlongPopover
+          anchorRect={makeRect({ left: 760, top: 32, width: 40, height: 18 })}
+          viewportRect={viewportRect}
+          onReadScope={vi.fn()}
+          onAnnotate={vi.fn()}
+          t={t}
+        />
+        <MediaReadAlongTransport
+          state={{
+            status: 'segment-error',
+            scope: 'full-item',
+            activeSegmentId: 'segment-5',
+            activeIndex: 4,
+            totalSegments: 10,
+            error: 'Generated audio playback failed',
+            cacheDisabled: false
+          }}
+          anchorRect={makeRect({ left: 900, top: 300, width: 40, height: 20 })}
+          viewportRect={makeRect({ left: 200, top: 100, width: 320, height: 240 })}
+          onToggle={vi.fn()}
+          onStop={vi.fn()}
+          onRetry={vi.fn()}
+          onSkip={vi.fn()}
+          t={t}
+        />
+      </>
+    )
+
+    expect(
+      Number(screen.getByTestId('media-selection-actions-popover').style.left.replace('px', ''))
+    ).toBeLessThanOrEqual(108)
+    const transport = screen.getByTestId('media-read-along-transport')
+    expect(Number(transport.style.left.replace('px', ''))).toBeLessThanOrEqual(252)
+    expect(Number(transport.style.top.replace('px', ''))).toBeLessThanOrEqual(288)
+    expect(screen.getByTestId('media-read-along-progress')).toHaveAttribute(
+      'role',
+      'status'
+    )
+    expect(screen.getByTestId('media-read-along-progress')).toHaveAttribute(
+      'aria-live',
+      'polite'
+    )
+    expect(screen.getByTestId('media-read-along-error')).toHaveAttribute(
+      'role',
+      'status'
+    )
+    expect(screen.getByTestId('media-read-along-error')).toHaveAttribute(
+      'aria-live',
+      'polite'
     )
   })
 

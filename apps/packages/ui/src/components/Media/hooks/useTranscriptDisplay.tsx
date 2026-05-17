@@ -170,6 +170,17 @@ const renderReadAlongWrappedText = (
   return <>{parts}</>
 }
 
+const getReadAlongSegmentEndOffset = (
+  segmentId: string | null | undefined
+): number | null => {
+  if (!segmentId) return null
+  const idParts = segmentId.split(':')
+  const endValue = idParts[idParts.length - 1]
+  if (!endValue) return null
+  const endOffset = Number(endValue)
+  return Number.isFinite(endOffset) && endOffset >= 0 ? endOffset : null
+}
+
 export function useTranscriptDisplay(deps: UseTranscriptDisplayDeps) {
   const {
     displayContent,
@@ -186,7 +197,7 @@ export function useTranscriptDisplay(deps: UseTranscriptDisplayDeps) {
   } = deps
 
   const [visiblePlainContentChars, setVisiblePlainContentChars] = useState(
-    () => content.length
+    () => Math.min(displayContent.length, LARGE_PLAIN_CONTENT_CHUNK_CHARS)
   )
   const [findBarOpen, setFindBarOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
@@ -196,24 +207,6 @@ export function useTranscriptDisplay(deps: UseTranscriptDisplayDeps) {
   const findMatchElementRefs = useRef<Array<HTMLElement | null>>([])
 
   const normalizedFindQuery = useMemo(() => normalizeFindQuery(findQuery), [findQuery])
-
-  const readAlongSegments = useMemo(
-    () =>
-      buildReadAlongSegments({
-        mediaId: selectedMedia?.id != null ? String(selectedMedia.id) : 'unknown-media',
-        content,
-        displayContent,
-        renderMode: effectiveRenderMode,
-        hideTranscriptTimings: shouldHideTranscriptTimings
-      }),
-    [
-      content,
-      displayContent,
-      effectiveRenderMode,
-      selectedMedia?.id,
-      shouldHideTranscriptTimings
-    ]
-  )
 
   const shouldRenderTranscriptTimestampChips =
     hasClickableTranscriptTimestamps &&
@@ -242,6 +235,49 @@ export function useTranscriptDisplay(deps: UseTranscriptDisplayDeps) {
       Math.max(0, Math.min(displayContent.length, visiblePlainContentChars))
     )
   }, [displayContent, shouldUseChunkedPlainRendering, visiblePlainContentChars])
+
+  useEffect(() => {
+    if (!shouldUseChunkedPlainRendering) return
+    const activeEndOffset = getReadAlongSegmentEndOffset(activeReadAlongSegmentId)
+    if (activeEndOffset == null) return
+
+    setVisiblePlainContentChars((prev) => {
+      const next = Math.min(displayContent.length, Math.max(prev, activeEndOffset))
+      return next > prev ? next : prev
+    })
+  }, [
+    activeReadAlongSegmentId,
+    displayContent.length,
+    shouldUseChunkedPlainRendering
+  ])
+
+  const readAlongContentWindow = useMemo(() => {
+    if (!shouldUseChunkedPlainRendering) return content
+    const end = Math.max(0, Math.min(content.length, visiblePlainContentChars))
+    return content.slice(0, end)
+  }, [content, shouldUseChunkedPlainRendering, visiblePlainContentChars])
+
+  const readAlongDisplayContentWindow = shouldUseChunkedPlainRendering
+    ? visiblePlainContent
+    : displayContent
+
+  const readAlongSegments = useMemo(
+    () =>
+      buildReadAlongSegments({
+        mediaId: selectedMedia?.id != null ? String(selectedMedia.id) : 'unknown-media',
+        content: readAlongContentWindow,
+        displayContent: readAlongDisplayContentWindow,
+        renderMode: effectiveRenderMode,
+        hideTranscriptTimings: shouldHideTranscriptTimings
+      }),
+    [
+      effectiveRenderMode,
+      readAlongContentWindow,
+      readAlongDisplayContentWindow,
+      selectedMedia?.id,
+      shouldHideTranscriptTimings
+    ]
+  )
 
   const hasUnrenderedPlainContent =
     shouldUseChunkedPlainRendering && visiblePlainContentChars < displayContent.length

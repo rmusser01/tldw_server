@@ -131,6 +131,16 @@ Task 6 completed:
 - Regression verification: `cd apps/packages/ui && bunx vitest run src/components/Media/__tests__/ContentViewer.read-along.test.tsx src/components/Media/__tests__/ContentViewer.stage12.performance.test.tsx src/components/Media/__tests__/ContentViewer.stage10.findBar.test.tsx src/components/Media/__tests__/ContentViewer.stage14.annotations.test.tsx --maxWorkers=1` passed 4 files / 20 tests.
 - `git diff --check` passed.
 - Bandit skipped for Task 6 because the touched slice is TypeScript/React frontend code only.
+
+Task 6 review findings fixed:
+- Lazy plain rendering now builds highlight wrappers only from the currently visible plain-content window and initializes large plain content at the first chunk instead of the full item.
+- Full-item/from-here playback no longer forces the lazy plain-content window to the full content. When the active segment advances outside the rendered chunk, the visible window expands only through that active segment so highlight and scroll can catch up.
+- Markdown/html text-only selections now hide unsupported mapped-scope actions (`Read from here`, `Read current section`) while preserving `Read selection`, `Read full item`, and `Annotate`; exact plain selections still expose all scopes.
+- Selection popover and read-along transport are clamped to the content viewport when available, including right-edge placement, and transport progress/error text uses polite status live regions.
+- Red verification: `cd apps/packages/ui && bunx vitest run src/components/Media/__tests__/ContentViewer.read-along.test.tsx --maxWorkers=1` failed with 4 expected review-regression failures: unsupported markdown/html scopes visible, full display content segmented during lazy rendering, active large-content highlight missing after playback advanced, and right-edge popover unclamped.
+- Green verification: `cd apps/packages/ui && bunx vitest run src/components/Media/__tests__/ContentViewer.read-along.test.tsx --maxWorkers=1` passed 1 file / 11 tests.
+- Regression verification: `cd apps/packages/ui && bunx vitest run src/components/Media/__tests__/ContentViewer.read-along.test.tsx src/components/Media/__tests__/ContentViewer.stage12.performance.test.tsx src/components/Media/__tests__/ContentViewer.stage10.findBar.test.tsx src/components/Media/__tests__/ContentViewer.stage14.annotations.test.tsx --maxWorkers=1` passed 4 files / 24 tests.
+- `git diff --check` passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

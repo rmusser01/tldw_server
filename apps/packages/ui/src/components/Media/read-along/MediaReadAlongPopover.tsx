@@ -8,6 +8,8 @@ type Translate = (key: string, opts?: Record<string, any>) => string
 
 interface MediaReadAlongPopoverProps {
   anchorRect: DOMRect
+  viewportRect?: DOMRect | null
+  supportedScopes?: ReadAlongScope[]
   onReadScope: (scope: ReadAlongScope) => void
   onAnnotate: () => void
   t: Translate
@@ -22,12 +24,65 @@ interface PopoverAction {
   onClick?: () => void
 }
 
+const EDGE_MARGIN_PX = 8
+const ESTIMATED_POPOVER_WIDTH_PX = 560
+const ESTIMATED_POPOVER_HEIGHT_PX = 40
+
+const clamp = (value: number, min: number, max: number): number =>
+  Math.max(min, Math.min(value, max))
+
+const getViewportRect = (viewportRect?: DOMRect | null): DOMRect => {
+  if (viewportRect) return viewportRect
+  const width = typeof window !== 'undefined' ? window.innerWidth : 1024
+  const height = typeof window !== 'undefined' ? window.innerHeight : 768
+  return {
+    x: 0,
+    y: 0,
+    left: 0,
+    top: 0,
+    width,
+    height,
+    right: width,
+    bottom: height,
+    toJSON: () => ({})
+  } as DOMRect
+}
+
+const getPopoverPosition = (
+  anchorRect: DOMRect,
+  viewportRect?: DOMRect | null
+): { left: number; top: number } => {
+  const viewport = getViewportRect(viewportRect)
+  const viewportWidth = Math.max(0, viewport.right - viewport.left)
+  const viewportHeight = Math.max(0, viewport.bottom - viewport.top)
+  const popoverWidth = Math.min(
+    ESTIMATED_POPOVER_WIDTH_PX,
+    Math.max(0, viewportWidth - EDGE_MARGIN_PX * 2)
+  )
+  const popoverHeight = Math.min(
+    ESTIMATED_POPOVER_HEIGHT_PX,
+    Math.max(0, viewportHeight - EDGE_MARGIN_PX * 2)
+  )
+  const minLeft = viewport.left + EDGE_MARGIN_PX
+  const maxLeft = Math.max(minLeft, viewport.right - popoverWidth - EDGE_MARGIN_PX)
+  const minTop = viewport.top + EDGE_MARGIN_PX
+  const maxTop = Math.max(minTop, viewport.bottom - popoverHeight - EDGE_MARGIN_PX)
+
+  return {
+    left: clamp(anchorRect.left, minLeft, maxLeft),
+    top: clamp(anchorRect.top - ESTIMATED_POPOVER_HEIGHT_PX, minTop, maxTop)
+  }
+}
+
 export function MediaReadAlongPopover({
   anchorRect,
+  viewportRect,
+  supportedScopes = ['selection', 'from-here', 'current-section', 'full-item'],
   onReadScope,
   onAnnotate,
   t
 }: MediaReadAlongPopoverProps) {
+  const supportedScopeSet = new Set(supportedScopes)
   const actions: PopoverAction[] = [
     {
       scope: 'selection',
@@ -76,14 +131,16 @@ export function MediaReadAlongPopover({
       icon: <StickyNote className="h-3.5 w-3.5" />,
       onClick: onAnnotate
     }
-  ]
+  ].filter((action) => !action.scope || supportedScopeSet.has(action.scope))
+
+  const position = getPopoverPosition(anchorRect, viewportRect)
 
   return (
     <div
       className="fixed z-50 flex max-w-[min(92vw,560px)] flex-wrap items-center gap-1 rounded border border-border bg-surface px-2 py-1 shadow-lg"
       style={{
-        left: Math.max(8, anchorRect.left),
-        top: Math.max(8, anchorRect.top - 40)
+        left: position.left,
+        top: position.top
       }}
       data-testid="media-selection-actions-popover"
     >

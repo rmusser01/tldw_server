@@ -349,6 +349,19 @@ export function ContentViewer({
     readAlong.pause()
   }, [readAlong])
 
+  const supportedReadAlongScopes = useMemo<ReadAlongScope[]>(() => {
+    const selection = selectionActions.selectionActionState
+    if (
+      selection?.mappingConfidence === 'exact' &&
+      (selection.startSegmentId ||
+        selection.endSegmentId ||
+        (selection.sourceStart != null && selection.sourceEnd != null))
+    ) {
+      return ['selection', 'from-here', 'current-section', 'full-item']
+    }
+    return ['selection', 'full-item']
+  }, [selectionActions.selectionActionState])
+
   // Now we have shouldShowEmbeddedPlayer from modals, re-run rendering with correct value
   // Actually, we need to use the modals result. Let's restructure:
   // The rendering hook needs shouldShowEmbeddedPlayer which comes from modals.
@@ -406,7 +419,11 @@ export function ContentViewer({
     if (isOutside && typeof activeNode.scrollIntoView === 'function') {
       activeNode.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
-  }, [readAlong.activeSegmentId, transcript.normalizedFindQuery])
+  }, [
+    readAlong.activeSegmentId,
+    transcript.normalizedFindQuery,
+    transcript.visiblePlainContentChars
+  ])
 
   // --- Hook: Reading Progress ---
   const readingProgress = useReadingProgress({
@@ -1300,6 +1317,12 @@ export function ContentViewer({
                   {selectionActions.selectionActionState ? (
                     <MediaReadAlongPopover
                       anchorRect={selectionActions.selectionActionState.anchorRect}
+                      viewportRect={
+                        contentScrollContainerRef.current?.getBoundingClientRect() ??
+                        rootContainerRef.current?.getBoundingClientRect() ??
+                        null
+                      }
+                      supportedScopes={supportedReadAlongScopes}
                       onReadScope={handleStartReadAlongScope}
                       onAnnotate={selectionActions.applyAnnotationSelection}
                       t={t}
@@ -1308,6 +1331,11 @@ export function ContentViewer({
                   <MediaReadAlongTransport
                     state={readAlong.state}
                     anchorRect={readAlongTransportAnchorRef.current}
+                    viewportRect={
+                      contentScrollContainerRef.current?.getBoundingClientRect() ??
+                      rootContainerRef.current?.getBoundingClientRect() ??
+                      null
+                    }
                     onToggle={handleToggleReadAlong}
                     onStop={handleStopReadAlong}
                     onRetry={readAlong.retry}
