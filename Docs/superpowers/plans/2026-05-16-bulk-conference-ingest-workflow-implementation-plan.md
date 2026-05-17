@@ -1079,7 +1079,7 @@ git commit -m "feat: review conference collections with scoped qa"
 - Test: `apps/packages/ui/src/routes/__tests__/route-registry.sidepanel-chat.test.ts`
 - Test as available: `apps/tldw-frontend/extension/__tests__/*`
 
-- [ ] **Step 1: Write failing context-handoff tests**
+- [x] **Step 1: Write failing context-handoff tests**
 
 Add a test that `requestQuickIngestOpen` accepts:
 
@@ -1094,7 +1094,7 @@ requestQuickIngestOpen({
 
 And that Sidepanel passes this detail to the modal/open request.
 
-- [ ] **Step 2: Run failing tests**
+- [x] **Step 2: Run failing tests**
 
 ```bash
 bunx vitest run \
@@ -1102,7 +1102,7 @@ bunx vitest run \
   apps/packages/ui/src/routes/__tests__/route-registry.sidepanel-chat.test.ts
 ```
 
-- [ ] **Step 3: Add typed Quick Ingest open detail**
+- [x] **Step 3: Add typed Quick Ingest open detail**
 
 In `quick-ingest-open.ts`:
 
@@ -1117,15 +1117,15 @@ export type QuickIngestOpenDetail =
     }
 ```
 
-- [ ] **Step 4: Detect active-tab playlist context**
+- [x] **Step 4: Detect active-tab playlist context**
 
 Use active-tab URL or existing sidepanel context, not content-script parsing. Show "Import playlist to tldw" only when the URL has a YouTube playlist/list context and extension readiness allows it.
 
-- [ ] **Step 5: Seed shared preflight**
+- [x] **Step 5: Seed shared preflight**
 
 Quick Ingest should consume the open detail and start the same preflight path as paste-from-WebUI.
 
-- [ ] **Step 6: Run verification**
+- [x] **Step 6: Run verification**
 
 ```bash
 bunx vitest run \
@@ -1135,7 +1135,14 @@ bunx vitest run \
 git diff --check
 ```
 
-- [ ] **Step 7: Commit**
+- Verification run:
+  - `./node_modules/.bin/vitest run -c vitest.config.ts ../../apps/packages/ui/src/utils/__tests__/quick-ingest-open.test.ts ../../apps/packages/ui/src/components/Sidepanel/Chat/__tests__/form.queue.contract.test.tsx ../../apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx`
+  - `./node_modules/.bin/vitest run -c vitest.config.ts ../../apps/packages/ui/src/routes/__tests__/route-registry.sidepanel-chat.test.ts`
+  - `./node_modules/.bin/tsc --noEmit -p tsconfig.json --pretty false` still fails only on unrelated baseline files: `EmbeddingsModelSelectionConfig.tsx`, `persona-visuals.ts`, and `lib/api/vnPlay.ts`.
+  - `git diff --check`
+- Implementation note: `background.ts` did not need changes for this slice because the active-tab URL is resolved in `ControlRow.tsx` at the point of user action, and the existing background quick-ingest runtime already carries playlist metadata from prior tasks.
+
+- [x] **Step 7: Commit**
 
 ```bash
 git add \

@@ -232,9 +232,14 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   onQuickProcess,
 }) => {
   const { t } = useTranslation(["option"])
-  const { state, setQueueItems, setConferenceBatchMetadata, goNext } =
-    useIngestWizard()
-  const { queueItems, conferenceBatchMetadata } = state
+  const {
+    state,
+    setQueueItems,
+    setPlaylistPreflightSeed,
+    setConferenceBatchMetadata,
+    goNext,
+  } = useIngestWizard()
+  const { queueItems, conferenceBatchMetadata, playlistPreflightSeed } = state
 
   const [urlInput, setUrlInput] = useState("")
   const [playlistPreflightUrl, setPlaylistPreflightUrl] = useState("")
@@ -242,6 +247,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   const [playlistPreflightLoading, setPlaylistPreflightLoading] = useState(false)
   const [playlistPreflightError, setPlaylistPreflightError] = useState<string | null>(null)
   const { capabilities } = useServerCapabilities()
+  const seededPlaylistUrlRef = React.useRef<string | null>(null)
 
   const qi = useCallback(
     (key: string, defaultValue: string, options?: Record<string, unknown>) =>
@@ -343,6 +349,35 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
       setPlaylistPreflightLoading(false)
     }
   }, [primaryPlaylistCandidateUrl])
+
+  React.useEffect(() => {
+    if (
+      !playlistPreflightSeed ||
+      playlistPreflightSeed.action !== "playlist_preflight" ||
+      typeof playlistPreflightSeed.url !== "string"
+    ) {
+      return
+    }
+
+    const seededUrl = playlistPreflightSeed.url.trim()
+    if (!seededUrl) return
+
+    seededPlaylistUrlRef.current = seededUrl
+    setUrlInput(seededUrl)
+    setPlaylistPreflight(null)
+    setPlaylistPreflightUrl("")
+    setPlaylistPreflightError(null)
+    setPlaylistPreflightSeed(null)
+  }, [playlistPreflightSeed, setPlaylistPreflightSeed])
+
+  React.useEffect(() => {
+    if (!seededPlaylistUrlRef.current) return
+    if (!shouldOfferPlaylistPreflight) return
+    if (primaryPlaylistCandidateUrl !== seededPlaylistUrlRef.current) return
+
+    seededPlaylistUrlRef.current = null
+    void handlePreviewPlaylist()
+  }, [handlePreviewPlaylist, primaryPlaylistCandidateUrl, shouldOfferPlaylistPreflight])
 
   const handleAddPreflightItems = useCallback(() => {
     if (!playlistPreflight) return

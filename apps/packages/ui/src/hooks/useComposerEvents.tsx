@@ -1,10 +1,11 @@
 import React from "react"
+import type { QuickIngestOpenDetail } from "@/utils/quick-ingest-open"
 
 export interface ComposerEventHandlers {
   /** Called when tldw:focus-composer event is fired */
   onFocusComposer?: () => void
   /** Called when tldw:open-quick-ingest event is fired */
-  onOpenQuickIngest?: () => void
+  onOpenQuickIngest?: (detail?: QuickIngestOpenDetail) => void
 }
 
 export interface DocumentGeneratorSeed {
@@ -97,8 +98,8 @@ export const useComposerEvents = (
   // tldw:open-quick-ingest
   React.useEffect(() => {
     if (!onOpenQuickIngest) return
-    const handler = () => {
-      onOpenQuickIngest()
+    const handler = (event: Event) => {
+      onOpenQuickIngest((event as CustomEvent<QuickIngestOpenDetail>).detail)
     }
     window.addEventListener("tldw:open-quick-ingest", handler)
     return () => {

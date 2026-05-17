@@ -1,4 +1,6 @@
 import React from "react"
+import { existsSync, readFileSync } from "node:fs"
+import path from "node:path"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
@@ -537,6 +539,27 @@ const expandAdvancedOptions = async (user: ReturnType<typeof userEvent.setup>) =
 // ---------------------------------------------------------------------------
 
 describe("QuickIngestWizardModal — full wizard flow integration", () => {
+  it("hydrates playlist preflight seed from typed open detail", () => {
+    const candidates = [
+      path.resolve(__dirname, "../IngestWizardContext.tsx"),
+      path.resolve(process.cwd(), "src/components/Common/QuickIngest/IngestWizardContext.tsx"),
+      path.resolve(
+        process.cwd(),
+        "../packages/ui/src/components/Common/QuickIngest/IngestWizardContext.tsx"
+      ),
+      path.resolve(
+        process.cwd(),
+        "apps/packages/ui/src/components/Common/QuickIngest/IngestWizardContext.tsx"
+      )
+    ]
+    const contextPath = candidates.find((candidate) => existsSync(candidate))
+    expect(contextPath).toBeTruthy()
+    const source = readFileSync(contextPath!, "utf8")
+
+    expect(source).toContain("playlistPreflightSeed")
+    expect(source).toContain("SET_PLAYLIST_PREFLIGHT_SEED")
+  })
+
   let onClose: () => void
 
   beforeEach(() => {

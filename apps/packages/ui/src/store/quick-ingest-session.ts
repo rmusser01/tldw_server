@@ -14,6 +14,7 @@ import type {
   PlaylistQueueMetadata,
 } from "@/components/Common/QuickIngest/types"
 import { DEFAULT_PRESET, DEFAULT_PRESETS } from "@/components/Common/QuickIngest/presets"
+import type { QuickIngestOpenDetail } from "@/utils/quick-ingest-open"
 
 const STORAGE_KEY = "tldw-quick-ingest-session"
 
@@ -102,6 +103,7 @@ export type QuickIngestSessionRecord = {
   customOptions: Partial<PresetConfig>
   processingState: WizardProcessingState
   results: WizardResultItem[]
+  openDetail?: QuickIngestOpenDetail | null
   conferenceBatchMetadata?: ConferenceBatchMetadata | null
   badge: QuickIngestSessionBadge
   resultSummary: QuickIngestSessionResultSummary
@@ -496,6 +498,10 @@ const sanitizeSession = (
     customOptions: session.customOptions || {},
     processingState: session.processingState || { ...INITIAL_PROCESSING_STATE },
     results: Array.isArray(session.results) ? session.results : [],
+    openDetail:
+      session.openDetail && typeof session.openDetail === "object"
+        ? session.openDetail
+        : null,
     conferenceBatchMetadata: session.conferenceBatchMetadata ?? null,
     badge: {
       queueCount: Math.max(
@@ -546,6 +552,7 @@ export const createEmptyQuickIngestSession = (): QuickIngestSessionRecord => {
     customOptions: {},
     processingState: { ...INITIAL_PROCESSING_STATE },
     results: [],
+    openDetail: null,
     conferenceBatchMetadata: null,
     badge: {
       queueCount: 0,

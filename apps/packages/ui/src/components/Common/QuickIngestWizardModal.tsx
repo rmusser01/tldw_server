@@ -57,6 +57,7 @@ import {
   DUPLICATE_SKIP_MESSAGE,
   isDbMessageDuplicate,
 } from "./QuickIngest/constants"
+import { isQuickIngestPlaylistPreflightDetail } from "@/utils/quick-ingest-open"
 
 // ---------------------------------------------------------------------------
 // Props
@@ -560,6 +561,9 @@ const buildInitialWizardState = (
   customBasePreset: session.customBasePreset,
   presetConfig: session.presetConfig,
   customOptions: session.customOptions,
+  playlistPreflightSeed: isQuickIngestPlaylistPreflightDetail(session.openDetail)
+    ? session.openDetail
+    : null,
   processingState: session.processingState,
   results: session.results,
   conferenceBatchMetadata: session.conferenceBatchMetadata ?? null,
@@ -583,6 +587,7 @@ const buildSessionPatchFromWizardState = (
     conferenceBatchMetadata: state.conferenceBatchMetadata,
     processingState: state.processingState,
     results: state.results,
+    openDetail: state.playlistPreflightSeed,
     badge: {
       queueCount:
         lifecycle === "draft"

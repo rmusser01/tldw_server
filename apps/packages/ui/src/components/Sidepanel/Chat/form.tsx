@@ -103,6 +103,10 @@ import { useSetting } from "@/hooks/useSetting"
 import { useFocusComposerOnConnect } from "@/hooks/useComposerFocus"
 import { useQuickIngestStore } from "@/store/quick-ingest"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
+import {
+  createQuickIngestSessionSeedFromOpenDetail,
+  type QuickIngestOpenDetail
+} from "@/utils/quick-ingest-open"
 import { useUiModeStore } from "@/store/ui-mode"
 import { useStoreMessageOption } from "@/store/option"
 import { shallow } from "zustand/shallow"
@@ -487,12 +491,14 @@ export const SidepanelForm = ({
   const {
     quickIngestSession,
     createDraftQuickIngestSession,
+    upsertQuickIngestSession,
     showQuickIngestSession,
     hideQuickIngestSession
   } = useQuickIngestSessionStore(
     (state) => ({
       quickIngestSession: state.session,
       createDraftQuickIngestSession: state.createDraftSession,
+      upsertQuickIngestSession: state.upsertSession,
       showQuickIngestSession: state.showSession,
       hideQuickIngestSession: state.hideSession
     }),
@@ -888,12 +894,16 @@ export const SidepanelForm = ({
     browserSupportsSpeechRecognition || hasServerStt || hasServerVoiceChat
 
   // Composer window events hook
-  const handleOpenQuickIngest = React.useCallback(() => {
+  const handleOpenQuickIngest = React.useCallback((detail?: QuickIngestOpenDetail) => {
+    const seed = createQuickIngestSessionSeedFromOpenDetail(detail)
     setAutoProcessQueuedIngest(false)
     if (quickIngestSession) {
+      if (seed) {
+        upsertQuickIngestSession(seed)
+      }
       showQuickIngestSession()
     } else {
-      createDraftQuickIngestSession()
+      createDraftQuickIngestSession(seed ?? undefined)
     }
     setIngestOpen(true)
     requestAnimationFrame(() => {
@@ -902,7 +912,8 @@ export const SidepanelForm = ({
   }, [
     createDraftQuickIngestSession,
     quickIngestSession,
-    showQuickIngestSession
+    showQuickIngestSession,
+    upsertQuickIngestSession
   ])
 
   const {
@@ -1992,18 +2003,23 @@ export const SidepanelForm = ({
     window.dispatchEvent(new CustomEvent("tldw:toggle-rag"))
   }, [])
 
-  const handleQuickIngestOpen = React.useCallback(() => {
+  const handleQuickIngestOpen = React.useCallback((detail?: QuickIngestOpenDetail) => {
+    const seed = createQuickIngestSessionSeedFromOpenDetail(detail)
     setAutoProcessQueuedIngest(false)
     if (quickIngestSession) {
+      if (seed) {
+        upsertQuickIngestSession(seed)
+      }
       showQuickIngestSession()
     } else {
-      createDraftQuickIngestSession()
+      createDraftQuickIngestSession(seed ?? undefined)
     }
     setIngestOpen(true)
   }, [
     createDraftQuickIngestSession,
     quickIngestSession,
-    showQuickIngestSession
+    showQuickIngestSession,
+    upsertQuickIngestSession
   ])
 
   const handleProcessQueuedIngest = React.useCallback(() => {
