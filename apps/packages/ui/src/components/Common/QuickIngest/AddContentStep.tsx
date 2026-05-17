@@ -13,11 +13,20 @@ import {
   X,
   Plus,
 } from "lucide-react"
-import type { DetectedMediaType, WizardQueueItem, QueueItemValidation } from "./types"
+import type {
+  ConferenceDuplicatePolicy,
+  DetectedMediaType,
+  WizardQueueItem,
+  QueueItemValidation,
+} from "./types"
 import { useIngestWizard } from "./IngestWizardContext"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { Alert as DesignSystemAlert, Badge } from "@/components/ui/primitives"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
+import type { PlaylistPreflightResult } from "@/services/tldw/playlist-preflight"
 import { FileDropZone } from "./QueueTab/FileDropZone"
+import { PlaylistPreflightPanel } from "./PlaylistPreflightPanel"
+import { BatchMetadataPanel } from "./BatchMetadataPanel"
 import {
   QUICK_INGEST_MAX_FILE_SIZE_LABEL,
   QUICK_INGEST_MAX_FILE_SIZE,
@@ -114,6 +123,23 @@ export const detectTypeFromUrl = (url: string): DetectedMediaType => {
     return "web"
   }
 }
+
+export const detectPlaylistPreflightCandidate = (url: string): boolean => {
+  try {
+    const parsed = new URL(url)
+    const hostname = parsed.hostname.toLowerCase()
+    if (!hostnameMatches(hostname, "youtube.com") && !hostnameMatches(hostname, "youtu.be")) {
+      return false
+    }
+    const playlistId = parsed.searchParams.get("list")?.trim()
+    return Boolean(playlistId)
+  } catch {
+    return false
+  }
+}
+
+const isDuplicatePreflightStatus = (status: string | undefined): boolean =>
+  status === "duplicate_existing" || status === "duplicate_in_batch"
 
 const isValidUrl = (raw: string): boolean => {
   const trimmed = raw.trim()
@@ -214,10 +240,23 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   onQuickProcess,
 }) => {
   const { t } = useTranslation(["option"])
-  const { state, setQueueItems, goNext } = useIngestWizard()
-  const { queueItems } = state
+  const {
+    state,
+    setQueueItems,
+    setPlaylistPreflightSeed,
+    setConferenceBatchMetadata,
+    goNext,
+  } = useIngestWizard()
+  const { queueItems, conferenceBatchMetadata, playlistPreflightSeed } = state
 
   const [urlInput, setUrlInput] = useState("")
+  const [playlistPreflightUrl, setPlaylistPreflightUrl] = useState("")
+  const [playlistPreflight, setPlaylistPreflight] = useState<PlaylistPreflightResult | null>(null)
+  const [duplicatePolicy, setDuplicatePolicy] = useState<ConferenceDuplicatePolicy>("skip")
+  const [playlistPreflightLoading, setPlaylistPreflightLoading] = useState(false)
+  const [playlistPreflightError, setPlaylistPreflightError] = useState<string | null>(null)
+  const { capabilities } = useServerCapabilities()
+  const seededPlaylistUrlRef = React.useRef<string | null>(null)
 
   const qi = useCallback(
     (key: string, defaultValue: string, options?: Record<string, unknown>) =>
@@ -277,7 +316,184 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
 
     setQueueItems([...queueItems, ...newItems])
     setUrlInput("")
+    setPlaylistPreflight(null)
+    setPlaylistPreflightUrl("")
+    setDuplicatePolicy("skip")
+    setPlaylistPreflightError(null)
   }, [urlInput, queueItems, setQueueItems])
+
+  const playlistCandidateUrls = useMemo(
+    () =>
+      urlInput
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .filter(detectPlaylistPreflightCandidate),
+    [urlInput]
+  )
+  const primaryPlaylistCandidateUrl = playlistCandidateUrls[0] || ""
+  const shouldOfferPlaylistPreflight =
+    Boolean(capabilities?.hasMediaPlaylistPreflight) && Boolean(primaryPlaylistCandidateUrl)
+
+  const handlePreviewPlaylist = useCallback(async () => {
+    if (!primaryPlaylistCandidateUrl) return
+    setPlaylistPreflightLoading(true)
+    setPlaylistPreflightError(null)
+    try {
+      const result = await tldwClient.preflightPlaylist({
+        url: primaryPlaylistCandidateUrl,
+        max_items: 100,
+        timeoutMs: 60_000
+      })
+      setPlaylistPreflight(result)
+      setPlaylistPreflightUrl(primaryPlaylistCandidateUrl)
+      setDuplicatePolicy("skip")
+    } catch (error) {
+      setPlaylistPreflight(null)
+      setPlaylistPreflightUrl(primaryPlaylistCandidateUrl)
+      setPlaylistPreflightError(
+        error instanceof Error && error.message
+          ? error.message
+          : "Playlist preview failed."
+      )
+    } finally {
+      setPlaylistPreflightLoading(false)
+    }
+  }, [primaryPlaylistCandidateUrl])
+
+  React.useEffect(() => {
+    if (
+      !playlistPreflightSeed ||
+      playlistPreflightSeed.action !== "playlist_preflight" ||
+      typeof playlistPreflightSeed.url !== "string"
+    ) {
+      return
+    }
+
+    const seededUrl = playlistPreflightSeed.url.trim()
+    if (!seededUrl) return
+
+    seededPlaylistUrlRef.current = seededUrl
+    setUrlInput(seededUrl)
+    setPlaylistPreflight(null)
+    setPlaylistPreflightUrl("")
+    setDuplicatePolicy("skip")
+    setPlaylistPreflightError(null)
+    setPlaylistPreflightSeed(null)
+  }, [playlistPreflightSeed, setPlaylistPreflightSeed])
+
+  React.useEffect(() => {
+    if (!seededPlaylistUrlRef.current) return
+    if (!shouldOfferPlaylistPreflight) return
+    if (primaryPlaylistCandidateUrl !== seededPlaylistUrlRef.current) return
+
+    seededPlaylistUrlRef.current = null
+    void handlePreviewPlaylist()
+  }, [handlePreviewPlaylist, primaryPlaylistCandidateUrl, shouldOfferPlaylistPreflight])
+
+  const handleAddPreflightItems = useCallback(() => {
+    if (!playlistPreflight) return
+    const newItems: WizardQueueItem[] = []
+    const selectedItems = playlistPreflight.items.filter(
+      (item) => item.selected && item.sourceUrl
+    )
+    for (const preflightItem of selectedItems) {
+      const detectedType = detectTypeFromUrl(preflightItem.sourceUrl)
+      const item: WizardQueueItem = {
+        id: crypto.randomUUID(),
+        url: preflightItem.sourceUrl,
+        detectedType,
+        icon: ICON_NAME_MAP[detectedType],
+        fileSize: 0,
+        validation: { valid: true },
+        playlist: {
+          playlistId: playlistPreflight.playlistId,
+          playlistTitle: playlistPreflight.playlistTitle,
+          ordinal: preflightItem.ordinal,
+          normalizedSourceId: preflightItem.normalizedSourceId,
+          duplicateStatus: preflightItem.duplicateStatus
+        },
+        conferenceOverride: {
+          selected: true,
+          ...(isDuplicatePreflightStatus(preflightItem.duplicateStatus)
+            ? { duplicatePolicy }
+            : {})
+        }
+      }
+      item.validation = validateQueueItem(item, [...queueItems, ...newItems])
+      newItems.push(item)
+    }
+    if (newItems.length === 0) return
+    setQueueItems([...queueItems, ...newItems])
+    setConferenceBatchMetadata({
+      collectionName:
+        conferenceBatchMetadata?.collectionName ||
+        playlistPreflight.playlistTitle ||
+        "",
+      conferenceName: conferenceBatchMetadata?.conferenceName,
+      eventDate: conferenceBatchMetadata?.eventDate,
+      eventYear: conferenceBatchMetadata?.eventYear,
+      sharedTags: conferenceBatchMetadata?.sharedTags ?? [],
+      sourcePlaylistUrl:
+        conferenceBatchMetadata?.sourcePlaylistUrl || playlistPreflightUrl,
+    })
+    setUrlInput((current) =>
+      current
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line && line !== playlistPreflightUrl)
+        .join("\n")
+    )
+    setPlaylistPreflight(null)
+    setPlaylistPreflightUrl("")
+    setDuplicatePolicy("skip")
+    setPlaylistPreflightError(null)
+  }, [
+    conferenceBatchMetadata,
+    duplicatePolicy,
+    playlistPreflight,
+    playlistPreflightUrl,
+    queueItems,
+    setConferenceBatchMetadata,
+    setQueueItems,
+  ])
+
+  const handlePreflightItemSelectionChange = useCallback(
+    (ordinal: number, selected: boolean) => {
+      setPlaylistPreflight((current) => {
+        if (!current) return current
+        const items = current.items.map((item) =>
+          item.ordinal === ordinal ? { ...item, selected } : item
+        )
+        return {
+          ...current,
+          selectedCount: items.filter((item) => item.selected && item.sourceUrl).length,
+          items
+        }
+      })
+    },
+    []
+  )
+
+  const handleDuplicatePolicyChange = useCallback(
+    (policy: ConferenceDuplicatePolicy) => {
+      setDuplicatePolicy(policy)
+      setPlaylistPreflight((current) => {
+        if (!current) return current
+        const items = current.items.map((item) => {
+          if (!item.sourceUrl) return { ...item, selected: false }
+          if (!isDuplicatePreflightStatus(item.duplicateStatus)) return item
+          return { ...item, selected: policy !== "skip" }
+        })
+        return {
+          ...current,
+          selectedCount: items.filter((item) => item.selected && item.sourceUrl).length,
+          items
+        }
+      })
+    },
+    []
+  )
 
   // Handle Enter key in URL input
   const handleUrlKeyDown = useCallback(
@@ -304,11 +520,15 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   }, [setQueueItems])
 
   const hasItems = queueItems.length > 0
-  const validItemCount = useMemo(
-    () => queueItems.filter((item) => item.validation.valid).length,
+  const selectedItems = useMemo(
+    () => queueItems.filter((item) => item.conferenceOverride?.selected !== false),
     [queueItems]
   )
-  const invalidItemCount = queueItems.length - validItemCount
+  const validItemCount = useMemo(
+    () => selectedItems.filter((item) => item.validation.valid).length,
+    [selectedItems]
+  )
+  const invalidItemCount = selectedItems.length - validItemCount
   const canProceed = validItemCount > 0
   const canStartProcessing = canProceed && isOnlineForIngest && !isCheckingConnection
 
@@ -317,7 +537,6 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     [queueItems]
   )
 
-  const { capabilities } = useServerCapabilities()
   const ffmpegMissing = capabilities?.ffmpegAvailable === false
   const hasAvMediaItems = useMemo(
     () =>
@@ -392,6 +611,24 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
             </Button>
           </div>
         </div>
+
+        {shouldOfferPlaylistPreflight && (
+          <PlaylistPreflightPanel
+            candidateUrl={primaryPlaylistCandidateUrl}
+            loading={playlistPreflightLoading}
+            error={playlistPreflightError}
+            result={
+              playlistPreflightUrl === primaryPlaylistCandidateUrl
+                ? playlistPreflight
+                : null
+            }
+            onPreview={handlePreviewPlaylist}
+            onAddItems={handleAddPreflightItems}
+            onItemSelectionChange={handlePreflightItemSelectionChange}
+            duplicatePolicy={duplicatePolicy}
+            onDuplicatePolicyChange={handleDuplicatePolicyChange}
+          />
+        )}
       </div>
 
       {/* FFmpeg missing warning for audio/video items */}
@@ -565,6 +802,8 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
           </div>
         </div>
       )}
+
+      {hasItems && <BatchMetadataPanel />}
 
       {/* Action buttons */}
       <div className="mt-4 flex items-center justify-end gap-2">

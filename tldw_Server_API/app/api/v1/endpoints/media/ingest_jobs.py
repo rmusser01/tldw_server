@@ -12,12 +12,20 @@ from typing import Any
 from uuid import uuid4
 
 from cachetools import LRUCache
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal, get_request_user, rbac_rate_limit, RequirePermission, User
+from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import try_get_collections_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    check_rate_limit,
+    get_auth_principal,
+    get_request_user,
+    rbac_rate_limit,
+    RequirePermission,
+    User,
+)
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
@@ -28,6 +36,7 @@ from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
     save_uploaded_files,
@@ -75,6 +84,9 @@ class MediaIngestJobItem(BaseModel):
     source: str
     source_kind: str
     status: str
+    collection_id: str | None = None
+    planned_item_id: str | None = None
+    idempotency_key: str | None = None
 
 
 class SubmitMediaIngestJobsResponse(BaseModel):
@@ -102,6 +114,9 @@ class MediaIngestJobStatus(BaseModel):
     source: str | None = None
     source_kind: str | None = None
     batch_id: str | None = None
+    collection_id: str | None = None
+    planned_item_id: str | None = None
+    idempotency_key: str | None = None
 
 
 class CancelMediaIngestJobResponse(BaseModel):
@@ -154,6 +169,155 @@ def _validate_submit_inputs(
             "'urls' list or one 'file' in the 'files' list must be provided."
         ),
     )
+
+
+def _coerce_form_string_list(value: Any) -> list[str]:
+    """Return trimmed form values from repeated fields, JSON strings, or scalar input."""
+    if value is None:
+        return []
+    raw_values = value if isinstance(value, list) else [value]
+    out: list[str] = []
+    for raw in raw_values:
+        if raw is None:
+            continue
+        if isinstance(raw, (list, tuple)):
+            out.extend(_coerce_form_string_list(list(raw)))
+            continue
+        text = str(raw).strip()
+        if not text:
+            continue
+        if text.startswith("[") or text.startswith('"'):
+            try:
+                parsed = json.loads(text)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                parsed = None
+            if isinstance(parsed, list):
+                out.extend(str(item).strip() for item in parsed if str(item).strip())
+                continue
+            if isinstance(parsed, str) and parsed.strip():
+                out.append(parsed.strip())
+                continue
+        out.append(text)
+    return out
+
+
+def _coerce_form_string(value: Any) -> str | None:
+    """Return the first normalized form string value, if one is present."""
+    values = _coerce_form_string_list(value)
+    return values[0] if values else None
+
+
+def _coerce_positive_int(value: Any) -> int | None:
+    """Parse a positive integer identifier from form data, ignoring invalid values."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _validate_per_url_binding_list(
+    *,
+    name: str,
+    values: list[str],
+    url_count: int,
+) -> None:
+    """Ensure optional per-URL binding arrays line up with the submitted URL count."""
+    if not values:
+        return
+    if len(values) == url_count:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail=f"{name} must match the number of URL items.",
+    )
+
+
+def _resolve_submit_bindings(
+    *,
+    url_count: int,
+    media_collection_id: Any,
+    collection_id: Any,
+    media_collection_item_id: Any,
+    planned_item_ids: Any,
+    idempotency_key: Any,
+    idempotency_keys: Any,
+) -> tuple[str | None, list[str], list[str]]:
+    """Normalize collection, planned-item, and idempotency bindings for URL jobs."""
+    collection_id_value = _coerce_form_string(media_collection_id) or _coerce_form_string(collection_id)
+    planned_values = _coerce_form_string_list(planned_item_ids)
+    single_planned = _coerce_form_string(media_collection_item_id)
+    if single_planned and not planned_values:
+        planned_values = [single_planned]
+
+    key_values = _coerce_form_string_list(idempotency_keys)
+    single_key = _coerce_form_string(idempotency_key)
+    if single_key and not key_values:
+        key_values = [single_key]
+
+    _validate_per_url_binding_list(
+        name="planned_item_ids",
+        values=planned_values,
+        url_count=url_count,
+    )
+    _validate_per_url_binding_list(
+        name="idempotency_keys",
+        values=key_values,
+        url_count=url_count,
+    )
+    return collection_id_value, planned_values, key_values
+
+
+def _apply_collection_binding_to_payload(
+    payload: dict[str, Any],
+    *,
+    collection_id: str | None,
+    planned_item_id: str | None,
+    idempotency_key: str | None,
+) -> None:
+    """Attach durable collection binding fields to a job payload when supplied."""
+    if collection_id:
+        payload["collection_id"] = collection_id
+    if planned_item_id:
+        payload["planned_item_id"] = planned_item_id
+    if idempotency_key:
+        payload["idempotency_key"] = idempotency_key
+
+
+def _submit_failure_message(exc: Exception) -> str:
+    """Return a bounded, user-safe message for collection submit-failure tracking."""
+    if isinstance(exc, HTTPException):
+        detail = exc.detail
+        if isinstance(detail, str):
+            return detail.strip() or "Media ingest job submission failed"
+        return str(detail).strip() or "Media ingest job submission failed"
+    return str(exc).strip() or "Media ingest job submission failed"
+
+
+def _mark_collection_item_submit_failed(
+    *,
+    collections_db: CollectionsDatabase | None,
+    planned_item_id: Any,
+    error_summary: str,
+) -> None:
+    """Mark a planned collection item as submit_failed using the injected DB handle."""
+    item_id = _coerce_positive_int(planned_item_id)
+    if item_id is None or collections_db is None:
+        return
+
+    try:
+        collections_db.update_media_collection_item_status(
+            item_id,
+            status="submit_failed",
+            latest_job_id=None,
+            error_summary=error_summary[:1000],
+        )
+    except Exception as exc:
+        logger.warning(
+            "Media collection item submit-failure sync failed for item {}: {}",
+            item_id,
+            exc,
+        )
 
 
 def _normalize_payload(payload: Any) -> dict[str, Any]:
@@ -250,6 +414,7 @@ def _create_media_ingest_job(
             owner_user_id=str(current_user.id),
             priority=5,
             max_retries=3,
+            idempotency_key=payload.get("idempotency_key"),
             request_id=request_id,
             trace_id=trace_id,
         )
@@ -257,25 +422,17 @@ def _create_media_ingest_job(
         message = str(exc).strip() or "Invalid media ingest job request"
         normalized = message.lower()
         status_code = (
-            status.HTTP_429_TOO_MANY_REQUESTS
-            if "concurrent job limit" in normalized
-            else status.HTTP_400_BAD_REQUEST
+            status.HTTP_429_TOO_MANY_REQUESTS if "concurrent job limit" in normalized else status.HTTP_400_BAD_REQUEST
         )
         raise HTTPException(status_code=status_code, detail=message) from exc
 
 
 def _principal_has_admin_claims(principal: AuthPrincipal) -> bool:
-    roles = {
-        str(role).strip().lower()
-        for role in (principal.roles or [])
-        if str(role).strip()
-    }
+    roles = {str(role).strip().lower() for role in (principal.roles or []) if str(role).strip()}
     if "admin" in roles:
         return True
     permissions = {
-        str(permission).strip().lower()
-        for permission in (principal.permissions or [])
-        if str(permission).strip()
+        str(permission).strip().lower() for permission in (principal.permissions or []) if str(permission).strip()
     }
     return bool(permissions & _ADMIN_CLAIM_PERMISSIONS)
 
@@ -308,6 +465,9 @@ def _job_to_status(job: dict[str, Any]) -> MediaIngestJobStatus:
         source=payload.get("source"),
         source_kind=payload.get("source_kind"),
         batch_id=payload.get("batch_id"),
+        collection_id=payload.get("collection_id"),
+        planned_item_id=payload.get("planned_item_id"),
+        idempotency_key=payload.get("idempotency_key"),
     )
 
 
@@ -424,8 +584,33 @@ async def submit_media_ingest_jobs(
     request: Request,
     form_data: AddMediaForm = Depends(get_add_media_form),
     files: list[UploadFile] | None = File(None, description="Optional media uploads"),
+    media_collection_id: str | None = Form(
+        None,
+        description="Optional durable media collection id for this job batch",
+    ),
+    collection_id: str | None = Form(
+        None,
+        description="Alias for media_collection_id",
+    ),
+    media_collection_item_id: str | None = Form(
+        None,
+        description="Optional planned collection item id for single-item submits",
+    ),
+    planned_item_ids: list[str] | None = Form(
+        None,
+        description="Optional JSON/list of planned collection item ids, one per URL",
+    ),
+    idempotency_key: str | None = Form(
+        None,
+        description="Optional idempotency key for single-item submits",
+    ),
+    idempotency_keys: list[str] | None = Form(
+        None,
+        description="Optional JSON/list of idempotency keys, one per URL",
+    ),
     current_user: User = Depends(get_request_user),
     jm: JobManager = Depends(get_job_manager),
+    collections_db: CollectionsDatabase | None = Depends(try_get_collections_db_for_user),
 ) -> SubmitMediaIngestJobsResponse:
     rid = ensure_request_id(request) if request is not None else None
     tp = ensure_traceparent(request) if request is not None else ""
@@ -444,11 +629,27 @@ async def submit_media_ingest_jobs(
     batch_id = str(uuid4())
     jobs: list[MediaIngestJobItem] = []
     errors: list[str] = []
+    first_url_submit_exception: Exception | None = None
+    url_failure_count = 0
 
     url_list = form_data.urls or []
+    valid_url_count = len([url for url in url_list if url and str(url).strip()])
+    collection_id_value, planned_item_values, idempotency_key_values = _resolve_submit_bindings(
+        url_count=valid_url_count,
+        media_collection_id=media_collection_id,
+        collection_id=collection_id,
+        media_collection_item_id=media_collection_item_id,
+        planned_item_ids=planned_item_ids,
+        idempotency_key=idempotency_key,
+        idempotency_keys=idempotency_keys,
+    )
+
+    url_index = 0
     for url in url_list:
         if not url or not str(url).strip():
             continue
+        planned_item_id = planned_item_values[url_index] if planned_item_values else None
+        item_idempotency_key = idempotency_key_values[url_index] if idempotency_key_values else None
         payload = {
             "batch_id": batch_id,
             "media_type": str(form_data.media_type),
@@ -457,18 +658,38 @@ async def submit_media_ingest_jobs(
             "input_ref": str(url).strip(),
             "options": options,
         }
-        row = _create_media_ingest_job(
-            jm=jm,
-            selected_queue=selected_queue,
-            payload=payload,
-            current_user=current_user,
-            batch_id=batch_id,
-            request_id=rid,
-            trace_id=tp or None,
+        _apply_collection_binding_to_payload(
+            payload,
+            collection_id=collection_id_value,
+            planned_item_id=planned_item_id,
+            idempotency_key=item_idempotency_key,
         )
-        row_id = row.get("id")
-        if row_id is None:
-            raise ValueError(f"Job creation returned no id: {row!r}")
+        try:
+            row = _create_media_ingest_job(
+                jm=jm,
+                selected_queue=selected_queue,
+                payload=payload,
+                current_user=current_user,
+                batch_id=batch_id,
+                request_id=rid,
+                trace_id=tp or None,
+            )
+            row_id = row.get("id")
+            if row_id is None:
+                raise ValueError(f"Job creation returned no id: {row!r}")
+        except Exception as exc:
+            url_failure_count += 1
+            if first_url_submit_exception is None:
+                first_url_submit_exception = exc
+            error_message = _submit_failure_message(exc)
+            _mark_collection_item_submit_failed(
+                collections_db=collections_db,
+                planned_item_id=planned_item_id,
+                error_summary=error_message,
+            )
+            errors.append(f"{payload['source']}: {error_message}")
+            url_index += 1
+            continue
         jobs.append(
             MediaIngestJobItem(
                 id=int(row_id),
@@ -476,8 +697,12 @@ async def submit_media_ingest_jobs(
                 source=payload["source"],
                 source_kind="url",
                 status=row.get("status"),
+                collection_id=payload.get("collection_id"),
+                planned_item_id=payload.get("planned_item_id"),
+                idempotency_key=payload.get("idempotency_key"),
             )
         )
+        url_index += 1
 
     if files:
         for upload in files:
@@ -550,6 +775,8 @@ async def submit_media_ingest_jobs(
                     _cleanup_dir(temp_dir_path)
 
     if not jobs:
+        if first_url_submit_exception is not None and valid_url_count == 1 and url_failure_count == 1 and not files:
+            raise first_url_submit_exception
         if errors:
             return JSONResponse(
                 status_code=status.HTTP_207_MULTI_STATUS,
@@ -786,10 +1013,13 @@ async def stream_media_ingest_job_events(
 
             if tracked_job_ids:
                 refreshed = [jm.get_job(job_id) for job_id in tracked_job_ids]
-                if all(
-                    (job or {}).get("status") in {"completed", "failed", "cancelled", "quarantined"}
-                    for job in refreshed
-                ) and not rows:
+                if (
+                    all(
+                        (job or {}).get("status") in {"completed", "failed", "cancelled", "quarantined"}
+                        for job in refreshed
+                    )
+                    and not rows
+                ):
                     break
 
             await asyncio.sleep(poll_interval)

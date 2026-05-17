@@ -30,6 +30,8 @@ const LazyExportDialog = React.lazy(() =>
   import("./ExportDialog").then((module) => ({ default: module.ExportDialog })),
 )
 
+export { buildConferenceCollectionKnowledgeQaOptions } from "./conference-scope"
+
 const ROUTE_HYDRATION_RETRY_DELAY_MS = 1500
 const ROUTE_HYDRATION_MAX_RETRIES = 2
 

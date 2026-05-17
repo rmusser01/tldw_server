@@ -298,6 +298,18 @@ async def get_add_media_form(
         None,
         description="Embedding provider (huggingface, openai, etc)",
     ),
+    media_collection_id: str | None = Form(
+        None,
+        description="Optional durable media collection id associated with this ingest item",
+    ),
+    media_collection_item_id: str | None = Form(
+        None,
+        description="Optional planned durable media collection item id to resolve after ingest",
+    ),
+    media_ingest_job_id: str | None = Form(
+        None,
+        description="Optional media ingest job id that produced this fallback ingest",
+    ),
 ) -> AddMediaForm:
     """
     Dependency function to parse form data for the /media/add endpoint and
@@ -423,6 +435,9 @@ async def get_add_media_form(
             embedding_dispatch_mode=embedding_dispatch_mode,
             embedding_model=embedding_model,
             embedding_provider=embedding_provider,
+            media_collection_id=media_collection_id,
+            media_collection_item_id=media_collection_item_id,
+            media_ingest_job_id=media_ingest_job_id,
         )
         return form_instance
     except ValidationError as exc:

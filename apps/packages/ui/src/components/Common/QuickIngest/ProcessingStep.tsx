@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from "react"
+import React, { useCallback, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import {
   Check,
@@ -18,6 +18,7 @@ import {
 } from "lucide-react"
 import type { ItemProgress, ItemProgressStatus, WizardQueueItem } from "./types"
 import { useIngestWizard } from "./IngestWizardContext"
+import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -51,6 +52,14 @@ const TERMINAL_STATUSES = new Set<ItemProgressStatus>([
   "failed",
   "cancelled",
 ])
+
+type FailedProcessingItem = {
+  id: string
+  label: string
+  sourceUrl?: string
+  fileName?: string
+  error?: string
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -344,6 +353,8 @@ export const ProcessingStep: React.FC = () => {
   const { t } = useTranslation(["option"])
   const { state, cancelProcessing, cancelItem, minimize } = useIngestWizard()
   const { processingState, queueItems } = state
+  const tracking = useQuickIngestSessionStore((store) => store.session?.tracking)
+  const [failedExportNotice, setFailedExportNotice] = useState<string | null>(null)
 
   const qi = useCallback(
     (key: string, defaultValue: string, options?: Record<string, unknown>) =>
@@ -361,6 +372,83 @@ export const ProcessingStep: React.FC = () => {
     }
     return map
   }, [queueItems])
+
+  const trackingSummary = useMemo(() => {
+    if (!tracking) return null
+
+    const plannedCount = tracking.plannedItemIds?.length ?? 0
+    const jobCount = tracking.jobIds?.length ?? 0
+    const batchCount = tracking.batchIds?.length ?? (tracking.batchId ? 1 : 0)
+    const hasAnyTracking =
+      Boolean(tracking.collectionId) ||
+      plannedCount > 0 ||
+      jobCount > 0 ||
+      batchCount > 0 ||
+      Boolean(tracking.sessionId)
+
+    if (!hasAnyTracking) return null
+
+    const modeLabel =
+      tracking.durableMode === "durable_collection"
+        ? qi("processing.tracking.durable", "Durable collection tracking")
+        : tracking.durableMode === "degraded"
+          ? qi("processing.tracking.degraded", "Local run tracking")
+          : qi("processing.tracking.job", "Job tracking")
+
+    const details: string[] = []
+    if (tracking.collectionId) {
+      details.push(
+        qi("processing.tracking.collection", "Collection {{id}}", {
+          id: tracking.collectionId,
+        })
+      )
+    }
+    if (plannedCount > 0) {
+      details.push(
+        plannedCount === 1
+          ? qi("processing.tracking.plannedOne", "1 planned item")
+          : qi("processing.tracking.plannedMany", "{{count}} planned items", {
+              count: plannedCount,
+            })
+      )
+    }
+    if (jobCount > 0) {
+      details.push(
+        jobCount === 1
+          ? qi("processing.tracking.jobOne", "1 job")
+          : qi("processing.tracking.jobMany", "{{count}} jobs", {
+              count: jobCount,
+            })
+      )
+    } else if (batchCount > 0) {
+      details.push(
+        batchCount === 1
+          ? qi("processing.tracking.batchOne", "1 batch")
+          : qi("processing.tracking.batchMany", "{{count}} batches", {
+              count: batchCount,
+            })
+      )
+    }
+
+    return { modeLabel, details }
+  }, [qi, tracking])
+
+  const failedItems = useMemo<FailedProcessingItem[]>(() => {
+    return processingState.perItemProgress
+      .filter((progress) => progress.status === "failed")
+      .map((progress) => {
+        const queueItem = queueItemMap.get(progress.id)
+        const sourceUrl = queueItem?.url
+        const fileName = queueItem?.fileName
+        return {
+          id: progress.id,
+          label: sourceUrl || fileName || queueItem?.id || progress.id,
+          sourceUrl,
+          fileName,
+          error: progress.error,
+        }
+      })
+  }, [processingState.perItemProgress, queueItemMap])
 
   // Compute summary counts
   const counts = useMemo(() => {
@@ -409,6 +497,60 @@ export const ProcessingStep: React.FC = () => {
     [cancelItem]
   )
 
+  const handleExportFailedItems = useCallback(async () => {
+    if (failedItems.length === 0) {
+      setFailedExportNotice(
+        qi("processing.failedExportEmpty", "No failed items to export.")
+      )
+      return
+    }
+
+    const text = failedItems
+      .map((item, index) => {
+        const lines = [`#${index + 1}`]
+        if (item.sourceUrl) {
+          lines.push(`URL: ${item.sourceUrl}`)
+        } else if (item.fileName) {
+          lines.push(`File: ${item.fileName}`)
+        } else {
+          lines.push(`Item: ${item.label}`)
+        }
+        lines.push(`ID: ${item.id}`)
+        if (item.error) {
+          lines.push(`Error: ${item.error}`)
+        }
+        return lines.join("\n")
+      })
+      .join("\n\n")
+
+    try {
+      if (
+        typeof navigator === "undefined" ||
+        typeof navigator.clipboard?.writeText !== "function"
+      ) {
+        throw new Error("Clipboard unavailable")
+      }
+      await navigator.clipboard.writeText(text)
+      setFailedExportNotice(
+        qi("processing.failedExportCopied", "Failed list copied.")
+      )
+      return
+    } catch {
+      if (typeof document !== "undefined" && typeof URL !== "undefined") {
+        const blob = new Blob([text], { type: "text/plain" })
+        const url = URL.createObjectURL(blob)
+        const anchor = document.createElement("a")
+        anchor.href = url
+        anchor.download = "quick-ingest-failed-items.txt"
+        anchor.click()
+        URL.revokeObjectURL(url)
+        setFailedExportNotice(
+          qi("processing.failedExportDownloaded", "Failed list downloaded.")
+        )
+      }
+    }
+  }, [failedItems, qi])
+
   return (
     <div className="flex flex-col gap-4 p-4">
       {/* Header */}
@@ -437,6 +579,30 @@ export const ProcessingStep: React.FC = () => {
           style={{ width: `${overallPercent}%` }}
         />
       </div>
+
+      {/* Durable run tracking */}
+      {trackingSummary && (
+        <div
+          className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-text-muted"
+          data-testid="quick-ingest-run-tracking"
+          role="status"
+          aria-live="polite"
+        >
+          <span className="font-medium text-text">{trackingSummary.modeLabel}</span>
+          {trackingSummary.details.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              {trackingSummary.details.map((detail) => (
+                <span
+                  key={detail}
+                  className="rounded border border-border bg-surface px-2 py-0.5"
+                >
+                  {detail}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Descriptive processing banner */}
       {processingState.status === "running" && counts.processing > 0 && (
@@ -544,6 +710,36 @@ export const ProcessingStep: React.FC = () => {
           )}
         </div>
       </div>
+
+      {failedItems.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-danger/20 bg-danger/5 px-3 py-2 text-xs">
+          <div className="min-w-0 text-danger">
+            <span className="font-medium">
+              {failedItems.length === 1
+                ? qi("processing.failedItemsOne", "1 failed item")
+                : qi("processing.failedItemsMany", "{{count}} failed items", {
+                    count: failedItems.length,
+                  })}
+            </span>
+            {failedExportNotice && (
+              <span className="ml-2 text-text-muted">{failedExportNotice}</span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              void handleExportFailedItems()
+            }}
+            className="rounded-md border border-danger/30 px-3 py-1.5 text-xs font-medium text-danger transition hover:bg-danger/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus"
+            aria-label={qi(
+              "processing.exportFailedListAria",
+              "Export failed items list"
+            )}
+          >
+            {qi("processing.exportFailedList", "Export failed list")}
+          </button>
+        </div>
+      )}
 
       {/* Action buttons */}
       <div className="flex items-center justify-end gap-2">

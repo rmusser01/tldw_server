@@ -60,6 +60,7 @@ This section is organized by product surface so you can quickly find the right d
 - [TTS Providers Getting Started](WebUI_Extension/TTS_Getting_Started.md)
 - [TTS Setup Guide (Runbook Index)](WebUI_Extension/TTS-SETUP-GUIDE.md)
 - [PocketTTS Voice Cloning Guide](WebUI_Extension/PocketTTS_Voice_Cloning_Guide.md)
+- [Bulk Conference Playlist Ingest](Bulk_Conference_Playlist_Ingest.md)
 - [EPUB Reader Guide](WebUI_Extension/EPUB_Reader_Guide.md)
 - [Image Generation Setup](WebUI_Extension/Image_Generation_Setup.md)
 

@@ -29,7 +29,10 @@ import {
   extractCompletedIngestJobError,
   extractCompletedIngestJobMediaId,
 } from "@/services/tldw/ingest-job-results"
-import { DOCUMENT_WORKSPACE_PATH } from "@/routes/route-paths"
+import {
+  DOCUMENT_WORKSPACE_PATH,
+  buildMediaCollectionReviewPath,
+} from "@/routes/route-paths"
 import {
   type PersistedWizardQueueItem,
   type QuickIngestSessionLifecycle,
@@ -41,9 +44,12 @@ import { useConnectionStore } from "@/store/connection"
 import { ConnectionPhase } from "@/types/connection"
 import type {
   CommonOptions,
+  ConferenceBatchMetadata,
+  ConferenceItemMetadataOverride,
   DetectedMediaType,
   ItemProgress,
   ItemProgressStatus,
+  PlaylistQueueMetadata,
   PersistedQuickIngestTracking,
   ReattachedQuickIngestJob,
   TypeDefaults,
@@ -54,6 +60,7 @@ import {
   DUPLICATE_SKIP_MESSAGE,
   isDbMessageDuplicate,
 } from "./QuickIngest/constants"
+import { isQuickIngestPlaylistPreflightDetail } from "@/utils/quick-ingest-open"
 
 // ---------------------------------------------------------------------------
 // Props
@@ -74,6 +81,8 @@ type QuickIngestRequestPayload = {
     url: string
     type: QuickIngestEntryType
     defaults?: TypeDefaults
+    playlist?: PlaylistQueueMetadata
+    conferenceOverride?: ConferenceItemMetadataOverride
   }>
   files: Array<{
     id: string
@@ -81,12 +90,14 @@ type QuickIngestRequestPayload = {
     type?: string
     data: number[]
     defaults?: TypeDefaults
+    conferenceOverride?: ConferenceItemMetadataOverride
   }>
   storeRemote: boolean
   processOnly: boolean
   common: CommonOptions
   advancedValues: Record<string, unknown>
   fileDefaults: TypeDefaults
+  conferenceBatchMetadata?: ConferenceBatchMetadata | null
   __quickIngestSessionId?: string
 }
 
@@ -213,6 +224,9 @@ const normalizeWizardResult = (
       item.mediaId ??
       extractCompletedIngestJobMediaId(item.data),
     persisted: item.persisted,
+    collectionItemId: item.collectionItemId ?? null,
+    retryAttempt: item.retryAttempt ?? null,
+    idempotencyKey: item.idempotencyKey ?? null,
     message: isDuplicate
       ? DUPLICATE_SKIP_MESSAGE
       : typeof item.message === "string" ? item.message : undefined,
@@ -297,6 +311,8 @@ const buildPersistedQueueItems = (
     fileSize: item.file?.size ?? item.fileSize,
     mimeType: item.file?.type || item.mimeType,
     validation: item.validation,
+    playlist: item.playlist,
+    conferenceOverride: item.conferenceOverride,
     fileStub:
       item.file || item.fileStub
         ? {
@@ -393,6 +409,9 @@ const buildPersistedReattachSignature = (
   const jobIdToItemId = Object.entries(tracking.jobIdToItemId ?? {})
     .map(([jobId, itemId]) => `${jobId}:${String(itemId || "").trim()}`)
     .sort()
+  const jobIdToCollectionItemId = Object.entries(tracking.jobIdToCollectionItemId ?? {})
+    .map(([jobId, itemId]) => `${jobId}:${String(itemId || "").trim()}`)
+    .sort()
 
   return [
     mode,
@@ -401,6 +420,7 @@ const buildPersistedReattachSignature = (
     jobIds.join(","),
     itemIds.join(","),
     jobIdToItemId.join(","),
+    jobIdToCollectionItemId.join(","),
   ].join("|")
 }
 
@@ -419,6 +439,8 @@ const hydrateQueueItems = (
         fileSize: item.fileSize,
         mimeType: item.mimeType,
         validation: item.validation,
+        playlist: item.playlist,
+        conferenceOverride: item.conferenceOverride,
       }
     }
 
@@ -439,6 +461,8 @@ const hydrateQueueItems = (
         valid: false,
         warnings,
       },
+      playlist: item.playlist,
+      conferenceOverride: item.conferenceOverride,
       fileStub: item.fileStub || {
         key: item.key,
         lastModified: item.lastModified,
@@ -547,8 +571,12 @@ const buildInitialWizardState = (
   customBasePreset: session.customBasePreset,
   presetConfig: session.presetConfig,
   customOptions: session.customOptions,
+  playlistPreflightSeed: isQuickIngestPlaylistPreflightDetail(session.openDetail)
+    ? session.openDetail
+    : null,
   processingState: session.processingState,
   results: session.results,
+  conferenceBatchMetadata: session.conferenceBatchMetadata ?? null,
   isMinimized:
     session.visibility === "hidden" && session.lifecycle === "processing",
 })
@@ -566,8 +594,10 @@ const buildSessionPatchFromWizardState = (
     customBasePreset: state.customBasePreset,
     presetConfig: state.presetConfig,
     customOptions: state.customOptions,
+    conferenceBatchMetadata: state.conferenceBatchMetadata,
     processingState: state.processingState,
     results: state.results,
+    openDetail: state.playlistPreflightSeed,
     badge: {
       queueCount:
         lifecycle === "draft"
@@ -671,6 +701,9 @@ const buildResultsFromReattachedJobs = (
             extractCompletedIngestJobError(job.result) ||
             `Quick ingest ${jobStatus || "failed"}.`,
       mediaId: extractCompletedIngestJobMediaId(job.result),
+      collectionItemId: tracking?.jobIdToCollectionItemId?.[String(job.jobId)] ?? null,
+      retryAttempt: null,
+      idempotencyKey: null,
       title: job.result?.title ?? null,
       data: job.result,
       message: isDuplicate ? DUPLICATE_SKIP_MESSAGE : undefined,
@@ -718,6 +751,7 @@ const buildProgressFromReattachedJobs = (
 
 const buildQuickIngestPayload = async (
   items: WizardQueueItem[],
+  conferenceBatchMetadata: ConferenceBatchMetadata | null,
   options: QuickIngestRequestPayload["common"] & {
     storeRemote: boolean
     reviewBeforeStorage: boolean
@@ -725,7 +759,9 @@ const buildQuickIngestPayload = async (
     typeDefaults: TypeDefaults
   }
 ): Promise<QuickIngestRequestPayload> => {
-  const validItems = items.filter((item) => item.validation.valid)
+  const validItems = items.filter(
+    (item) => item.validation.valid && item.conferenceOverride?.selected !== false
+  )
   const entries = validItems
     .filter((item): item is WizardQueueItem & { url: string } => Boolean(item.url))
     .map((item) => ({
@@ -733,6 +769,8 @@ const buildQuickIngestPayload = async (
       url: item.url,
       type: mapDetectedTypeToEntryType(item.detectedType),
       defaults: buildDefaultsForQueueItem(item, options.typeDefaults),
+      playlist: item.playlist,
+      conferenceOverride: item.conferenceOverride,
     }))
 
   const files = await Promise.all(
@@ -744,6 +782,7 @@ const buildQuickIngestPayload = async (
         type: item.file.type || undefined,
         data: Array.from(new Uint8Array(await item.file.arrayBuffer())),
         defaults: buildDefaultsForQueueItem(item, options.typeDefaults),
+        conferenceOverride: item.conferenceOverride,
       }))
   )
 
@@ -762,6 +801,7 @@ const buildQuickIngestPayload = async (
     },
     advancedValues: options.advancedValues ?? {},
     fileDefaults: options.typeDefaults,
+    conferenceBatchMetadata,
   }
 }
 
@@ -809,7 +849,10 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const runStartedAtRef = useRef<number | null>(null)
   const cancelledSessionIdsRef = useRef<Set<string>>(new Set())
   const validQueueItems = useMemo(
-    () => queueItems.filter((item) => item.validation.valid),
+    () =>
+      queueItems.filter(
+        (item) => item.validation.valid && item.conferenceOverride?.selected !== false
+      ),
     [queueItems]
   )
   const trackedQueueItems = useMemo(
@@ -1211,8 +1254,11 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   const finalizeFailure = useCallback(
     (message: string, outcome: "failed" | "cancelled") => {
+      const trackedEligibleItems = trackedQueueItems.filter(
+        (item) => item.validation.valid && item.conferenceOverride?.selected !== false
+      )
       const fallbackItems =
-        trackedQueueItems.length > 0 ? trackedQueueItems : validQueueItems
+        trackedEligibleItems.length > 0 ? trackedEligibleItems : validQueueItems
       const existingResultIds = new Set(
         resultsRef.current
           .map((result) => String(result.id || "").trim())
@@ -1332,13 +1378,17 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         // Best effort; background proxy handles auth for direct runtimes.
       }
 
-      const requestPayload = await buildQuickIngestPayload(validQueueItems, {
-        ...presetConfig.common,
-        storeRemote: presetConfig.storeRemote,
-        reviewBeforeStorage: presetConfig.reviewBeforeStorage,
-        advancedValues: presetConfig.advancedValues,
-        typeDefaults: presetConfig.typeDefaults,
-      })
+      const requestPayload = await buildQuickIngestPayload(
+        validQueueItems,
+        state.conferenceBatchMetadata,
+        {
+          ...presetConfig.common,
+          storeRemote: presetConfig.storeRemote,
+          reviewBeforeStorage: presetConfig.reviewBeforeStorage,
+          advancedValues: presetConfig.advancedValues,
+          typeDefaults: presetConfig.typeDefaults,
+        }
+      )
 
       const startAck = await startQuickIngestSession(requestPayload)
       if (!startAck?.ok || !startAck?.sessionId) {
@@ -1417,6 +1467,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     presetConfig.reviewBeforeStorage,
     presetConfig.storeRemote,
     presetConfig.typeDefaults,
+    state.conferenceBatchMetadata,
     markProcessingTracking,
     validQueueItems,
   ])
@@ -1544,6 +1595,15 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     [navigate, onClose]
   )
 
+  const handleOpenCollection = useCallback(
+    (collectionId: string) => {
+      const collectionPath = buildMediaCollectionReviewPath(collectionId)
+      onClose()
+      navigate(collectionPath)
+    },
+    [navigate, onClose]
+  )
+
   // Render the current step
   const stepContent = useMemo(() => {
     switch (currentStep) {
@@ -1581,6 +1641,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
             onOpenMedia={handleOpenMedia}
             onSearchKnowledge={handleSearchKnowledge}
             onOpenWorkspace={handleOpenWorkspace}
+            onOpenCollection={handleOpenCollection}
           />
         )
       default:
@@ -1590,6 +1651,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     connectionRecoveryMessage,
     currentStep,
     handleOpenMedia,
+    handleOpenCollection,
     handleOpenWorkspace,
     handleQuickProcess,
     handleRetryConnection,

@@ -19,14 +19,32 @@ import {
   pollSingleIngestJob,
 } from "@/services/tldw/ingest-jobs-orchestrator";
 import {
+  completedIngestJobIndicatesSkipped,
+  extractCompletedIngestJobMediaId,
+} from "@/services/tldw/ingest-job-results";
+import {
   normalizePersistentAddResponse,
   shouldFallbackToPersistentAdd,
 } from "@/services/tldw/quick-ingest-fallback";
-import type { PersistedQuickIngestTracking } from "@/components/Common/QuickIngest/types";
+import type {
+  ConferenceBatchMetadata,
+  ConferenceItemMetadataOverride,
+  PersistedQuickIngestTracking,
+  PlaylistQueueMetadata,
+} from "@/components/Common/QuickIngest/types";
 import {
   DUPLICATE_SKIP_MESSAGE,
   isDbMessageDuplicate,
 } from "@/components/Common/QuickIngest/constants";
+import {
+  buildConferenceCollectionCreatePayload,
+  buildConferenceCollectionItemPayload,
+  normalizeMediaCollectionItem,
+  normalizeMediaCollectionResponse,
+  resolveConferenceDuplicatePolicy,
+  type ApiMediaCollection,
+  type ApiMediaCollectionItem,
+} from "@/services/tldw/conference-collections";
 
 type TypeDefaults = {
   audio?: { language?: string; diarize?: boolean };
@@ -40,6 +58,8 @@ type QuickIngestEntry = {
   type: "auto" | "html" | "pdf" | "document" | "audio" | "video";
   defaults?: TypeDefaults;
   keywords?: string;
+  playlist?: PlaylistQueueMetadata;
+  conferenceOverride?: ConferenceItemMetadataOverride;
   audio?: { language?: string; diarize?: boolean };
   document?: { ocr?: boolean };
   video?: { captions?: boolean };
@@ -51,6 +71,7 @@ type QuickIngestFilePayload = {
   type?: string;
   data?: number[] | Uint8Array | ArrayBuffer;
   defaults?: TypeDefaults;
+  conferenceOverride?: ConferenceItemMetadataOverride;
 };
 
 type QuickIngestBatchInput = {
@@ -68,6 +89,7 @@ type QuickIngestBatchInput = {
   };
   advancedValues?: Record<string, any>;
   fileDefaults?: TypeDefaults;
+  conferenceBatchMetadata?: ConferenceBatchMetadata | null;
   chunkingTemplateName?: string;
   autoApplyTemplate?: boolean;
   __quickIngestSessionId?: string;
@@ -77,7 +99,7 @@ type QuickIngestBatchInput = {
 type QuickIngestBatchResult = {
   id: string;
   status: "ok" | "error";
-  outcome?: "skipped";
+  outcome?: "skipped" | "submit_failed" | "failed" | "cancelled";
   url?: string;
   fileName?: string;
   type: string;
@@ -85,6 +107,9 @@ type QuickIngestBatchResult = {
   error?: string;
   message?: string;
   persisted?: boolean;
+  collectionItemId?: string | number | null;
+  retryAttempt?: number | null;
+  idempotencyKey?: string | null;
 };
 
 type QuickIngestBatchResponse = {
@@ -171,6 +196,16 @@ const buildJobIdToItemId = (
   sourceItemId: string,
 ): Record<string, string> =>
   Object.fromEntries(jobIds.map((jobId) => [String(jobId), sourceItemId]));
+
+const buildJobIdToCollectionItemId = (
+  jobIds: number[],
+  planned: PlannedConferenceCollectionItem | undefined,
+): Record<string, string> | undefined => {
+  if (!planned) return undefined;
+  return Object.fromEntries(
+    jobIds.map((jobId) => [String(jobId), String(planned.itemId)]),
+  );
+};
 
 const ensureDirectSessionTracker = (
   sessionId: string | undefined,
@@ -524,11 +559,137 @@ const processWebScrape = async ({
   });
 };
 
+type PlannedConferenceCollectionItem = {
+  collectionId: number;
+  itemId: number;
+  idempotencyKey?: string | null;
+};
+
+type PlannedConferenceCollection = {
+  collectionId: number;
+  itemsByEntryId: Map<string, PlannedConferenceCollectionItem>;
+};
+
+const hasUsableConferenceMetadata = (
+  metadata: QuickIngestBatchInput["conferenceBatchMetadata"],
+): metadata is ConferenceBatchMetadata =>
+  Boolean(
+    metadata &&
+      typeof metadata === "object" &&
+      (
+        String(metadata.collectionName || "").trim() ||
+        String(metadata.conferenceName || "").trim() ||
+        String(metadata.sourcePlaylistUrl || "").trim() ||
+        (Array.isArray(metadata.sharedTags) && metadata.sharedTags.length > 0)
+      ),
+  );
+
+const getConferenceFallbackName = (entries: QuickIngestEntry[]): string | null => {
+  for (const entry of entries) {
+    const title = String(entry?.playlist?.playlistTitle || "").trim();
+    if (title) return title;
+  }
+  return null;
+};
+
+const createPlannedConferenceCollection = async (
+  input: QuickIngestBatchInput,
+  entries: QuickIngestEntry[],
+): Promise<PlannedConferenceCollection | null> => {
+  if (!hasUsableConferenceMetadata(input.conferenceBatchMetadata)) return null;
+  const selectedEntries = entries.filter(
+    (entry) =>
+      String(entry?.url || "").trim() &&
+      entry?.conferenceOverride?.selected !== false,
+  );
+  if (selectedEntries.length === 0) return null;
+
+  const collection = normalizeMediaCollectionResponse(
+    await bgRequest<ApiMediaCollection>({
+      path: "/api/v1/media/collections",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: buildConferenceCollectionCreatePayload(
+        input.conferenceBatchMetadata,
+        getConferenceFallbackName(selectedEntries),
+      ),
+      timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
+      ...DIRECT_QUICK_INGEST_TRANSPORT,
+    }),
+  );
+
+  const itemsByEntryId = new Map<string, PlannedConferenceCollectionItem>();
+  for (const entry of selectedEntries) {
+    const item = normalizeMediaCollectionItem(
+      await bgRequest<ApiMediaCollectionItem>({
+        path: `/api/v1/media/collections/${encodeURIComponent(String(collection.id))}/items`,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: buildConferenceCollectionItemPayload(input.conferenceBatchMetadata, {
+          id: entry.id,
+          url: entry.url,
+          playlist: entry.playlist,
+          conferenceOverride: entry.conferenceOverride,
+        }),
+        timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
+        ...DIRECT_QUICK_INGEST_TRANSPORT,
+      }),
+    );
+    itemsByEntryId.set(entry.id, {
+      collectionId: collection.id,
+      itemId: item.id,
+      idempotencyKey: item.idempotencyKey,
+    });
+  }
+
+  return {
+    collectionId: collection.id,
+    itemsByEntryId,
+  };
+};
+
+const patchConferenceCollectionItem = async (
+  planned: PlannedConferenceCollectionItem | undefined,
+  payload: Record<string, unknown>,
+): Promise<void> => {
+  if (!planned) return;
+  await bgRequest<ApiMediaCollectionItem>({
+    path: `/api/v1/media/collections/${encodeURIComponent(
+      String(planned.collectionId),
+    )}/items/${encodeURIComponent(String(planned.itemId))}`,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: payload,
+    timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
+    ...DIRECT_QUICK_INGEST_TRANSPORT,
+  }).catch(() => {
+    // Collection status updates should not hide the ingest result itself.
+  });
+};
+
+const applyPlannedConferenceFields = (
+  fields: Record<string, any>,
+  planned: PlannedConferenceCollectionItem | undefined,
+) => {
+  if (!planned) return;
+  fields.media_collection_id = planned.collectionId;
+  fields.media_collection_item_id = planned.itemId;
+  fields.planned_item_ids = [String(planned.itemId)];
+  if (planned.idempotencyKey) {
+    fields.idempotency_key = planned.idempotencyKey;
+    fields.idempotency_keys = [planned.idempotencyKey];
+  }
+};
+
 const runDirectQuickIngestBatch = async (
   input: QuickIngestBatchInput,
 ): Promise<QuickIngestBatchResponse> => {
-  const entries = Array.isArray(input.entries) ? input.entries : [];
-  const files = Array.isArray(input.files) ? input.files : [];
+  const entries = Array.isArray(input.entries)
+    ? input.entries.filter((entry) => entry?.conferenceOverride?.selected !== false)
+    : [];
+  const files = Array.isArray(input.files)
+    ? input.files.filter((file) => file?.conferenceOverride?.selected !== false)
+    : [];
   const fileDefaults =
     input.fileDefaults && typeof input.fileDefaults === "object"
       ? input.fileDefaults
@@ -539,6 +700,14 @@ const runDirectQuickIngestBatch = async (
     String(input.__quickIngestSessionId || "").trim() || undefined;
 
   const out: QuickIngestBatchResult[] = [];
+  let conferencePlan: PlannedConferenceCollection | null = null;
+  if (shouldStoreRemote) {
+    try {
+      conferencePlan = await createPlannedConferenceCollection(input, entries);
+    } catch (error) {
+      console.warn("[tldw] Conference collection planning failed", error);
+    }
+  }
 
   const pollIngestJobStatus = async (
     jobId: number,
@@ -595,8 +764,43 @@ const runDirectQuickIngestBatch = async (
       const resolvedType =
         explicitType === "auto" ? inferIngestTypeFromUrl(url) : explicitType;
 
+      const plannedConferenceItem =
+        conferencePlan?.itemsByEntryId.get(entry.id);
+      const duplicatePolicyResolution = resolveConferenceDuplicatePolicy(
+        entry.playlist?.duplicateStatus,
+        entry.conferenceOverride?.duplicatePolicy,
+      );
+      let jobSubmitted = false;
+      let localProcessingAttempted = false;
+      let latestJobId: number | undefined;
       try {
+        if (
+          shouldStoreRemote &&
+          plannedConferenceItem &&
+          !duplicatePolicyResolution.shouldSubmitJob
+        ) {
+          await patchConferenceCollectionItem(plannedConferenceItem, {
+            status: duplicatePolicyResolution.plannedStatus,
+            retry_count: 0,
+          });
+          out.push({
+            id: entry.id,
+            status: "ok",
+            outcome: "skipped",
+            url,
+            type: resolvedType,
+            collectionItemId: plannedConferenceItem.itemId,
+            retryAttempt: 0,
+            idempotencyKey: plannedConferenceItem.idempotencyKey ?? null,
+            message: DUPLICATE_SKIP_MESSAGE,
+            persisted: false,
+          });
+          continue;
+        }
+
         let data: unknown;
+        let resultOutcome: QuickIngestBatchResult["outcome"];
+        let resultMessage: string | undefined;
         if (shouldStoreRemote) {
           const fields = buildFields({
             rawType: resolvedType,
@@ -610,6 +814,10 @@ const runDirectQuickIngestBatch = async (
             chunkingTemplateName: input.chunkingTemplateName,
             autoApplyTemplate: input.autoApplyTemplate,
           });
+          if (duplicatePolicyResolution.forceOverwrite) {
+            fields.overwrite_existing = true;
+          }
+          applyPlannedConferenceFields(fields, plannedConferenceItem);
           fields.urls = [url];
           try {
             const submitData = await bgUpload<any>({
@@ -624,6 +832,13 @@ const runDirectQuickIngestBatch = async (
             if (!batchId || jobIds.length === 0) {
               throw new Error("Ingest job submission returned no job IDs.");
             }
+            const firstJobId = jobIds[0];
+            jobSubmitted = true;
+            latestJobId = firstJobId;
+            await patchConferenceCollectionItem(plannedConferenceItem, {
+              status: "processing",
+              latest_job_id: String(firstJobId),
+            });
             const directTracker = ensureDirectSessionTracker(directSessionId);
             directTracker?.trackJobs(batchId, jobIds, { sourceId: entry.id });
             input.onTrackingMetadata?.({
@@ -631,13 +846,23 @@ const runDirectQuickIngestBatch = async (
               sessionId: directSessionId,
               batchId,
               batchIds: [batchId],
+              collectionId: plannedConferenceItem
+                ? String(plannedConferenceItem.collectionId)
+                : undefined,
+              plannedItemIds: plannedConferenceItem
+                ? [String(plannedConferenceItem.itemId)]
+                : undefined,
               jobIds,
               submittedItemIds: [entry.id],
               itemIds: [entry.id],
               jobIdToItemId: buildJobIdToItemId(jobIds, entry.id),
+              jobIdToCollectionItemId: buildJobIdToCollectionItemId(
+                jobIds,
+                plannedConferenceItem,
+              ),
+              durableMode: plannedConferenceItem ? "durable_collection" : undefined,
               startedAt: Date.now(),
             });
-            const firstJobId = jobIds[0];
             const pollResult = await pollIngestJobStatus(
               firstJobId,
               DIRECT_INGEST_TIMEOUT_MS,
@@ -646,13 +871,48 @@ const runDirectQuickIngestBatch = async (
               throw new Error(String(pollResult.error || "Ingest failed"));
             }
             data = pollResult.data;
+            const completedDuplicate = completedIngestJobIndicatesSkipped(
+              pollResult.data,
+            );
+            if (completedDuplicate) {
+              resultOutcome = "skipped";
+              resultMessage = DUPLICATE_SKIP_MESSAGE;
+            }
+            await patchConferenceCollectionItem(plannedConferenceItem, {
+              status: completedDuplicate ? "skipped_existing" : "completed",
+              latest_job_id: String(latestJobId),
+              media_id: extractCompletedIngestJobMediaId(pollResult.data),
+            });
           } catch (error) {
             if (!shouldFallbackToPersistentAdd(error)) {
               throw error;
             }
+            await patchConferenceCollectionItem(plannedConferenceItem, {
+              status: jobSubmitted ? "failed" : "submit_failed",
+              latest_job_id:
+                typeof latestJobId === "number" ? String(latestJobId) : undefined,
+              error_summary:
+                error instanceof Error ? error.message : String(error || "Submit failed"),
+            });
+            if (typeof latestJobId === "number") {
+              fields.media_ingest_job_id = String(latestJobId);
+            }
+            localProcessingAttempted = true;
             data = await submitPersistentAdd({ fields });
+            const fallbackDuplicate = completedIngestJobIndicatesSkipped(data);
+            if (fallbackDuplicate) {
+              resultOutcome = "skipped";
+              resultMessage = DUPLICATE_SKIP_MESSAGE;
+            }
+            await patchConferenceCollectionItem(plannedConferenceItem, {
+              status: fallbackDuplicate ? "skipped_existing" : "completed",
+              latest_job_id:
+                typeof latestJobId === "number" ? String(latestJobId) : undefined,
+              media_id: extractCompletedIngestJobMediaId(data),
+            });
           }
         } else if (resolvedType === "html") {
+          localProcessingAttempted = true;
           data = await processWebScrape({
             url,
             entry,
@@ -676,6 +936,7 @@ const runDirectQuickIngestBatch = async (
             persist: false,
           });
           fields.urls = [url];
+          localProcessingAttempted = true;
           data = await bgUpload<any>({
             path: getProcessPathForType(resolvedType),
             method: "POST",
@@ -688,21 +949,41 @@ const runDirectQuickIngestBatch = async (
         out.push({
           id: entry.id,
           status: "ok",
+          outcome: resultOutcome,
           url,
           type: resolvedType,
           data,
+          message: resultMessage,
           persisted: false,
+          collectionItemId: plannedConferenceItem?.itemId ?? null,
+          retryAttempt: plannedConferenceItem ? 0 : null,
+          idempotencyKey: plannedConferenceItem?.idempotencyKey ?? null,
         });
       } catch (error) {
+        const outcome =
+          jobSubmitted || localProcessingAttempted ? "failed" : "submit_failed";
+        await patchConferenceCollectionItem(plannedConferenceItem, {
+          status: outcome,
+          latest_job_id:
+            typeof latestJobId === "number" ? String(latestJobId) : undefined,
+          error_summary:
+            error instanceof Error
+              ? error.message
+              : String(error || "Request failed"),
+        });
         out.push({
           id: entry.id,
           status: "error",
+          outcome,
           url,
           type: resolvedType,
           error:
             error instanceof Error
               ? error.message
               : String(error || "Request failed"),
+          collectionItemId: plannedConferenceItem?.itemId ?? null,
+          retryAttempt: plannedConferenceItem ? 0 : null,
+          idempotencyKey: plannedConferenceItem?.idempotencyKey ?? null,
         });
       }
     }

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   cancelQuickIngestSession: vi.fn(),
   reattachQuickIngestSession: vi.fn(),
   checkConnection: vi.fn(),
+  navigate: vi.fn(),
   runtimeListeners: [] as Array<(message: any) => void>,
 }))
 
@@ -92,11 +93,13 @@ vi.mock("antd", () => ({
 
 vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router-dom")>()
-  return { ...actual, useNavigate: () => vi.fn() }
+  return { ...actual, useNavigate: () => mocks.navigate }
 })
 
 vi.mock("@/routes/route-paths", () => ({
   DOCUMENT_WORKSPACE_PATH: "/document-workspace",
+  buildMediaCollectionReviewPath: (collectionId: string | number) =>
+    `/media-collections/${collectionId}`,
 }))
 
 vi.mock("@/store/connection", () => ({
@@ -172,7 +175,8 @@ vi.mock("@/components/Common/QuickIngest/AddContentStep", async () => {
   >("@/components/Common/QuickIngest/IngestWizardContext")
   return {
     AddContentStep: ({ onQuickProcess }: { onQuickProcess?: () => void }) => {
-      const { state, setQueueItems } = actual.useIngestWizard()
+      const context = actual.useIngestWizard() as any
+      const { state, setQueueItems } = context
       return (
         <div>
           <button
@@ -191,6 +195,43 @@ vi.mock("@/components/Common/QuickIngest/AddContentStep", async () => {
             }}
           >
             Queue And Process
+          </button>
+          <button
+            onClick={() => {
+              context.setConferenceBatchMetadata({
+                collectionName: "Strange Loop 2012",
+                conferenceName: "Strange Loop",
+                eventYear: "2012",
+                sharedTags: ["conference", "clojure"],
+                sourcePlaylistUrl: "https://youtube.com/playlist?list=PL-conf",
+              })
+              setQueueItems([
+                {
+                  id: "conference-talk-1",
+                  url: "https://youtube.com/watch?v=talk-1",
+                  detectedType: "video",
+                  icon: "Film",
+                  fileSize: 0,
+                  validation: { valid: true },
+                  playlist: {
+                    playlistId: "PL-conf",
+                    playlistTitle: "Strange Loop 2012",
+                    ordinal: 1,
+                    normalizedSourceId: "youtube:video:talk-1",
+                    duplicateStatus: "new",
+                  },
+                  conferenceOverride: {
+                    selected: true,
+                    title: "Simplicity Matters",
+                    speaker: "Rich Hickey",
+                    tags: ["keynote"],
+                  },
+                },
+              ])
+              onQuickProcess?.()
+            }}
+          >
+            Queue Conference And Process
           </button>
           {state.queueItems.map((item) => (
             <div key={item.id} data-testid={`queued-item-${item.id}`}>
@@ -232,7 +273,11 @@ vi.mock("@/components/Common/QuickIngest/WizardResultsStep", async () => {
     typeof import("@/components/Common/QuickIngest/IngestWizardContext")
   >("@/components/Common/QuickIngest/IngestWizardContext")
   return {
-    WizardResultsStep: () => {
+    WizardResultsStep: ({
+      onOpenCollection,
+    }: {
+      onOpenCollection?: (collectionId: string) => void
+    }) => {
       const { state } = actual.useIngestWizard()
       return (
         <div data-testid="wizard-results">
@@ -242,6 +287,14 @@ vi.mock("@/components/Common/QuickIngest/WizardResultsStep", async () => {
               {item.id}:{item.outcome}:{item.message || ""}
             </div>
           ))}
+          {onOpenCollection ? (
+            <button
+              type="button"
+              onClick={() => onOpenCollection("7")}
+            >
+              Open collection
+            </button>
+          ) : null}
         </div>
       )
     },
@@ -272,6 +325,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     mocks.cancelQuickIngestSession.mockReset()
     mocks.reattachQuickIngestSession.mockReset()
     mocks.checkConnection.mockReset()
+    mocks.navigate.mockReset()
     mocks.cancelQuickIngestSession.mockResolvedValue({ ok: true })
     useQuickIngestSessionStore.setState({
       session: null,
@@ -340,6 +394,66 @@ describe("QuickIngestWizardModal session runtime", () => {
     await waitFor(() => {
       expect(screen.getByTestId("wizard-results")).toHaveTextContent("complete:1")
     })
+  })
+
+  it("submits conference batch metadata and item overrides through the session payload", async () => {
+    const user = userEvent.setup()
+    useQuickIngestSessionStore.getState().createDraftSession()
+    mocks.startQuickIngestSession.mockResolvedValue({
+      ok: true,
+      sessionId: "qi-direct-conference",
+    })
+    mocks.submitQuickIngestBatch.mockResolvedValue({
+      ok: true,
+      results: [
+        {
+          id: "conference-talk-1",
+          status: "ok",
+          url: "https://youtube.com/watch?v=talk-1",
+          type: "video",
+        },
+      ],
+    })
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Queue Conference And Process" })
+    )
+
+    await waitFor(() => {
+      expect(mocks.submitQuickIngestBatch).toHaveBeenCalledTimes(1)
+    })
+    expect(mocks.submitQuickIngestBatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        __quickIngestSessionId: "qi-direct-conference",
+        conferenceBatchMetadata: {
+          collectionName: "Strange Loop 2012",
+          conferenceName: "Strange Loop",
+          eventYear: "2012",
+          sharedTags: ["conference", "clojure"],
+          sourcePlaylistUrl: "https://youtube.com/playlist?list=PL-conf",
+        },
+        entries: [
+          expect.objectContaining({
+            id: "conference-talk-1",
+            url: "https://youtube.com/watch?v=talk-1",
+            type: "video",
+            playlist: expect.objectContaining({
+              playlistId: "PL-conf",
+              ordinal: 1,
+              normalizedSourceId: "youtube:video:talk-1",
+            }),
+            conferenceOverride: expect.objectContaining({
+              selected: true,
+              title: "Simplicity Matters",
+              speaker: "Rich Hickey",
+              tags: ["keynote"],
+            }),
+          }),
+        ],
+      })
+    )
   })
 
   it("does not pre-seed direct tracking item identities before backend submissions are acknowledged", async () => {
@@ -432,9 +546,13 @@ describe("QuickIngestWizardModal session runtime", () => {
         batchId: "batch-77",
         batchIds: ["batch-77"],
         jobIds: [77],
+        collectionId: "7",
+        plannedItemIds: ["11"],
         itemIds: ["queued-url-1"],
         submittedItemIds: ["queued-url-1"],
         jobIdToItemId: { "77": "queued-url-1" },
+        jobIdToCollectionItemId: { "77": "11" },
+        durableMode: "durable_collection",
         startedAt: Date.now(),
       })
       return new Promise(() => {})
@@ -469,6 +587,10 @@ describe("QuickIngestWizardModal session runtime", () => {
           sessionId: "qi-direct-late-tracking",
           batchIds: ["batch-77"],
           jobIds: [77],
+          collectionId: "7",
+          plannedItemIds: ["11"],
+          jobIdToCollectionItemId: { "77": "11" },
+          durableMode: "durable_collection",
         })
       )
     })
@@ -1188,6 +1310,48 @@ describe("QuickIngestWizardModal session runtime", () => {
           }),
         ])
       )
+    })
+  })
+
+  it("opens durable conference collections from terminal results", async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    useQuickIngestSessionStore.getState().upsertSession({
+      ...createEmptyQuickIngestSession(),
+      lifecycle: "completed",
+      currentStep: 5,
+      highestStep: 5,
+      processingState: {
+        status: "complete",
+        perItemProgress: [],
+        elapsed: 7,
+        estimatedRemaining: 0,
+      },
+      results: [
+        {
+          id: "conference-talk-1",
+          status: "ok",
+          url: "https://youtube.com/watch?v=talk-1",
+          type: "video",
+          mediaId: "101",
+        } as any,
+      ],
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-conference",
+        collectionId: "7",
+        durableMode: "durable_collection",
+        startedAt: 1234,
+      } as any,
+    })
+
+    render(<QuickIngestWizardModal open onClose={onClose} />)
+
+    await user.click(screen.getByRole("button", { name: "Open collection" }))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    await waitFor(() => {
+      expect(mocks.navigate).toHaveBeenCalledWith("/media-collections/7")
     })
   })
 

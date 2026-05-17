@@ -23,7 +23,11 @@ import { useMcpTools } from "@/hooks/useMcpTools"
 import { browser } from "wxt/browser"
 import { useStorage } from "@plasmohq/storage/hook"
 import { fetchChatModels } from "@/services/tldw-server"
-import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
+import {
+  buildQuickIngestOpenDetailFromUrl,
+  requestQuickIngestOpen,
+  type QuickIngestOpenDetail
+} from "@/utils/quick-ingest-open"
 import type { ToolChoice } from "@/store/option"
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
 import type { ConversationContextComposition } from "@/types/conversation-context"
@@ -95,6 +99,8 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   >(undefined)
   const moreBtnRef = React.useRef<HTMLButtonElement>(null)
   const { capabilities } = useServerCapabilities()
+  const [activePlaylistDetail, setActivePlaylistDetail] =
+    React.useState<QuickIngestOpenDetail | null>(null)
   const {
     hasMcp,
     healthState: mcpHealthState,
@@ -247,8 +253,56 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     setSystemPromptOverride(undefined)
   }, [selectedSystemPrompt])
 
-  const openQuickIngest = () => {
-    requestQuickIngestOpen()
+  const playlistImportEnabled =
+    Boolean(isConnected) && Boolean(capabilities?.hasMediaPlaylistPreflight)
+
+  const resolveActivePlaylistDetail =
+    React.useCallback(async (): Promise<QuickIngestOpenDetail | null> => {
+      if (!playlistImportEnabled) return null
+      try {
+        const tabs = await browser.tabs?.query({
+          active: true,
+          currentWindow: true
+        })
+        const activeTab = tabs?.find(
+          (tab) => typeof tab.url === "string" && tab.url.trim().length > 0
+        )
+        return activeTab?.url ? buildQuickIngestOpenDetailFromUrl(activeTab.url) : null
+      } catch {
+        return null
+      }
+    }, [playlistImportEnabled])
+
+  React.useEffect(() => {
+    let cancelled = false
+
+    if (!moreOpen || !playlistImportEnabled) {
+      setActivePlaylistDetail(null)
+      return
+    }
+
+    void resolveActivePlaylistDetail().then((detail) => {
+      if (!cancelled) {
+        setActivePlaylistDetail(detail)
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [moreOpen, playlistImportEnabled, resolveActivePlaylistDetail])
+
+  const quickIngestLabel =
+    playlistImportEnabled && activePlaylistDetail
+      ? t("sidepanel:controlRow.importPlaylist", "Import playlist to tldw")
+      : t("sidepanel:controlRow.quickIngest", "Quick Ingest")
+
+  const openQuickIngest = async () => {
+    const detail =
+      playlistImportEnabled
+        ? (await resolveActivePlaylistDetail()) ?? activePlaylistDetail
+        : null
+    requestQuickIngestOpen(detail ?? undefined)
     setMoreOpen(false)
     requestAnimationFrame(() => moreBtnRef.current?.focus())
   }
@@ -638,13 +692,15 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
       </div>
       <button
         type="button"
-        onClick={openQuickIngest}
+        onClick={() => {
+          void openQuickIngest()
+        }}
         data-testid="chat-quick-ingest"
         className="w-full text-left text-sm px-3 py-2 rounded flex items-center gap-2 hover:bg-surface2"
-        title={t("sidepanel:controlRow.quickIngest", "Quick Ingest")}
+        title={quickIngestLabel}
       >
         <UploadCloud className="size-4 text-text-subtle" />
-        {t("sidepanel:controlRow.quickIngest", "Quick Ingest")}
+        {quickIngestLabel}
       </button>
       <button
         type="button"

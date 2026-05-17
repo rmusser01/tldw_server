@@ -23,6 +23,8 @@ export const SOURCES_PATH = "/sources"
 export const SOURCES_NEW_PATH = "/sources/new"
 export const SOURCES_DETAIL_PATH = "/sources/:sourceId"
 export const ADMIN_SOURCES_PATH = "/admin/sources"
+export const MEDIA_COLLECTIONS_PATH = "/media-collections"
+export const MEDIA_COLLECTION_REVIEW_PATH = `${MEDIA_COLLECTIONS_PATH}/:collectionId`
 
 export const VIEWPORT_CONSTRAINED_PATHS = [
   CHAT_WORKSPACE_PATH,
@@ -114,3 +116,7 @@ export const buildChatThreadPath = (
   const encoded = params.toString()
   return encoded ? `${CHAT_PATH}?${encoded}` : CHAT_PATH
 }
+
+export const buildMediaCollectionReviewPath = (
+  collectionId: string | number
+): string => `${MEDIA_COLLECTIONS_PATH}/${encodeURIComponent(String(collectionId))}`

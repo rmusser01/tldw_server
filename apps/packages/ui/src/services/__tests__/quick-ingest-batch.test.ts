@@ -1134,6 +1134,402 @@ describe("submitQuickIngestBatch", () => {
     })
   })
 
+  it("creates planned conference collection items before direct job submission", async () => {
+    const onTrackingMetadata = vi.fn()
+
+    mocks.bgUpload
+      .mockResolvedValueOnce({
+        batch_id: "batch-talk-1",
+        jobs: [{ id: 501 }]
+      })
+      .mockResolvedValueOnce({
+        batch_id: "batch-talk-2",
+        jobs: [{ id: 502 }]
+      })
+    mocks.bgRequest.mockImplementation(async (request: { path?: string; body?: any }) => {
+      const path = String(request?.path || "")
+      if (path === "/api/v1/media/collections") {
+        return {
+          id: 7,
+          name: "Strange Loop 2012",
+          kind: "conference",
+          source_url: "https://youtube.com/playlist?list=PL-conf",
+          metadata: request.body?.metadata || {},
+          default_tags: request.body?.default_tags || [],
+          created_at: "2026-05-01T00:00:00Z",
+          updated_at: "2026-05-01T00:00:00Z",
+          items: []
+        }
+      }
+      if (path === "/api/v1/media/collections/7/items") {
+        const ordinal = Number(request.body?.ordinal || 0)
+        return {
+          id: ordinal === 1 ? 11 : 12,
+          collection_id: 7,
+          ordinal,
+          source_url: request.body?.source_url,
+          normalized_source_id: request.body?.normalized_source_id,
+          source_kind: request.body?.source_kind,
+          title: request.body?.title,
+          speaker: request.body?.speaker,
+          duplicate_status: request.body?.duplicate_status || "new",
+          status: "planned",
+          retry_count: 0,
+          idempotency_key: `conference-7-${ordinal}`,
+          warnings: [],
+          metadata: request.body?.metadata || {},
+          tags: request.body?.tags || [],
+          created_at: "2026-05-01T00:00:00Z",
+          updated_at: "2026-05-01T00:00:00Z"
+        }
+      }
+      if (path === "/api/v1/media/ingest/jobs/501" || path === "/api/v1/media/ingest/jobs/502") {
+        return {
+          ok: true,
+          data: {
+            status: "completed",
+            result: { media_id: path.endsWith("501") ? 901 : 902 }
+          }
+        }
+      }
+      if (path === "/api/v1/media/collections/7/items/11" || path === "/api/v1/media/collections/7/items/12") {
+        return {
+          id: path.endsWith("/11") ? 11 : 12,
+          collection_id: 7,
+          ordinal: path.endsWith("/11") ? 1 : 2,
+          source_url: request.body?.source_url || "https://youtube.com/watch?v=talk",
+          duplicate_status: "new",
+          status: request.body?.status || "processing",
+          retry_count: 0,
+          warnings: [],
+          metadata: {},
+          tags: [],
+          created_at: "2026-05-01T00:00:00Z",
+          updated_at: "2026-05-01T00:00:00Z"
+        }
+      }
+      throw new Error(`Unexpected bgRequest path: ${path}`)
+    })
+
+    await submitQuickIngestBatch({
+      entries: [
+        {
+          id: "talk-1",
+          url: "https://youtube.com/watch?v=talk-1",
+          type: "video",
+          playlist: {
+            playlistId: "PL-conf",
+            playlistTitle: "Strange Loop 2012",
+            ordinal: 1,
+            normalizedSourceId: "youtube:video:talk-1",
+            duplicateStatus: "new"
+          },
+          conferenceOverride: {
+            selected: true,
+            title: "Simplicity Matters",
+            speaker: "Rich Hickey",
+            tags: ["keynote"]
+          }
+        },
+        {
+          id: "talk-2",
+          url: "https://youtube.com/watch?v=talk-2",
+          type: "video",
+          playlist: {
+            playlistId: "PL-conf",
+            playlistTitle: "Strange Loop 2012",
+            ordinal: 2,
+            normalizedSourceId: "youtube:video:talk-2",
+            duplicateStatus: "new"
+          },
+          conferenceOverride: {
+            selected: true,
+            speaker: "Alex Miller"
+          }
+        }
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      conferenceBatchMetadata: {
+        collectionName: "Strange Loop 2012",
+        conferenceName: "Strange Loop",
+        eventYear: "2012",
+        sharedTags: ["conference", "clojure"],
+        sourcePlaylistUrl: "https://youtube.com/playlist?list=PL-conf"
+      },
+      common: {
+        perform_analysis: true,
+        perform_chunking: false,
+        overwrite_existing: false
+      },
+      advancedValues: {},
+      __quickIngestSessionId: "qi-direct-conference-run",
+      onTrackingMetadata
+    } as any)
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/collections",
+        method: "POST",
+        body: expect.objectContaining({
+          name: "Strange Loop 2012",
+          kind: "conference",
+          source_url: "https://youtube.com/playlist?list=PL-conf",
+          metadata: expect.objectContaining({
+            conference_name: "Strange Loop",
+            event_year: "2012",
+            source_playlist_url: "https://youtube.com/playlist?list=PL-conf"
+          }),
+          default_tags: ["conference", "clojure"]
+        })
+      })
+    )
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/collections/7/items",
+        method: "POST",
+        body: expect.objectContaining({
+          ordinal: 1,
+          source_url: "https://youtube.com/watch?v=talk-1",
+          normalized_source_id: "youtube:video:talk-1",
+          title: "Simplicity Matters",
+          speaker: "Rich Hickey",
+          tags: ["conference", "clojure", "keynote"]
+        })
+      })
+    )
+    expect(mocks.bgUpload).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        fields: expect.objectContaining({
+          media_collection_id: 7,
+          media_collection_item_id: 11,
+          idempotency_key: "conference-7-1"
+        })
+      })
+    )
+    expect(onTrackingMetadata).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        mode: "webui-direct",
+        sessionId: "qi-direct-conference-run",
+        batchId: "batch-talk-1",
+        collectionId: "7",
+        plannedItemIds: ["11"],
+        jobIdToCollectionItemId: {
+          "501": "11"
+        },
+        durableMode: "durable_collection"
+      })
+    )
+  })
+
+  it("skips direct ingest submission for existing conference items when policy includes existing", async () => {
+    mocks.bgRequest.mockImplementation(async (request: { path?: string; body?: any }) => {
+      const path = String(request?.path || "")
+      if (path === "/api/v1/media/collections") {
+        return {
+          id: 9,
+          name: "Conference Batch",
+          kind: "conference",
+          metadata: {},
+          default_tags: [],
+          created_at: "2026-05-01T00:00:00Z",
+          updated_at: "2026-05-01T00:00:00Z",
+          items: []
+        }
+      }
+      if (path === "/api/v1/media/collections/9/items") {
+        return {
+          id: 91,
+          collection_id: 9,
+          ordinal: 3,
+          source_url: request.body?.source_url,
+          duplicate_status: request.body?.duplicate_status,
+          status: request.body?.status,
+          retry_count: 0,
+          idempotency_key: "conference-9-3",
+          warnings: [],
+          metadata: request.body?.metadata || {},
+          tags: [],
+          created_at: "2026-05-01T00:00:00Z",
+          updated_at: "2026-05-01T00:00:00Z"
+        }
+      }
+      if (path === "/api/v1/media/collections/9/items/91") {
+        return {
+          id: 91,
+          collection_id: 9,
+          ordinal: 3,
+          source_url: "https://youtube.com/watch?v=existing",
+          duplicate_status: "duplicate_existing",
+          status: request.body?.status,
+          retry_count: request.body?.retry_count || 0,
+          warnings: [],
+          metadata: {},
+          tags: [],
+          created_at: "2026-05-01T00:00:00Z",
+          updated_at: "2026-05-01T00:00:00Z"
+        }
+      }
+      throw new Error(`Unexpected bgRequest path: ${path}`)
+    })
+
+    const result = await submitQuickIngestBatch({
+      entries: [
+        {
+          id: "existing-talk",
+          url: "https://youtube.com/watch?v=existing",
+          type: "video",
+          playlist: {
+            playlistId: "PL-conf",
+            playlistTitle: "Conference Batch",
+            ordinal: 3,
+            normalizedSourceId: "youtube:video:existing",
+            duplicateStatus: "duplicate_existing"
+          },
+          conferenceOverride: {
+            selected: true,
+            duplicatePolicy: "include_existing",
+            title: "Existing Talk"
+          }
+        }
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      conferenceBatchMetadata: {
+        collectionName: "Conference Batch",
+        sharedTags: []
+      },
+      common: {
+        perform_analysis: true,
+        perform_chunking: false,
+        overwrite_existing: false
+      },
+      advancedValues: {},
+      __quickIngestSessionId: "qi-direct-duplicate-policy"
+    } as any)
+
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+    expect(result.results?.[0]).toMatchObject({
+      id: "existing-talk",
+      status: "ok",
+      outcome: "skipped",
+      collectionItemId: 91,
+      idempotencyKey: "conference-9-3"
+    })
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/collections/9/items",
+        method: "POST",
+        body: expect.objectContaining({
+          status: "skipped_existing",
+          metadata: expect.objectContaining({
+            duplicate_policy: "include_existing"
+          })
+        })
+      })
+    )
+  })
+
+  it("marks planned conference items as submit_failed when direct job submission fails", async () => {
+    mocks.bgUpload.mockRejectedValueOnce(new Error("job submit failed"))
+    mocks.bgRequest.mockImplementation(async (request: { path?: string; body?: any }) => {
+      const path = String(request?.path || "")
+      if (path === "/api/v1/media/collections") {
+        return {
+          id: 8,
+          name: "Conference Batch",
+          kind: "conference",
+          metadata: {},
+          default_tags: [],
+          created_at: "2026-05-01T00:00:00Z",
+          updated_at: "2026-05-01T00:00:00Z",
+          items: []
+        }
+      }
+      if (path === "/api/v1/media/collections/8/items") {
+        return {
+          id: 81,
+          collection_id: 8,
+          ordinal: 1,
+          source_url: request.body?.source_url,
+          duplicate_status: "new",
+          status: "planned",
+          retry_count: 0,
+          warnings: [],
+          metadata: {},
+          tags: [],
+          created_at: "2026-05-01T00:00:00Z",
+          updated_at: "2026-05-01T00:00:00Z"
+        }
+      }
+      if (path === "/api/v1/media/collections/8/items/81") {
+        return {
+          id: 81,
+          collection_id: 8,
+          ordinal: 1,
+          source_url: "https://youtube.com/watch?v=failed",
+          duplicate_status: "new",
+          status: request.body?.status,
+          error_summary: request.body?.error_summary,
+          retry_count: 0,
+          warnings: [],
+          metadata: {},
+          tags: [],
+          created_at: "2026-05-01T00:00:00Z",
+          updated_at: "2026-05-01T00:00:00Z"
+        }
+      }
+      throw new Error(`Unexpected bgRequest path: ${path}`)
+    })
+
+    const result = await submitQuickIngestBatch({
+      entries: [
+        {
+          id: "failed-talk",
+          url: "https://youtube.com/watch?v=failed",
+          type: "video",
+          conferenceOverride: {
+            selected: true,
+            title: "Failed Talk"
+          }
+        }
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      conferenceBatchMetadata: {
+        collectionName: "Conference Batch",
+        sharedTags: []
+      },
+      common: {
+        perform_analysis: true,
+        perform_chunking: false,
+        overwrite_existing: false
+      },
+      advancedValues: {}
+    } as any)
+
+    expect(result.results?.[0]).toMatchObject({
+      id: "failed-talk",
+      status: "error",
+      error: "job submit failed"
+    })
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/collections/8/items/81",
+        method: "PATCH",
+        body: expect.objectContaining({
+          status: "submit_failed",
+          error_summary: "job submit failed"
+        })
+      })
+    )
+  })
+
   it("returns a direct session ack for mv3 extension pages", async () => {
     mocks.runtimeId = "ext-1"
 

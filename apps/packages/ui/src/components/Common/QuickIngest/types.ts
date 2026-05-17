@@ -34,6 +34,7 @@ export type ResultOutcome =
   | "ingested"
   | "processed"
   | "skipped"
+  | "submit_failed"
   | "failed"
   | "cancelled"
 
@@ -142,11 +143,15 @@ export type PersistedQuickIngestTracking = {
   sessionId?: string
   batchId?: string
   batchIds?: string[]
+  collectionId?: string
+  plannedItemIds?: string[]
   jobIds?: number[]
   submittedItemIds?: string[]
   /** @deprecated use submittedItemIds */
   itemIds?: string[]
   jobIdToItemId?: Record<string, string>
+  jobIdToCollectionItemId?: Record<string, string>
+  durableMode?: "durable_collection" | "degraded" | "unknown"
   startedAt?: number
 }
 
@@ -196,6 +201,39 @@ export type QueueItemValidation = {
   warnings?: string[]
 }
 
+export type PlaylistQueueMetadata = {
+  playlistId?: string | null
+  playlistTitle?: string | null
+  ordinal?: number
+  normalizedSourceId?: string | null
+  duplicateStatus?: "new" | "duplicate_in_batch" | "duplicate_existing" | "unknown"
+}
+
+export type ConferenceDuplicatePolicy =
+  | "skip"
+  | "overwrite"
+  | "update_metadata_only"
+  | "include_existing"
+
+export type ConferenceBatchMetadata = {
+  collectionName: string
+  conferenceName?: string
+  eventDate?: string
+  eventYear?: string
+  sharedTags: string[]
+  sourcePlaylistUrl?: string
+}
+
+export type ConferenceItemMetadataOverride = {
+  title?: string
+  speaker?: string
+  talkDate?: string
+  track?: string
+  tags?: string[]
+  duplicatePolicy?: ConferenceDuplicatePolicy
+  selected: boolean
+}
+
 /**
  * An item in the wizard's ingest queue (files + URLs with detected types).
  */
@@ -226,6 +264,10 @@ export type WizardQueueItem = {
   mimeType?: string
   /** Validation state for this item. */
   validation: QueueItemValidation
+  /** Metadata carried from a playlist preflight response. */
+  playlist?: PlaylistQueueMetadata
+  /** Conference-specific metadata overrides for bulk review workflows. */
+  conferenceOverride?: ConferenceItemMetadataOverride
 }
 
 /**
@@ -290,6 +332,12 @@ export type WizardResultItem = ResultItem & {
   durationMs?: number
   /** Media ID returned from the server. */
   mediaId?: string | number | null
+  /** Durable collection item ID for bulk conference ingestion handoff. */
+  collectionItemId?: string | number | null
+  /** Retry attempt count associated with the latest ingest attempt. */
+  retryAttempt?: number | null
+  /** Idempotency key for durable retry operations. */
+  idempotencyKey?: string | null
   /** Title extracted or assigned during processing. */
   title?: string | null
   /** Non-error informational message (e.g., "Already exists in library"). */

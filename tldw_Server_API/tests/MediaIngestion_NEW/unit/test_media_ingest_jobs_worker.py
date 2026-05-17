@@ -4,6 +4,53 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
+class _CollectionUpdateRecorder:
+    def __init__(self) -> None:
+        self.status_updates: list[dict] = []
+        self.resolutions: list[dict] = []
+
+    def update_media_collection_item_status(self, item_id: int, **kwargs):
+        self.status_updates.append({"item_id": item_id, **kwargs})
+        return {"id": item_id, **kwargs}
+
+    def resolve_media_collection_item(self, item_id: int, **kwargs):
+        self.resolutions.append({"item_id": item_id, **kwargs})
+        return {"id": item_id, **kwargs}
+
+    def close(self):
+        return None
+
+
+def _install_fake_collections_db(monkeypatch, worker, recorder: _CollectionUpdateRecorder):
+    class _FakeCollectionsDatabase:
+        @classmethod
+        def for_user(cls, user_id):  # noqa: ARG003
+            return recorder
+
+    monkeypatch.setattr(worker, "CollectionsDatabase", _FakeCollectionsDatabase, raising=False)
+
+
+def test_truncate_collection_error_redacts_sensitive_details():
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+
+    raw = (
+        "failed token=super-secret at /private/tmp/video.mp4 "
+        "url=https://example.com/watch?api_key=secret-value "
+        "hash=0123456789abcdef0123456789abcdef"
+    )
+
+    sanitized = worker._truncate_collection_error(raw)
+
+    assert sanitized is not None
+    assert "super-secret" not in sanitized
+    assert "secret-value" not in sanitized
+    assert "/private/tmp/video.mp4" not in sanitized
+    assert "0123456789abcdef0123456789abcdef" not in sanitized
+    assert "[redacted]" in sanitized
+    assert "[redacted-path]" in sanitized
+    assert "[redacted-hex]" in sanitized
+
+
 @pytest.mark.asyncio
 async def test_media_ingest_worker_honors_cancel_before_processing(monkeypatch, tmp_path):
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
@@ -47,6 +94,292 @@ async def test_media_ingest_worker_honors_cancel_before_processing(monkeypatch, 
     updated = jm.get_job(job_id)
     assert updated is not None
     assert updated.get("status") == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_media_ingest_worker_marks_planned_collection_item_completed(monkeypatch, tmp_path):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+
+    recorder = _CollectionUpdateRecorder()
+    _install_fake_collections_db(monkeypatch, worker, recorder)
+
+    class _DummyDB:
+        db_path_str = str(tmp_path / "media.db")
+        client_id = "media_ingest_test"
+
+        def close_connection(self):
+            return None
+
+    async def _fake_process_batch_media(**_kwargs):
+        return [
+            {
+                "status": "Success",
+                "db_id": 456,
+                "media_uuid": "media-uuid-456",
+                "warnings": None,
+                "db_message": "Media added to database.",
+            }
+        ]
+
+    async def _fake_chunking_resolver(*_args, **_kwargs):
+        return None, None
+
+    monkeypatch.setattr(worker, "_create_db", lambda _user_id: _DummyDB(), raising=True)
+    monkeypatch.setattr(worker, "process_batch_media", _fake_process_batch_media, raising=True)
+    monkeypatch.setattr(
+        worker,
+        "async_resolve_chunking_options_and_plan",
+        _fake_chunking_resolver,
+        raising=True,
+    )
+
+    jm = JobManager()
+    row = jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={
+            "batch_id": "batch-conf-complete",
+            "media_type": "video",
+            "source": "https://example.com/talk-1",
+            "source_kind": "url",
+            "input_ref": "https://example.com/talk-1",
+            "collection_id": "42",
+            "planned_item_id": "101",
+            "idempotency_key": "conference-42-101-0",
+            "options": {"media_type": "video"},
+        },
+        owner_user_id="1",
+    )
+
+    result = await worker._handle_job(
+        jm.get_job(int(row.get("id"))),
+        jm,
+        worker._ProgressState(),
+    )
+
+    assert result["media_id"] == 456
+    assert recorder.status_updates == [
+        {
+            "item_id": 101,
+            "status": "processing",
+            "latest_job_id": str(row.get("id")),
+        }
+    ]
+    assert recorder.resolutions == [
+        {
+            "item_id": 101,
+            "media_id": 456,
+            "status": "completed",
+            "latest_job_id": str(row.get("id")),
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_media_ingest_worker_marks_duplicate_result_skipped_existing(monkeypatch, tmp_path):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+
+    recorder = _CollectionUpdateRecorder()
+    _install_fake_collections_db(monkeypatch, worker, recorder)
+
+    class _DummyDB:
+        db_path_str = str(tmp_path / "media.db")
+        client_id = "media_ingest_test"
+
+        def close_connection(self):
+            return None
+
+    async def _fake_process_batch_media(**_kwargs):
+        return [
+            {
+                "status": "Skipped",
+                "db_id": 789,
+                "media_uuid": "existing-media-uuid",
+                "warnings": None,
+                "db_message": "Media already exists.",
+            }
+        ]
+
+    async def _fake_chunking_resolver(*_args, **_kwargs):
+        return None, None
+
+    monkeypatch.setattr(worker, "_create_db", lambda _user_id: _DummyDB(), raising=True)
+    monkeypatch.setattr(worker, "process_batch_media", _fake_process_batch_media, raising=True)
+    monkeypatch.setattr(
+        worker,
+        "async_resolve_chunking_options_and_plan",
+        _fake_chunking_resolver,
+        raising=True,
+    )
+
+    jm = JobManager()
+    row = jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={
+            "batch_id": "batch-conf-skip",
+            "media_type": "video",
+            "source": "https://example.com/talk-2",
+            "source_kind": "url",
+            "input_ref": "https://example.com/talk-2",
+            "collection_id": "42",
+            "planned_item_id": "102",
+            "options": {"media_type": "video"},
+        },
+        owner_user_id="1",
+    )
+
+    await worker._handle_job(jm.get_job(int(row.get("id"))), jm, worker._ProgressState())
+
+    assert recorder.resolutions == [
+        {
+            "item_id": 102,
+            "media_id": 789,
+            "status": "skipped_existing",
+            "latest_job_id": str(row.get("id")),
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_media_ingest_worker_marks_missing_media_id_failed(monkeypatch, tmp_path):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+
+    recorder = _CollectionUpdateRecorder()
+    _install_fake_collections_db(monkeypatch, worker, recorder)
+
+    class _DummyDB:
+        db_path_str = str(tmp_path / "media.db")
+        client_id = "media_ingest_test"
+
+        def close_connection(self):
+            return None
+
+    async def _fake_process_batch_media(**_kwargs):
+        return [
+            {
+                "status": "Success",
+                "media_uuid": None,
+                "warnings": None,
+                "db_message": "Media was accepted without a row id.",
+            }
+        ]
+
+    async def _fake_chunking_resolver(*_args, **_kwargs):
+        return None, None
+
+    monkeypatch.setattr(worker, "_create_db", lambda _user_id: _DummyDB(), raising=True)
+    monkeypatch.setattr(worker, "process_batch_media", _fake_process_batch_media, raising=True)
+    monkeypatch.setattr(
+        worker,
+        "async_resolve_chunking_options_and_plan",
+        _fake_chunking_resolver,
+        raising=True,
+    )
+
+    jm = JobManager()
+    row = jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={
+            "batch_id": "batch-conf-no-media-id",
+            "media_type": "video",
+            "source": "https://example.com/talk-no-media-id",
+            "source_kind": "url",
+            "input_ref": "https://example.com/talk-no-media-id",
+            "collection_id": "42",
+            "planned_item_id": "104",
+            "options": {"media_type": "video"},
+        },
+        owner_user_id="1",
+    )
+
+    await worker._handle_job(jm.get_job(int(row.get("id"))), jm, worker._ProgressState())
+
+    assert recorder.resolutions == []
+    assert recorder.status_updates[-1] == {
+        "item_id": 104,
+        "status": "failed",
+        "latest_job_id": str(row.get("id")),
+        "error_summary": "No media id returned",
+    }
+
+
+@pytest.mark.asyncio
+async def test_media_ingest_worker_marks_planned_collection_item_failed_on_exception(monkeypatch, tmp_path):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+
+    recorder = _CollectionUpdateRecorder()
+    _install_fake_collections_db(monkeypatch, worker, recorder)
+
+    class _DummyDB:
+        db_path_str = str(tmp_path / "media.db")
+        client_id = "media_ingest_test"
+
+        def close_connection(self):
+            return None
+
+    async def _fake_process_batch_media(**_kwargs):
+        raise RuntimeError("private video")
+
+    async def _fake_chunking_resolver(*_args, **_kwargs):
+        return None, None
+
+    monkeypatch.setattr(worker, "_create_db", lambda _user_id: _DummyDB(), raising=True)
+    monkeypatch.setattr(worker, "process_batch_media", _fake_process_batch_media, raising=True)
+    monkeypatch.setattr(
+        worker,
+        "async_resolve_chunking_options_and_plan",
+        _fake_chunking_resolver,
+        raising=True,
+    )
+
+    jm = JobManager()
+    row = jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={
+            "batch_id": "batch-conf-fail",
+            "media_type": "video",
+            "source": "https://example.com/private-talk",
+            "source_kind": "url",
+            "input_ref": "https://example.com/private-talk",
+            "collection_id": "42",
+            "planned_item_id": "103",
+            "options": {"media_type": "video"},
+        },
+        owner_user_id="1",
+    )
+
+    with pytest.raises(RuntimeError, match="private video"):
+        await worker._handle_job(jm.get_job(int(row.get("id"))), jm, worker._ProgressState())
+
+    assert recorder.status_updates[-1] == {
+        "item_id": 103,
+        "status": "failed",
+        "latest_job_id": str(row.get("id")),
+        "error_summary": "private video",
+    }
 
 
 @pytest.mark.asyncio

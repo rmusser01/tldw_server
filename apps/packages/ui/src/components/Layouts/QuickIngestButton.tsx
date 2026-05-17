@@ -6,7 +6,9 @@ import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
 import { createEventHost } from "@/utils/create-event-host"
 import {
   consumePendingQuickIngestOpen,
+  createQuickIngestSessionSeedFromOpenDetail,
   rememberQuickIngestOpenRequest,
+  type QuickIngestOpenDetail,
   type QuickIngestPendingOpenOptions,
 } from "@/utils/quick-ingest-open"
 
@@ -39,13 +41,11 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
   )
   const quickIngestReadyRef = useRef(false)
   const pendingQuickIngestIntroRef = useRef(false)
-  const { session, createDraftSession, showSession, hideSession } =
-    useQuickIngestSessionStore((s) => ({
-      session: s.session,
-      createDraftSession: s.createDraftSession,
-      showSession: s.showSession,
-      hideSession: s.hideSession,
-    }))
+  const session = useQuickIngestSessionStore((s) => s.session)
+  const createDraftSession = useQuickIngestSessionStore((s) => s.createDraftSession)
+  const upsertSession = useQuickIngestSessionStore((s) => s.upsertSession)
+  const showSession = useQuickIngestSessionStore((s) => s.showSession)
+  const hideSession = useQuickIngestSessionStore((s) => s.hideSession)
   const quickIngestOpen = session?.visibility === "visible"
   const hasQuickIngestSession = Boolean(session)
 
@@ -63,14 +63,18 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
   }, [])
 
   const performOpenQuickIngest = useCallback(
-    (options?: QuickIngestOpenOptions) => {
+    (options?: QuickIngestOpenOptions, detail?: QuickIngestOpenDetail) => {
       const { autoProcessQueued = false, focusTrigger = true } = options || {}
+      const seed = createQuickIngestSessionSeedFromOpenDetail(detail)
       setQuickIngestAutoProcessQueued(autoProcessQueued)
       const currentSession = useQuickIngestSessionStore.getState().session
       if (currentSession) {
+        if (seed) {
+          upsertSession(seed)
+        }
         showSession()
       } else {
-        createDraftSession()
+        createDraftSession(seed ?? undefined)
       }
       if (focusTrigger && focusTriggerRef?.current) {
         requestAnimationFrame(() => {
@@ -78,12 +82,12 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
         })
       }
     },
-    [createDraftSession, focusTriggerRef, showSession]
+    [createDraftSession, focusTriggerRef, showSession, upsertSession]
   )
 
   const performOpenQuickIngestIntro = useCallback(
-    (options?: QuickIngestOpenOptions) => {
-      performOpenQuickIngest({ ...options, focusTrigger: false })
+    (options?: QuickIngestOpenOptions, detail?: QuickIngestOpenDetail) => {
+      performOpenQuickIngest({ ...options, focusTrigger: false }, detail)
       if (quickIngestReadyRef.current) {
         window.dispatchEvent(new CustomEvent("tldw:quick-ingest-force-intro"))
       } else {
@@ -99,21 +103,21 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
       return false
     }
     if (pending.mode === "intro") {
-      performOpenQuickIngestIntro(pending.options)
+      performOpenQuickIngestIntro(pending.options, pending.detail)
       return true
     }
-    performOpenQuickIngest(pending.options)
+    performOpenQuickIngest(pending.options, pending.detail)
     return true
   }, [performOpenQuickIngest, performOpenQuickIngestIntro])
 
   const openQuickIngest = useCallback(
-    (nextOptions?: QuickIngestOpenOptions) => {
+    (nextOptions?: QuickIngestOpenOptions, detail?: QuickIngestOpenDetail) => {
       if (!quickIngestSessionHydrated) {
-        rememberQuickIngestOpenRequest("normal", undefined, nextOptions)
+        rememberQuickIngestOpenRequest("normal", detail, nextOptions)
         void rehydrateQuickIngestSession()
         return
       }
-      performOpenQuickIngest(nextOptions)
+      performOpenQuickIngest(nextOptions, detail)
     },
     [performOpenQuickIngest, quickIngestSessionHydrated, rehydrateQuickIngestSession]
   )
@@ -133,8 +137,11 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
 
   // Global event listeners for opening quick ingest
   useEffect(() => {
-    const handler = () => {
-      openQuickIngest()
+    const handler = (event: Event) => {
+      openQuickIngest(
+        undefined,
+        (event as CustomEvent<QuickIngestOpenDetail>).detail
+      )
     }
     window.addEventListener("tldw:open-quick-ingest", handler)
     return () => {

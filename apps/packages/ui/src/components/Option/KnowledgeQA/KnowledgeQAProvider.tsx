@@ -1183,6 +1183,12 @@ function buildScopeSnapshot(
     preset,
     sources: [...settings.sources],
     webFallback: Boolean(settings.enable_web_fallback),
+    collectionId:
+      typeof settings.collection_id === "number" &&
+      Number.isInteger(settings.collection_id) &&
+      settings.collection_id > 0
+        ? settings.collection_id
+        : null,
     includeMediaIds: Array.isArray(settings.include_media_ids)
       ? settings.include_media_ids
           .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
@@ -1199,6 +1205,12 @@ function buildScopeSnapshot(
 function createRestorableSettingsSnapshot(settings: RagSettings): Partial<RagSettings> {
   return {
     sources: Array.isArray(settings.sources) ? [...settings.sources] : [],
+    collection_id:
+      typeof settings.collection_id === "number" &&
+      Number.isInteger(settings.collection_id) &&
+      settings.collection_id > 0
+        ? settings.collection_id
+        : undefined,
     include_media_ids: Array.isArray(settings.include_media_ids)
       ? settings.include_media_ids
           .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
@@ -1258,6 +1270,14 @@ function normalizeRestorableSettingsSnapshot(
     normalized.include_media_ids = candidate.include_media_ids
       .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
       .map((value) => Math.round(value))
+  }
+
+  if (
+    typeof candidate.collection_id === "number" &&
+    Number.isInteger(candidate.collection_id) &&
+    candidate.collection_id > 0
+  ) {
+    normalized.collection_id = candidate.collection_id
   }
 
   if (Array.isArray(candidate.include_note_ids)) {

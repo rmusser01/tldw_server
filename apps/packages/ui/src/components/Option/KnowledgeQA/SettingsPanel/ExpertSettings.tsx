@@ -128,6 +128,7 @@ const NULLABLE_STRING_KEYS = new Set<RagKey>([
 ])
 
 const NULLABLE_NUMBER_KEYS = new Set<RagKey>([
+  "collection_id",
   "accumulation_time_budget_sec",
   "subquery_time_budget_sec",
   "subquery_doc_budget",

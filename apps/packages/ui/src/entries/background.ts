@@ -61,6 +61,10 @@ import {
   extractCompletedIngestJobError,
   extractCompletedIngestJobMediaId,
 } from "@/services/tldw/ingest-job-results";
+import {
+  buildConferenceCollectionCreatePayload,
+  buildConferenceCollectionItemPayload,
+} from "@/services/tldw/conference-collections";
 
 type BackgroundDiagnostics = {
   startedAt: number;
@@ -1775,8 +1779,16 @@ export default defineBackground({
       payload: any,
       runtimeContext?: QuickIngestSessionRunContext,
     ): Promise<{ ok: boolean; results: any[] }> => {
-      const entries = Array.isArray(payload?.entries) ? payload.entries : [];
-      const files = Array.isArray(payload?.files) ? payload.files : [];
+      const entries = Array.isArray(payload?.entries)
+        ? payload.entries.filter(
+            (entry: any) => entry?.conferenceOverride?.selected !== false,
+          )
+        : [];
+      const files = Array.isArray(payload?.files)
+        ? payload.files.filter(
+            (file: any) => file?.conferenceOverride?.selected !== false,
+          )
+        : [];
       const storeRemote = Boolean(payload?.storeRemote);
       const processOnly = Boolean(payload?.processOnly);
       const common = payload?.common || {};
@@ -1817,6 +1829,20 @@ export default defineBackground({
       };
       const queuedRemoteJobs =
         createIngestJobsTracker<QuickIngestRemoteResultMeta>();
+      const conferenceBatchMetadata =
+        payload?.conferenceBatchMetadata &&
+        typeof payload.conferenceBatchMetadata === "object"
+          ? payload.conferenceBatchMetadata
+          : null;
+      type PlannedConferenceCollectionItem = {
+        collectionId: number;
+        itemId: number;
+        idempotencyKey?: string | null;
+      };
+      const plannedConferenceItems = new Map<
+        string,
+        PlannedConferenceCollectionItem
+      >();
 
       const isCancelled = () =>
         Boolean(
@@ -1909,6 +1935,140 @@ export default defineBackground({
           autoApplyTemplate,
         });
         return fields;
+      };
+
+      const hasConferenceMetadata = (): boolean =>
+        Boolean(
+          conferenceBatchMetadata &&
+            (
+              String(conferenceBatchMetadata.collectionName || "").trim() ||
+              String(conferenceBatchMetadata.conferenceName || "").trim() ||
+              String(conferenceBatchMetadata.sourcePlaylistUrl || "").trim() ||
+              (Array.isArray(conferenceBatchMetadata.sharedTags) &&
+                conferenceBatchMetadata.sharedTags.length > 0)
+            ),
+        );
+
+      const getConferenceFallbackName = (): string | null => {
+        for (const entry of entries) {
+          const title = String(entry?.playlist?.playlistTitle || "").trim();
+          if (title) return title;
+        }
+        return null;
+      };
+
+      const createPlannedConferenceItems = async () => {
+        if (!shouldStoreRemote || !hasConferenceMetadata()) return;
+        const selectedEntries = entries.filter((entry: any) =>
+          String(entry?.url || "").trim(),
+        );
+        if (selectedEntries.length === 0) return;
+
+        let collectionId: number | null = null;
+        try {
+          const collectionResp = (await handleTldwRequest({
+            path: "/api/v1/media/collections",
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: buildConferenceCollectionCreatePayload(
+              conferenceBatchMetadata,
+              getConferenceFallbackName(),
+            ),
+            timeoutMs: ingestTimeoutMs,
+          })) as
+            | { ok: boolean; error?: string; status?: number; data?: any }
+            | undefined;
+          if (!collectionResp?.ok) {
+            throw new Error(
+              collectionResp?.error ||
+                `Collection creation failed: ${collectionResp?.status}`,
+            );
+          }
+          const parsedCollectionId = Number(collectionResp.data?.id);
+          if (!Number.isFinite(parsedCollectionId) || parsedCollectionId <= 0) {
+            throw new Error("Collection creation returned no collection id.");
+          }
+          collectionId = parsedCollectionId;
+        } catch (error) {
+          console.debug("[tldw] conference collection planning failed", error);
+          return;
+        }
+        if (collectionId === null) return;
+
+        for (const entry of selectedEntries) {
+          try {
+            const itemResp = (await handleTldwRequest({
+              path: `/api/v1/media/collections/${encodeURIComponent(
+                String(collectionId),
+              )}/items`,
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: buildConferenceCollectionItemPayload(conferenceBatchMetadata, {
+                id: String(entry.id || ""),
+                url: String(entry.url || ""),
+                playlist: entry.playlist,
+                conferenceOverride: entry.conferenceOverride,
+              }),
+              timeoutMs: ingestTimeoutMs,
+            })) as
+              | { ok: boolean; error?: string; status?: number; data?: any }
+              | undefined;
+            if (!itemResp?.ok) {
+              throw new Error(
+                itemResp?.error || `Collection item failed: ${itemResp?.status}`,
+              );
+            }
+            const itemId = Number(itemResp.data?.id);
+            if (Number.isFinite(itemId) && itemId > 0) {
+              plannedConferenceItems.set(String(entry.id || ""), {
+                collectionId,
+                itemId,
+                idempotencyKey:
+                  typeof itemResp.data?.idempotency_key === "string"
+                    ? itemResp.data.idempotency_key
+                    : null,
+              });
+            }
+          } catch (error) {
+            console.debug(
+              "[tldw] conference collection item planning failed",
+              { collectionId, entryId: entry?.id },
+              error,
+            );
+          }
+        }
+      };
+
+      const patchPlannedConferenceItem = async (
+        planned: PlannedConferenceCollectionItem | undefined,
+        body: Record<string, unknown>,
+      ) => {
+        if (!planned) return;
+        await handleTldwRequest({
+          path: `/api/v1/media/collections/${encodeURIComponent(
+            String(planned.collectionId),
+          )}/items/${encodeURIComponent(String(planned.itemId))}`,
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body,
+          timeoutMs: ingestTimeoutMs,
+        }).catch((error) => {
+          logBackgroundError("quick ingest collection item patch", error);
+        });
+      };
+
+      const applyPlannedConferenceFields = (
+        fields: Record<string, any>,
+        planned: PlannedConferenceCollectionItem | undefined,
+      ) => {
+        if (!planned) return;
+        fields.media_collection_id = planned.collectionId;
+        fields.media_collection_item_id = planned.itemId;
+        fields.planned_item_ids = [String(planned.itemId)];
+        if (planned.idempotencyKey) {
+          fields.idempotency_key = planned.idempotencyKey;
+          fields.idempotency_keys = [planned.idempotencyKey];
+        }
       };
 
       const processWebScrape = async (url: string, entry?: any) => {
@@ -2150,6 +2310,8 @@ export default defineBackground({
         });
       };
 
+      await createPlannedConferenceItems();
+
       for (const r of entries) {
         if (isCancelled()) break;
         const url = String(r?.url || "").trim();
@@ -2158,6 +2320,11 @@ export default defineBackground({
           r?.type && typeof r.type === "string" ? r.type : "auto";
         const t =
           explicitType === "auto" ? inferMediaTypeFromUrl(url) : explicitType;
+        const plannedConferenceItem = plannedConferenceItems.get(
+          String(r.id || ""),
+        );
+        let jobSubmitted = false;
+        let latestJobId: number | undefined;
         try {
           let data: any;
           if (shouldStoreRemote) {
@@ -2170,6 +2337,7 @@ export default defineBackground({
               r,
               resolvedDefaults,
             );
+            applyPlannedConferenceFields(fields, plannedConferenceItem);
             fields.urls = [url];
             const resp = await handleUpload({
               path: "/api/v1/media/ingest/jobs",
@@ -2183,12 +2351,25 @@ export default defineBackground({
                 const msg = resp?.error || `Upload failed: ${resp?.status}`;
                 throw new Error(msg);
               }
+              if (typeof latestJobId === "number") {
+                fields.media_ingest_job_id = String(latestJobId);
+              }
               data = await submitPersistentAddFallback({ fields });
             } else {
-              trackRemoteJobs(resp.data, {
+              const trackedCount = trackRemoteJobs(resp.data, {
                 id: String(r.id || crypto.randomUUID()),
                 url,
                 type: t,
+              });
+              const jobIds = queuedRemoteJobs.getJobIds();
+              latestJobId = jobIds[jobIds.length - trackedCount];
+              jobSubmitted = trackedCount > 0;
+              await patchPlannedConferenceItem(plannedConferenceItem, {
+                status: "processing",
+                latest_job_id:
+                  typeof latestJobId === "number"
+                    ? String(latestJobId)
+                    : undefined,
               });
               continue;
             }
@@ -2219,6 +2400,12 @@ export default defineBackground({
           emitProgress(result);
         } catch (e: any) {
           if (isCancelled()) break;
+          await patchPlannedConferenceItem(plannedConferenceItem, {
+            status: jobSubmitted ? "failed" : "submit_failed",
+            latest_job_id:
+              typeof latestJobId === "number" ? String(latestJobId) : undefined,
+            error_summary: e?.message || "Request failed",
+          });
           const result = {
             id: r.id,
             status: "error",
@@ -2331,6 +2518,20 @@ export default defineBackground({
       if (shouldStoreRemote && queuedRemoteJobs.hasItems()) {
         const remoteResults = await pollQueuedRemoteJobs();
         for (const result of remoteResults) {
+          await patchPlannedConferenceItem(
+            plannedConferenceItems.get(String(result?.id || "")),
+            {
+              status: result?.status === "ok" ? "completed" : "failed",
+              media_id:
+                result?.status === "ok"
+                  ? extractCompletedIngestJobMediaId(result?.data)
+                  : undefined,
+              error_summary:
+                result?.status === "ok"
+                  ? undefined
+                  : String(result?.error || "Ingest failed"),
+            },
+          );
           out.push(result);
           emitProgress(result);
         }

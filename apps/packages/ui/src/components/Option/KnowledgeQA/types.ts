@@ -17,6 +17,7 @@ export type ScopeSnapshot = {
   preset: RagPresetName
   sources: RagSettings["sources"]
   webFallback: boolean
+  collectionId: number | null
   includeMediaIds: number[]
   includeNoteIds: string[]
 }

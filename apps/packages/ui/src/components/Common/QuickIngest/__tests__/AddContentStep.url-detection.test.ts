@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { detectTypeFromUrl } from "../AddContentStep"
+import { detectPlaylistPreflightCandidate, detectTypeFromUrl } from "../AddContentStep"
 import { normalizeUrlForDedupe } from "@/entries/shared/ingest-payloads"
 
 describe("detectTypeFromUrl", () => {
@@ -15,6 +15,24 @@ describe("detectTypeFromUrl", () => {
     expect(detectTypeFromUrl("https://youtube.com.evil.test/watch?v=123")).toBe("web")
     expect(detectTypeFromUrl("https://evil-youtube.com/watch?v=123")).toBe("web")
     expect(detectTypeFromUrl("https://soundcloud.com.evil.test/track")).toBe("web")
+  })
+
+  it("identifies YouTube playlist URLs as preflight candidates", () => {
+    expect(
+      detectPlaylistPreflightCandidate(
+        "https://www.youtube.com/watch?v=PrNmmN6qBiw&list=PL0065D9B288E6804B"
+      )
+    ).toBe(true)
+    expect(
+      detectPlaylistPreflightCandidate("https://www.youtube.com/playlist?list=PLtest")
+    ).toBe(true)
+  })
+
+  it("does not identify single videos or lookalike hosts as playlist preflight candidates", () => {
+    expect(detectPlaylistPreflightCandidate("https://www.youtube.com/watch?v=abc123")).toBe(false)
+    expect(
+      detectPlaylistPreflightCandidate("https://youtube.com.evil.test/watch?v=abc&list=PLtest")
+    ).toBe(false)
   })
 })
 
