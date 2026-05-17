@@ -17,6 +17,7 @@ In scope:
 
 - Investigate the running Next dev server process and its immediate frontend development environment.
 - Include the Next parent/child process tree, not only the single high-RSS child process.
+- Distinguish RSS growth from JavaScript heap growth, external memory, native allocations, file-descriptor growth, and route/build cache growth before assigning blame to application code.
 - Correlate memory growth with idle time, file watching, HMR, route compilation, browser requests, extension background traffic, and API request pressure.
 - Inspect frontend and extension code paths only after evidence points to a likely trigger.
 - Produce a ranked root-cause hypothesis list and a concrete next investigation or fix plan.
@@ -35,9 +36,10 @@ Use an observation-first sequence.
 1. Rediscover the target process from the process table: PID, parent PID, command line, current working directory, child processes, observed port, and whether the command is using default Turbopack dev mode or an explicit Webpack fallback.
 2. Capture process telemetry for the active `next-server` process tree every 10 to 15 seconds over a short idle window.
 3. Inspect dev-server evidence from terminal output and the `.next/dev/logs/next-development.log` under the process working directory, not the main checkout unless they are the same directory.
-4. Correlate memory changes with browser and request activity only after the idle baseline.
-5. Run focused workflow probes if the idle baseline does not explain the growth.
-6. Move into code audit only after identifying a route, request type, build loop, or extension background path.
+4. Classify memory shape using the least intrusive available evidence: RSS and open-file counts first; JavaScript heap, external memory, native memory maps, or process samples only if they are available without disrupting the target, or after the baseline has been captured and the user agrees to more intrusive diagnostics.
+5. Correlate memory changes with browser and request activity only after the idle baseline.
+6. Run focused workflow probes if the idle baseline does not explain the growth.
+7. Move into code audit only after identifying a route, request type, build loop, or extension background path.
 
 This sequence prevents guessing between Next/Turbopack behavior, HMR churn, frontend polling, streaming cleanup, route compilation cache growth, or extension background messaging.
 
@@ -49,6 +51,7 @@ Collect a small evidence table with one row per sample:
 - PID and command line.
 - Current working directory and serving port.
 - RSS and CPU.
+- JavaScript heap, external memory, or native-memory classification when available, with unavailable fields marked explicitly instead of inferred.
 - Parent process, child processes, and elapsed runtime.
 - Open file count when available.
 - Listening ports and active connections when available.
@@ -64,12 +67,14 @@ If RSS rises while idle with no browser requests:
 
 - Investigate Next/Turbopack dev-server behavior, file watching, workspace symlinks, `.next` cache churn, repeated route compilation, and source-map or HMR loops.
 - Check for self-watch loops or generated-output churn in `.next`, test output, docs output, or Playwright output directories before blaming application code.
+- If JavaScript heap is stable while RSS grows, prioritize native/tooling/cache hypotheses over React component lifecycle hypotheses.
 
 If RSS rises only after route loads:
 
 - Replay a small route set and isolate the triggering route.
 - Inspect that route's server-side imports, dynamic imports, SSR-incompatible browser libraries, heavy shared UI imports, and route compilation output.
 - Distinguish one-time route compilation/cache growth from unbounded growth after repeated visits to the same route.
+- If JavaScript heap grows with repeated route visits, prioritize server-side module caches, SSR work, route data loading, or request lifecycle issues before client-only component cleanup.
 
 If RSS rises with request storms:
 
@@ -88,6 +93,7 @@ If RSS growth appears tied to dev tooling rather than app behavior:
 
 - Do not make application code changes during first-pass evidence gathering.
 - Do not restart or kill the current high-RSS process until evidence capture is complete.
+- Do not attach an inspector, send diagnostic signals, or run intrusive sampling until low-impact process evidence is captured and the user has agreed to the more intrusive step.
 - Keep user-owned dirty worktree changes untouched.
 - If fixes become necessary, create or update a Backlog task before editing runtime code.
 - Prefer a dedicated worktree for implementation if the main checkout remains dirty.
@@ -99,6 +105,7 @@ The investigation pass should produce:
 
 - Confirmed target process and command line.
 - Idle baseline memory slope.
+- RSS versus JavaScript heap/native/tooling classification, with confidence level and any unavailable data called out directly.
 - Correlation notes for logs, requests, file watchers, route loads, and extension activity.
 - Ranked root-cause hypotheses with evidence for each.
 - A durable evidence artifact at `Docs/superpowers/reviews/2026-05-17-next-dev-server-memory-leak-investigation.md`, unless implementation planning identifies a stronger repo-local convention.
