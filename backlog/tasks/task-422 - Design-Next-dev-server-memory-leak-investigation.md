@@ -39,7 +39,7 @@ Create a design/spec for investigating the WebUI/extension Next dev server memor
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created the Next dev server memory leak investigation design spec at `Docs/superpowers/specs/2026-05-17-next-dev-server-memory-leak-investigation-design.md`. The spec confirms the target process as the high-RSS Next dev server rather than the FastAPI backend, defines the process/log/browser-request measurement plan, records triage branches for idle growth, route-load growth, request storms, and extension/background traffic, and sets guardrails against premature fixes or restarting the high-RSS process before evidence capture. The required spec review loop approved the document after one advisory clarification pass. No runtime code was changed; Bandit was skipped as docs-only.
+Created and critique-hardened the Next dev server memory leak investigation design spec at `Docs/superpowers/specs/2026-05-17-next-dev-server-memory-leak-investigation-design.md`. The spec confirms the target process as the high-RSS Next dev server rather than the FastAPI backend, defines the process/log/browser-request measurement plan, records triage branches for idle growth, route-load growth, request storms, extension/background traffic, and dev-tooling isolation, and sets guardrails against premature fixes or restarting the high-RSS process before evidence capture. The user-requested critique pass patched the spec to require fresh process rediscovery, process-tree sampling, worktree-specific log paths, self-watch loop checks, route cache versus unbounded-growth separation, and a durable evidence artifact path. No runtime code was changed; Bandit was skipped as docs-only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
