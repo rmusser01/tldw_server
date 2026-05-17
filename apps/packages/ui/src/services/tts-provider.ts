@@ -158,17 +158,21 @@ export const applyBrowserSpeechSynthesisVoice = (
   utterance: SpeechSynthesisUtterance,
   synthesis: SpeechSynthesis | null | undefined,
   voiceName?: string | null
-): void => {
+): (() => void) => {
+  const noop = () => undefined
   const targetVoiceName = String(voiceName || "").trim()
   if (
     !targetVoiceName ||
     !synthesis ||
     typeof synthesis.getVoices !== "function"
   ) {
-    return
+    return noop
   }
 
+  let cleanup: () => void = noop
+  let cleanedUp = false
   const applyVoice = () => {
+    if (cleanedUp) return
     const selectedVoice = synthesis
       .getVoices()
       .find((voice) => voice.name === targetVoiceName)
@@ -178,15 +182,29 @@ export const applyBrowserSpeechSynthesisVoice = (
   }
 
   applyVoice()
-  if (utterance.voice) return
+  if (utterance.voice) return noop
 
-  const previousHandler = synthesis.onvoiceschanged
-  synthesis.onvoiceschanged = function onvoiceschanged(event: Event) {
+  if (
+    typeof synthesis.addEventListener !== "function" ||
+    typeof synthesis.removeEventListener !== "function"
+  ) {
+    return noop
+  }
+
+  const handleVoicesChanged = () => {
     applyVoice()
-    if (typeof previousHandler === "function") {
-      previousHandler.call(this, event)
+    if (utterance.voice) {
+      cleanup()
     }
   }
+
+  cleanup = () => {
+    if (cleanedUp) return
+    cleanedUp = true
+    synthesis.removeEventListener("voiceschanged", handleVoicesChanged)
+  }
+  synthesis.addEventListener("voiceschanged", handleVoicesChanged)
+  return cleanup
 }
 
 export const inferTldwProviderFromModel = (
@@ -250,7 +268,9 @@ export const resolveTtsProviderContext = async (
         format: "mp3"
       },
       synthesize: async (segment: string, _options?: TtsSynthesizeOptions) => ({
-        buffer: await generateSpeech(apiKey, segment, voiceId, modelId, speed),
+        buffer: await generateSpeech(apiKey, segment, voiceId, modelId, speed, {
+          signal: _options?.signal
+        }),
         format: "mp3",
         mimeType: "audio/mpeg"
       })

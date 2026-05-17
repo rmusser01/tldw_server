@@ -12,10 +12,14 @@ references:
 - Docs/superpowers/specs/2026-05-17-media-viewer-read-along-tts-design.md
 - Docs/superpowers/plans/2026-05-17-media-viewer-read-along-tts-implementation-plan.md
 modified_files:
-- apps/packages/ui/src/components/Media/read-along/useMediaReadAlongSession.ts
+- apps/packages/ui/src/services/elevenlabs.ts
+- apps/packages/ui/src/services/__tests__/elevenlabs.test.ts
 - apps/packages/ui/src/services/tts-provider.ts
-- apps/packages/ui/src/components/Media/read-along/__tests__/useMediaReadAlongSession.test.tsx
 - apps/packages/ui/src/services/__tests__/tts-provider.read-along.test.ts
+- apps/packages/ui/src/components/Media/read-along/media-read-along-cache.ts
+- apps/packages/ui/src/components/Media/read-along/__tests__/media-read-along-cache.test.ts
+- apps/packages/ui/src/components/Media/read-along/useMediaReadAlongSession.ts
+- apps/packages/ui/src/components/Media/read-along/__tests__/useMediaReadAlongSession.test.tsx
 ---
 
 ## Description

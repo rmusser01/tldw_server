@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { rows, mockTable, putState } = vi.hoisted(() => {
+const { rows, mockTable, putState, tableState } = vi.hoisted(() => {
   const rows = new Map<string, any>()
   const putState = {
     throwQuotaTimes: 0,
     beforeCommit: undefined as Promise<void> | undefined,
     afterCommit: undefined as ((row: any) => void) | undefined
+  }
+  const tableState = {
+    afterToArray: undefined as (() => void) | undefined
   }
 
   const mockTable = {
@@ -34,17 +37,22 @@ const { rows, mockTable, putState } = vi.hoisted(() => {
     bulkDelete: vi.fn(async (ids: string[]) => {
       for (const id of ids) rows.delete(id)
     }),
-    toArray: vi.fn(async () => Array.from(rows.values())),
+    toArray: vi.fn(async () => {
+      const values = Array.from(rows.values())
+      tableState.afterToArray?.()
+      return values
+    }),
     orderBy: vi.fn((field: string) => ({
       toArray: vi.fn(async () => {
         const all = Array.from(rows.values())
         all.sort((a, b) => a[field] - b[field])
+        tableState.afterToArray?.()
         return all
       })
     }))
   }
 
-  return { rows, mockTable, putState }
+  return { rows, mockTable, putState, tableState }
 })
 
 vi.mock('@/db/dexie/schema', () => ({
@@ -87,6 +95,7 @@ describe('media read-along audio cache', () => {
     putState.throwQuotaTimes = 0
     putState.beforeCommit = undefined
     putState.afterCommit = undefined
+    tableState.afterToArray = undefined
     vi.clearAllMocks()
     resetMediaReadAlongAudioCacheSessionForTests()
   })
@@ -141,7 +150,7 @@ describe('media read-along audio cache', () => {
     expect(rows.has('oversized')).toBe(false)
   })
 
-  it('does not write when the save guard fails after eviction and before put', async () => {
+  it('does not evict or write when the save guard fails after preflight', async () => {
     rows.set('oldest', cacheEntry({ id: 'oldest', lastUsedAt: 10, sizeBytes: 900 }))
     const entry = cacheEntry({ id: 'guarded', sizeBytes: 200 })
     let checks = 0
@@ -153,8 +162,29 @@ describe('media read-along audio cache', () => {
 
     expect(saved).toBe(false)
     expect(mockTable.put).not.toHaveBeenCalled()
-    expect(mockTable.bulkDelete).toHaveBeenCalledWith(['oldest'])
+    expect(mockTable.bulkDelete).not.toHaveBeenCalled()
+    expect(rows.has('oldest')).toBe(true)
     expect(rows.has('guarded')).toBe(false)
+  })
+
+  it('does not evict entries when the save guard fails immediately before bulk delete', async () => {
+    rows.set('oldest', cacheEntry({ id: 'oldest', lastUsedAt: 10, sizeBytes: 900 }))
+    const entry = cacheEntry({ id: 'guarded-before-delete', sizeBytes: 200 })
+    let allowSave = true
+    tableState.afterToArray = () => {
+      allowSave = false
+    }
+
+    const saved = await saveMediaReadAlongAudioCacheEntry(entry, {
+      maxBytes: 1000,
+      shouldContinue: () => allowSave
+    })
+
+    expect(saved).toBe(false)
+    expect(mockTable.bulkDelete).not.toHaveBeenCalled()
+    expect(mockTable.put).not.toHaveBeenCalled()
+    expect(rows.has('oldest')).toBe(true)
+    expect(rows.has(entry.id)).toBe(false)
   })
 
   it('removes a row when the save guard fails after a delayed put commits', async () => {
@@ -217,6 +247,31 @@ describe('media read-along audio cache', () => {
     expect(mockTable.put).toHaveBeenCalledTimes(2)
     expect(mockTable.bulkDelete).toHaveBeenCalledWith(['oldest'])
     expect(rows.has('incoming')).toBe(true)
+  })
+
+  it('does not retry-evict entries when the save guard fails before quota bulk delete', async () => {
+    rows.set('oldest', cacheEntry({ id: 'oldest', lastUsedAt: 10, sizeBytes: 100 }))
+    const entry = cacheEntry({ id: 'stale-before-retry-delete', sizeBytes: 100 })
+    putState.throwQuotaTimes = 1
+    let allowSave = true
+    let reads = 0
+    tableState.afterToArray = () => {
+      reads += 1
+      if (reads === 2) {
+        allowSave = false
+      }
+    }
+
+    const saved = await saveMediaReadAlongAudioCacheEntry(entry, {
+      maxBytes: 1000,
+      shouldContinue: () => allowSave
+    })
+
+    expect(saved).toBe(false)
+    expect(mockTable.put).toHaveBeenCalledTimes(1)
+    expect(mockTable.bulkDelete).not.toHaveBeenCalled()
+    expect(rows.has('oldest')).toBe(true)
+    expect(rows.has(entry.id)).toBe(false)
   })
 
   it('removes a row when the save guard fails after a delayed quota retry put commits', async () => {

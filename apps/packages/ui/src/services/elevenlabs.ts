@@ -13,6 +13,7 @@ const DEFAULT_ELEVENLABS_TIMEOUT_MS = 10_000;
 
 type ElevenLabsRequestOptions = {
   timeoutMs?: number;
+  signal?: AbortSignal;
   responseType?: 'json' | 'text' | 'arrayBuffer' | 'arraybuffer';
   includeBrowserTransportFailure?: boolean;
 };
@@ -33,6 +34,55 @@ function createTimeoutSignal(timeoutMs: number): {
     signal: controller.signal,
     cleanup: () => clearTimeout(timeoutId),
     didTimeout: () => timedOut,
+  };
+}
+
+function createRequestSignal(options?: ElevenLabsRequestOptions): {
+  signal: AbortSignal;
+  cleanup: () => void;
+  didTimeout: () => boolean;
+  didCallerAbort: () => boolean;
+} {
+  const timeout = createTimeoutSignal(
+    options?.timeoutMs ?? DEFAULT_ELEVENLABS_TIMEOUT_MS
+  );
+  const callerSignal = options?.signal;
+  if (!callerSignal) {
+    return {
+      ...timeout,
+      didCallerAbort: () => false,
+    };
+  }
+
+  const controller = new AbortController();
+  let callerAborted = callerSignal.aborted;
+
+  const abortFromTimeout = () => {
+    controller.abort(timeout.signal.reason);
+  };
+  const abortFromCaller = () => {
+    if (timeout.didTimeout()) return;
+    callerAborted = true;
+    timeout.cleanup();
+    controller.abort(callerSignal.reason);
+  };
+
+  timeout.signal.addEventListener('abort', abortFromTimeout, { once: true });
+  if (callerSignal.aborted) {
+    abortFromCaller();
+  } else {
+    callerSignal.addEventListener('abort', abortFromCaller, { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      timeout.cleanup();
+      timeout.signal.removeEventListener('abort', abortFromTimeout);
+      callerSignal.removeEventListener('abort', abortFromCaller);
+    },
+    didTimeout: timeout.didTimeout,
+    didCallerAbort: () => callerAborted,
   };
 }
 
@@ -67,9 +117,7 @@ async function fetchElevenLabs<T>(
   init: RequestInit = {},
   options?: ElevenLabsRequestOptions
 ): Promise<T> {
-  const timeout = createTimeoutSignal(
-    options?.timeoutMs ?? DEFAULT_ELEVENLABS_TIMEOUT_MS
-  );
+  const requestSignal = createRequestSignal(options);
   const headers = new Headers(init.headers);
   headers.set('xi-api-key', apiKey);
 
@@ -78,14 +126,16 @@ async function fetchElevenLabs<T>(
     response = await fetch(`${BASE_URL}${path}`, {
       ...init,
       headers,
-      signal: timeout.signal,
+      signal: requestSignal.signal,
     });
   } catch (error) {
-    timeout.cleanup();
+    requestSignal.cleanup();
+    const callerAbort = requestSignal.didCallerAbort();
     if (
+      !callerAbort &&
       isTimeoutLikeFetchFailure(
         error,
-        timeout.didTimeout(),
+        requestSignal.didTimeout(),
         options?.includeBrowserTransportFailure ?? true
       )
     ) {
@@ -93,7 +143,7 @@ async function fetchElevenLabs<T>(
     }
     throw error;
   }
-  timeout.cleanup();
+  requestSignal.cleanup();
 
   if (!response.ok) {
     throw new Error(`ElevenLabs request failed with status ${response.status}`);
@@ -141,7 +191,8 @@ export const generateSpeech = async (
   text: string,
   voiceId: string,
   modelId: string,
-  speed?: number
+  speed?: number,
+  options?: ElevenLabsRequestOptions
 ): Promise<ArrayBuffer> => {
   const payload: Record<string, unknown> = {
     text,
@@ -163,6 +214,7 @@ export const generateSpeech = async (
       body: JSON.stringify(payload),
     },
     {
+      ...options,
       responseType: 'arrayBuffer',
       includeBrowserTransportFailure: false,
     }

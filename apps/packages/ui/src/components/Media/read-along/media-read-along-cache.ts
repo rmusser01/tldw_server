@@ -35,8 +35,9 @@ const listEntries = async (): Promise<MediaReadAlongAudioCacheEntry[]> => {
 const evictLeastRecentlyUsed = async (
   incomingSizeBytes: number,
   maxBytes: number,
+  options: SaveOptions,
   forceOne = false
-): Promise<void> => {
+): Promise<boolean> => {
   const entries = await listEntries()
   const sorted = [...entries].sort((a, b) => a.lastUsedAt - b.lastUsedAt)
   const idsToDelete: string[] = []
@@ -50,8 +51,10 @@ const evictLeastRecentlyUsed = async (
   }
 
   if (idsToDelete.length > 0) {
+    if (!canContinueSave(options)) return false
     await table().bulkDelete(idsToDelete)
   }
+  return canContinueSave(options)
 }
 
 const matchesAttemptedWrite = (
@@ -120,15 +123,17 @@ export const saveMediaReadAlongAudioCacheEntry = async (
   if (!canContinueSave(options)) return false
 
   try {
-    await evictLeastRecentlyUsed(entry.sizeBytes, maxBytes)
-    if (!canContinueSave(options)) return false
+    if (!(await evictLeastRecentlyUsed(entry.sizeBytes, maxBytes, options))) {
+      return false
+    }
     return await putEntryIfCurrent(entry, options)
   } catch (error) {
     if (!isQuotaExceededError(error)) return false
 
     try {
-      await evictLeastRecentlyUsed(entry.sizeBytes, maxBytes, true)
-      if (!canContinueSave(options)) return false
+      if (!(await evictLeastRecentlyUsed(entry.sizeBytes, maxBytes, options, true))) {
+        return false
+      }
       return await putEntryIfCurrent(entry, options)
     } catch (retryError) {
       if (isQuotaExceededError(retryError)) {

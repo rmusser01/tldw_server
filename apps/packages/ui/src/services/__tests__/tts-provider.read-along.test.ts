@@ -54,15 +54,22 @@ vi.mock('@/services/tldw/TldwApiClient', () => ({
 }))
 
 import { tldwClient } from '@/services/tldw/TldwApiClient'
+import { generateSpeech } from '@/services/elevenlabs'
 import { generateOpenAITTS } from '@/services/openai-tts'
 import { markdownToText } from '@/utils/markdown-to-text'
 import {
+  getElevenLabsApiKey,
+  getElevenLabsModel,
+  getElevenLabsVoiceId,
   getOpenAITTSModel,
   getOpenAITTSVoice,
   getVoice,
   isSSMLEnabled
 } from '@/services/tts'
-import { resolveTtsProviderContext } from '../tts-provider'
+import {
+  applyBrowserSpeechSynthesisVoice,
+  resolveTtsProviderContext
+} from '../tts-provider'
 
 describe('tts provider read-along synthesis', () => {
   beforeEach(() => {
@@ -110,6 +117,74 @@ describe('tts provider read-along synthesis', () => {
 
     expect(generateOpenAITTS).toHaveBeenCalledWith(
       expect.objectContaining({ signal })
+    )
+  })
+
+  it('passes abort signals through ElevenLabs synthesis', async () => {
+    const signal = new AbortController().signal
+    vi.mocked(getElevenLabsApiKey).mockResolvedValueOnce('eleven-key')
+    vi.mocked(getElevenLabsModel).mockResolvedValueOnce('model-a')
+    vi.mocked(getElevenLabsVoiceId).mockResolvedValueOnce('voice-a')
+    vi.mocked(generateSpeech).mockResolvedValueOnce(new ArrayBuffer(8))
+    const context = await resolveTtsProviderContext('hello', { provider: 'elevenlabs' })
+
+    await context.synthesize?.('hello', { signal })
+
+    expect(generateSpeech).toHaveBeenCalledWith(
+      'eleven-key',
+      'hello',
+      'voice-a',
+      'model-a',
+      undefined,
+      { signal }
+    )
+  })
+
+  it('uses scoped browser voice listeners without overwriting global handlers', () => {
+    const originalHandler = vi.fn()
+    let voices: SpeechSynthesisVoice[] = []
+    const listeners: EventListener[] = []
+    const synthesis = {
+      onvoiceschanged: originalHandler,
+      getVoices: vi.fn(() => voices),
+      addEventListener: vi.fn((_eventName: string, listener: EventListener) => {
+        listeners.push(listener)
+      }),
+      removeEventListener: vi.fn()
+    } as unknown as SpeechSynthesis
+    const firstUtterance = {} as SpeechSynthesisUtterance
+    const secondUtterance = {} as SpeechSynthesisUtterance
+    const voice = { name: 'Browser Voice' } as SpeechSynthesisVoice
+
+    const cleanupFirst = applyBrowserSpeechSynthesisVoice(
+      firstUtterance,
+      synthesis,
+      'Browser Voice'
+    )
+    const cleanupSecond = applyBrowserSpeechSynthesisVoice(
+      secondUtterance,
+      synthesis,
+      'Browser Voice'
+    )
+    voices = [voice]
+    listeners.forEach((listener) => listener(new Event('voiceschanged')))
+
+    expect(synthesis.onvoiceschanged).toBe(originalHandler)
+    expect(synthesis.addEventListener).toHaveBeenCalledTimes(2)
+    expect(firstUtterance.voice).toBe(voice)
+    expect(secondUtterance.voice).toBe(voice)
+
+    cleanupFirst()
+    cleanupSecond()
+
+    expect(synthesis.removeEventListener).toHaveBeenCalledTimes(2)
+    expect(synthesis.removeEventListener).toHaveBeenCalledWith(
+      'voiceschanged',
+      listeners[0]
+    )
+    expect(synthesis.removeEventListener).toHaveBeenCalledWith(
+      'voiceschanged',
+      listeners[1]
     )
   })
 

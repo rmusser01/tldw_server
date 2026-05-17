@@ -60,6 +60,7 @@ type ReadAlongSession = {
   audio: HTMLAudioElement | null
   objectUrl: string | null
   browserUtterance: SpeechSynthesisUtterance | null
+  browserVoiceCleanup: (() => void) | null
   prefetched: Map<string, AudioSource[]>
   inFlight: Map<string, InFlightSegmentAudio>
   cacheDisabled: boolean
@@ -181,6 +182,11 @@ const linkAbortSignal = (
   return () => signal.removeEventListener('abort', abort)
 }
 
+const cleanupBrowserVoiceListener = (session: ReadAlongSession): void => {
+  session.browserVoiceCleanup?.()
+  session.browserVoiceCleanup = null
+}
+
 export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
   const {
     mediaId,
@@ -238,6 +244,7 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
       session.audio = null
       revokeObjectUrl(session.objectUrl)
       session.objectUrl = null
+      cleanupBrowserVoiceListener(session)
       session.browserUtterance = null
       session.playAttemptToken = null
       if (
@@ -486,11 +493,11 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
       const utterance = new SpeechSynthesisUtterance(
         session.providerContext.normalizeText(segment.text)
       )
-      applyBrowserSpeechSynthesisVoice(
+      session.browserVoiceCleanup = applyBrowserSpeechSynthesisVoice(
         utterance,
         window.speechSynthesis,
         session.providerContext.browserVoiceName
-      )
+      ) ?? null
       utterance.rate = session.providerContext.playbackSpeed || 1
       utterance.onend = () => {
         if (
@@ -499,6 +506,7 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
         ) {
           return
         }
+        cleanupBrowserVoiceListener(session)
         void playSegmentRef.current(session, index + 1)
       }
       utterance.onerror = () => {
@@ -508,6 +516,7 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
         ) {
           return
         }
+        cleanupBrowserVoiceListener(session)
         mutateState(session.token, {
           status: 'segment-error',
           scope: session.scope,
@@ -643,6 +652,7 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
       session.currentController.abort()
       session.currentController = new AbortController()
       session.audio?.pause()
+      cleanupBrowserVoiceListener(session)
       session.browserUtterance = null
       session.pendingIndex = index
       const playToken = Symbol('read-along-play-attempt')
@@ -764,6 +774,7 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
         audio: null,
         objectUrl: null,
         browserUtterance: null,
+        browserVoiceCleanup: null,
         prefetched: new Map(),
         inFlight: new Map(),
         playAttemptToken: null,
@@ -864,6 +875,7 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
       )
       session.audio?.pause()
       if (session.providerContext.provider === 'browser' && typeof window !== 'undefined') {
+        cleanupBrowserVoiceListener(session)
         session.browserUtterance = null
         session.playAttemptToken = null
         window.speechSynthesis?.cancel()

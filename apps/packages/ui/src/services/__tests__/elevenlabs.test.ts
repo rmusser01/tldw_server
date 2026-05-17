@@ -86,6 +86,36 @@ describe("ElevenLabs fetch service", () => {
     })
   })
 
+  it("aborts generated speech with the caller-provided signal without reporting a timeout", async () => {
+    vi.useFakeTimers()
+    const callerAbort = new AbortController()
+    let fetchSignal: AbortSignal | undefined
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      fetchSignal = init?.signal ?? undefined
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"))
+        })
+      })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const request = generateSpeech(
+      "eleven-key",
+      "hello",
+      "voice-1",
+      "model-1",
+      undefined,
+      { signal: callerAbort.signal, timeoutMs: 10_000 }
+    )
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+
+    callerAbort.abort()
+
+    expect(fetchSignal?.aborted).toBe(true)
+    await expect(request).rejects.toThrow("Aborted")
+  })
+
   it("rejects failed ElevenLabs responses with a descriptive status error", async () => {
     const fetchMock = vi
       .fn()

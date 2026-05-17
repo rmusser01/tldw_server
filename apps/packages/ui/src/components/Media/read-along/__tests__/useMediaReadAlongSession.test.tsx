@@ -179,7 +179,10 @@ vi.mock('../media-read-along-cache', () => ({
   })
 }))
 
-import { resolveTtsProviderContext } from '@/services/tts-provider'
+import {
+  applyBrowserSpeechSynthesisVoice,
+  resolveTtsProviderContext
+} from '@/services/tts-provider'
 import { tldwClient } from '@/services/tldw/TldwApiClient'
 import {
   getMediaReadAlongAudioCacheEntry,
@@ -269,6 +272,7 @@ describe('useMediaReadAlongSession', () => {
       })
     }
     vi.clearAllMocks()
+    vi.mocked(applyBrowserSpeechSynthesisVoice).mockReset()
     vi.mocked(tldwClient.getConfig).mockResolvedValue({
       serverUrl: 'http://127.0.0.1:8000/',
       apiKey: 'secret-api-key',
@@ -382,6 +386,50 @@ describe('useMediaReadAlongSession', () => {
     expect(getMediaReadAlongAudioCacheEntry).not.toHaveBeenCalled()
     expect(saveMediaReadAlongAudioCacheEntry).not.toHaveBeenCalled()
     expect(buildReadAlongCacheKey).not.toHaveBeenCalled()
+  })
+
+  it('cleans up browser voice listeners when browser segments are replaced', async () => {
+    providerContext = {
+      provider: 'browser',
+      utterance: 'First sentence.',
+      playbackSpeed: 1,
+      supported: true,
+      browserVoiceName: 'Browser Voice',
+      normalizeText: (text: string) => text
+    }
+    const cleanups: Array<ReturnType<typeof vi.fn>> = []
+    vi.mocked(applyBrowserSpeechSynthesisVoice).mockImplementation(() => {
+      const cleanup = vi.fn()
+      cleanups.push(cleanup)
+      return cleanup
+    })
+    Object.defineProperty(window, 'speechSynthesis', {
+      configurable: true,
+      value: {
+        speak: vi.fn((utterance: MockSpeechSynthesisUtterance) => {
+          eventLog.push(`speech:speak:${utterance.text}`)
+        }),
+        cancel: vi.fn(),
+        pause: vi.fn(),
+        resume: vi.fn()
+      }
+    })
+    const { result } = setupHook()
+
+    await act(async () => {
+      await result.current.start('full-item')
+    })
+    act(() => {
+      result.current.skip()
+    })
+    act(() => {
+      result.current.stop()
+    })
+
+    expect(window.speechSynthesis.speak).toHaveBeenCalledTimes(2)
+    expect(cleanups).toHaveLength(2)
+    expect(cleanups[0]).toHaveBeenCalledTimes(1)
+    expect(cleanups[1]).toHaveBeenCalledTimes(1)
   })
 
   it('targets retry and skip from the segment that failed while loading', async () => {
