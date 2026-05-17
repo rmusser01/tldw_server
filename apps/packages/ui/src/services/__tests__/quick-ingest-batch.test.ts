@@ -1325,6 +1325,115 @@ describe("submitQuickIngestBatch", () => {
     )
   })
 
+  it("skips direct ingest submission for existing conference items when policy includes existing", async () => {
+    mocks.bgRequest.mockImplementation(async (request: { path?: string; body?: any }) => {
+      const path = String(request?.path || "")
+      if (path === "/api/v1/media/collections") {
+        return {
+          id: 9,
+          name: "Conference Batch",
+          kind: "conference",
+          metadata: {},
+          default_tags: [],
+          created_at: "2026-05-01T00:00:00Z",
+          updated_at: "2026-05-01T00:00:00Z",
+          items: []
+        }
+      }
+      if (path === "/api/v1/media/collections/9/items") {
+        return {
+          id: 91,
+          collection_id: 9,
+          ordinal: 3,
+          source_url: request.body?.source_url,
+          duplicate_status: request.body?.duplicate_status,
+          status: request.body?.status,
+          retry_count: 0,
+          idempotency_key: "conference-9-3",
+          warnings: [],
+          metadata: request.body?.metadata || {},
+          tags: [],
+          created_at: "2026-05-01T00:00:00Z",
+          updated_at: "2026-05-01T00:00:00Z"
+        }
+      }
+      if (path === "/api/v1/media/collections/9/items/91") {
+        return {
+          id: 91,
+          collection_id: 9,
+          ordinal: 3,
+          source_url: "https://youtube.com/watch?v=existing",
+          duplicate_status: "duplicate_existing",
+          status: request.body?.status,
+          retry_count: request.body?.retry_count || 0,
+          warnings: [],
+          metadata: {},
+          tags: [],
+          created_at: "2026-05-01T00:00:00Z",
+          updated_at: "2026-05-01T00:00:00Z"
+        }
+      }
+      throw new Error(`Unexpected bgRequest path: ${path}`)
+    })
+
+    const result = await submitQuickIngestBatch({
+      entries: [
+        {
+          id: "existing-talk",
+          url: "https://youtube.com/watch?v=existing",
+          type: "video",
+          playlist: {
+            playlistId: "PL-conf",
+            playlistTitle: "Conference Batch",
+            ordinal: 3,
+            normalizedSourceId: "youtube:video:existing",
+            duplicateStatus: "duplicate_existing"
+          },
+          conferenceOverride: {
+            selected: true,
+            duplicatePolicy: "include_existing",
+            title: "Existing Talk"
+          }
+        }
+      ],
+      files: [],
+      storeRemote: true,
+      processOnly: false,
+      conferenceBatchMetadata: {
+        collectionName: "Conference Batch",
+        sharedTags: []
+      },
+      common: {
+        perform_analysis: true,
+        perform_chunking: false,
+        overwrite_existing: false
+      },
+      advancedValues: {},
+      __quickIngestSessionId: "qi-direct-duplicate-policy"
+    } as any)
+
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+    expect(result.results?.[0]).toMatchObject({
+      id: "existing-talk",
+      status: "ok",
+      outcome: "skipped",
+      collectionItemId: 91,
+      idempotencyKey: "conference-9-3"
+    })
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/collections/9/items",
+        method: "POST",
+        body: expect.objectContaining({
+          status: "skipped_existing",
+          metadata: expect.objectContaining({
+            duplicate_policy: "include_existing"
+          })
+        })
+      })
+    )
+  })
+
   it("marks planned conference items as submit_failed when direct job submission fails", async () => {
     mocks.bgUpload.mockRejectedValueOnce(new Error("job submit failed"))
     mocks.bgRequest.mockImplementation(async (request: { path?: string; body?: any }) => {

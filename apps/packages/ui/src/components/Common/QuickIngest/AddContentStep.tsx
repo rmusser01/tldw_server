@@ -13,7 +13,12 @@ import {
   X,
   Plus,
 } from "lucide-react"
-import type { DetectedMediaType, WizardQueueItem, QueueItemValidation } from "./types"
+import type {
+  ConferenceDuplicatePolicy,
+  DetectedMediaType,
+  WizardQueueItem,
+  QueueItemValidation,
+} from "./types"
 import { useIngestWizard } from "./IngestWizardContext"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { Alert as DesignSystemAlert, Badge } from "@/components/ui/primitives"
@@ -133,6 +138,9 @@ export const detectPlaylistPreflightCandidate = (url: string): boolean => {
   }
 }
 
+const isDuplicatePreflightStatus = (status: string | undefined): boolean =>
+  status === "duplicate_existing" || status === "duplicate_in_batch"
+
 const isValidUrl = (raw: string): boolean => {
   const trimmed = raw.trim()
   if (!trimmed) return false
@@ -244,6 +252,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   const [urlInput, setUrlInput] = useState("")
   const [playlistPreflightUrl, setPlaylistPreflightUrl] = useState("")
   const [playlistPreflight, setPlaylistPreflight] = useState<PlaylistPreflightResult | null>(null)
+  const [duplicatePolicy, setDuplicatePolicy] = useState<ConferenceDuplicatePolicy>("skip")
   const [playlistPreflightLoading, setPlaylistPreflightLoading] = useState(false)
   const [playlistPreflightError, setPlaylistPreflightError] = useState<string | null>(null)
   const { capabilities } = useServerCapabilities()
@@ -309,6 +318,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     setUrlInput("")
     setPlaylistPreflight(null)
     setPlaylistPreflightUrl("")
+    setDuplicatePolicy("skip")
     setPlaylistPreflightError(null)
   }, [urlInput, queueItems, setQueueItems])
 
@@ -337,6 +347,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
       })
       setPlaylistPreflight(result)
       setPlaylistPreflightUrl(primaryPlaylistCandidateUrl)
+      setDuplicatePolicy("skip")
     } catch (error) {
       setPlaylistPreflight(null)
       setPlaylistPreflightUrl(primaryPlaylistCandidateUrl)
@@ -366,6 +377,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     setUrlInput(seededUrl)
     setPlaylistPreflight(null)
     setPlaylistPreflightUrl("")
+    setDuplicatePolicy("skip")
     setPlaylistPreflightError(null)
     setPlaylistPreflightSeed(null)
   }, [playlistPreflightSeed, setPlaylistPreflightSeed])
@@ -400,6 +412,12 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
           ordinal: preflightItem.ordinal,
           normalizedSourceId: preflightItem.normalizedSourceId,
           duplicateStatus: preflightItem.duplicateStatus
+        },
+        conferenceOverride: {
+          selected: true,
+          ...(isDuplicatePreflightStatus(preflightItem.duplicateStatus)
+            ? { duplicatePolicy }
+            : {})
         }
       }
       item.validation = validateQueueItem(item, [...queueItems, ...newItems])
@@ -428,9 +446,11 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     )
     setPlaylistPreflight(null)
     setPlaylistPreflightUrl("")
+    setDuplicatePolicy("skip")
     setPlaylistPreflightError(null)
   }, [
     conferenceBatchMetadata,
+    duplicatePolicy,
     playlistPreflight,
     playlistPreflightUrl,
     queueItems,
@@ -445,6 +465,26 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
         const items = current.items.map((item) =>
           item.ordinal === ordinal ? { ...item, selected } : item
         )
+        return {
+          ...current,
+          selectedCount: items.filter((item) => item.selected && item.sourceUrl).length,
+          items
+        }
+      })
+    },
+    []
+  )
+
+  const handleDuplicatePolicyChange = useCallback(
+    (policy: ConferenceDuplicatePolicy) => {
+      setDuplicatePolicy(policy)
+      setPlaylistPreflight((current) => {
+        if (!current) return current
+        const items = current.items.map((item) => {
+          if (!item.sourceUrl) return { ...item, selected: false }
+          if (!isDuplicatePreflightStatus(item.duplicateStatus)) return item
+          return { ...item, selected: policy !== "skip" }
+        })
         return {
           ...current,
           selectedCount: items.filter((item) => item.selected && item.sourceUrl).length,
@@ -581,6 +621,8 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
             onPreview={handlePreviewPlaylist}
             onAddItems={handleAddPreflightItems}
             onItemSelectionChange={handlePreflightItemSelectionChange}
+            duplicatePolicy={duplicatePolicy}
+            onDuplicatePolicyChange={handleDuplicatePolicyChange}
           />
         )}
       </div>

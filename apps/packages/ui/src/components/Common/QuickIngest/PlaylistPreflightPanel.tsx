@@ -1,16 +1,22 @@
 import React from "react"
-import { Alert, Button, Checkbox, List, Tag, Typography } from "antd"
+import { Alert, Button, Checkbox, List, Radio, Tag, Typography } from "antd"
 import { ListVideo, Plus, RefreshCw } from "lucide-react"
 import type { PlaylistPreflightResult } from "@/services/tldw/playlist-preflight"
+import type { ConferenceDuplicatePolicy } from "./types"
+
+const isDuplicatePreflightStatus = (status: string | undefined): boolean =>
+  status === "duplicate_existing" || status === "duplicate_in_batch"
 
 type PlaylistPreflightPanelProps = {
   candidateUrl: string
   loading?: boolean
   error?: string | null
   result?: PlaylistPreflightResult | null
+  duplicatePolicy?: ConferenceDuplicatePolicy
   onPreview: () => void
   onAddItems: () => void
   onItemSelectionChange?: (ordinal: number, selected: boolean) => void
+  onDuplicatePolicyChange?: (policy: ConferenceDuplicatePolicy) => void
 }
 
 export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
@@ -18,15 +24,17 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
   loading = false,
   error = null,
   result = null,
+  duplicatePolicy = "skip",
   onPreview,
   onAddItems,
-  onItemSelectionChange
+  onItemSelectionChange,
+  onDuplicatePolicyChange
 }) => {
   const selectedCount =
     result?.items.filter((item) => item.selected && item.sourceUrl).length ?? 0
   const duplicateCount =
     result?.duplicateCount ??
-    result?.items.filter((item) => item.duplicateStatus !== "new").length ??
+    result?.items.filter((item) => isDuplicatePreflightStatus(item.duplicateStatus)).length ??
     0
 
   return (
@@ -69,6 +77,28 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
             {duplicateCount > 0 && <Tag color="warning">{duplicateCount} duplicates</Tag>}
           </div>
 
+          {duplicateCount > 0 && (
+            <div className="mt-2 rounded border border-amber-500/20 bg-amber-500/5 px-2 py-1.5">
+              <Typography.Text className="block text-[11px] font-medium text-text-muted">
+                Duplicate policy
+              </Typography.Text>
+              <Radio.Group
+                className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs"
+                value={duplicatePolicy}
+                onChange={(event) =>
+                  onDuplicatePolicyChange?.(
+                    event.target.value as ConferenceDuplicatePolicy
+                  )
+                }
+              >
+                <Radio value="skip">Skip duplicates</Radio>
+                <Radio value="overwrite">Overwrite</Radio>
+                <Radio value="update_metadata_only">Update metadata only</Radio>
+                <Radio value="include_existing">Include existing</Radio>
+              </Radio.Group>
+            </div>
+          )}
+
           <List
             className="mt-2 max-h-36 overflow-y-auto rounded border border-border"
             size="small"
@@ -92,7 +122,7 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
                     {item.sourceUrl}
                   </Typography.Text>
                 </div>
-                {item.duplicateStatus !== "new" && (
+                {isDuplicatePreflightStatus(item.duplicateStatus) && (
                   <Tag color="warning" className="!mr-0">
                     duplicate
                   </Tag>

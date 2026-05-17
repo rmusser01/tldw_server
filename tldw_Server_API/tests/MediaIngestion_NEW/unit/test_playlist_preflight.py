@@ -4,6 +4,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.playlist_prefligh
     classify_playlist_url,
     extract_playlist_preflight,
     normalize_preflight_items,
+    resolve_duplicate_policy_action,
 )
 
 
@@ -160,3 +161,42 @@ def test_extract_playlist_preflight_truncates_large_playlist():
     assert result.item_count == 2
     assert result.selected_count == 2
     assert result.warnings == ["Playlist truncated to 2 items."]
+
+
+@pytest.mark.parametrize(
+    ("policy", "expected_status", "expected_submit"),
+    [
+        ("skip", "skipped_existing", False),
+        ("overwrite", "planned", True),
+        ("update_metadata_only", "skipped_existing", False),
+        ("include_existing", "skipped_existing", False),
+    ],
+)
+def test_duplicate_policy_action_for_existing_duplicate(policy, expected_status, expected_submit):
+    action = resolve_duplicate_policy_action(
+        duplicate_status="duplicate_existing",
+        policy=policy,
+    )
+
+    assert action.planned_status == expected_status
+    assert action.should_submit_job is expected_submit
+
+
+def test_duplicate_policy_action_does_not_skip_new_items():
+    action = resolve_duplicate_policy_action(
+        duplicate_status="new",
+        policy="skip",
+    )
+
+    assert action.planned_status == "planned"
+    assert action.should_submit_job is True
+
+
+def test_duplicate_policy_action_does_not_skip_unknown_items():
+    action = resolve_duplicate_policy_action(
+        duplicate_status="unknown",
+        policy="skip",
+    )
+
+    assert action.planned_status == "planned"
+    assert action.should_submit_job is True

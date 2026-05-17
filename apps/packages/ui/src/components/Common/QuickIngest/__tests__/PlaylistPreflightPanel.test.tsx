@@ -50,4 +50,30 @@ describe("PlaylistPreflightPanel", () => {
 
     expect(onItemSelectionChange).toHaveBeenCalledWith(2, false)
   })
+
+  it("shows duplicate policy controls only when duplicates are present", () => {
+    const onDuplicatePolicyChange = vi.fn()
+    const result = buildResult()
+    result.duplicateCount = 1
+    result.items[1] = {
+      ...result.items[1],
+      duplicateStatus: "duplicate_existing",
+      selected: false
+    }
+
+    render(
+      <PlaylistPreflightPanel
+        candidateUrl="https://www.youtube.com/playlist?list=PLtest"
+        result={result}
+        duplicatePolicy="skip"
+        onDuplicatePolicyChange={onDuplicatePolicyChange}
+        onPreview={vi.fn()}
+        onAddItems={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("radio", { name: "Include existing" }))
+
+    expect(onDuplicatePolicyChange).toHaveBeenCalledWith("include_existing")
+  })
 })

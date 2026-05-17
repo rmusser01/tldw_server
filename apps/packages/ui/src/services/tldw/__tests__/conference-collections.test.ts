@@ -10,8 +10,12 @@ vi.mock("@/services/background-proxy", () => ({
 }))
 
 import {
+  buildConferenceRetryRequestItems,
   buildConferenceFailedResultExportText,
+  classifyConferenceIngestFailure,
   getMediaCollectionStatusCounts,
+  resolveConferenceDuplicatePolicy,
+  buildConferenceCollectionItemPayload,
   normalizeMediaCollectionResponse
 } from "@/services/tldw/conference-collections"
 import { mediaMethods } from "@/services/tldw/domains/media"
@@ -184,5 +188,140 @@ describe("conference media collection normalizers", () => {
     expect(text).toContain("Status: failed")
     expect(text).toContain("Retry attempt: 2")
     expect(text).toContain("Error: Download failed")
+  })
+
+  it("resolves duplicate policies into planned status and submit behavior", () => {
+    expect(
+      resolveConferenceDuplicatePolicy("duplicate_existing", "skip")
+    ).toMatchObject({
+      plannedStatus: "skipped_existing",
+      shouldSubmitJob: false
+    })
+    expect(
+      resolveConferenceDuplicatePolicy("duplicate_existing", "overwrite")
+    ).toMatchObject({
+      plannedStatus: "planned",
+      shouldSubmitJob: true,
+      forceOverwrite: true
+    })
+    expect(
+      resolveConferenceDuplicatePolicy("duplicate_existing", "update_metadata_only")
+    ).toMatchObject({
+      plannedStatus: "skipped_existing",
+      shouldSubmitJob: false
+    })
+    expect(
+      resolveConferenceDuplicatePolicy("duplicate_existing", "include_existing")
+    ).toMatchObject({
+      plannedStatus: "skipped_existing",
+      shouldSubmitJob: false
+    })
+    expect(resolveConferenceDuplicatePolicy("new", "skip")).toMatchObject({
+      plannedStatus: "planned",
+      shouldSubmitJob: true
+    })
+    expect(resolveConferenceDuplicatePolicy("unknown", "skip")).toMatchObject({
+      plannedStatus: "planned",
+      shouldSubmitJob: true
+    })
+  })
+
+  it("adds duplicate policy metadata to planned collection item payloads", () => {
+    const payload = buildConferenceCollectionItemPayload(
+      {
+        collectionName: "Conference 2026",
+        sharedTags: ["conference"],
+        sourcePlaylistUrl: "https://www.youtube.com/playlist?list=PLtest"
+      },
+      {
+        id: "entry-1",
+        url: "https://www.youtube.com/watch?v=a",
+        playlist: {
+          playlistId: "PLtest",
+          ordinal: 1,
+          normalizedSourceId: "youtube:video:a",
+          duplicateStatus: "duplicate_existing"
+        },
+        conferenceOverride: {
+          selected: true,
+          duplicatePolicy: "include_existing",
+          title: "Existing Talk"
+        }
+      }
+    )
+
+    expect(payload.status).toBe("skipped_existing")
+    expect(payload.duplicate_status).toBe("duplicate_existing")
+    expect(payload.metadata).toMatchObject({
+      duplicate_policy: "include_existing",
+      quick_ingest_item_id: "entry-1"
+    })
+  })
+
+  it("classifies conservative conference ingest failure categories", () => {
+    expect(classifyConferenceIngestFailure("Private video")).toBe("auth_required")
+    expect(classifyConferenceIngestFailure("HTTP Error 404")).toBe("unavailable")
+    expect(classifyConferenceIngestFailure("timed out")).toBe("timeout")
+  })
+
+  it("builds selected retry requests from durable failed collection items only", () => {
+    const retryItems = buildConferenceRetryRequestItems([
+      {
+        id: "ok-1",
+        status: "ok",
+        outcome: "processed",
+        type: "video",
+        collectionItemId: "11"
+      } as any,
+      {
+        id: "submit-1",
+        status: "error",
+        outcome: "submit_failed",
+        type: "video",
+        collectionItemId: "13"
+      } as any,
+      {
+        id: "failed-1",
+        status: "error",
+        outcome: "failed",
+        type: "video",
+        collectionItemId: "14",
+        retryAttempt: 2
+      } as any,
+      {
+        id: "cancel-1",
+        status: "error",
+        outcome: "cancelled",
+        type: "video",
+        collectionItemId: "15"
+      } as any,
+      {
+        id: "legacy-failed",
+        status: "error",
+        outcome: "failed",
+        type: "video"
+      } as any
+    ])
+
+    expect(retryItems).toEqual([
+      {
+        resultId: "submit-1",
+        collectionItemId: "13",
+        retryAttempt: 1,
+        idempotencyKey: "conference-retry-13-1"
+      },
+      {
+        resultId: "failed-1",
+        collectionItemId: "14",
+        retryAttempt: 3,
+        idempotencyKey: "conference-retry-14-3"
+      },
+      {
+        resultId: "cancel-1",
+        collectionItemId: "15",
+        retryAttempt: 1,
+        idempotencyKey: "conference-retry-15-1"
+      }
+    ])
   })
 })

@@ -1169,7 +1169,7 @@ git commit -m "feat: add extension playlist quick ingest handoff"
 - Test: `apps/packages/ui/src/services/tldw/__tests__/conference-collections.test.ts`
 - Test: `apps/packages/ui/src/components/Common/QuickIngest/__tests__/WizardResultsStep.navigation.test.tsx`
 
-- [ ] **Step 1: Write failing duplicate policy tests**
+- [x] **Step 1: Write failing duplicate policy tests**
 
 Policies:
 
@@ -1180,7 +1180,7 @@ Policies:
 
 Assert each policy produces expected planned item status and job submission behavior.
 
-- [ ] **Step 2: Write failing failure taxonomy tests**
+- [x] **Step 2: Write failing failure taxonomy tests**
 
 Classify conservative failure types:
 
@@ -1190,15 +1190,15 @@ expect(classifyConferenceIngestFailure("HTTP Error 404")).toBe("unavailable")
 expect(classifyConferenceIngestFailure("timed out")).toBe("timeout")
 ```
 
-- [ ] **Step 3: Implement duplicate policy UI and payloads**
+- [x] **Step 3: Implement duplicate policy UI and payloads**
 
 Expose policy choice in preflight/results only when duplicates exist. Default should avoid surprise overwrite.
 
-- [ ] **Step 4: Implement selected-subset retry**
+- [x] **Step 4: Implement selected-subset retry**
 
 Retry selected applies only to retryable `submit_failed`, `failed`, or `cancelled` items. It must use collection item ID plus retry attempt/idempotency key and must skip completed items.
 
-- [ ] **Step 5: Run verification**
+- [x] **Step 5: Run verification**
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -1213,7 +1213,7 @@ bunx vitest run \
 git diff --check
 ```
 
-- [ ] **Step 6: Bandit**
+- [x] **Step 6: Bandit**
 
 ```bash
 source .venv/bin/activate && python -m bandit \
@@ -1222,6 +1222,16 @@ source .venv/bin/activate && python -m bandit \
      tldw_Server_API/app/services/media_ingest_jobs_worker.py \
   -f json -o /tmp/bandit_bulk_conference_recovery.json
 ```
+
+Task 8 verification note: focused backend tests passed for
+`test_playlist_preflight.py` and `test_media_ingest_jobs_worker.py`; focused
+Vitest passed for conference collection helpers, playlist preflight panel,
+wizard results retry/navigation, and direct quick-ingest batch orchestration.
+`git diff --check` passed. Bandit on the touched backend playlist preflight
+module produced zero findings in `/tmp/bandit_task408.json`. Full frontend
+`tsc --noEmit` still fails only on the existing baseline files outside this
+slice: `EmbeddingsModelSelectionConfig.tsx`, `persona-visuals.ts`, and
+`lib/api/vnPlay.ts`.
 
 - [ ] **Step 7: Commit**
 

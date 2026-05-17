@@ -221,6 +221,9 @@ const normalizeWizardResult = (
       item.mediaId ??
       extractCompletedIngestJobMediaId(item.data),
     persisted: item.persisted,
+    collectionItemId: item.collectionItemId ?? null,
+    retryAttempt: item.retryAttempt ?? null,
+    idempotencyKey: item.idempotencyKey ?? null,
     message: isDuplicate
       ? DUPLICATE_SKIP_MESSAGE
       : typeof item.message === "string" ? item.message : undefined,
@@ -403,6 +406,9 @@ const buildPersistedReattachSignature = (
   const jobIdToItemId = Object.entries(tracking.jobIdToItemId ?? {})
     .map(([jobId, itemId]) => `${jobId}:${String(itemId || "").trim()}`)
     .sort()
+  const jobIdToCollectionItemId = Object.entries(tracking.jobIdToCollectionItemId ?? {})
+    .map(([jobId, itemId]) => `${jobId}:${String(itemId || "").trim()}`)
+    .sort()
 
   return [
     mode,
@@ -411,6 +417,7 @@ const buildPersistedReattachSignature = (
     jobIds.join(","),
     itemIds.join(","),
     jobIdToItemId.join(","),
+    jobIdToCollectionItemId.join(","),
   ].join("|")
 }
 
@@ -691,6 +698,9 @@ const buildResultsFromReattachedJobs = (
             extractCompletedIngestJobError(job.result) ||
             `Quick ingest ${jobStatus || "failed"}.`,
       mediaId: extractCompletedIngestJobMediaId(job.result),
+      collectionItemId: tracking?.jobIdToCollectionItemId?.[String(job.jobId)] ?? null,
+      retryAttempt: null,
+      idempotencyKey: null,
       title: job.result?.title ?? null,
       data: job.result,
       message: isDuplicate ? DUPLICATE_SKIP_MESSAGE : undefined,

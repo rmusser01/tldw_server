@@ -209,6 +209,12 @@ export type PlaylistQueueMetadata = {
   duplicateStatus?: "new" | "duplicate_in_batch" | "duplicate_existing" | "unknown"
 }
 
+export type ConferenceDuplicatePolicy =
+  | "skip"
+  | "overwrite"
+  | "update_metadata_only"
+  | "include_existing"
+
 export type ConferenceBatchMetadata = {
   collectionName: string
   conferenceName?: string
@@ -224,6 +230,7 @@ export type ConferenceItemMetadataOverride = {
   talkDate?: string
   track?: string
   tags?: string[]
+  duplicatePolicy?: ConferenceDuplicatePolicy
   selected: boolean
 }
 
@@ -329,6 +336,8 @@ export type WizardResultItem = ResultItem & {
   collectionItemId?: string | number | null
   /** Retry attempt count associated with the latest ingest attempt. */
   retryAttempt?: number | null
+  /** Idempotency key for durable retry operations. */
+  idempotencyKey?: string | null
   /** Title extracted or assigned during processing. */
   title?: string | null
   /** Non-error informational message (e.g., "Already exists in library"). */

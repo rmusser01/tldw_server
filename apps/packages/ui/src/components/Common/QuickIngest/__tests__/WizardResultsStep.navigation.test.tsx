@@ -454,4 +454,98 @@ describe("WizardResultsStep navigation buttons", () => {
 
     expect(screen.queryByText("Ask this collection")).toBeNull()
   })
+
+  it("retries durable failed collection items with retry request metadata", () => {
+    const onRetryItems = vi.fn()
+    wizardHarness.results = [
+      {
+        id: "ok-1",
+        status: "ok" as const,
+        type: "video",
+        title: "Opening Keynote",
+        mediaId: 101,
+        collectionItemId: "11",
+      } as any,
+      {
+        id: "submit-1",
+        status: "error" as const,
+        outcome: "submit_failed",
+        type: "video",
+        title: "Submit Blocked",
+        error: "timed out",
+        collectionItemId: "13",
+      } as any,
+      {
+        id: "failed-1",
+        status: "error" as const,
+        outcome: "failed",
+        type: "video",
+        title: "Bad Video",
+        error: "timed out",
+        collectionItemId: "14",
+        retryAttempt: 2,
+      } as any,
+      {
+        id: "cancel-1",
+        status: "error" as const,
+        outcome: "cancelled",
+        type: "video",
+        title: "Cancelled Talk",
+        error: "cancelled",
+        collectionItemId: "15",
+      } as any,
+      {
+        id: "legacy-failed",
+        status: "error" as const,
+        outcome: "failed",
+        type: "video",
+        title: "Legacy Failed",
+        error: "timed out",
+      } as any,
+    ]
+    sessionHarness.tracking = {
+      mode: "webui-direct",
+      collectionId: "7",
+      plannedItemIds: ["11", "13", "14", "15"],
+      durableMode: "durable_collection",
+      startedAt: "2026-05-16T12:00:00Z",
+    }
+
+    render(
+      <WizardResultsStep
+        onClose={vi.fn()}
+        onRetryItems={onRetryItems}
+      />
+    )
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Retry all 3 retryable errors",
+      })
+    )
+
+    expect(onRetryItems).toHaveBeenCalledWith(
+      ["13", "14", "15"],
+      [
+        {
+          resultId: "submit-1",
+          collectionItemId: "13",
+          retryAttempt: 1,
+          idempotencyKey: "conference-retry-13-1",
+        },
+        {
+          resultId: "failed-1",
+          collectionItemId: "14",
+          retryAttempt: 3,
+          idempotencyKey: "conference-retry-14-3",
+        },
+        {
+          resultId: "cancel-1",
+          collectionItemId: "15",
+          retryAttempt: 1,
+          idempotencyKey: "conference-retry-15-1",
+        },
+      ]
+    )
+  })
 })

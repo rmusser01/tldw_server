@@ -18,7 +18,10 @@ import {
   extractIngestJobIds,
   pollSingleIngestJob,
 } from "@/services/tldw/ingest-jobs-orchestrator";
-import { extractCompletedIngestJobMediaId } from "@/services/tldw/ingest-job-results";
+import {
+  completedIngestJobIndicatesSkipped,
+  extractCompletedIngestJobMediaId,
+} from "@/services/tldw/ingest-job-results";
 import {
   normalizePersistentAddResponse,
   shouldFallbackToPersistentAdd,
@@ -38,6 +41,7 @@ import {
   buildConferenceCollectionItemPayload,
   normalizeMediaCollectionItem,
   normalizeMediaCollectionResponse,
+  resolveConferenceDuplicatePolicy,
   type ApiMediaCollection,
   type ApiMediaCollectionItem,
 } from "@/services/tldw/conference-collections";
@@ -95,7 +99,7 @@ type QuickIngestBatchInput = {
 type QuickIngestBatchResult = {
   id: string;
   status: "ok" | "error";
-  outcome?: "skipped";
+  outcome?: "skipped" | "submit_failed" | "failed" | "cancelled";
   url?: string;
   fileName?: string;
   type: string;
@@ -103,6 +107,9 @@ type QuickIngestBatchResult = {
   error?: string;
   message?: string;
   persisted?: boolean;
+  collectionItemId?: string | number | null;
+  retryAttempt?: number | null;
+  idempotencyKey?: string | null;
 };
 
 type QuickIngestBatchResponse = {
@@ -754,10 +761,40 @@ const runDirectQuickIngestBatch = async (
 
       const plannedConferenceItem =
         conferencePlan?.itemsByEntryId.get(entry.id);
+      const duplicatePolicyResolution = resolveConferenceDuplicatePolicy(
+        entry.playlist?.duplicateStatus,
+        entry.conferenceOverride?.duplicatePolicy,
+      );
       let jobSubmitted = false;
       let latestJobId: number | undefined;
       try {
+        if (
+          shouldStoreRemote &&
+          plannedConferenceItem &&
+          !duplicatePolicyResolution.shouldSubmitJob
+        ) {
+          await patchConferenceCollectionItem(plannedConferenceItem, {
+            status: duplicatePolicyResolution.plannedStatus,
+            retry_count: 0,
+          });
+          out.push({
+            id: entry.id,
+            status: "ok",
+            outcome: "skipped",
+            url,
+            type: resolvedType,
+            collectionItemId: plannedConferenceItem.itemId,
+            retryAttempt: 0,
+            idempotencyKey: plannedConferenceItem.idempotencyKey ?? null,
+            message: DUPLICATE_SKIP_MESSAGE,
+            persisted: false,
+          });
+          continue;
+        }
+
         let data: unknown;
+        let resultOutcome: QuickIngestBatchResult["outcome"];
+        let resultMessage: string | undefined;
         if (shouldStoreRemote) {
           const fields = buildFields({
             rawType: resolvedType,
@@ -771,6 +808,9 @@ const runDirectQuickIngestBatch = async (
             chunkingTemplateName: input.chunkingTemplateName,
             autoApplyTemplate: input.autoApplyTemplate,
           });
+          if (duplicatePolicyResolution.forceOverwrite) {
+            fields.overwrite_existing = true;
+          }
           applyPlannedConferenceFields(fields, plannedConferenceItem);
           fields.urls = [url];
           try {
@@ -825,8 +865,15 @@ const runDirectQuickIngestBatch = async (
               throw new Error(String(pollResult.error || "Ingest failed"));
             }
             data = pollResult.data;
+            const completedDuplicate = completedIngestJobIndicatesSkipped(
+              pollResult.data,
+            );
+            if (completedDuplicate) {
+              resultOutcome = "skipped";
+              resultMessage = DUPLICATE_SKIP_MESSAGE;
+            }
             await patchConferenceCollectionItem(plannedConferenceItem, {
-              status: "completed",
+              status: completedDuplicate ? "skipped_existing" : "completed",
               latest_job_id: String(latestJobId),
               media_id: extractCompletedIngestJobMediaId(pollResult.data),
             });
@@ -845,6 +892,17 @@ const runDirectQuickIngestBatch = async (
               fields.media_ingest_job_id = String(latestJobId);
             }
             data = await submitPersistentAdd({ fields });
+            const fallbackDuplicate = completedIngestJobIndicatesSkipped(data);
+            if (fallbackDuplicate) {
+              resultOutcome = "skipped";
+              resultMessage = DUPLICATE_SKIP_MESSAGE;
+            }
+            await patchConferenceCollectionItem(plannedConferenceItem, {
+              status: fallbackDuplicate ? "skipped_existing" : "completed",
+              latest_job_id:
+                typeof latestJobId === "number" ? String(latestJobId) : undefined,
+              media_id: extractCompletedIngestJobMediaId(data),
+            });
           }
         } else if (resolvedType === "html") {
           data = await processWebScrape({
@@ -882,14 +940,20 @@ const runDirectQuickIngestBatch = async (
         out.push({
           id: entry.id,
           status: "ok",
+          outcome: resultOutcome,
           url,
           type: resolvedType,
           data,
+          message: resultMessage,
           persisted: false,
+          collectionItemId: plannedConferenceItem?.itemId ?? null,
+          retryAttempt: plannedConferenceItem ? 0 : null,
+          idempotencyKey: plannedConferenceItem?.idempotencyKey ?? null,
         });
       } catch (error) {
+        const outcome = jobSubmitted ? "failed" : "submit_failed";
         await patchConferenceCollectionItem(plannedConferenceItem, {
-          status: jobSubmitted ? "failed" : "submit_failed",
+          status: outcome,
           latest_job_id:
             typeof latestJobId === "number" ? String(latestJobId) : undefined,
           error_summary:
@@ -900,12 +964,16 @@ const runDirectQuickIngestBatch = async (
         out.push({
           id: entry.id,
           status: "error",
+          outcome,
           url,
           type: resolvedType,
           error:
             error instanceof Error
               ? error.message
               : String(error || "Request failed"),
+          collectionItemId: plannedConferenceItem?.itemId ?? null,
+          retryAttempt: plannedConferenceItem ? 0 : null,
+          idempotencyKey: plannedConferenceItem?.idempotencyKey ?? null,
         });
       }
     }

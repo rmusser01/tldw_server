@@ -50,6 +50,19 @@ class PlaylistPreflightData:
         return payload
 
 
+@dataclass(frozen=True)
+class DuplicatePolicyAction:
+    policy: str
+    planned_status: str
+    should_submit_job: bool
+    force_overwrite: bool
+
+
+def _is_duplicate_status(value: str | None) -> bool:
+    normalized = str(value or "").strip().lower()
+    return normalized in {"duplicate_existing", "duplicate_in_batch"}
+
+
 def _hostname_matches(hostname: str, allowed_host: str) -> bool:
     return hostname == allowed_host or hostname.endswith(f".{allowed_host}")
 
@@ -251,6 +264,46 @@ def normalize_preflight_items(raw_items: list[dict[str, Any]]) -> list[PlaylistP
         )
 
     return normalized
+
+
+def resolve_duplicate_policy_action(
+    *,
+    duplicate_status: str | None,
+    policy: str | None,
+) -> DuplicatePolicyAction:
+    """Resolve duplicate policy into collection status and job submission behavior."""
+    normalized_duplicate_status = str(duplicate_status or "unknown").strip() or "unknown"
+    normalized_policy = str(policy or "skip").strip() or "skip"
+    if normalized_policy not in {
+        "skip",
+        "overwrite",
+        "update_metadata_only",
+        "include_existing",
+    }:
+        normalized_policy = "skip"
+
+    if not _is_duplicate_status(normalized_duplicate_status):
+        return DuplicatePolicyAction(
+            policy=normalized_policy,
+            planned_status="planned",
+            should_submit_job=True,
+            force_overwrite=False,
+        )
+
+    if normalized_policy == "overwrite":
+        return DuplicatePolicyAction(
+            policy=normalized_policy,
+            planned_status="planned",
+            should_submit_job=True,
+            force_overwrite=True,
+        )
+
+    return DuplicatePolicyAction(
+        policy=normalized_policy,
+        planned_status="skipped_existing",
+        should_submit_job=False,
+        force_overwrite=False,
+    )
 
 
 def _youtube_dl_class():

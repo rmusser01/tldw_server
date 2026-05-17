@@ -1,5 +1,6 @@
 import type {
   ConferenceBatchMetadata,
+  ConferenceDuplicatePolicy,
   ConferenceItemMetadataOverride,
   PlaylistQueueMetadata,
   WizardResultItem,
@@ -119,6 +120,29 @@ export type MediaCollectionStatusCounts = {
   cancelled: number
 }
 
+export type ConferenceDuplicatePolicyResolution = {
+  policy: ConferenceDuplicatePolicy
+  plannedStatus: MediaCollectionItemStatus
+  shouldSubmitJob: boolean
+  forceOverwrite: boolean
+}
+
+export type ConferenceIngestFailureKind =
+  | "auth_required"
+  | "unavailable"
+  | "timeout"
+  | "cancelled"
+  | "validation"
+  | "server"
+  | "unknown"
+
+export type ConferenceRetryRequestItem = {
+  resultId: string
+  collectionItemId: string
+  retryAttempt: number
+  idempotencyKey: string
+}
+
 export type ConferenceCollectionCreatePayload = {
   name: string
   kind: "conference"
@@ -156,6 +180,130 @@ const compactString = (value: unknown): string | undefined => {
   const trimmed = value.trim()
   return trimmed || undefined
 }
+
+export const CONFERENCE_DUPLICATE_POLICIES: ConferenceDuplicatePolicy[] = [
+  "skip",
+  "overwrite",
+  "update_metadata_only",
+  "include_existing",
+]
+
+export const normalizeConferenceDuplicatePolicy = (
+  value: unknown
+): ConferenceDuplicatePolicy =>
+  CONFERENCE_DUPLICATE_POLICIES.includes(value as ConferenceDuplicatePolicy)
+    ? (value as ConferenceDuplicatePolicy)
+    : "skip"
+
+const isDuplicateStatus = (value: unknown): boolean => {
+  const normalized = compactString(value)?.toLowerCase()
+  return normalized === "duplicate_existing" || normalized === "duplicate_in_batch"
+}
+
+export const resolveConferenceDuplicatePolicy = (
+  duplicateStatus: unknown,
+  policy: unknown
+): ConferenceDuplicatePolicyResolution => {
+  const resolvedPolicy = normalizeConferenceDuplicatePolicy(policy)
+  if (!isDuplicateStatus(duplicateStatus)) {
+    return {
+      policy: resolvedPolicy,
+      plannedStatus: "planned",
+      shouldSubmitJob: true,
+      forceOverwrite: false,
+    }
+  }
+
+  if (resolvedPolicy === "overwrite") {
+    return {
+      policy: resolvedPolicy,
+      plannedStatus: "planned",
+      shouldSubmitJob: true,
+      forceOverwrite: true,
+    }
+  }
+
+  return {
+    policy: resolvedPolicy,
+    plannedStatus: "skipped_existing",
+    shouldSubmitJob: false,
+    forceOverwrite: false,
+  }
+}
+
+export const classifyConferenceIngestFailure = (
+  value: unknown
+): ConferenceIngestFailureKind => {
+  const message = String(value || "").trim().toLowerCase()
+  if (!message) return "unknown"
+  if (
+    message.includes("private") ||
+    message.includes("sign in") ||
+    message.includes("login") ||
+    message.includes("unauthorized") ||
+    message.includes("forbidden") ||
+    message.includes("403")
+  ) {
+    return "auth_required"
+  }
+  if (
+    message.includes("404") ||
+    message.includes("not found") ||
+    message.includes("unavailable") ||
+    message.includes("removed")
+  ) {
+    return "unavailable"
+  }
+  if (
+    message.includes("timeout") ||
+    message.includes("timed out") ||
+    message.includes("deadline")
+  ) {
+    return "timeout"
+  }
+  if (message.includes("cancelled") || message.includes("canceled")) {
+    return "cancelled"
+  }
+  if (message.includes("invalid") || message.includes("unsupported")) {
+    return "validation"
+  }
+  if (message.includes("500") || message.includes("server")) {
+    return "server"
+  }
+  return "unknown"
+}
+
+const isRetryableConferenceOutcome = (
+  item: Pick<WizardResultItem, "status" | "outcome">
+): boolean =>
+  item.outcome === "submit_failed" ||
+  item.outcome === "failed" ||
+  item.outcome === "cancelled" ||
+  item.status === "error"
+
+export const buildConferenceRetryRequestItems = (
+  items: WizardResultItem[]
+): ConferenceRetryRequestItem[] =>
+  items
+    .filter(isRetryableConferenceOutcome)
+    .map((item) => {
+      const collectionItemId =
+        item.collectionItemId == null
+          ? undefined
+          : compactString(String(item.collectionItemId))
+      if (!collectionItemId) return null
+      const retryAttempt =
+        typeof item.retryAttempt === "number" && Number.isFinite(item.retryAttempt)
+          ? Math.trunc(item.retryAttempt) + 1
+          : 1
+      return {
+        resultId: item.id,
+        collectionItemId,
+        retryAttempt,
+        idempotencyKey: `conference-retry-${collectionItemId}-${retryAttempt}`,
+      }
+    })
+    .filter((item): item is ConferenceRetryRequestItem => Boolean(item))
 
 export const normalizeConferenceTagList = (value: unknown): string[] => {
   const raw = Array.isArray(value)
@@ -217,6 +365,13 @@ export const buildConferenceCollectionItemPayload = (
 ): ConferenceCollectionItemPayload => {
   const override = item.conferenceOverride
   const playlist = item.playlist
+  const duplicatePolicy = normalizeConferenceDuplicatePolicy(
+    override?.duplicatePolicy
+  )
+  const duplicateResolution = resolveConferenceDuplicatePolicy(
+    playlist?.duplicateStatus,
+    duplicatePolicy
+  )
   const ordinal = playlist?.ordinal
   const metadata: Record<string, unknown> = {
     quick_ingest_item_id: item.id,
@@ -228,6 +383,9 @@ export const buildConferenceCollectionItemPayload = (
   if (ordinal != null) metadata.playlist_ordinal = ordinal
   if (compactString(batchMetadata.eventYear)) {
     metadata.event_year = compactString(batchMetadata.eventYear)
+  }
+  if (isDuplicateStatus(playlist?.duplicateStatus)) {
+    metadata.duplicate_policy = duplicatePolicy
   }
 
   return {
@@ -243,7 +401,7 @@ export const buildConferenceCollectionItemPayload = (
       null,
     track: compactString(override?.track) ?? null,
     duplicate_status: compactString(playlist?.duplicateStatus ?? undefined) ?? "unknown",
-    status: "planned",
+    status: duplicateResolution.plannedStatus,
     metadata,
     tags: mergeConferenceTags(batchMetadata.sharedTags, override?.tags),
   }

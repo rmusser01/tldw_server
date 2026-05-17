@@ -7,13 +7,18 @@ import {
   RefreshCw,
   ExternalLink,
   MessageSquare,
+  Trash2,
   Search,
   BookOpen,
   Download,
 } from "lucide-react"
 import type { WizardResultItem } from "./types"
 import { shouldKeepOriginalFile } from "@/services/tldw/media-routing"
-import { buildConferenceFailedResultExportText } from "@/services/tldw/conference-collections"
+import {
+  buildConferenceFailedResultExportText,
+  buildConferenceRetryRequestItems,
+  type ConferenceRetryRequestItem,
+} from "@/services/tldw/conference-collections"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
 import { useIngestWizard } from "./IngestWizardContext"
@@ -33,7 +38,10 @@ import {
 
 type WizardResultsStepProps = {
   onClose: () => void
-  onRetryItems?: (itemIds: string[]) => void
+  onRetryItems?: (
+    itemIds: string[],
+    retryItems?: ConferenceRetryRequestItem[]
+  ) => void
   onOpenMedia?: (item: WizardResultItem) => void
   onDiscussInChat?: (item: WizardResultItem) => void
   onSearchKnowledge?: () => void
@@ -235,14 +243,16 @@ type ErrorRowProps = {
   item: WizardResultItem
   category: ErrorCategory
   qi: (key: string, defaultValue: string, options?: Record<string, unknown>) => string
-  onRetry?: (id: string) => void
+  onRetry?: (item: WizardResultItem) => void
+  onRemove?: (id: string) => void
 }
 
 const ErrorRow: React.FC<ErrorRowProps> = React.memo(
-  ({ item, category, qi, onRetry }) => {
+  ({ item, category, qi, onRetry, onRemove }) => {
     const label = item.title || item.fileName || item.url || item.id
 
-    const handleRetry = useCallback(() => onRetry?.(item.id), [item.id, onRetry])
+    const handleRetry = useCallback(() => onRetry?.(item), [item, onRetry])
+    const handleRemove = useCallback(() => onRemove?.(item.id), [item.id, onRemove])
 
     return (
       <div className="rounded-md border border-danger/20 bg-danger/5 px-3 py-2">
@@ -279,6 +289,17 @@ const ErrorRow: React.FC<ErrorRowProps> = React.memo(
               >
                 <RefreshCw className="h-3 w-3" aria-hidden="true" />
                 {qi("wizard.results.retry", "Retry")}
+              </button>
+            )}
+            {onRemove && (
+              <button
+                type="button"
+                onClick={handleRemove}
+                className="flex items-center gap-1 rounded px-2 py-1 text-xs text-text-muted hover:bg-danger/10 hover:text-danger transition-colors"
+                aria-label={qi("wizard.results.removeItemAria", "Remove {{name}}", { name: label })}
+              >
+                <Trash2 className="h-3 w-3" aria-hidden="true" />
+                {qi("wizard.results.remove", "Remove")}
               </button>
             )}
           </div>
@@ -366,21 +387,39 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
 
   // -- Retryable error IDs --------------------------------------------------
 
+  const conferenceRetryRequests = useMemo(
+    () => (hasDurableCollection ? buildConferenceRetryRequestItems(failures) : []),
+    [failures, hasDurableCollection]
+  )
+
+  const conferenceRetryRequestsByResultId = useMemo(
+    () =>
+      new Map(
+        conferenceRetryRequests.map((request) => [request.resultId, request])
+      ),
+    [conferenceRetryRequests]
+  )
+
   const retryableIds = useMemo(
     () =>
-      failures
-        .filter((e) => errorCategories.get(e.id)?.retryable)
-        .map((e) => e.id),
-    [failures, errorCategories]
+      hasDurableCollection
+        ? conferenceRetryRequests.map((request) => request.collectionItemId)
+        : failures
+            .filter((e) => errorCategories.get(e.id)?.retryable)
+            .map((e) => e.id),
+    [conferenceRetryRequests, errorCategories, failures, hasDurableCollection]
   )
 
   // -- Callbacks ------------------------------------------------------------
 
   const handleRetryAll = useCallback(() => {
     if (retryableIds.length > 0) {
-      onRetryItems?.(retryableIds)
+      onRetryItems?.(
+        retryableIds,
+        hasDurableCollection ? conferenceRetryRequests : undefined
+      )
     }
-  }, [retryableIds, onRetryItems])
+  }, [conferenceRetryRequests, hasDurableCollection, retryableIds, onRetryItems])
 
   const handleOpenCollection = useCallback(() => {
     if (collectionId) {
@@ -417,10 +456,41 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
   }, [failures, qi])
 
   const handleRetrySingle = useCallback(
-    (id: string) => {
-      onRetryItems?.([id])
+    (item: WizardResultItem) => {
+      if (hasDurableCollection) {
+        const retryRequest = conferenceRetryRequestsByResultId.get(item.id)
+        if (retryRequest) {
+          onRetryItems?.([retryRequest.collectionItemId], [retryRequest])
+        }
+        return
+      }
+      onRetryItems?.([item.id])
     },
-    [onRetryItems]
+    [conferenceRetryRequestsByResultId, hasDurableCollection, onRetryItems]
+  )
+
+  const getRetryHandlerForItem = useCallback(
+    (item: WizardResultItem) => {
+      if (!onRetryItems) return undefined
+      if (!hasDurableCollection) return handleRetrySingle
+      return conferenceRetryRequestsByResultId.has(item.id)
+        ? handleRetrySingle
+        : undefined
+    },
+    [
+      conferenceRetryRequestsByResultId,
+      handleRetrySingle,
+      hasDurableCollection,
+      onRetryItems,
+    ]
+  )
+
+  const handleRemoveSingle = useCallback(
+    (_id: string) => {
+      // Remove is a no-op placeholder; parent will handle via onRetryItems
+      // or a future onRemoveItems callback.
+    },
+    []
   )
 
   const handleIngestMore = useCallback(() => {
@@ -618,7 +688,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
                   item={item}
                   category={errorCategories.get(item.id) ?? classifyError(item.error)}
                   qi={qi}
-                  onRetry={onRetryItems ? handleRetrySingle : undefined}
+                  onRetry={getRetryHandlerForItem(item)}
                   onRemove={handleRemoveSingle}
                 />
               ))}
@@ -645,7 +715,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
                   item={item}
                   category={errorCategories.get(item.id) ?? classifyError(item.error)}
                   qi={qi}
-                  onRetry={onRetryItems ? handleRetrySingle : undefined}
+                  onRetry={getRetryHandlerForItem(item)}
                   onRemove={handleRemoveSingle}
                 />
               ))}
@@ -672,7 +742,8 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
                   item={item}
                   category={errorCategories.get(item.id) ?? classifyError(item.error)}
                   qi={qi}
-                  onRetry={onRetryItems ? handleRetrySingle : undefined}
+                  onRetry={getRetryHandlerForItem(item)}
+                  onRemove={handleRemoveSingle}
                 />
               ))}
             </div>
