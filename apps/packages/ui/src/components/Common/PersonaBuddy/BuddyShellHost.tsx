@@ -21,10 +21,14 @@ import type {
   PersonaBuddySummary
 } from "@/types/persona-buddy"
 import {
+  asPersonaVisualCustomStateId,
   isPersonaVisualCustomStateIdText,
   PERSONA_VISUAL_PACK_ACTIVATED_EVENT
 } from "@/types/persona-visuals"
-import type { PersonaVisualPack } from "@/types/persona-visuals"
+import type {
+  PersonaVisualManifest,
+  PersonaVisualPack
+} from "@/types/persona-visuals"
 
 import { useBuddyShellRenderContext } from "./BuddyShellRenderContext"
 import { BuddyShellDock } from "./BuddyShellDock"
@@ -42,6 +46,15 @@ type BuddyShellHostProps = {
 type DragState = {
   offsetX: number
   offsetY: number
+  lastClientX: number
+}
+
+type BuddyMovementState = "moving_left" | "moving_right"
+
+type BuddyMovementContext = {
+  activePersonaId: string | null
+  sessionId: string | null
+  manifest: PersonaVisualManifest | null
 }
 
 type ResolvedPersonaShellState = {
@@ -49,6 +62,45 @@ type ResolvedPersonaShellState = {
   activePersonaId: string | null
   fallbackName: string | null
   buddySummary: PersonaBuddySummary | null
+}
+
+const BUDDY_DRAG_MOVEMENT_THRESHOLD_PX = 8
+const BUDDY_DRAG_MOVEMENT_OVERRIDE_MS = 300
+
+const hasVisualMovementState = (
+  manifest: PersonaVisualManifest | null | undefined,
+  state: BuddyMovementState
+): boolean => {
+  const stateId = asPersonaVisualCustomStateId(state)
+  return Boolean(manifest?.states?.[stateId] || manifest?.state_catalog?.[stateId])
+}
+
+const clearBuddyDragOverride = (context: BuddyMovementContext) => {
+  const runtimeStore = usePersonaVisualRuntimeStore.getState()
+  const current = runtimeStore.override
+  if (
+    current?.reason === "buddy_drag" &&
+    (!context.activePersonaId || current.personaId === context.activePersonaId)
+  ) {
+    runtimeStore.clearOverride()
+  }
+}
+
+const setBuddyDragMovementOverride = (
+  context: BuddyMovementContext,
+  state: BuddyMovementState
+) => {
+  if (!context.activePersonaId || !hasVisualMovementState(context.manifest, state)) {
+    return
+  }
+
+  usePersonaVisualRuntimeStore.getState().setOverride({
+    personaId: context.activePersonaId,
+    sessionId: context.sessionId,
+    state: asPersonaVisualCustomStateId(state),
+    reason: "buddy_drag",
+    expiresAt: Date.now() + BUDDY_DRAG_MOVEMENT_OVERRIDE_MS
+  })
 }
 
 const ensurePortalRoot = () => {
@@ -178,6 +230,11 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
 }) => {
   const dockRef = React.useRef<HTMLDivElement | null>(null)
   const dragStateRef = React.useRef<DragState | null>(null)
+  const movementContextRef = React.useRef<BuddyMovementContext>({
+    activePersonaId: null,
+    sessionId: null,
+    manifest: null
+  })
 
   const positionBucket: PersonaBuddyPositionBucket =
     renderContext?.position_bucket ??
@@ -221,18 +278,32 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
         }
       )
 
+      const deltaX = event.clientX - dragStateRef.current.lastClientX
+      dragStateRef.current.lastClientX = event.clientX
+      if (Math.abs(deltaX) >= BUDDY_DRAG_MOVEMENT_THRESHOLD_PX) {
+        setBuddyDragMovementOverride(
+          movementContextRef.current,
+          deltaX > 0 ? "moving_right" : "moving_left"
+        )
+      }
+
       setPosition(positionBucket, nextPosition)
     }
 
     const handlePointerUp = () => {
+      if (dragStateRef.current) {
+        clearBuddyDragOverride(movementContextRef.current)
+      }
       dragStateRef.current = null
     }
 
     window.addEventListener("pointermove", handlePointerMove)
     window.addEventListener("pointerup", handlePointerUp)
+    window.addEventListener("pointercancel", handlePointerUp)
     return () => {
       window.removeEventListener("pointermove", handlePointerMove)
       window.removeEventListener("pointerup", handlePointerUp)
+      window.removeEventListener("pointercancel", handlePointerUp)
     }
   }, [positionBucket, setPosition])
 
@@ -279,8 +350,10 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       const rect = dockRef.current.getBoundingClientRect()
       dragStateRef.current = {
         offsetX: event.clientX - rect.left,
-        offsetY: event.clientY - rect.top
+        offsetY: event.clientY - rect.top,
+        lastClientX: event.clientX
       }
+      event.currentTarget.setPointerCapture?.(event.pointerId)
       event.preventDefault()
     },
     []
@@ -387,6 +460,18 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     visualPackRefreshNonce
   ])
 
+  React.useEffect(() => {
+    movementContextRef.current = {
+      activePersonaId: resolvedPersona.activePersonaId,
+      sessionId: renderContext.live_session_id ?? null,
+      manifest: visualPack?.manifest ?? null
+    }
+  }, [
+    renderContext.live_session_id,
+    resolvedPersona.activePersonaId,
+    visualPack?.manifest
+  ])
+
   const buddySummary = resolvedPersona.buddySummary
   const isDormant = resolvedPersona.hasTargetPersona && !buddySummary?.has_buddy
   const applicableRuntimeOverride =
@@ -400,11 +485,9 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
   const runtimeStateIds = React.useMemo(() => {
     const states = visualPack?.manifest?.states
     const stateCatalog = visualPack?.manifest?.state_catalog
-    if (!states || !stateCatalog) return []
-    return Object.keys(states).filter((stateId) =>
-      Object.prototype.hasOwnProperty.call(stateCatalog, stateId) &&
-      isPersonaVisualCustomStateIdText(stateId)
-    )
+    return Array.from(
+      new Set([...Object.keys(states || {}), ...Object.keys(stateCatalog || {})])
+    ).filter(isPersonaVisualCustomStateIdText)
   }, [visualPack])
   const visualState =
     renderContext.visual_state ??

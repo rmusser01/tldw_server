@@ -814,9 +814,9 @@ git commit -m "feat: configure Buddy visual states in builder"
 - Modify: `apps/packages/ui/src/components/Common/PersonaBuddy/BuddyShellHost.tsx`
 - Modify: `apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx`
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] **Step 1: Write runtime store tests if a clear helper is needed**
+- [x] **Step 1: Write runtime store tests if a clear helper is needed**
 
 If `BuddyShellHost` needs explicit clearing beyond `clearExpired`, add `clearOverride()` and test it.
 
@@ -843,7 +843,7 @@ describe("persona visual runtime override clearing", () => {
 })
 ```
 
-- [ ] **Step 2: Write Buddy drag movement tests**
+- [x] **Step 2: Write Buddy drag movement tests**
 
 In `BuddyShellHost.test.tsx`, add tests for:
 
@@ -852,7 +852,7 @@ In `BuddyShellHost.test.tsx`, add tests for:
 - pointerup clears movement override,
 - packs without movement states continue to move the dock without setting override.
 
-- [ ] **Step 3: Run runtime tests and verify they fail**
+- [x] **Step 3: Run runtime tests and verify they fail**
 
 Run:
 
@@ -863,7 +863,7 @@ bunx vitest run src/store/__tests__/persona-visual-runtime.test.ts src/component
 
 Expected: FAIL until movement override logic exists.
 
-- [ ] **Step 4: Implement runtime store helper if needed**
+- [x] **Step 4: Implement runtime store helper if needed**
 
 Add:
 
@@ -877,7 +877,7 @@ to `PersonaVisualRuntimeStore` and implementation:
 clearOverride: () => set({ override: null })
 ```
 
-- [ ] **Step 5: Implement directional drag override**
+- [x] **Step 5: Implement directional drag override**
 
 In `BuddyShellHost.tsx`:
 
@@ -908,7 +908,7 @@ const hasVisualState = (
   )
 ```
 
-- [ ] **Step 6: Run runtime tests**
+- [x] **Step 6: Run runtime tests**
 
 Run:
 
@@ -919,7 +919,7 @@ bunx vitest run src/store/__tests__/persona-visual-runtime.test.ts src/component
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Task 5**
+- [x] **Step 7: Commit Task 5**
 
 ```bash
 git add apps/packages/ui/src/store/persona-visual-runtime.ts apps/packages/ui/src/store/__tests__/persona-visual-runtime.test.ts apps/packages/ui/src/components/Common/PersonaBuddy/BuddyShellHost.tsx apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx

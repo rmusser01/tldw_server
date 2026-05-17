@@ -69,4 +69,32 @@ describe("persona visual runtime store", () => {
       .clearRuntimeDiagnostics("sidepanel:persona-garden")
     expect(usePersonaVisualRuntimeStore.getState().runtimeDiagnostics).toBeNull()
   })
+
+  it("clears the current runtime override without touching diagnostics", () => {
+    usePersonaVisualRuntimeStore.getState().setOverride({
+      personaId: "persona-1",
+      sessionId: null,
+      state: "speaking",
+      reason: "buddy_drag",
+      expiresAt: Date.now() + 500
+    })
+    usePersonaVisualRuntimeStore.getState().setRuntimeDiagnostics({
+      sourceId: "web:chat",
+      personaId: "persona-1",
+      sessionId: null,
+      packId: "pack-1",
+      packTitle: "Animated buddy",
+      packLoadStatus: "loaded",
+      visualState: "speaking",
+      diagnostic: null,
+      updatedAt: 2000
+    })
+
+    usePersonaVisualRuntimeStore.getState().clearOverride()
+
+    expect(usePersonaVisualRuntimeStore.getState().override).toBeNull()
+    expect(usePersonaVisualRuntimeStore.getState().runtimeDiagnostics?.packId).toBe(
+      "pack-1"
+    )
+  })
 })
