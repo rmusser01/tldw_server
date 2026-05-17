@@ -1,7 +1,7 @@
 ---
 id: TASK-407
 title: Design Workspace Playground UX remediation
-status: In Progress
+status: Done
 references:
 - apps/packages/ui/src/components/Option/WorkspacePlayground/index.tsx
 - apps/packages/ui/src/components/Option/WorkspacePlayground/SourcesPane/index.tsx
@@ -35,7 +35,7 @@ Design the /workspace-playground WebUI/extension remediation for disappearing co
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Design spec committed at Docs/superpowers/specs/2026-05-17-workspace-playground-ux-remediation-design.md in commit e7dd65170. Spec review loop returned Approved and user approved the written spec. Bandit is not applicable because this slice touched only documentation and Backlog task metadata.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
