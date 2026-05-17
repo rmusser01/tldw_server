@@ -1,7 +1,7 @@
 ---
 id: TASK-419.1
 title: Implement WebUI route contract and visibility policy
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
 updated_date: '2026-05-17 21:27'
@@ -35,8 +35,8 @@ Implement the first WP1 slice from the approved WebUI/extension UX remediation p
 - [x] #4 Extension sidepanel and options availability are represented in metadata or tested as an explicit follow-up gap.
 - [x] #5 Command palette route target mismatch is covered by tests before any behavior change.
 - [x] #6 Smoke inventory ownership is derived from or checked against route metadata.
-- [ ] #7 Implementation remains scoped to WP1; no route-family visual remediation is included.
-- [ ] #8 Focused frontend tests and diff checks are recorded in the task before completion.
+- [x] #7 Implementation remains scoped to WP1; no route-family visual remediation is included.
+- [x] #8 Focused frontend tests and diff checks are recorded in the task before completion.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -56,19 +56,22 @@ Task 3 red/green: added `src/routes/__tests__/route-registry.sidepanel-availabil
 Task 4 red/green: added a command palette regression test asserting the `Go to Chat` row exposes `data-command-id="nav-chat"`, `data-target-path="/chat"`, and navigates to `/chat`. Red run failed because command rows had no command id/target path attributes and `nav-chat` targeted `/`. Updated `CommandPalette.tsx` to use `CHAT_PATH`, set `nav-chat.targetPath` to `/chat`, navigate to `/chat`, and expose nonvisual data attributes for command id/target path. Focused command palette run passed: 5 tests passed. Combined route plus command run passed: 18 tests passed.
 
 Task 5 red/green: added static smoke inventory contract tests to `e2e/smoke/route-contract-stage2.spec.ts`. Red Playwright run failed on included routes missing from `PAGES` (`/workspace-playground`, `/integrations`, `/scheduled-tasks`, `/vn-assets`, `/vn-play`, `/admin/integrations`, `/admin/runtime-config`, `/sources/new`, `/presentation-studio/new`, `/presentation-studio/start`) and active internal QA/debug entries (`/404`, `/onboarding-test`, `/__debug__/sidepanel-chat`, `/__debug__/sidepanel-error-boundary`). Aligned page inventory for page-backed include routes, marked registry-only `/admin/runtime-config` and `/presentation-studio/start` as manual smoke, changed `/404` to a default self-hosted error-state route, and added skip reasons for onboarding/debug routes. Rerun passed: `bunx playwright test e2e/smoke/route-contract-stage2.spec.ts --reporter=line` passed 4 tests in 56.9s. Generated artifact timestamp/base URL churn was reverted.
+
+Final verification after rebasing onto current `origin/dev`: focused route and command Vitest gate passed (`route-metadata.coverage`, `route-registry.visibility`, `route-registry.sidepanel-availability`, `CommandPalette.shortcuts`): 4 files, 18 tests passed. Standalone route metadata type check passed with `bunx tsc --noEmit --pretty false --target es2022 --module esnext --moduleResolution bundler src/routes/route-metadata.ts`. Playwright route contract gate passed: `bunx playwright test e2e/smoke/route-contract-stage2.spec.ts --reporter=line`, 4 tests passed in 52.6s. `git diff --check` passed before final task-note update. Route metadata coverage count: 120 rows total; smoke policies: 83 include, 31 manual, 6 exclude. Findings closed by this task: F1, F8, F12, F17, F18. Bandit skipped because this task touched TypeScript/TSX, Playwright smoke inventory, and Backlog markdown only; no Python code was touched.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented WP1 route-contract governance for the WebUI/extension: canonical route metadata, audited route coverage, option registry validation, explicit sidepanel availability, command palette `/chat` target correction, and smoke inventory validation. Verification after rebase passed for focused route/command Vitest, standalone route metadata type check, Playwright stage-2 route contract, and diff checks. No backend APIs or page-family visual remediation were changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
