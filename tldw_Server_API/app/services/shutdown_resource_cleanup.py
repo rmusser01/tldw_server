@@ -240,6 +240,11 @@ async def _shutdown_local_llm_manager(
     run_in_thread: Callable[[Callable[..., Any]], Awaitable[Any]],
 ) -> None:
     try:
+        reconciler = getattr(getattr(app, "state", None), "llamacpp_runtime_reconciler", None)
+        if reconciler is not None and hasattr(reconciler, "shutdown"):
+            await reconciler.shutdown()
+            app.state.llamacpp_runtime_reconciler = None
+            logger.info("App Shutdown: llama.cpp runtime reconciler shutdown complete")
         llm_manager = getattr(getattr(app, "state", None), "llm_manager", None)
         if llm_manager is not None and hasattr(llm_manager, "cleanup_on_exit"):
             await run_in_thread(llm_manager.cleanup_on_exit)

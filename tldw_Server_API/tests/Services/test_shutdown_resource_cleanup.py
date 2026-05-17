@@ -238,3 +238,39 @@ async def test_shutdown_local_llm_manager_uses_thread_helper(
     )
 
     assert calls == ["to-thread", "cleanup"]
+
+
+@pytest.mark.asyncio
+async def test_shutdown_local_llm_manager_stops_llamacpp_reconciler_before_sync_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shutdown_resources = _import_shutdown_resource_cleanup()
+    calls: list[str] = []
+
+    class _Reconciler:
+        async def shutdown(self) -> None:
+            calls.append("reconciler")
+
+    class _LocalLLMManager:
+        def cleanup_on_exit(self) -> None:
+            calls.append("cleanup")
+
+    async def _fake_run_in_thread(fn):
+        calls.append("to-thread")
+        fn()
+
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            llamacpp_runtime_reconciler=_Reconciler(),
+            llm_manager=_LocalLLMManager(),
+        )
+    )
+
+    await shutdown_resources._shutdown_local_llm_manager(
+        app=app,
+        guard_exceptions=(RuntimeError,),
+        run_in_thread=_fake_run_in_thread,
+    )
+
+    assert calls == ["reconciler", "to-thread", "cleanup"]
+    assert app.state.llamacpp_runtime_reconciler is None
