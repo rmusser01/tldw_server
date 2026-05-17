@@ -1,7 +1,7 @@
 ---
 id: TASK-417
 title: Implement media viewer read-along TTS
-status: To Do
+status: In Progress
 labels:
 - implementation
 - webui
@@ -40,7 +40,24 @@ Implementation constraints:
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Task 1 baseline completed.
 
+Dependency setup:
+- Initial worker baseline could not run because the clean worktree had broken node_modules symlinks for Vitest.
+- Ran `bun install` from `apps/` to restore dependencies. The command populated `apps/node_modules` enough for Vitest to run, but the install session did not exit cleanly through the tool after dependency resolution. Subsequent Vitest commands are usable.
+
+Focused baseline results before read-along code edits:
+- Command: `cd apps/packages/ui && bunx vitest run src/components/Media/__tests__/ContentViewer.stage14.annotations.test.tsx src/components/Media/__tests__/ContentViewer.stage12.performance.test.tsx src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx src/services/__tests__/tts.defaults.test.ts src/db/dexie/__tests__/stt-recordings.test.ts --maxWorkers=1`
+- Result: 17 passed, 1 failed.
+- Reproduced with: `bunx vitest run src/components/Media/__tests__/ContentViewer.stage14.annotations.test.tsx --maxWorkers=1`
+- Pre-existing failure: `ContentViewer.stage14.annotations.test.tsx` first test cannot find `data-testid="media-intelligence-tab-annotations"` immediately after clicking `media-intelligence-toggle`. The selected-content annotation test passes.
+
+Guardrail anchors:
+- `rg` confirmed `ContentViewer` still binds `onMouseUp`/`onKeyUp` to `modals.handleCaptureAnnotationSelection`.
+- `rg` confirmed embedded audio/video elements still assign through `modals.mediaPlayerRef`.
+
+Known baseline concern:
+- The annotation panel create/update/sync/delete test is already failing before implementation changes. Task 4 will intentionally update this annotation-selection surface, so keep this failure visible in verification until the mediated selection task replaces or fixes the expectation.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
