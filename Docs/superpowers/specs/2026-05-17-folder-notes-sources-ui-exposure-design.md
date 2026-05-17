@@ -1,18 +1,25 @@
 # Folder-To-Notes Sources UI Exposure Design
 
 Date: 2026-05-17
-Status: Approved concept, pending written-spec review
+Status: Critique pass applied, pending user review
 Owner: Codex brainstorming session
 Backlog: TASK-400
 
 ## Summary
 
-This spec defines the first, UI-only slice for exposing folder-to-notes sync in
-the WebUI and browser extension. The backend already has an ingestion source
-model that can scan a server-local directory and sync files into Notes. This
-slice should make that existing capability discoverable from Notes, add Sources
-to shortcut/navigation surfaces, and avoid claiming bidirectional mirroring
-until a later backend design extends the sync model.
+This spec defines the first slice for exposing folder-to-notes sync in the
+WebUI and browser extension. The backend already has an ingestion source model
+that can scan a server-local directory and sync files into Notes. The slice
+should make that existing capability discoverable from Notes, add Sources to
+shortcut/navigation surfaces, and avoid claiming bidirectional mirroring until a
+later backend design extends the sync model.
+
+This is mostly UI work, but it has one backend/capability precondition: the
+direct folder-sync entry point must not be exposed unless the server can safely
+advertise and enforce local-directory source access for the current user. The
+original product boundary remains binding: single-user setups may enable this by
+default; multi-user setups require administrator enablement at user or
+organization scope.
 
 The canonical management page remains Sources. Notes gets a focused entry point
 that opens the existing new-source flow with a Notes folder-sync preset.
@@ -29,6 +36,8 @@ that opens the existing new-source flow with a Notes folder-sync preset.
   it is not bidirectional mirroring.
 - Preserve the security boundary that local-directory sync reads server-host
   paths and must be controlled by backend capability/authorization checks.
+- Avoid expanding local-directory source discoverability until the server
+  exposes an explicit current-user capability for it.
 
 ## Non-Goals
 
@@ -39,6 +48,9 @@ that opens the existing new-source flow with a Notes folder-sync preset.
 - Create a second folder-sync UI outside Sources.
 - Change the notes database schema to match `tldw_chatbook` sync metadata.
 - Replace the existing ingestion source worker, sink, or tracked item tables.
+- Build the full admin UI for user/org local-folder-sync entitlement management.
+  This first slice may consume the entitlement but does not need to become the
+  complete admin-management surface.
 
 ## Current-State Evidence
 
@@ -76,6 +88,84 @@ shared navigation shortcut handler or explicitly keep the Sources change to
 launcher/search surfaces only. The recommended path is to wire the existing
 mode shortcuts and Sources together.
 
+The existing `SourceForm` already carries `schedule_enabled` through payloads,
+but the current rendered form does not expose a schedule control. A first-class
+"manual and scheduled rescans" UX therefore requires adding a visible schedule
+toggle or explicitly deferring schedule configuration. The recommended path is
+to add the toggle now, default it off, and avoid exposing cadence fields unless
+the backend supports a concrete schedule contract.
+
+## Critique Findings And Corrections
+
+### Finding 1: Local Directory Access Cannot Be UI-Only
+
+The ingestion sources API validates local-directory paths against configured
+allowed roots, but the reviewed endpoint currently creates sources for the
+authenticated user without an obvious single-user/admin-enabled entitlement
+check in the route itself. Making a direct Notes "Sync folder" action prominent
+would therefore widen discoverability of a filesystem-reading feature before
+the per-deployment policy is explicit.
+
+Correction:
+
+- Implementation must start with a minimum local-directory source access gate.
+- The UI may show the generic Sources page if `hasIngestionSources` is true.
+- The Notes "Sync folder" action and `notes-folder-sync` local-directory preset
+  require a more specific current-user capability, such as
+  `hasLocalDirectoryIngestionSources`, `canCreateLocalDirectoryIngestionSource`,
+  or an equivalent server-owned field.
+- If the specific capability does not exist yet, the implementation plan should
+  include a small backend capability/enforcement slice before the direct Notes
+  entry point ships.
+- UI-only hiding is not sufficient for multi-user safety.
+
+### Finding 2: Shortcut Config Migration Needs A Fallback
+
+Adding `modeSources` to `ShortcutConfig` can leave existing persisted
+`keyboardShortcuts` objects without the new key. A navigation hook that reads
+`configuredShortcuts.modeSources` directly could silently skip the shortcut or
+throw if consumers assume all keys exist.
+
+Correction:
+
+- `useShortcutConfig` should merge persisted shortcut values over
+  `defaultShortcuts` before returning them.
+- Tests should cover a persisted legacy shortcut object that lacks
+  `modeSources`.
+- Display rows should use the resolved shortcut config, not only the static
+  defaults, when they are meant to describe user-customized shortcuts.
+
+### Finding 3: Header Launcher Selection Has A Legacy-Default Trap
+
+Adding a `sources` header launcher item will not necessarily show for existing
+users if they already have a persisted shortcut selection from before the new
+ID existed. For users who customized the launcher, forcing Sources in would be
+surprising; for users who only have the old full-default selection, hiding the
+new page would weaken discoverability.
+
+Correction:
+
+- Add `sources` to `HEADER_SHORTCUT_IDS` and the Library group.
+- Update selection coercion so legacy full-default selections gain `sources`.
+- Do not force `sources` into genuinely customized, trimmed selections.
+- Add a regression test for both cases.
+
+### Finding 4: Schedule UX Is Assumed But Not Rendered
+
+The spec said to keep scheduling visible, but the current form only carries
+`schedule_enabled` through values and payloads; it does not render a schedule
+switch.
+
+Correction:
+
+- Add a visible "Scheduled rescans" switch in the source form if this slice
+  claims scheduled rescan support.
+- Keep the default off.
+- Do not add cadence controls unless the backend schedule object has a stable
+  contract in this implementation slice.
+- If the backend treats `schedule_enabled` as a fixed scheduler cadence, the UI
+  copy should say "Use the server's scheduled rescan cadence."
+
 ## User Experience
 
 ### Notes Entry Point
@@ -100,6 +190,14 @@ The new-source form reads this preset and defaults to:
 
 The form should still show the normal path input and advanced controls. Users
 can change settings before creating the source.
+
+The Notes action should be disabled or hidden unless capabilities indicate all
+of the following:
+
+- the server is online
+- Notes are available
+- ingestion sources are available
+- local-directory source creation is allowed for the current user
 
 ### Sources Form Copy
 
@@ -128,10 +226,17 @@ For the keyboard binding, add `modeSources` to `ShortcutConfig` with default
 `Alt+2`. The existing mode sequence skips 2, so this fills the gap without
 moving existing bindings.
 
+The implementation must merge persisted shortcut settings with the expanded
+defaults before any component reads `modeSources`.
+
 Because the header shortcut launcher already uses command-number indexes while
 the launcher is open, the Sources launcher item should not receive a
 `shortcutIndex` unless a later design rebalances that launcher. The real Sources
 shortcut for this slice is the global `Alt+2` mode shortcut.
+
+Existing users with a legacy full-default header shortcut selection should get
+Sources added automatically. Existing users with customized or trimmed launcher
+selections should keep their choices.
 
 ### Navigation Shortcut Handler
 
@@ -177,17 +282,19 @@ path and validates it against configured allowed roots. The UI should surface
 backend rejection clearly instead of trying to validate filesystem access in the
 browser.
 
-For multi-user deployments, the later backend mirror design must add an
-explicit entitlement/capability so local-folder sync is:
+For multi-user deployments, the backend must expose and enforce an explicit
+entitlement/capability before this slice adds a direct local-folder Notes entry
+point. The later bidirectional mirror design can expand the entitlement model,
+but this first exposure still needs a minimum current-user local-directory
+access decision:
 
 - enabled by default only in single-user setups
 - disabled by default in multi-user setups
 - enableable by an administrator at user or organization scope
 
-Until that entitlement exists, the UI should avoid marketing this as a broadly
-available multi-user feature. If the server advertises a disabled or unsupported
-state, the Notes entry point and local-directory source type should be hidden or
-disabled with a clear explanation.
+Until that entitlement exists, implementation should not ship the direct Notes
+"Sync folder" entry point. It may still add neutral Sources-page discoverability
+if the existing generic ingestion-sources capability is available.
 
 ## Error Handling
 
@@ -208,11 +315,19 @@ disabled with a clear explanation.
 - Unit test the preset parser/defaults for `SourceForm`.
 - Unit or component test that the Notes "Sync folder" action navigates to the
   preset route.
+- Unit or API test the local-directory source entitlement behavior, if the
+  capability/enforcement field does not already exist.
+- Component test that the Notes action is disabled or hidden when Notes,
+  ingestion sources, or local-directory source access is unavailable.
 - Component test that `PageHelpModal` and `KeyboardShortcutsModal` include "Go
   to Sources" and display `Alt + 2`.
+- Unit test `useShortcutConfig` merges legacy persisted shortcuts with new
+  defaults so `modeSources` exists.
 - Unit test the navigation shortcut hook maps `modeSources` to `/sources`.
 - Header launcher test that Sources appears under Library and searches as
   "Sources."
+- Header launcher test that legacy full-default selections gain Sources while
+  customized selections are preserved.
 - Existing Sources API/client tests remain the backend contract guard.
 - Browser verification after implementation:
   - WebUI Notes -> Sync folder -> prefilled Sources form.
@@ -240,11 +355,15 @@ That work should not be folded into the UI exposure slice.
 
 ## Implementation Stages For Planning
 
-1. Add the Sources shortcut config, navigation shortcut hook, help modal rows,
+1. Add or consume a server-owned current-user capability for local-directory
+   source creation, and ensure direct Notes exposure respects it.
+2. Add the Sources shortcut config, shortcut-config migration fallback,
+   navigation shortcut hook, help modal rows,
    and launcher item.
-2. Add the Notes page entry point and preset route builder.
-3. Add `SourceForm` preset support and focused copy for notes folder sync.
-4. Add tests and browser verification for WebUI and extension parity.
+3. Add the Notes page entry point and preset route builder.
+4. Add `SourceForm` preset support, schedule switch, and focused copy for notes
+   folder sync.
+5. Add tests and browser verification for WebUI and extension parity.
 
 ## Decisions For Implementation Planning
 
@@ -252,7 +371,9 @@ That work should not be folded into the UI exposure slice.
   If the Notes header is already crowded, place it in the existing overflow or
   action menu rather than making it a primary call to action.
 - The preset path should keep scheduling visible because the approved v1 sync
-  mode includes manual and scheduled rescans. The default remains off.
-- The implementation should use existing capability/unsupported/offline states
-  and backend errors. A richer single-user/multi-user entitlement signal is a
-  follow-up backend slice, not a frontend-only assumption.
+  mode includes manual and scheduled rescans. The default remains off, and
+  cadence controls are out of scope unless the backend contract already supports
+  them.
+- Existing generic capability/unsupported/offline states are enough for neutral
+  Sources-page routing, but not enough for a direct local-directory Notes
+  action. That action needs server-owned current-user authorization.

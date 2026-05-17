@@ -28,7 +28,7 @@ Track the approved design/spec work for exposing existing local-directory-to-not
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Spec phase only. The written design captures the approved Notes entry point, Sources preset route, shortcut/help/launcher exposure, and the boundary that bidirectional mirror plus multi-user entitlement are later backend work. Implementation should not begin until the user reviews the written spec.
+Spec phase only. Critique pass applied after user review. The direct Notes folder-sync entry point now has a required server-owned local-directory source capability/enforcement precondition; generic Sources-page routing can proceed on the existing ingestion-sources capability. Implementation planning must also cover shortcut-config default merging, header launcher legacy-default migration, and rendering the existing schedule_enabled control before claiming scheduled rescans.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
