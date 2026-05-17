@@ -47,7 +47,7 @@ Implement the shared ChatSidebar tools-first expansion behavior: shortcuts expan
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 4 completed and review fixes applied: wired openResetKey through shared Layout and WebLayout, added ChatSidebar openResetKey reset coverage, guarded WebLayout tldw:open-chat-sidebar so the legacy sidebar path is unchanged while showChatSidebar is false, and made source-guard tests module-relative instead of cwd-relative. Focused verification passed: package UI sidebar/layout tests (4 files, 14 tests) and WebLayout test (1 file, 4 tests). git diff --check passed for Task 4 follow-up files. Bandit skipped: frontend-only TS/TSX change.
+Implementation and verification are complete pending human visual approval of the rendered screenshot. Fresh verification passed: apps/packages/ui focused sidebar/layout Vitest suite (4 files, 14 tests), apps/tldw-frontend WebLayout Vitest suite (1 file, 4 tests), and Playwright browser check against the existing Next dev server at http://127.0.0.1:3000/chat. Browser check confirmed opening the collapsed sidebar yields Shortcuts aria-expanded=true, Recent conversations aria-expanded=false, no search while Recent is collapsed; manual Recent expansion shows search; collapse/reopen resets back to Shortcuts expanded and Recent collapsed. Screenshot artifact: output/playwright/chat-sidebar-tools-first-expanded.png. Bandit skipped because the touched implementation is frontend TS/TSX plus Backlog markdown. Root-level Vitest invocation was not used as evidence because it globbed unrelated .worktrees; package-scoped commands were used instead.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
