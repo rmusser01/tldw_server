@@ -443,7 +443,7 @@ git commit -m "feat: add playlist preflight for quick ingest"
 - Test: `tldw_Server_API/tests/Collections/test_conference_media_collections.py`
 - Test: `apps/packages/ui/src/services/tldw/__tests__/conference-collections.test.ts`
 
-- [ ] **Step 1: Write failing collection contract tests**
+- [x] **Step 1: Write failing collection contract tests**
 
 Start from the selected contract in Task 0. Minimum backend tests:
 
@@ -471,7 +471,7 @@ def test_conference_collection_persists_planned_and_resolved_items(collections_d
 
 Add tests that planned/source items do not overwrite unrelated `content_items` with matching URL/hash unless the selected contract intentionally reuses those rows with a safe namespace.
 
-- [ ] **Step 2: Run failing collection tests**
+- [x] **Step 2: Run failing collection tests**
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -481,7 +481,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: FAIL due missing collection APIs/storage helpers.
 
-- [ ] **Step 3: Implement the selected durable storage contract**
+- [x] **Step 3: Implement the selected durable storage contract**
 
 If reusing `CollectionsDatabase`, prefer narrow methods rather than exposing raw SQL:
 
@@ -557,7 +557,7 @@ CONFERENCE_ITEM_STATUSES = {
 }
 ```
 
-- [ ] **Step 4: Implement API and frontend client**
+- [x] **Step 4: Implement API and frontend client**
 
 Expose stable collection operations. If using `/api/v1/media/collections`, add:
 
@@ -572,7 +572,7 @@ PATCH /api/v1/media/collections/{collection_id}/items/{item_id}
 
 Add typed client wrappers and normalize collection item status/counts in `conference-collections.ts`.
 
-- [ ] **Step 5: Preserve localStorage collection boundary**
+- [x] **Step 5: Preserve localStorage collection boundary**
 
 Read `useMediaSelection.ts` and make one explicit choice:
 
@@ -582,7 +582,7 @@ Read `useMediaSelection.ts` and make one explicit choice:
 
 Record the choice in the inventory artifact.
 
-- [ ] **Step 6: Run focused verification**
+- [x] **Step 6: Run focused verification**
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -596,7 +596,7 @@ bunx vitest run \
 git diff --check
 ```
 
-- [ ] **Step 7: Run Bandit**
+- [x] **Step 7: Run Bandit**
 
 ```bash
 source .venv/bin/activate && python -m bandit \
@@ -607,7 +607,7 @@ source .venv/bin/activate && python -m bandit \
 
 Expected: no new high/medium findings in touched code.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add \

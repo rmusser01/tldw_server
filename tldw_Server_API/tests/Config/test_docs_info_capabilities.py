@@ -178,7 +178,7 @@ def test_docs_info_exposes_bulk_conference_ingest_capabilities(
     assert caps["hasMediaIngestJobs"] is True
     assert caps["hasMediaIngestJobEvents"] is True
     assert caps["hasMediaIngestWorker"] is False
-    assert caps["hasDurableMediaCollections"] is False
+    assert caps["hasDurableMediaCollections"] is True
     assert caps["hasKnowledgeQaMediaScope"] is False
     assert safe_config["supported_features"] == caps
 

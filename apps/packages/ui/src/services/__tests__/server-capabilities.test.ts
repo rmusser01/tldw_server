@@ -167,6 +167,7 @@ describe("server capabilities docs-info merge", () => {
       info: { version: "bulk-ingest-capabilities" },
       paths: {
         "/api/v1/media/playlists/preflight": {},
+        "/api/v1/media/collections": {},
         "/api/v1/media/ingest/jobs": {},
         "/api/v1/media/ingest/jobs/events/stream": {}
       }
@@ -177,7 +178,7 @@ describe("server capabilities docs-info merge", () => {
         hasMediaIngestJobs: true,
         hasMediaIngestJobEvents: true,
         hasMediaIngestWorker: false,
-        hasDurableMediaCollections: false,
+        hasDurableMediaCollections: true,
         hasKnowledgeQaMediaScope: false
       }
     })
@@ -190,7 +191,7 @@ describe("server capabilities docs-info merge", () => {
     expect(capabilities.hasMediaIngestJobs).toBe(true)
     expect(capabilities.hasMediaIngestJobEvents).toBe(true)
     expect(capabilities.hasMediaIngestWorker).toBe(false)
-    expect(capabilities.hasDurableMediaCollections).toBe(false)
+    expect(capabilities.hasDurableMediaCollections).toBe(true)
     expect(capabilities.hasKnowledgeQaMediaScope).toBe(false)
   })
 

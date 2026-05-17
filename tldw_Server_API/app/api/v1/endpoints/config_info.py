@@ -153,7 +153,7 @@ def load_safe_config() -> dict:
                 test_mode=False,
             )
         )
-        caps["hasDurableMediaCollections"] = False
+        caps["hasDurableMediaCollections"] = has_media_routes
         caps["hasKnowledgeQaMediaScope"] = False
         # expose both for backward-compat and forward-looking UI
         safe_config["supported_features"] = caps

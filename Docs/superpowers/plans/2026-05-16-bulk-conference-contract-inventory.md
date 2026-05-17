@@ -98,4 +98,5 @@ Capability discovery should expose playlist preflight, durable media collections
   - optional content hash dedupe after media processing.
 - Retry should reuse the same `media_collection_items.id` and create a new `media_collection_runs` row or update latest run/job references. The user's row identity and edited metadata must survive failed attempts.
 - Existing localStorage collections can be offered an explicit migration path into backend media collections, but migration is not required before bulk conference ingest. Local collections without source URLs should migrate as manual resolved-media collections, not playlist ingestion plans.
+- Task 2 decision: `media:collections:v1` in `apps/packages/ui/src/components/Review/hooks/useMediaSelection.ts` remains a local-only manual review collection store. Durable playlist/conference ingestion now uses `/api/v1/media/collections`; migration or side-by-side labeling of local review collections is deferred to a later UX slice.
 - The extension and WebUI should submit the same collection/run payloads through shared services so a playlist detected in the sidepanel can be continued and reviewed in the WebUI.
