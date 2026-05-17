@@ -30,7 +30,7 @@ Write a staged design spec for addressing the audited main /chat role-play prese
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Design approved in-session and reviewed twice by spec-document-reviewer. Both reviews returned Approved with no blocking issues. Non-blocking implementation-planning notes: define generation-style reset target, and include character vs persona as a Stage 6 compatibility test axis. Verification: spec was inspected locally for TODO/TBD placeholders; none were found. Bandit skipped because this task touched documentation and Backlog task metadata only.
+Second hardening review completed. Issues found and patched: Stage 1 now requires reproducing the current crash before behavior changes; default-entry wording no longer overfits to one fixture name; terminology changes must update i18n/fallbacks; Stage 3 mobile parity must create reusable entry points rather than throwaway controls; Stage 4 must preserve Stage 3 mobile access; extension sidepanel parity is explicitly out of scope except for avoiding shared-component regressions. Verification: local diff review and placeholder scan completed. Bandit skipped because this task touched documentation and Backlog task metadata only.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -42,7 +42,7 @@ Design approved in-session and reviewed twice by spec-document-reviewer. Both re
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created the staged main /chat role-play preset remediation design spec. The spec covers the approved hybrid six-stage sequence: crash/recovery/accessibility fixes, visible state and terminology cleanup, mobile parity, role-play setup consolidation, saved role-play presets, and compatibility/guardrail tests.
+Created and hardened the staged main /chat role-play preset remediation design spec. The final spec covers the approved hybrid six-stage sequence and includes implementation anchors, coordination constraints, adapter sequencing, recovery semantics, saved setup eligibility, compatibility test axes, i18n requirements, current-branch reproduction guidance, mobile reuse constraints, and extension scope boundaries.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
