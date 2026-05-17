@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -188,5 +188,58 @@ describe("ChatSidebar tools-first reset", () => {
       screen.getByRole("button", { name: /Recent conversations/i })
     ).toHaveAttribute("aria-expanded", "false")
     expect(screen.queryByTestId("server-chat-list")).not.toBeInTheDocument()
+  })
+
+  it("shows recent conversation controls when the user expands recent conversations", () => {
+    renderSidebar()
+
+    fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))
+
+    expect(screen.getByTestId("chat-sidebar-search")).toBeInTheDocument()
+    expect(screen.getByLabelText("Chat view")).toBeInTheDocument()
+    expect(screen.getByTestId("server-chat-list")).toBeInTheDocument()
+  })
+
+  it("hides server selection controls while recent conversations are collapsed", () => {
+    renderSidebar()
+
+    expect(
+      screen.queryByRole("button", { name: /Select chats/i })
+    ).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))
+
+    expect(screen.getByRole("button", { name: /Select chats/i })).toBeInTheDocument()
+  })
+
+  it("exits selection mode when recent conversations collapse", () => {
+    renderSidebar()
+
+    fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Select chats/i }))
+    expect(screen.getByRole("button", { name: /Exit selection/i })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))
+
+    expect(screen.getByRole("button", { name: /Select chats/i })).toBeInTheDocument()
+  })
+
+  it("keeps search controls reachable when a query is active across reset", () => {
+    const { rerender } = renderSidebar({ openResetKey: 1 })
+
+    fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))
+    fireEvent.change(screen.getByTestId("chat-sidebar-search"), {
+      target: { value: "alpha" }
+    })
+
+    rerender(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <ChatSidebar collapsed={false} openResetKey={2} />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByTestId("chat-sidebar-search")).toBeInTheDocument()
+    expect(screen.getByTestId("server-chat-list")).toBeInTheDocument()
   })
 })
