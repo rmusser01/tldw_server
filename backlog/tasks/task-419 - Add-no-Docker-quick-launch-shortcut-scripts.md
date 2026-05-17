@@ -20,6 +20,8 @@ modified_files:
 - Docs/superpowers/plans/2026-05-17-quick-launch-scripts-implementation-plan.md
 - tldw_Server_API/tests/Utils/test_quick_launch_scripts.py
 - tldw_Server_API/tests/Docs/test_onboarding_entrypoints.py
+references:
+- https://github.com/rmusser01/tldw_server/pull/1817
 ---
 
 ## Description
@@ -54,7 +56,7 @@ Docs/superpowers/plans/2026-05-17-quick-launch-scripts-implementation-plan.md
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added Linux/macOS, macOS Finder, and Windows PowerShell quick-launch scripts for the local single-user no-Docker path. The scripts create/update .venv, run the existing local-single setup wizard, start uvicorn at 127.0.0.1:8000, avoid printing API keys by default, and are documented in README plus Getting Started local profile docs. Verification: focused onboarding/script pytest suite passed; bash syntax check passed; Bandit found no issues in touched Python tests. PowerShell syntax execution was not run because pwsh/powershell is unavailable on this host.
+Added Linux/macOS, macOS Finder, and Windows PowerShell quick-launch scripts for the local single-user no-Docker path. The scripts create/update .venv, run the existing local-single setup wizard, start uvicorn at 127.0.0.1:8000, avoid printing API keys by default, and are documented in README plus Getting Started local profile docs. Verification: focused onboarding/script pytest suite passed; bash syntax check passed; Bandit found no issues in touched Python tests. PowerShell syntax execution was not run because pwsh/powershell is unavailable on this host. Draft PR: https://github.com/rmusser01/tldw_server/pull/1817
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
