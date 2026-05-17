@@ -43,7 +43,7 @@ import {
 } from "@/utils/message-variants"
 import { buildConversationShareUrl } from "@/components/Layouts/chat-share-links"
 import { PlaygroundMessage } from "@/components/Common/Playground/Message"
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import { EmptyState } from "@/components/ui/feedback/EmptyState"
 import { ChatModelSelectorDropdown } from "@/components/Option/Playground/ChatModelSelectorDropdown"
 import { PlaygroundModelCatalogControls } from "@/components/Option/Playground/PlaygroundModelCatalogControls"
@@ -86,6 +86,7 @@ type RetrievalDiagnostics = {
 }
 
 type ChatModePreference = "normal" | "rag"
+type ChatComposerModel = Awaited<ReturnType<typeof fetchChatModels>>[number]
 type ChatPaneContentWidthMode = "comfortable" | "expanded" | "full"
 type LorebookActivityTurn = {
   turnNumber: number
@@ -1222,7 +1223,21 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   onRefreshResearchStudioCapabilities
 }) => {
   const { t } = useTranslation(["playground", "common"])
+  const translate = React.useCallback(
+    (
+      key: string,
+      defaultValueOrOptions?: unknown,
+      options?: unknown
+    ): string =>
+      t(
+        key,
+        defaultValueOrOptions as never,
+        options as never
+      ) as unknown as string,
+    [t]
+  )
   const isMobile = useMobile()
+  const navigate = useNavigate()
   const [messageApi, messageContextHolder] = message.useMessage()
 
   // Workspace store
@@ -1309,14 +1324,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const checkConnectionOnce = useConnectionStore((s) => s.checkOnce)
   const connectionState = useConnectionStore((s) => s.state)
   const navigateTo = React.useCallback((path: string) => {
-    if (typeof window === "undefined") return
-    window.history.pushState({}, "", path)
-    const event =
-      typeof PopStateEvent === "function"
-        ? new PopStateEvent("popstate")
-        : new Event("popstate")
-    window.dispatchEvent(event)
-  }, [])
+    navigate(path)
+  }, [navigate])
   const [preferredChatMode, setPreferredChatMode] = React.useState<
     ChatModePreference | null
   >(null)
@@ -1352,7 +1361,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const [slashCommands, setSlashCommands] = React.useState<
     Array<{ name: string; description: string }>
   >([])
-  const [composerModels, setComposerModels] = React.useState<any[]>([])
+  const [composerModels, setComposerModels] = React.useState<
+    ChatComposerModel[]
+  >([])
   const slashCommandsFetchedRef = React.useRef(false)
   const modelsFetchedRef = React.useRef(false)
   const workspaceSessionRef = React.useRef<string | null>(null)
@@ -2994,7 +3005,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   apiModelLabel={apiModelLabel}
                   catalogControls={
                     <PlaygroundModelCatalogControls
-                      t={t}
+                      t={translate}
                       modelListScope={modelListScope}
                       setModelListScope={setModelListScope}
                       modelSearchQuery={modelSearchQuery}

@@ -170,13 +170,25 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
     ])
   })
 
-  it("shows a load error when My Media cannot load", async () => {
+  it("shows and logs a load error when My Media cannot load", async () => {
     workspaceStoreState.addSourceModalTab = "existing"
-    mockListMedia.mockRejectedValueOnce(new Error("offline"))
+    const loadFailure = new Error("offline")
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined)
+    mockListMedia.mockRejectedValueOnce(loadFailure)
 
-    render(<AddSourceModal />)
+    try {
+      render(<AddSourceModal />)
 
-    expect(await screen.findByText(/unable to load media/i)).toBeInTheDocument()
+      expect(await screen.findByText(/unable to load media/i)).toBeInTheDocument()
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "Failed to fetch media from server:",
+        loadFailure
+      )
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
   })
 
   it("renders My Media items from items response shape", async () => {
@@ -214,6 +226,117 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
     expect(screen.getByText("Second Library Item")).toBeInTheDocument()
     expect(screen.getByText("Showing 2 of 125")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Load more" })).toBeInTheDocument()
+  })
+
+  it("searches My Media with query, content type, keywords, and sort filters", async () => {
+    workspaceStoreState.addSourceModalTab = "existing"
+    mockListMedia.mockResolvedValueOnce({ media: [], total_count: 0 })
+    mockSearchMedia.mockResolvedValueOnce({
+      items: [
+        {
+          id: 801,
+          title: "Conference Keynote",
+          type: "video",
+          keywords: ["keynote", "ai"]
+        }
+      ],
+      pagination: { total_items: 1 }
+    })
+
+    render(<AddSourceModal />)
+
+    await waitFor(() => {
+      expect(mockListMedia).toHaveBeenCalledWith({
+        page: 1,
+        results_per_page: 50,
+        include_keywords: true
+      })
+    })
+
+    fireEvent.change(screen.getByLabelText("Search media"), {
+      target: { value: "conference" }
+    })
+    fireEvent.change(screen.getByLabelText("Media type"), {
+      target: { value: "video" }
+    })
+    fireEvent.change(screen.getByLabelText("Keywords"), {
+      target: { value: "keynote, ai" }
+    })
+    fireEvent.change(screen.getByLabelText("Sort media"), {
+      target: { value: "date_desc" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Search" }))
+
+    await waitFor(() => {
+      expect(mockSearchMedia).toHaveBeenCalledWith(
+        {
+          query: "conference",
+          fields: ["title", "content"],
+          media_types: ["video"],
+          must_have: ["keynote", "ai"],
+          sort_by: "date_desc"
+        },
+        { page: 1, results_per_page: 50 }
+      )
+    })
+    expect(await screen.findByText("Conference Keynote")).toBeInTheDocument()
+    expect(screen.getByText("keynote")).toBeInTheDocument()
+    expect(screen.getByText("ai")).toBeInTheDocument()
+  })
+
+  it("clears My Media filters and returns to the default media listing", async () => {
+    workspaceStoreState.addSourceModalTab = "existing"
+    mockListMedia
+      .mockResolvedValueOnce({ media: [], total_count: 0 })
+      .mockResolvedValueOnce({
+        media: [{ id: 901, title: "Default Library Item", type: "pdf" }],
+        total_count: 1
+      })
+    mockSearchMedia.mockResolvedValueOnce({
+      items: [{ id: 902, title: "Filtered Result", type: "video" }],
+      total: 1
+    })
+
+    render(<AddSourceModal />)
+
+    await waitFor(() => {
+      expect(mockListMedia).toHaveBeenCalledWith({
+        page: 1,
+        results_per_page: 50,
+        include_keywords: true
+      })
+    })
+
+    fireEvent.change(screen.getByLabelText("Search media"), {
+      target: { value: "filtered" }
+    })
+    fireEvent.change(screen.getByLabelText("Media type"), {
+      target: { value: "video" }
+    })
+    fireEvent.change(screen.getByLabelText("Keywords"), {
+      target: { value: "demo" }
+    })
+    fireEvent.change(screen.getByLabelText("Sort media"), {
+      target: { value: "title_asc" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Search" }))
+
+    expect(await screen.findByText("Filtered Result")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }))
+
+    await waitFor(() => {
+      expect(mockListMedia).toHaveBeenLastCalledWith({
+        page: 1,
+        results_per_page: 50,
+        include_keywords: true
+      })
+    })
+    expect(screen.getByLabelText("Search media")).toHaveValue("")
+    expect(screen.getByLabelText("Media type")).toHaveValue("all")
+    expect(screen.getByLabelText("Keywords")).toHaveValue("")
+    expect(screen.getByLabelText("Sort media")).toHaveValue("relevance")
+    expect(await screen.findByText("Default Library Item")).toBeInTheDocument()
   })
 
   it("distinguishes all-added media from an empty media library", async () => {

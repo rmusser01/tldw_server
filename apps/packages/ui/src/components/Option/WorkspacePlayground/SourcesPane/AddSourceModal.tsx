@@ -101,6 +101,51 @@ type UploadProgressEntry = {
 
 type AddSourceTabUsage = Record<AddSourceTab, number>
 
+type ExistingMediaSortBy =
+  | "relevance"
+  | "date_desc"
+  | "date_asc"
+  | "title_asc"
+  | "title_desc"
+
+type ExistingMediaFilters = {
+  query: string
+  mediaType: string
+  keywords: string
+  sortBy: ExistingMediaSortBy
+}
+
+type MediaLibraryItem = Record<string, unknown>
+
+const DEFAULT_EXISTING_MEDIA_FILTERS: ExistingMediaFilters = {
+  query: "",
+  mediaType: "all",
+  keywords: "",
+  sortBy: "relevance"
+}
+
+const EXISTING_MEDIA_TYPE_FILTERS = [
+  { value: "all", label: "All types" },
+  { value: "pdf", label: "PDF" },
+  { value: "video", label: "Video" },
+  { value: "audio", label: "Audio" },
+  { value: "website", label: "Website" },
+  { value: "document", label: "Document" },
+  { value: "text", label: "Text" },
+  { value: "email", label: "Email" }
+] as const
+
+const EXISTING_MEDIA_SORT_OPTIONS: Array<{
+  value: ExistingMediaSortBy
+  label: string
+}> = [
+  { value: "relevance", label: "Relevance" },
+  { value: "date_desc", label: "Newest" },
+  { value: "date_asc", label: "Oldest" },
+  { value: "title_asc", label: "Title A-Z" },
+  { value: "title_desc", label: "Title Z-A" }
+]
+
 const buildDefaultAddSourceTabUsage = (): AddSourceTabUsage => ({
   upload: 0,
   existing: 0,
@@ -178,6 +223,80 @@ const toOptionalString = (value: unknown): string | undefined => {
   if (typeof value !== "string") return undefined
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : undefined
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value)
+
+const asMediaLibraryItem = (value: unknown): MediaLibraryItem | null =>
+  isRecord(value) ? value : null
+
+const getMediaLibraryIdNumber = (item: MediaLibraryItem): number | null =>
+  toMediaId(item.media_id ?? item.id)
+
+const getMediaLibraryTitle = (item: MediaLibraryItem): string =>
+  toOptionalString(item.title) || toOptionalString(item.name) || "Untitled"
+
+const getMediaLibraryTypeLabel = (item: MediaLibraryItem): string =>
+  toOptionalString(item.type) || toOptionalString(item.media_type) || "document"
+
+const getMediaLibraryKeywords = (item: MediaLibraryItem): string[] => {
+  const raw = item.keywords
+  if (Array.isArray(raw)) {
+    return raw
+      .map((keyword) => String(keyword).trim())
+      .filter(Boolean)
+      .slice(0, 8)
+  }
+  if (typeof raw === "string") {
+    return raw
+      .split(",")
+      .map((keyword) => keyword.trim())
+      .filter(Boolean)
+      .slice(0, 8)
+  }
+  return []
+}
+
+const parseKeywordFilterInput = (value: string): string[] =>
+  Array.from(
+    new Set(
+      value
+        .split(",")
+        .map((keyword) => keyword.trim())
+        .filter(Boolean)
+    )
+  )
+
+const hasActiveExistingMediaFilters = (filters: ExistingMediaFilters): boolean =>
+  Boolean(filters.query.trim()) ||
+  filters.mediaType !== "all" ||
+  parseKeywordFilterInput(filters.keywords).length > 0 ||
+  filters.sortBy !== "relevance"
+
+const buildMediaSearchPayload = (filters: ExistingMediaFilters) => {
+  const payload: {
+    query?: string
+    fields: string[]
+    media_types?: string[]
+    must_have?: string[]
+    sort_by: ExistingMediaSortBy
+  } = {
+    fields: ["title", "content"],
+    sort_by: filters.sortBy
+  }
+  const trimmedQuery = filters.query.trim()
+  if (trimmedQuery) {
+    payload.query = trimmedQuery
+  }
+  if (filters.mediaType !== "all") {
+    payload.media_types = [filters.mediaType]
+  }
+  const keywords = parseKeywordFilterInput(filters.keywords)
+  if (keywords.length > 0) {
+    payload.must_have = keywords
+  }
+  return payload
 }
 
 const extractCandidateMetadata = (candidate: Record<string, unknown>) => ({
@@ -1219,7 +1338,10 @@ const ExistingTab: React.FC<{
 }> = ({ onAddSources, setProcessing, setError }) => {
   const { t } = useTranslation(["playground", "common"])
   const [searchQuery, setSearchQuery] = React.useState("")
-  const [media, setMedia] = React.useState<any[]>([])
+  const [mediaTypeFilter, setMediaTypeFilter] = React.useState("all")
+  const [keywordFilterInput, setKeywordFilterInput] = React.useState("")
+  const [sortBy, setSortBy] = React.useState<ExistingMediaSortBy>("relevance")
+  const [media, setMedia] = React.useState<MediaLibraryItem[]>([])
   const [isLoading, setIsLoading] = React.useState(false)
   const [loadError, setLoadError] = React.useState<string | null>(null)
   const [selectedMediaKeys, setSelectedMediaKeys] = React.useState<Set<string>>(
@@ -1228,7 +1350,7 @@ const ExistingTab: React.FC<{
   const [currentPage, setCurrentPage] = React.useState(1)
   const [totalCount, setTotalCount] = React.useState(0)
   const [hasMore, setHasMore] = React.useState(false)
-  const mediaRef = React.useRef<any[]>([])
+  const mediaRef = React.useRef<MediaLibraryItem[]>([])
 
   // Already added source media IDs
   const sources = useWorkspaceStore((s) => s.sources)
@@ -1237,24 +1359,26 @@ const ExistingTab: React.FC<{
     [sources]
   )
 
-  const setMediaList = React.useCallback((items: any[]) => {
+  const setMediaList = React.useCallback((items: MediaLibraryItem[]) => {
     mediaRef.current = items
     setMedia(items)
   }, [])
 
   const dedupeMediaItems = React.useCallback((items: unknown[]) => {
-    const itemMap = new Map<string, any>()
+    const itemMap = new Map<string, MediaLibraryItem>()
     for (const item of items) {
-      const key = getMediaLibraryItemKey(item)
+      const mediaItem = asMediaLibraryItem(item)
+      if (!mediaItem) continue
+      const key = getMediaLibraryItemKey(mediaItem)
       if (key == null) continue
-      itemMap.set(key, item)
+      itemMap.set(key, mediaItem)
     }
     return Array.from(itemMap.values())
   }, [])
 
   const fetchMediaFromServer = React.useCallback(
     async (
-      query?: string,
+      filters: ExistingMediaFilters,
       options?: { silent?: boolean; page?: number; append?: boolean }
     ) => {
       const shouldShowLoading = !options?.silent
@@ -1267,11 +1391,10 @@ const ExistingTab: React.FC<{
       const append = Boolean(options?.append)
 
       try {
-        const trimmedQuery = query?.trim()
         let response
-        if (trimmedQuery) {
+        if (hasActiveExistingMediaFilters(filters)) {
           response = await tldwClient.searchMedia(
-            { query: trimmedQuery },
+            buildMediaSearchPayload(filters),
             { page, results_per_page: 50 }
           )
         } else {
@@ -1303,7 +1426,8 @@ const ExistingTab: React.FC<{
         setCurrentPage(page)
         setHasMore(dedupedItems.length < normalizedTotal)
 
-      } catch {
+      } catch (err) {
+        console.error("Failed to fetch media from server:", err)
         setLoadError("Unable to load media. Please try again.")
       } finally {
         if (shouldShowLoading) {
@@ -1315,27 +1439,54 @@ const ExistingTab: React.FC<{
   )
 
   const loadMedia = React.useCallback(
-    async (query?: string) => {
-      const trimmedQuery = query?.trim()
+    async (filters?: ExistingMediaFilters) => {
+      const nextFilters =
+        filters || {
+          query: searchQuery,
+          mediaType: mediaTypeFilter,
+          keywords: keywordFilterInput,
+          sortBy
+        }
       setCurrentPage(1)
       setSelectedMediaKeys(new Set())
-      await fetchMediaFromServer(trimmedQuery, { page: 1 })
+      await fetchMediaFromServer(nextFilters, { page: 1 })
     },
-    [fetchMediaFromServer]
+    [fetchMediaFromServer, keywordFilterInput, mediaTypeFilter, searchQuery, sortBy]
   )
 
   React.useEffect(() => {
-    loadMedia()
-  }, [loadMedia])
+    void fetchMediaFromServer(DEFAULT_EXISTING_MEDIA_FILTERS, { page: 1 })
+  }, [fetchMediaFromServer])
+
+  const currentFilters = React.useMemo<ExistingMediaFilters>(
+    () => ({
+      query: searchQuery,
+      mediaType: mediaTypeFilter,
+      keywords: keywordFilterInput,
+      sortBy
+    }),
+    [keywordFilterInput, mediaTypeFilter, searchQuery, sortBy]
+  )
+  const filtersActive = hasActiveExistingMediaFilters(currentFilters)
 
   const handleSearch = () => {
     setCurrentPage(1)
-    void loadMedia(searchQuery)
+    void loadMedia(currentFilters)
+  }
+
+  const handleClearFilters = () => {
+    setSearchQuery("")
+    setMediaTypeFilter("all")
+    setKeywordFilterInput("")
+    setSortBy("relevance")
+    setCurrentPage(1)
+    setSelectedMediaKeys(new Set())
+    void fetchMediaFromServer(DEFAULT_EXISTING_MEDIA_FILTERS, { page: 1 })
   }
 
   const handleLoadMore = () => {
     if (isLoading || !hasMore) return
-    void fetchMediaFromServer(searchQuery, {
+    void fetchMediaFromServer(currentFilters, {
       page: currentPage + 1,
       append: true
     })
@@ -1344,28 +1495,30 @@ const ExistingTab: React.FC<{
   const handleAddSelected = () => {
     const selectedItems = media.filter((m) => {
       const key = getMediaLibraryItemKey(m)
-      const mediaId = Number(m.media_id ?? m.id)
+      const mediaId = getMediaLibraryIdNumber(m)
       return (
         key != null &&
-        Number.isFinite(mediaId) &&
+        mediaId != null &&
         selectedMediaKeys.has(key) &&
         !existingMediaIds.has(key)
       )
     })
 
     const newSources = selectedItems.map((m) => ({
-      mediaId: Number(m.media_id ?? m.id),
-      title: m.title || m.name || "Untitled",
-      type: getSourceTypeFromMediaType(m.type || m.media_type) as WorkspaceSourceType,
+      mediaId: getMediaLibraryIdNumber(m) as number,
+      title: getMediaLibraryTitle(m),
+      type: getSourceTypeFromMediaType(
+        toOptionalString(m.type) || toOptionalString(m.media_type) || ""
+      ) as WorkspaceSourceType,
       status: "ready" as const,
-      url: m.url || m.source_url || undefined,
-      fileSize: toOptionalNumber(m.file_size || m.filesize || m.size),
-      duration: toOptionalNumber(m.duration_seconds || m.duration),
-      pageCount: toOptionalNumber(m.page_count || m.pages),
+      url: toOptionalString(m.url) || toOptionalString(m.source_url),
+      fileSize: toOptionalNumber(m.file_size ?? m.filesize ?? m.size),
+      duration: toOptionalNumber(m.duration_seconds ?? m.duration),
+      pageCount: toOptionalNumber(m.page_count ?? m.pages),
       sourceCreatedAt:
-        parseSourceCreatedAt(m.created_at || m.createdAt || m.date_added) ||
+        parseSourceCreatedAt(m.created_at ?? m.createdAt ?? m.date_added) ||
         undefined,
-      thumbnailUrl: m.thumbnail_url || m.thumbnail || undefined
+      thumbnailUrl: toOptionalString(m.thumbnail_url) || toOptionalString(m.thumbnail)
     }))
 
     if (newSources.length > 0) {
@@ -1396,18 +1549,76 @@ const ExistingTab: React.FC<{
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-2">
+      <div className="space-y-2 rounded border border-border bg-surface2/30 p-2">
+        <div className="flex gap-2">
+          <Input
+            aria-label={t("playground:sources.searchMediaLabel", "Search media")}
+            prefix={<Search className="h-4 w-4 text-text-muted" />}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onPressEnter={handleSearch}
+            placeholder={t("playground:sources.searchExisting", "Search your media library...")}
+            className="flex-1"
+          />
+          <Button
+            aria-label={t("common:search", "Search")}
+            onClick={handleSearch}
+            loading={isLoading}
+          >
+            {t("common:search", "Search")}
+          </Button>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+          <label className="min-w-0">
+            <span className="mb-1 block text-[11px] font-medium text-text-muted">
+              {t("playground:sources.mediaTypeFilter", "Media type")}
+            </span>
+            <select
+              aria-label={t("playground:sources.mediaTypeFilter", "Media type")}
+              value={mediaTypeFilter}
+              onChange={(event) => setMediaTypeFilter(event.target.value)}
+              className="h-8 w-full rounded border border-border bg-surface px-2 text-xs text-text"
+            >
+              {EXISTING_MEDIA_TYPE_FILTERS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="min-w-0">
+            <span className="mb-1 block text-[11px] font-medium text-text-muted">
+              {t("playground:sources.sortMedia", "Sort media")}
+            </span>
+            <select
+              aria-label={t("playground:sources.sortMedia", "Sort media")}
+              value={sortBy}
+              onChange={(event) => setSortBy(event.target.value as ExistingMediaSortBy)}
+              className="h-8 w-full rounded border border-border bg-surface px-2 text-xs text-text"
+            >
+              {EXISTING_MEDIA_SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {filtersActive && (
+            <Button onClick={handleClearFilters} className="self-end">
+              {t("playground:sources.clearFilters", "Clear filters")}
+            </Button>
+          )}
+        </div>
         <Input
-          prefix={<Search className="h-4 w-4 text-text-muted" />}
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          aria-label={t("playground:sources.keywordFilter", "Keywords")}
+          value={keywordFilterInput}
+          onChange={(event) => setKeywordFilterInput(event.target.value)}
           onPressEnter={handleSearch}
-          placeholder={t("playground:sources.searchExisting", "Search your media library...")}
-          className="flex-1"
+          placeholder={t(
+            "playground:sources.keywordFilterPlaceholder",
+            "Filter keywords, comma-separated"
+          )}
         />
-        <Button onClick={handleSearch} loading={isLoading}>
-          {t("common:search", "Search")}
-        </Button>
       </div>
 
       {isLoading ? (
@@ -1451,7 +1662,8 @@ const ExistingTab: React.FC<{
               renderItem={(item) => {
                 const key = getMediaLibraryItemKey(item)
                 if (key == null) return null
-                const title = item.title || item.name || "Untitled"
+                const title = getMediaLibraryTitle(item)
+                const keywords = getMediaLibraryKeywords(item)
                 return (
                   <List.Item
                     className={`cursor-pointer transition hover:bg-surface2 ${
@@ -1475,8 +1687,20 @@ const ExistingTab: React.FC<{
                           {title}
                         </p>
                         <p className="text-xs text-text-muted capitalize">
-                          {item.type || item.media_type || "document"}
+                          {getMediaLibraryTypeLabel(item)}
                         </p>
+                        {keywords.length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {keywords.map((keyword) => (
+                              <span
+                                key={keyword}
+                                className="rounded bg-surface2 px-1.5 py-0.5 text-[10px] text-text-muted"
+                              >
+                                {keyword}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </List.Item>

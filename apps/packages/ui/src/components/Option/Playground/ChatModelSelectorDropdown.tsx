@@ -1,5 +1,6 @@
 import { ProviderIcons } from "@/components/Common/ProviderIcon"
 import { Dropdown, Tooltip } from "antd"
+import type { MenuProps } from "antd"
 import { ArrowRight, HelpCircle } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
@@ -11,7 +12,7 @@ type ChatModelSelectorDropdownProps = {
   catalogControls: React.ReactNode
   connectionStatusLabel: string
   connectionStatusWarning?: boolean
-  modelDropdownMenuItems: any[]
+  modelDropdownMenuItems: MenuProps["items"]
   modelDropdownOpen: boolean
   modelSelectorWarning?: boolean
   onBeforeOpen?: () => void
@@ -38,11 +39,6 @@ export const ChatModelSelectorDropdown = React.memo(
     setModelSearchQuery
   }: ChatModelSelectorDropdownProps) {
     const { t } = useTranslation(["playground", "common"])
-
-    const openDropdown = React.useCallback(() => {
-      onBeforeOpen?.()
-      setModelDropdownOpen(true)
-    }, [onBeforeOpen, setModelDropdownOpen])
 
     return (
       <Dropdown
@@ -106,11 +102,6 @@ export const ChatModelSelectorDropdown = React.memo(
             aria-haspopup="listbox"
             aria-expanded={modelDropdownOpen}
             data-testid="model-selector"
-            onClick={() => {
-              if (!modelDropdownOpen) {
-                openDropdown()
-              }
-            }}
             className={`inline-flex min-h-[44px] min-w-0 cursor-pointer items-center gap-1 rounded-full border px-2 text-[10px] transition-colors ${
               modelSelectorWarning
                 ? "border-warn/50 bg-warn/10 text-warn hover:bg-warn/20"
