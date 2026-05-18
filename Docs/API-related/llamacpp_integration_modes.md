@@ -45,6 +45,26 @@ The `/admin/llamacpp` WebUI is an admin/operator surface for the managed plane. 
 
 After a managed server is running, the page shows **Use this in Chat**. This is intentionally explicit: it calls `POST /api/v1/llamacpp/use-in-chat` and updates the provider-plane `llama_api` endpoint only after the admin chooses it. Starting a managed server alone does not mutate chat provider settings.
 
+## Model Acquisition And Import
+
+The `/admin/llamacpp` **Assets** panel helps operators make local GGUF and mmproj files visible to the managed plane without changing runtime or provider-plane state by surprise.
+
+Local acquisition has two paths:
+
+1. **Register local asset path**: `POST /api/v1/llamacpp/assets/register-path` records one allowed local GGUF or mmproj file path. Use this when the asset already exists and only that file should be added to inventory.
+2. **Import local asset folder**: `POST /api/v1/llamacpp/assets/import-folder/preview` scans a folder first and returns counts, warnings, candidate assets, and `will_persist=false`. The preview does not mutate config. `POST /api/v1/llamacpp/assets/import-folder` is the explicit confirmation step that persists the folder in the managed asset inventory.
+
+Remote acquisition is Jobs-backed. `POST /api/v1/llamacpp/assets/downloads` validates a remote GGUF download request and creates an acquisition job. The worker downloads to a partial file, enforces size/checksum validation when requested, promotes the file atomically, then registers the completed asset. A queued or running download does not appear in normal asset inventory until the worker finishes validation and registration; the WebUI refreshes assets after it observes a newly completed download job.
+
+Acquisition is intentionally not a launch workflow. Registering, importing, or downloading an asset never creates a profile, starts a runtime, or wires the asset into Chat. Operators must still create or update a profile, start the desired runtime, and explicitly use **Use this in Chat** when they want provider-plane routing to change.
+
+Remote download policy is conservative by default:
+
+- download URLs must use `http` or `https`, must not embed credentials, and must not include known secret query keys;
+- local/private-network hosts are rejected unless the operator explicitly enables private downloads for the deployment;
+- destination paths must resolve under configured llama.cpp roots such as `models_dir` or `allowed_paths`;
+- destination filenames must be simple `.gguf` filenames.
+
 ## Common Misconfigurations
 
 | Symptom | Plane | Likely Cause | Correct Fix |

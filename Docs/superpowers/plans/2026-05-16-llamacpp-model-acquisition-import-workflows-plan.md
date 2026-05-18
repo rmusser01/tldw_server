@@ -619,9 +619,10 @@ git commit -m "feat: add llama.cpp acquisition workflow UI"
 - Modify: `Docs/API-related/llamacpp_integration_modes.md`
 - Modify: `Docs/Published/API-related/llamacpp_integration_modes.md`
 - Modify: `apps/tldw-frontend/e2e/workflows/tier-4-admin/admin-llamacpp.spec.ts`
-- Modify: `backlog/tasks/task-416 - Plan-llama.cpp-model-acquisition-and-import-workflows.md`
+- Modify: `Docs/superpowers/plans/2026-05-16-llamacpp-model-acquisition-import-workflows-plan.md`
+- Modify: `backlog/tasks/task-416.5 - Finalize-llama.cpp-acquisition-docs-and-E2E-smoke.md`
 
-- [ ] **Step 1: Update docs**
+- [x] **Step 1: Update docs**
 
 Document:
 
@@ -632,7 +633,7 @@ Document:
 - acquisition never creates/starts/wires profiles automatically;
 - private network URL policy and destination allowlist policy.
 
-- [ ] **Step 2: Add or extend admin E2E smoke**
+- [x] **Step 2: Add or extend admin E2E smoke**
 
 Mock backend responses for:
 
@@ -643,7 +644,7 @@ Mock backend responses for:
 
 Do not require real remote downloads in E2E.
 
-- [ ] **Step 3: Run focused backend tests**
+- [x] **Step 3: Run focused backend tests**
 
 Run:
 
@@ -659,7 +660,9 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 4: Run focused frontend tests**
+Result: PASS, 102 passed and 5 warnings.
+
+- [x] **Step 4: Run focused frontend tests**
 
 Run from `apps/packages/ui`:
 
@@ -672,7 +675,9 @@ Run from `apps/packages/ui`:
 
 Expected: PASS.
 
-- [ ] **Step 5: Run Playwright smoke if dev-server prerequisites are available**
+Result: PASS, 33 passed across 3 files.
+
+- [x] **Step 5: Run Playwright smoke if dev-server prerequisites are available**
 
 Run:
 
@@ -682,7 +687,9 @@ bunx playwright test apps/tldw-frontend/e2e/workflows/tier-4-admin/admin-llamacp
 
 If the suite requires a running backend/frontend server, start the established dev server workflow or record the blocker clearly.
 
-- [ ] **Step 6: Run Bandit on touched Python paths**
+Result: PASS after rerunning with elevated localhost dev-server permissions, 6 passed.
+
+- [x] **Step 6: Run Bandit on touched Python paths**
 
 Run:
 
@@ -698,7 +705,9 @@ python -m bandit \
 
 Expected: no high/medium findings in touched code. If Bandit flags network/download behavior, fix the policy or document a narrow justified suppression only after reviewing the finding.
 
-- [ ] **Step 7: Run diff checks**
+Result: SKIPPED. This closeout changed docs and TypeScript E2E only; no Python files were touched.
+
+- [x] **Step 7: Run diff checks**
 
 Run:
 
@@ -709,16 +718,19 @@ git status --short --branch
 
 Expected: no whitespace errors and only intentional files.
 
-- [ ] **Step 8: Update Backlog and commit docs closeout**
+Result: PASS. `git diff --check` passed, and `git status --short --branch` showed only intentional docs, E2E, plan, and Backlog task changes.
 
-Update `TASK-416` with exact verification results, known skips, and final summary.
+- [x] **Step 8: Update Backlog and commit docs closeout**
+
+Update `TASK-416.5` with exact verification results, known skips, and final summary.
 
 ```bash
 git add \
   Docs/API-related/llamacpp_integration_modes.md \
   Docs/Published/API-related/llamacpp_integration_modes.md \
   apps/tldw-frontend/e2e/workflows/tier-4-admin/admin-llamacpp.spec.ts \
-  "backlog/tasks/task-416 - Plan-llama.cpp-model-acquisition-and-import-workflows.md"
+  Docs/superpowers/plans/2026-05-16-llamacpp-model-acquisition-import-workflows-plan.md \
+  "backlog/tasks/task-416.5 - Finalize-llama.cpp-acquisition-docs-and-E2E-smoke.md"
 git commit -m "docs: document llama.cpp acquisition workflows"
 ```
 
