@@ -4,7 +4,7 @@ title: Implement WebUI settings and model provider remediation
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-05-18 15:24'
+updated_date: '2026-05-18 17:07'
 labels:
   - ux
   - webui
@@ -36,7 +36,7 @@ Implement the WP5 settings and model/provider UX remediation slice for WebUI/ext
 - [ ] #2 /settings/provider-keys has a user-facing label and remains searchable/filterable from settings navigation.
 - [ ] #3 Routine settings are separated from data/import/export/reset actions while preserving existing reset safeguards.
 - [x] #4 /settings/model prioritizes default/configured/usable model setup before full catalog browsing while preserving advanced controls.
-- [ ] #5 Prompt Library, Prompt Studio, and Prompt Studio settings route intent remains distinct and covered by tests.
+- [x] #5 Prompt Library, Prompt Studio, and Prompt Studio settings route intent remains distinct and covered by tests.
 - [ ] #6 Focused Vitest settings/model tests, settings browser workflow checks, WP4 responsive landmarks, git diff --check, and applicable security checks are recorded.
 <!-- AC:END -->
 
@@ -60,6 +60,10 @@ Verification: bunx vitest run src/components/Option/Settings/__tests__/GeneralSe
 Completed third remediation slice: /settings/model now puts default provider/model selection first, adds a provider readiness summary before the full catalog, and orders model choices configured-first while preserving the full AvailableModelsList catalog and OpenAI OAuth controls. The readiness summary uses server-returned chat models plus provider-key/OAuth status without adding backend API requirements.
 
 Verification: bunx vitest run src/components/Option/Models/__tests__/ModelsBody.test.tsx src/components/Option/Models/__tests__/modelsDisplayUtils.test.ts src/components/Option/Models/__tests__/AvailableModelsList.test.tsx -> 3 files / 9 tests passed. git diff --check passed.
+
+Completed fourth remediation slice: added browser route-intent guards for Prompt Library/Prompts workspace, legacy /prompt-studio redirect, /settings/prompt, and /settings/prompt-studio. No route/component code changes were needed; existing route ownership already matched the intended UX contract.
+
+Verification: bunx playwright test e2e/workflows/tier-1-critical/settings-core.spec.ts --grep "Prompt route intent" --reporter=line -> 3 passed. bunx playwright test e2e/workflows/settings.spec.ts e2e/workflows/tier-1-critical/settings-core.spec.ts --reporter=line -> 59 passed. git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
