@@ -4,7 +4,7 @@ title: Add prepared-host VZ acceptance evidence tracker
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-16 15:00'
+updated_date: '2026-05-18 12:42'
 labels:
   - sandbox
   - vz_linux
@@ -42,6 +42,8 @@ Implementation notes:
 - Linked the tracker from the host-gated acceptance policy, macOS operator notes, and sandbox roadmap.
 - Added focused infrastructure tests that guard the tracker fields and host-gated/manual execution boundary.
 - Kept the slice docs/test-only; no workflow triggers or runtime behavior changed.
+- PR review follow-up: replaced raw evidence-tracker substring checks with normalized doc-text helpers, section anchors, and targeted failure messages.
+- Verified CodeRabbit's return-type comment against current code; the cited test function already declares `-> None`.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -53,8 +55,12 @@ Verification:
 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Infrastructure/test_vz_linux_host_gated_workflow.py -q
 - git diff --check
 
-Bandit skipped: docs/test-only change; no production Python/runtime code changed.
+Bandit initially skipped for the docs-only slice; PR review follow-up ran Bandit on the touched Python test file.
 Known skip: no new real VZ VM smoke was run in this slice; the tracker explicitly records that no dated prepared-host evidence packet has been added yet.
+
+PR review follow-up:
+- Addressed Qodo feedback by making evidence-tracker doc-contract tests less brittle to markdown wrapping/reflow.
+- CodeRabbit return-type feedback was already satisfied in current code.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
