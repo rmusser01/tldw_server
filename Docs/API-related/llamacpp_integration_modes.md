@@ -20,7 +20,11 @@ This project supports two distinct `llama.cpp` integration planes. They are both
 | `GET /api/v1/llamacpp/config` and `PUT /api/v1/llamacpp/config` | managed plane | Reads and updates saved llama.cpp admin configuration |
 | `POST /api/v1/llamacpp/validate` | managed plane | Validates a local `llama-server` binary path |
 | `GET /api/v1/llamacpp/inventory` | managed plane | Lists bounded GGUF inventory with stable model IDs and metadata hints |
-| `POST /api/v1/llamacpp/models/register-path` | managed plane | Registers an allowed local GGUF path for inventory |
+| `POST /api/v1/llamacpp/models/register-path` | managed plane | Legacy inventory-only path registration for local GGUF models |
+| `GET /api/v1/llamacpp/assets` | managed plane | Lists GGUF, mmproj, and imported-folder assets for the Assets panel |
+| `POST /api/v1/llamacpp/assets/register-path` | managed plane | Registers an allowed local GGUF or mmproj path for the Assets panel |
+| `POST /api/v1/llamacpp/assets/import-folder/preview` and `POST /api/v1/llamacpp/assets/import-folder` | managed plane | Previews, then explicitly persists, an allowed local asset folder import |
+| `GET/POST/DELETE /api/v1/llamacpp/assets/downloads*` | managed plane | Lists, queues, reads, or cancels Jobs-backed remote GGUF acquisition jobs |
 | `GET /api/v1/llamacpp/models` | managed plane | Legacy model-file listing from managed-plane runtime |
 | `GET /api/v1/llamacpp/hardware` | managed plane | Returns best-effort local RAM/GPU snapshot and warnings |
 | `GET /api/v1/llamacpp/logs/tail` | managed plane | Tails the configured managed llama.cpp log with bounded line count |

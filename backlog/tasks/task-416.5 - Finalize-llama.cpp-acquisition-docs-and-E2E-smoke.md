@@ -49,7 +49,7 @@ Execute Task 5 from the llama.cpp model acquisition/import workflow plan: docume
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Task 5 closeout from the llama.cpp acquisition/import workflow plan. Updated public and published integration-mode docs with local register vs folder import behavior, non-mutating previews, Jobs-backed remote downloads, validation-to-inventory flow, no automatic profile/start/chat wiring, private-network URL policy, and destination allowlist rules. Extended the tier-4 admin Playwright smoke with mocked import preview, confirmed folder import, queued download, completed download, and asset refresh coverage.
 
-Verification: backend focused pytest passed (102 passed, 5 warnings); frontend focused Vitest passed (33 passed across 3 files); Playwright admin llama.cpp smoke passed after elevated localhost dev-server run (6 passed); git diff --check passed. Bandit skipped because this closeout changed docs and TypeScript E2E only, with no touched Python scope.
+Verification: backend-focused pytest passed (102 passed, 5 warnings); frontend-focused Vitest passed (33 passed across 3 files); Playwright admin llama.cpp smoke passed after elevated localhost dev-server run (6 passed); git diff --check passed. Bandit skipped because this closeout changed docs and TypeScript E2E only, with no touched Python scope.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
