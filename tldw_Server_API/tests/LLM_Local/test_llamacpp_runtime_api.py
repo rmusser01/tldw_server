@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_store import DEFAULT_PR
 from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
     LlamaCppPortPolicy,
     LlamaCppProfile,
+    LlamaCppProfileConflictError,
     LlamaCppProfileNotFoundError,
     LlamaCppRuntime,
     LlamaCppRuntimeState,
@@ -150,6 +151,12 @@ class _SupervisorStub:
     def tail_logs(self, profile_id: str, lines: int) -> dict[str, object]:
         self.tail_requests.append((profile_id, lines))
         return {"lines": ["first", "second"], "truncated": False, "warnings": []}
+
+    async def tail_logs_if_running(self, profile_id: str, lines: int) -> dict[str, object]:
+        runtime = self.get_runtime(profile_id)
+        if runtime.state != LlamaCppRuntimeState.RUNNING:
+            raise LlamaCppProfileConflictError("Managed llama.cpp server is not running.")
+        return self.tail_logs(profile_id, lines)
 
     async def start_default_by_model(self, model_id: str, server_args: dict[str, object]) -> LlamaCppRuntime:
         _ = server_args
