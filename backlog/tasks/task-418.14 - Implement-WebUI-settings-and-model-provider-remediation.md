@@ -4,7 +4,7 @@ title: Implement WebUI settings and model provider remediation
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-18 18:03'
+updated_date: '2026-05-18 19:13'
 labels:
   - ux
   - webui
@@ -66,6 +66,8 @@ Completed fourth remediation slice: added browser route-intent guards for Prompt
 Verification: bunx playwright test e2e/workflows/tier-1-critical/settings-core.spec.ts --grep "Prompt route intent" --reporter=line -> 3 passed. bunx playwright test e2e/workflows/settings.spec.ts e2e/workflows/tier-1-critical/settings-core.spec.ts --reporter=line -> 59 passed. git diff --check passed.
 
 Final verification 2026-05-18: focused UI Vitest suite passed 11 files / 41 tests; settings Playwright workflow pair passed 59 tests; WP4 responsive landmarks passed 12 tests including /settings and /settings/model; git diff --check passed. Documentation governance scans for the child plan and TASK-418.2 produced no placeholder/trailing-whitespace/non-ASCII findings and diff-check passed. Bandit was not run because this slice touched frontend TypeScript/TSX, Playwright tests, Markdown, locale JSON, and Backlog files only. Full apps/packages/ui TypeScript remains blocked by pre-existing repo-wide baseline debt outside this slice; first failures are in audio, chat composer, common prompt utils, quick-ingest, flashcards, playground, services, and route baseline tests before this branch’s settings/model files.
+
+Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1845
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
