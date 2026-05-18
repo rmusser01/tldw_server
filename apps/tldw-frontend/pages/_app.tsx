@@ -160,6 +160,7 @@ export default function App({ Component, pageProps }: AppProps) {
       ? pathname.slice(0, -1)
       : pathname
   const isPublicAuthRoute = routePath === "/login"
+  const isSetupRoute = routePath === "/setup"
   const isSettingsRoute =
     routePath === "/settings" || routePath.startsWith("/settings/")
   const [isAuthenticated, setIsAuthenticated] = React.useState(false)
@@ -294,7 +295,7 @@ export default function App({ Component, pageProps }: AppProps) {
   }, [authResolved, isAuthenticated, isPublicAuthRoute, routePath, router])
 
   const hideShellNav = !authResolved || !isAuthenticated
-  const shouldBypassGates = isPublicAuthRoute || isSettingsRoute
+  const shouldBypassGates = isPublicAuthRoute || isSettingsRoute || isSetupRoute
   const shouldAllowDegradedReadiness = routePath === "/chat"
   const firstRunSetupRoute = React.useMemo(
     () => buildFirstRunSetupRoute(router.asPath || routePath || "/"),
@@ -309,11 +310,11 @@ export default function App({ Component, pageProps }: AppProps) {
 
   const layoutProps = React.useMemo(
     () => ({
-      hideHeader: hideShellNav,
-      hideSidebar: hideShellNav || isSettingsRoute,
+      hideHeader: hideShellNav || isSetupRoute,
+      hideSidebar: hideShellNav || isSettingsRoute || isSetupRoute,
       allowNestedHideHeader: !isSettingsRoute
     }),
-    [hideShellNav, isSettingsRoute]
+    [hideShellNav, isSettingsRoute, isSetupRoute]
   )
 
   const layoutContent = (

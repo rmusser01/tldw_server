@@ -234,6 +234,19 @@ describe("App layout routing", () => {
     expect(layout).toHaveAttribute("data-hide-sidebar", "true")
   })
 
+  it("keeps setup in a setup-only shell even when authenticated", async () => {
+    process.env.NEXT_PUBLIC_X_API_KEY = "env-api-key"
+
+    renderApp("/setup")
+    const layout = await screen.findByTestId("option-layout")
+    expect(screen.getByTestId("server-readiness-gate")).toBeInTheDocument()
+    expect(screen.queryByTestId("first-run-gate")).toBeNull()
+    await waitFor(() => {
+      expect(layout).toHaveAttribute("data-hide-header", "true")
+    })
+    expect(layout).toHaveAttribute("data-hide-sidebar", "true")
+  })
+
   it("refreshes nav visibility when auth config updates", async () => {
     currentConfig = {
       serverUrl: "http://127.0.0.1:8000",

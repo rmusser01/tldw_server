@@ -4,7 +4,7 @@ title: Implement WebUI setup and connection flow
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-05-18 04:09'
+updated_date: '2026-05-18 04:31'
 labels:
   - ux
   - webui
@@ -38,7 +38,7 @@ Implement the Task 3 WebUI/extension UX remediation slice for first-run setup, h
 - [x] #4 Self-host /login and hosted /login behavior are explicit and covered by tests.
 - [x] #5 Hosted-only OSS placeholders for signup/account/billing/auth recovery routes expose route context and appropriate primary actions instead of defaulting to chat.
 - [x] #6 /profile, /config, /privileges, and /404 recovery labels/actions are explicit and covered by tests.
-- [ ] #7 Browser or Playwright QA evidence is recorded for setup/recovery routes, with environment gaps documented.
+- [x] #7 Browser or Playwright QA evidence is recorded for setup/recovery routes, with environment gaps documented.
 - [ ] #8 No backend auth API changes, broad shell redesign, or route renaming are included.
 - [ ] #9 Focused unit/E2E checks and git diff --check are recorded.
 <!-- AC:END -->
@@ -61,6 +61,8 @@ Task 4 login and hosted-only placeholders: added unit coverage for self-host /lo
 Task 4 additional focused verification: bunx vitest run __tests__/navigation/login-page.test.tsx __tests__/navigation/hosted-placeholder-pages.test.tsx __tests__/navigation/route-placeholder-component.test.tsx __tests__/navigation/route-redirect-component.test.tsx passed 4 files / 28 tests; git diff --check passed for the slice.
 
 Task 5 profile/config/privileges/404 recovery: added page-level coverage for /profile and /config settings recovery, privileges redirect source/destination context, and 404 keyboard/action recovery. Patched /privileges to use route-specific redirect title/description, changed 404 and shared redirect/root fallback labels from chat-specific language to Open Home, and mirrored the 404 home label in the extension route shell. Verification: bunx vitest run __tests__/navigation/login-page.test.tsx __tests__/navigation/hosted-placeholder-pages.test.tsx __tests__/navigation/route-placeholder-component.test.tsx __tests__/navigation/route-redirect-component.test.tsx __tests__/navigation/not-found-page.test.tsx passed 5 files / 34 tests; rg found no remaining WebUI Go to Chat/not-found-go-chat/route-redirect-go-chat recovery strings; git diff --check passed.
+
+Task 6 browser QA: added e2e/workflows/setup-connection-flow.spec.ts covering / and /setup first-run states plus /login, /account, /signup, /billing, and 404 recovery at 1440px desktop and 390px mobile. The first Playwright run exposed a real Next shell gap: /setup still rendered the WebUI header/sidebar because the outer Next app shell did not treat /setup as setup-only. Patched pages/_app.tsx to bypass app gates and hide header/sidebar for /setup, and added app-layout unit coverage for that behavior. Verification: bunx vitest run __tests__/app/app-layout.test.tsx __tests__/navigation/login-page.test.tsx __tests__/navigation/hosted-placeholder-pages.test.tsx __tests__/navigation/route-placeholder-component.test.tsx __tests__/navigation/route-redirect-component.test.tsx __tests__/navigation/not-found-page.test.tsx passed 6 files / 45 tests. Browser QA: bunx playwright test e2e/workflows/setup-connection-flow.spec.ts --reporter=line passed 4 tests at desktop/mobile. Initial sandbox run failed to bind port 8080 with EPERM; reran with approved escalation for local Playwright dev server.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
