@@ -79,6 +79,26 @@ class SetupReadinessProvisionResponse(BaseModel):
     backup_path: str | None = None
 
 
+class SetupReadinessVerifyRequest(BaseModel):
+    preview_id: str | None = Field(
+        None,
+        description="Optional preview identifier to verify.",
+    )
+    selection: dict[str, Any] | None = Field(
+        None,
+        description="Optional inline readiness selection to verify.",
+    )
+
+
+class SetupReadinessVerifyResponse(BaseModel):
+    profile_id: str | None = None
+    lane_ids: list[str] = Field(default_factory=list)
+    lanes: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    overlays: list[str] = Field(default_factory=list)
+    status: str
+    verified_at: str
+
+
 class SetupCompleteRequest(BaseModel):
     disable_first_time_setup: bool | None = Field(
         False,

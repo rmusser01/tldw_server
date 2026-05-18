@@ -430,7 +430,7 @@ Verification:
 - Test: `tldw_Server_API/tests/Setup/test_setup_readiness_api.py`
 - Test: `tldw_Server_API/tests/Setup/test_setup_readiness_preview.py`
 
-- [ ] **Step 1: Write failing verification tests**
+- [x] **Step 1: Write failing verification tests**
 
 ```python
 def test_verify_skip_does_not_call_hosted_provider(monkeypatch):
@@ -459,13 +459,13 @@ def test_verify_speech_reuses_audio_bundle_verification(monkeypatch):
     assert result["lanes"]["speech"]["status"] == "ready_with_warnings"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_setup_readiness_api.py -q`
 
 Expected: FAIL with missing verification behavior.
 
-- [ ] **Step 3: Implement verification boundaries**
+- [x] **Step 3: Implement verification boundaries**
 
 Implementation responsibilities:
 
@@ -480,13 +480,13 @@ Implementation responsibilities:
   - Delegate to `install_manager.verify_audio_bundle_async`.
   - Map STT ready + TTS failed into `ready_with_warnings`.
 
-- [ ] **Step 4: Run targeted backend tests**
+- [x] **Step 4: Run targeted backend tests**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_setup_readiness_api.py tldw_Server_API/tests/Setup/test_setup_public_error_sanitization.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Setup/readiness_service.py \
@@ -494,6 +494,10 @@ git add tldw_Server_API/app/core/Setup/readiness_service.py \
   tldw_Server_API/tests/Setup/test_setup_readiness_api.py
 git commit -m "feat: verify setup readiness lanes"
 ```
+
+Verification:
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_setup_readiness_profiles.py tldw_Server_API/tests/Setup/test_setup_readiness_preview.py tldw_Server_API/tests/Setup/test_setup_readiness_api.py tldw_Server_API/tests/Setup/test_setup_readiness_store.py -q --timeout=30` -> 20 passed.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Setup/readiness_service.py tldw_Server_API/app/core/Setup/readiness_store.py tldw_Server_API/app/api/v1/endpoints/setup.py tldw_Server_API/app/api/v1/schemas/setup_schemas.py -f json -o /tmp/bandit_first_time_readiness_verify.json` -> 0 findings.
 
 ---
 

@@ -207,3 +207,40 @@ def test_readiness_provision_requires_explicit_confirmation(_readiness_api_setup
     )
 
     assert response.status_code == 400
+
+
+def test_readiness_verify_route_persists_speech_warnings(monkeypatch, _readiness_api_setup):
+    async def fake_verify(bundle_id, resource_profile, tts_choice=None):
+        return {
+            "status": "ready",
+            "stt_health": {"status": "ready"},
+            "tts_health": {"status": "failed"},
+        }
+
+    monkeypatch.setattr(setup_endpoint.install_manager, "verify_audio_bundle_async", fake_verify)
+
+    client = _make_client()
+    response = client.post(
+        "/api/v1/setup/readiness/verify",
+        headers={"host": "localhost"},
+        json={
+            "selection": {
+                "profile_id": "advanced_custom",
+                "lanes": {
+                    "speech": {
+                        "bundle_id": "cpu_local",
+                        "resource_profile": "balanced",
+                    }
+                },
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ready_with_warnings"
+    assert payload["lanes"]["speech"]["status"] == "ready_with_warnings"
+
+    status_response = client.get("/api/v1/setup/readiness/status", headers={"host": "localhost"})
+    assert status_response.status_code == 200
+    assert status_response.json()["readiness_status"] == "ready_with_warnings"

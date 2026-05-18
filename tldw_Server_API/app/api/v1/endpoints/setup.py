@@ -40,6 +40,8 @@ from tldw_Server_API.app.api.v1.schemas.setup_schemas import (
     SetupReadinessPreviewResponse,
     SetupReadinessProvisionRequest,
     SetupReadinessProvisionResponse,
+    SetupReadinessVerifyRequest,
+    SetupReadinessVerifyResponse,
     SetupResetResponse,
     SetupStatusResponse,
 )
@@ -57,7 +59,7 @@ from tldw_Server_API.app.core.Setup.audio_bundle_catalog import (
 from tldw_Server_API.app.core.Setup.install_schema import InstallPlan
 from tldw_Server_API.app.core.Setup.install_manager import execute_install_plan
 from tldw_Server_API.app.core.Setup.readiness_profiles import build_readiness_profiles
-from tldw_Server_API.app.core.Setup.readiness_service import preview_readiness_selection
+from tldw_Server_API.app.core.Setup.readiness_service import preview_readiness_selection, verify_readiness_lanes
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 from tldw_Server_API.app.services.auth_service import mark_user_verified
 
@@ -425,6 +427,28 @@ def _resolve_setup_readiness_preview(
     return dict(stored_preview)
 
 
+def _resolve_setup_readiness_verification_selection(
+    payload: SetupReadinessVerifyRequest,
+    store: readiness_store.SetupReadinessStore,
+) -> dict[str, Any]:
+    """Return an inline or stored readiness selection for explicit verification."""
+
+    if payload.selection:
+        return payload.selection
+
+    stored_preview = store.load().get("last_preview")
+    preview_id = (payload.preview_id or "").strip()
+    if isinstance(stored_preview, dict) and (
+        not preview_id or stored_preview.get("preview_id") == preview_id
+    ):
+        return dict(stored_preview)
+
+    raise HTTPException(
+        status.HTTP_400_BAD_REQUEST,
+        detail="A readiness selection or current preview is required before verification.",
+    )
+
+
 @router.get("/audio/recommendations", openapi_extra={"security": []}, response_model=AudioRecommendationsResponse)
 async def get_audio_recommendations(
     prefer_offline_runtime: bool = True,
@@ -563,6 +587,33 @@ async def provision_setup_readiness(
         "backup_path": str(backup_path) if backup_path else None,
     }
     return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=response)
+
+
+@router.post(
+    "/readiness/verify",
+    openapi_extra={"security": []},
+    response_model=SetupReadinessVerifyResponse,
+)
+async def verify_setup_readiness(
+    payload: SetupReadinessVerifyRequest,
+    _guard: None = Depends(require_local_setup_access),
+) -> SetupReadinessVerifyResponse:
+    """Explicitly verify selected setup readiness lanes."""
+
+    status_snapshot = setup_manager.get_status_snapshot()
+    _ensure_setup_readiness_available(status_snapshot)
+
+    store = readiness_store.get_setup_readiness_store()
+    selection = _resolve_setup_readiness_verification_selection(payload, store)
+    verification = _sanitize_setup_payload(await verify_readiness_lanes(selection))
+    store.update(
+        status=verification["status"],
+        selected_profile_id=verification.get("profile_id"),
+        lanes=list(verification.get("lanes", {}).values()),
+        overlays=verification.get("overlays", []),
+        last_verification=verification,
+    )
+    return verification
 
 
 def _build_audio_recommendations_response(

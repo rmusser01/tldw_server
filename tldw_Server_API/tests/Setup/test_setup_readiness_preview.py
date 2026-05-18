@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import pytest
+
 from tldw_Server_API.app.core.Setup import setup_manager
-from tldw_Server_API.app.core.Setup.readiness_service import preview_readiness_selection
+from tldw_Server_API.app.core.Setup import readiness_service
+from tldw_Server_API.app.core.Setup.readiness_service import (
+    preview_readiness_selection,
+    verify_readiness_lanes,
+)
 
 
 def test_preview_returns_config_updates_and_install_plan_without_writing(monkeypatch):
@@ -123,3 +129,41 @@ def test_local_chat_preview_only_emits_existing_config_keys():
     assert preview["config_updates"]["Local-API"] == {
         "llama_api_IP": "http://127.0.0.1:8080/completion"
     }
+
+
+@pytest.mark.asyncio
+async def test_verify_skip_does_not_call_hosted_provider():
+    result = await verify_readiness_lanes({"lanes": {"chat": {"mode": "skip"}}})
+
+    assert result["lanes"]["chat"]["status"] == "skipped"
+    assert result["lanes"]["chat"]["consequences"]
+
+
+@pytest.mark.asyncio
+async def test_verify_speech_reuses_audio_bundle_verification(monkeypatch):
+    calls: list[tuple[str, str, str | None]] = []
+
+    async def fake_verify(bundle_id, resource_profile, tts_choice=None):
+        calls.append((bundle_id, resource_profile, tts_choice))
+        return {
+            "status": "ready",
+            "stt_health": {"status": "ready"},
+            "tts_health": {"status": "failed"},
+        }
+
+    monkeypatch.setattr(readiness_service.install_manager, "verify_audio_bundle_async", fake_verify)
+
+    result = await verify_readiness_lanes(
+        {
+            "lanes": {
+                "speech": {
+                    "bundle_id": "cpu_local",
+                    "resource_profile": "balanced",
+                    "tts_choice": "kitten_tts",
+                }
+            }
+        }
+    )
+
+    assert calls == [("cpu_local", "balanced", "kitten_tts")]
+    assert result["lanes"]["speech"]["status"] == "ready_with_warnings"

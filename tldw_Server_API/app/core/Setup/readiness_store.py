@@ -42,6 +42,7 @@ class SetupReadinessRecord(BaseModel):
     overlays: list[str] = Field(default_factory=list)
     last_preview: dict[str, Any] | None = None
     last_provision: dict[str, Any] | None = None
+    last_verification: dict[str, Any] | None = None
     operation_id: str | None = None
     operation_status: Literal["queued", "running", "completed", "failed"] | None = None
     errors: list[str] = Field(default_factory=list)
