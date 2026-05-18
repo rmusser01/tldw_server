@@ -11,6 +11,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "vz-linux-host-gated.yml"
 POLICY_PATH = REPO_ROOT / "Docs" / "Sandbox" / "vz-linux-host-gated-ci-acceptance-policy.md"
+EVIDENCE_TRACKER_PATH = REPO_ROOT / "Docs" / "Sandbox" / "vz-linux-prepared-host-evidence.md"
 SMOKE_SCRIPT_PATH = REPO_ROOT / "tools" / "vz-linux-image" / "scripts" / "run-host-e2e-smoke.sh"
 
 
@@ -175,3 +176,34 @@ def test_vz_linux_host_gated_acceptance_policy_doc_exists_and_references_workflo
     assert ".github/workflows/vz-linux-host-gated.yml" in policy  # nosec B101
     assert "TLDW_SANDBOX_VZ_LINUX_HOST_GATED_NIGHTLY" in policy  # nosec B101
     assert "blocking regression" in policy.lower()  # nosec B101
+    assert "Docs/Sandbox/vz-linux-prepared-host-evidence.md" in policy  # nosec B101
+
+
+def test_vz_linux_prepared_host_evidence_tracker_defines_packet() -> None:
+    """Prepared-host evidence should be durable, reviewable, and non-secret."""
+    tracker = EVIDENCE_TRACKER_PATH.read_text(encoding="utf-8")
+    tracker_lower = tracker.lower()
+
+    assert "prepared apple silicon" in tracker_lower  # nosec B101
+    assert "evidence packet" in tracker_lower  # nosec B101
+    assert "real `vz_linux` ephemeral execution" in tracker_lower  # nosec B101
+    assert "same-session vm reuse" in tracker_lower  # nosec B101
+    assert "helper build/signing" in tracker_lower  # nosec B101
+    assert "artifact" in tracker_lower  # nosec B101
+    assert "expected skips" in tracker_lower  # nosec B101
+    assert "residual gaps" in tracker_lower  # nosec B101
+    assert "do not paste secrets" in tracker_lower  # nosec B101
+
+
+def test_vz_linux_prepared_host_evidence_tracker_keeps_real_vm_runs_gated() -> None:
+    """The tracker must not promote real VM execution into normal PR CI."""
+    tracker = EVIDENCE_TRACKER_PATH.read_text(encoding="utf-8")
+    tracker_lower = tracker.lower()
+
+    assert "manual or host-gated only" in tracker_lower  # nosec B101
+    assert "do not add pull request triggers" in tracker_lower  # nosec B101
+    assert "push triggers" in tracker_lower  # nosec B101
+    assert "scheduled destructive drills" in tracker_lower  # nosec B101
+    assert "manual opt-in only" in tracker_lower  # nosec B101
+    assert "launchd-drill" in tracker_lower  # nosec B101
+    assert "host reboot" in tracker_lower  # nosec B101

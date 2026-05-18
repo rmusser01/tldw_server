@@ -632,6 +632,8 @@ they execute on the self-hosted runner.
 The acceptance policy for when this workflow should run, what counts as an
 expected skip, and what counts as a blocking `vz_linux` regression lives in
 `Docs/Sandbox/vz-linux-host-gated-ci-acceptance-policy.md`.
+Prepared-host run evidence and residual gaps should be recorded in
+`Docs/Sandbox/vz-linux-prepared-host-evidence.md`.
 
 The workflow calls the same operator smoke script documented above:
 

@@ -12,6 +12,7 @@ admin surfaces, CI, security, and all current runtime families.
 - `Docs/Sandbox/sandbox-runtime-capability-inventory.md`
 - `Docs/Sandbox/sandbox-security-policy-matrix.md`
 - `Docs/Sandbox/vz-linux-host-gated-ci-acceptance-policy.md`
+- `Docs/Sandbox/vz-linux-prepared-host-evidence.md`
 - `Docs/Design/2026-05-02-apple-containerization-evaluation.md`
 - `tldw_Server_API/app/core/Sandbox/README.md`
 
@@ -343,8 +344,9 @@ this table as the current status map before selecting new sandbox work.
    Capture manual/nightly `vz_linux` host-gated run evidence from a prepared
    Apple silicon host, including command execution, same-session reuse, helper
    restart drill, launchd-drill where explicitly requested, artifact upload, and
-   expected skips. This is the best next slice because it tests the stability
-   path the preceding PRs built.
+   expected skips. Record results in
+   `Docs/Sandbox/vz-linux-prepared-host-evidence.md`. This is the best next
+   slice because it tests the stability path the preceding PRs built.
 
 2. **Remaining `vz_linux` lifecycle drill gaps**
 
