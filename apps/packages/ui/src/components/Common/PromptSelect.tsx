@@ -56,8 +56,8 @@ export const PromptSelect: React.FC<Props> = ({
   const returnFocusSelectorRef = useRef<string | null>(null)
 
   const restorePromptSelectFocus = React.useCallback(() => {
-    const returnFocusSelector = returnFocusSelectorRef.current
-    if (!returnFocusSelector) return
+    const returnFocusSelector =
+      returnFocusSelectorRef.current ?? "[data-testid='chat-prompt-select']"
     returnFocusSelectorRef.current = null
 
     scheduleFocusFirstVisibleElement(returnFocusSelector)
@@ -144,12 +144,58 @@ export const PromptSelect: React.FC<Props> = ({
 
   // Group prompts by category: Favorites, System, Quick
   const groupedMenuItems = useMemo<ItemType[]>(() => {
+    const hasCurrentSystemPrompt =
+      typeof systemPrompt === "string" && systemPrompt.trim().length > 0
+    const currentSystemPromptRecoveryItems: ItemType[] = hasCurrentSystemPrompt
+      ? [
+          {
+            key: "__edit_current_system_prompt__",
+            label: t(
+              "promptSelect.editCurrentSystemPrompt",
+              "Edit current system prompt"
+            ),
+            onClick: () => {
+              void openSystemPromptEditor()
+            }
+          },
+          {
+            key: "__clear_current_system_prompt__",
+            label: t(
+              "promptSelect.clearCurrentSystemPrompt",
+              "Clear current system prompt"
+            ),
+            onClick: () => {
+              setSystemPrompt("")
+              setDropdownOpen(false)
+              restorePromptSelectFocus()
+            }
+          }
+        ]
+      : []
+
     if (filteredData.length === 0) {
       return [
         {
-        key: "empty",
-        label: <Empty description={searchText ? t("noMatchingPrompts", "No matching prompts") : undefined} />
-      }
+          key: "empty",
+          label: (
+            <Empty
+              description={
+                searchText
+                  ? t("noMatchingPrompts", "No matching prompts")
+                  : t("promptSelect.noSavedPrompts", "No saved prompts")
+              }
+            />
+          )
+        },
+        ...(currentSystemPromptRecoveryItems.length > 0
+          ? [
+              {
+                key: "__current_system_prompt_divider__",
+                type: "divider" as const
+              },
+              ...currentSystemPromptRecoveryItems
+            ]
+          : [])
       ]
     }
 
@@ -222,6 +268,7 @@ export const PromptSelect: React.FC<Props> = ({
 
     if (items.length > 0) {
       items.push({
+        key: "__prompt_actions_divider__",
         type: "divider"
       })
     }
@@ -234,6 +281,10 @@ export const PromptSelect: React.FC<Props> = ({
       }
     })
 
+    if (currentSystemPromptRecoveryItems.length > 0) {
+      items.push(...currentSystemPromptRecoveryItems)
+    }
+
     // If no groups (shouldn't happen, but fallback)
     if (items.length === 0) {
       return filteredData.map(createPromptItem)
@@ -244,12 +295,14 @@ export const PromptSelect: React.FC<Props> = ({
     filteredData,
     searchText,
     selectedSystemPrompt,
+    systemPrompt,
     t,
     handlePromptChange,
     openSystemPromptEditor,
     restorePromptSelectFocus,
     setDropdownOpen,
-    setSelectedSystemPrompt
+    setSelectedSystemPrompt,
+    setSystemPrompt
   ])
 
   // Focus search input when dropdown opens

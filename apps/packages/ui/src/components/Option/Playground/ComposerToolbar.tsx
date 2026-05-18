@@ -3,7 +3,7 @@ import { Button as TldwButton } from "@/components/Common/Button"
 import { PromptSelect } from "@/components/Common/PromptSelect"
 import { ConnectionStatus } from "@/components/Layouts/ConnectionStatus"
 import { PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY } from "@/utils/output-formatting-guide"
-import { Tooltip } from "antd"
+import { Modal, Tooltip } from "antd"
 import {
   ChevronDown,
   FileIcon,
@@ -11,18 +11,24 @@ import {
   Gauge,
   Globe,
   MicIcon,
-  Search
+  Search,
+  Users
 } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
 
 import { useStorage } from "@plasmohq/storage/hook"
 
-import { ComposerToolbarOverflow } from "./ComposerToolbarOverflow"
+import {
+  ComposerToolbarOverflow,
+  type ComposerToolbarRolePlayActions
+} from "./ComposerToolbarOverflow"
 import {
   ParameterPresets,
+  ParameterPresetsDropdown,
   type PromptTemplate,
   SessionCostEstimation,
+  SystemPromptTemplatesModal,
   SystemPromptTemplatesButton
 } from "./playground-features"
 
@@ -92,6 +98,7 @@ export type ComposerToolbarProps = {
   onDismissServerPersistenceHint: () => void
   onFocusConnectionCard: () => void
   contextItems?: ComposerContextItem[]
+  rolePlayActions?: ComposerToolbarRolePlayActions
 }
 
 export type ComposerContextItem = {
@@ -169,7 +176,8 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     showServerPersistenceHint,
     onDismissServerPersistenceHint,
     onFocusConnectionCard,
-    contextItems = []
+    contextItems = [],
+    rolePlayActions: providedRolePlayActions
   } = props
   const toolbarSendControl =
     sendControlPlacement === "toolbar" ? sendControl : null
@@ -183,6 +191,35 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     useStorage("playgroundComposerCasualAdvancedControlsOpen", false)
   const [appendFormattingGuidePrompt, setAppendFormattingGuidePrompt] =
     useStorage(PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY, false)
+  const [systemPromptsOpen, setSystemPromptsOpen] = React.useState(false)
+  const [generationStyleOpen, setGenerationStyleOpen] = React.useState(false)
+
+  const mobileRolePlayActions = React.useMemo<ComposerToolbarRolePlayActions>(
+    () => ({
+      onOpenSystemPrompts:
+        providedRolePlayActions?.onOpenSystemPrompts ??
+        (() => setSystemPromptsOpen(true)),
+      onOpenGenerationStyle:
+        providedRolePlayActions?.onOpenGenerationStyle ??
+        (() => setGenerationStyleOpen(true)),
+      ...(providedRolePlayActions?.onOpenRolePlaySetup
+        ? { onOpenRolePlaySetup: providedRolePlayActions.onOpenRolePlaySetup }
+        : {})
+    }),
+    [
+      providedRolePlayActions?.onOpenGenerationStyle,
+      providedRolePlayActions?.onOpenRolePlaySetup,
+      providedRolePlayActions?.onOpenSystemPrompts
+    ]
+  )
+
+  const handleMobileTemplateSelect = React.useCallback(
+    (template: PromptTemplate) => {
+      onTemplateSelect(template)
+      setSystemPromptsOpen(false)
+    },
+    [onTemplateSelect]
+  )
 
   // --- Shared sub-elements ---
   const ephemeralToggle = React.useMemo(
@@ -494,6 +531,29 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     [isProMode]
   )
 
+  const rolePlaySetupButton = React.useMemo(() => {
+    if (!providedRolePlayActions?.onOpenRolePlaySetup) return null
+
+    const label = t(
+      "playground:composer.rolePlaySetup",
+      "Role-play setup"
+    ) as string
+
+    return (
+      <Tooltip title={label}>
+        <button
+          type="button"
+          onClick={providedRolePlayActions.onOpenRolePlaySetup}
+          aria-label={label}
+          data-testid="composer-role-play-setup"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-text-muted transition hover:bg-surface2 hover:text-text">
+          <Users className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>{label}</span>
+        </button>
+      </Tooltip>
+    )
+  }, [providedRolePlayActions?.onOpenRolePlaySetup, t])
+
   const hiddenContextItemIds = React.useMemo(
     () =>
       new Set([
@@ -799,11 +859,11 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       </div>
       <div
         data-playground-toolbar-row="actions"
-        className="flex items-center justify-between gap-2">
+        className="flex flex-wrap items-center justify-between gap-2">
         <div
           role="group"
           aria-label={mobileContextGroupLabel}
-          className="flex items-center gap-2">
+          className="flex min-w-0 flex-wrap items-center gap-2">
           {ephemeralToggle}
           {searchContextButton}
           {webSearchButton}
@@ -811,7 +871,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         <div
           role="group"
           aria-label={mobileRunInputGroupLabel}
-          className="flex items-center gap-2">
+          className="flex min-w-0 flex-wrap items-center justify-end gap-2">
           {modelUsageBadge}
           <ComposerToolbarOverflow
             isProMode={isProMode}
@@ -831,6 +891,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             onDictationToggle={onDictationToggle}
             temporaryChat={temporaryChat}
             onFocusConnectionCard={onFocusConnectionCard}
+            rolePlayActions={mobileRolePlayActions}
           />
           {researchLaunchButton}
           {voiceChatButton}
@@ -858,6 +919,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           {searchContextButton}
           {promptSelectControl}
           {characterSelectControl}
+          {rolePlaySetupButton}
         </div>
         <div
           role="group"
@@ -927,6 +989,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {promptSelectControl}
             {characterSelectControl}
+            {rolePlaySetupButton}
           </div>
         </section>
         <section
@@ -982,6 +1045,20 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     <div
       data-testid="composer-options-panel"
       className="mt-2 flex flex-col gap-1">
+      <SystemPromptTemplatesModal
+        open={systemPromptsOpen}
+        onClose={() => setSystemPromptsOpen(false)}
+        onSelect={handleMobileTemplateSelect}
+      />
+      <Modal
+        title={t("playground:presets.title", "Generation style") as string}
+        open={generationStyleOpen}
+        onCancel={() => setGenerationStyleOpen(false)}
+        footer={null}
+        width={420}
+        className="generation-style-modal">
+        <ParameterPresetsDropdown onChange={() => setGenerationStyleOpen(false)} />
+      </Modal>
       {optionsExpanded ? (
         <>
           {isMobile

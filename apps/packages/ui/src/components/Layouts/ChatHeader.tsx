@@ -125,7 +125,7 @@ export function ChatHeader({
       data-ischat-route="true"
       className="z-20 flex w-full flex-col border-b border-border bg-surface/95 backdrop-blur data-[istemporary-chat='true']:bg-purple-900 data-[ischat-route='true']:bg-surface/95"
     >
-      <div className="flex w-full items-center justify-between gap-3 px-4 py-2">
+      <div className="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           {showSidebarToggle && (
             <Tooltip title={sidebarLabel} placement="bottom">
@@ -249,7 +249,7 @@ export function ChatHeader({
             </div>
           ) : null}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-1 sm:gap-2">
           <button
             type="button"
             onClick={onOpenCommandPalette}

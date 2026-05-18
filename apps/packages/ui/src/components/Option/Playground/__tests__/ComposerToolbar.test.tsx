@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest"
 
 import { ComposerToolbar } from "../ComposerToolbar"
 
+const assistantSelectMock = vi.hoisted(() => vi.fn())
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, fallback?: string) => fallback || key
@@ -11,7 +13,14 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("antd", () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>
+  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  Modal: ({
+    open,
+    children
+  }: {
+    open?: boolean
+    children: React.ReactNode
+  }) => (open ? <div data-testid="toolbar-modal">{children}</div> : null)
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({
@@ -24,7 +33,12 @@ vi.mock("@/components/Common/PromptSelect", () => ({
 }))
 
 vi.mock("@/components/Common/AssistantSelect", () => ({
-  AssistantSelect: () => <div data-testid="character-select" />
+  AssistantSelect: (props: { variant?: string }) => {
+    assistantSelectMock(props)
+    return (
+      <div data-testid="character-select" data-variant={props.variant ?? ""} />
+    )
+  }
 }))
 
 vi.mock("@/components/Layouts/ConnectionStatus", () => ({
@@ -47,7 +61,9 @@ vi.mock("@/components/Common/Button", () => ({
 
 vi.mock("../playground-features", () => ({
   ParameterPresets: () => <div data-testid="parameter-presets" />,
+  ParameterPresetsDropdown: () => <div data-testid="parameter-presets-dropdown" />,
   SystemPromptTemplatesButton: () => <button type="button">Templates</button>,
+  SystemPromptTemplatesModal: () => null,
   SessionCostEstimation: () => <div data-testid="session-cost" />
 }))
 
@@ -119,6 +135,18 @@ const createProps = (
 })
 
 describe("ComposerToolbar web search", () => {
+  it("owns the dropdown assistant selector used by chat starter events", () => {
+    render(<ComposerToolbar {...createProps()} />)
+
+    expect(screen.getByTestId("character-select")).toHaveAttribute(
+      "data-variant",
+      "dropdown"
+    )
+    expect(assistantSelectMock).toHaveBeenCalledWith(
+      expect.objectContaining({ variant: "dropdown" })
+    )
+  })
+
   it("hides the options panel when rendered collapsed for external send placement", () => {
     render(
       <ComposerToolbar
@@ -237,6 +265,29 @@ describe("ComposerToolbar web search", () => {
     ).toHaveAttribute("id", "composer-casual-advanced-controls-row")
   })
 
+  it("exposes role-play setup directly in the desktop casual toolbar", () => {
+    const onOpenRolePlaySetup = vi.fn()
+    render(
+      <ComposerToolbar
+        {...createProps({
+          rolePlayActions: {
+            onOpenRolePlaySetup
+          }
+        })}
+      />
+    )
+
+    const setupButton = screen.getByRole("button", {
+      name: "Role-play setup"
+    })
+    fireEvent.click(setupButton)
+
+    expect(onOpenRolePlaySetup).toHaveBeenCalledTimes(1)
+    expect(
+      setupButton.closest('[data-playground-toolbar-row="actions"]')
+    ).not.toBeNull()
+  })
+
   it("places token usage in the casual bottom context chip row", () => {
     render(
       <ComposerToolbar
@@ -338,8 +389,12 @@ describe("ComposerToolbar web search", () => {
 
     const contextStrip = screen.getByTestId("composer-context-strip")
     const contextButtons = contextStrip.querySelectorAll("button")
-    const savedButton = screen.getByTestId("composer-casual-persistence-chip")
-    const advancedButton = screen.getByTestId("composer-casual-advanced-chip")
+    const savedButton = screen.getByTestId(
+      "composer-casual-persistence-chip"
+    ) as HTMLButtonElement
+    const advancedButton = screen.getByTestId(
+      "composer-casual-advanced-chip"
+    ) as HTMLButtonElement
 
     const savedIndex = Array.from(contextButtons).indexOf(savedButton)
     const advancedIndex = Array.from(contextButtons).indexOf(advancedButton)

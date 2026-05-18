@@ -39,6 +39,7 @@ import type { DictationModePreference } from "@/hooks/useDictationStrategy";
 import { useMcpTools } from "@/hooks/useMcpTools";
 import { useMobile } from "@/hooks/useMediaQuery";
 // isMac moved to PlaygroundSendControl
+import { useSelectedAssistant } from "@/hooks/useSelectedAssistant";
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter";
 import { useServerCapabilities } from "@/hooks/useServerCapabilities";
 import { useTldwAudioStatus } from "@/hooks/useTldwAudioStatus";
@@ -75,16 +76,19 @@ import {
   buildWatchlistChatHint,
   normalizeWatchlistChatHandoffPayload,
 } from "@/services/tldw/watchlist-chat-handoff";
+import { saveActorSettingsForChat } from "@/services/actor-settings";
 import {
   shouldEnableOptionalResource,
   useChatSurfaceCoordinatorStore,
 } from "@/store/chat-surface-coordinator";
+import { useActorStore } from "@/store/actor";
 import {
   type ChatModelSettings,
   useStoreChatModelSettings,
 } from "@/store/model";
 import { useStoreMessageOption } from "@/store/option";
 import { useUiModeStore } from "@/store/ui-mode";
+import { createDefaultActorSettings } from "@/types/actor";
 import type { Character } from "@/types/character";
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings";
 import { ConnectionPhase, deriveConnectionUxState } from "@/types/connection";
@@ -173,6 +177,7 @@ import {
   PlaygroundSendControl,
 } from "./PlaygroundSendControl";
 import { PlaygroundToolsPopover } from "./PlaygroundToolsPopover";
+import type { RolePlaySetupApplyPayload } from "./RolePlaySetupDrawer";
 import { TokenProgressBar } from "./TokenProgressBar";
 import { VoiceChatIndicator } from "./VoiceChatIndicator";
 import { buildConversationSummaryCheckpointPrompt } from "./conversation-summary-checkpoint";
@@ -188,6 +193,9 @@ import {
   type McpSettingsOpenDetail,
   type ModelSettingsOpenDetail,
 } from "./playground-cockpit-actions";
+import { deriveRolePlayState, type RolePlayIdentity } from "./role-play-state";
+import { summarizeRolePlayScene } from "./role-play-scene";
+import { getPromptTemplateById } from "./SystemPromptTemplates";
 // buildImagePromptRefineMessages, extractImagePromptRefineCandidate moved to usePlaygroundImageGen
 // QueuedRequest moved to usePlaygroundQueueManagement
 // WeightedImagePromptContextEntry moved to usePlaygroundImageGen
@@ -398,6 +406,12 @@ const LazyPlaygroundStartupTemplateModal = React.lazy(() =>
   })),
 );
 
+const LazyRolePlaySetupDrawer = React.lazy(() =>
+  import("./RolePlaySetupDrawer").then((module) => ({
+    default: module.RolePlaySetupDrawer,
+  })),
+);
+
 const LazyPlaygroundContextWindowModal = React.lazy(() =>
   import("./PlaygroundContextWindowModal").then((module) => ({
     default: module.PlaygroundContextWindowModal,
@@ -435,7 +449,11 @@ export const PlaygroundForm = ({
   const { t: translate } = useTranslation(["playground", "common", "option"]);
   const t = React.useCallback(
     (key: string, defaultValueOrOptions?: any, options?: any) =>
-      translate(key as any, defaultValueOrOptions as any, options as any) as string,
+      translate(
+        key as any,
+        defaultValueOrOptions as any,
+        options as any,
+      ) as string,
     [translate],
   );
   const notificationApi = useAntdNotification();
@@ -591,7 +609,13 @@ export const PlaygroundForm = ({
   const modelSettingsReturnFocusSelectorRef = React.useRef<string | null>(null);
   const mcpSettingsReturnFocusSelectorRef = React.useRef<string | null>(null);
   const [openActorSettings, setOpenActorSettings] = React.useState(false);
+  const [rolePlaySetupOpen, setRolePlaySetupOpen] = React.useState(false);
   const [noticesExpanded, setNoticesExpanded] = React.useState(false);
+  const actorSettings = useActorStore((state) => state.settings);
+  const setActorSettings = useActorStore((state) => state.setSettings);
+  const setActorPreviewAndTokens = useActorStore(
+    (state) => state.setPreviewAndTokens,
+  );
   const systemPrompt = useStoreChatModelSettings((state) => state.systemPrompt);
   const setSystemPrompt = useStoreChatModelSettings(
     (state) => state.setSystemPrompt,
@@ -617,6 +641,7 @@ export const PlaygroundForm = ({
     llamaGrammarInline: state.llamaGrammarInline,
     llamaGrammarOverride: state.llamaGrammarOverride,
     jsonMode: state.jsonMode,
+    systemPromptTemplateId: state.systemPromptTemplateId,
   }));
   const numCtx = useStoreChatModelSettings((state) => state.numCtx);
   const updateChatModelSetting = useStoreChatModelSettings(
@@ -933,6 +958,7 @@ export const PlaygroundForm = ({
   const [sttSegEmbeddingsModel] = useStorage("sttSegEmbeddingsModel", "");
   const [selectedCharacter, setSelectedCharacter] =
     useSelectedCharacter<Character | null>(null);
+  const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null);
   const [defaultCharacter, setDefaultCharacter] = useStorage<Character | null>(
     {
       key: DEFAULT_CHARACTER_STORAGE_KEY,
@@ -1451,6 +1477,7 @@ export const PlaygroundForm = ({
     setSelectedQuickPrompt,
     setSystemPrompt,
     setSelectedCharacter,
+    setSelectedAssistant,
     setRagPinnedResults,
     updateChatModelSettings,
     compareModeActive,
@@ -1474,6 +1501,9 @@ export const PlaygroundForm = ({
     handleDeleteStartupTemplate,
     handleTemplateSelect,
     promptSummaryLabel,
+    handleSaveRolePlaySetup,
+    handleApplySavedRolePlaySetup,
+    handleRenameStartupTemplate,
   } = promptTemplates;
   React.useEffect(() => {
     if (previousPresetKeyRef.current == null) {
@@ -1923,7 +1953,95 @@ export const PlaygroundForm = ({
     setSelectedQuickPrompt(null);
     setSelectedSystemPrompt("");
     setSystemPrompt("");
-  }, [setSelectedQuickPrompt, setSelectedSystemPrompt, setSystemPrompt]);
+    updateChatModelSetting("systemPromptTemplateId", undefined);
+  }, [
+    setSelectedQuickPrompt,
+    setSelectedSystemPrompt,
+    setSystemPrompt,
+    updateChatModelSetting,
+  ]);
+  const clearBehaviorTemplateIdentity = React.useCallback(() => {
+    updateChatModelSetting("systemPromptTemplateId", undefined);
+  }, [updateChatModelSetting]);
+  const setSelectedSystemPromptForComposer = React.useCallback(
+    (id: string | undefined) => {
+      clearBehaviorTemplateIdentity();
+      setSelectedSystemPrompt(id);
+    },
+    [clearBehaviorTemplateIdentity, setSelectedSystemPrompt],
+  );
+  const setSelectedQuickPromptForComposer = React.useCallback(
+    (prompt: string | undefined) => {
+      clearBehaviorTemplateIdentity();
+      setSelectedQuickPrompt(prompt);
+    },
+    [clearBehaviorTemplateIdentity, setSelectedQuickPrompt],
+  );
+  const clearRolePlayIdentity = React.useCallback(() => {
+    void setSelectedCharacter(null);
+    void setSelectedAssistant(null);
+  }, [setSelectedAssistant, setSelectedCharacter]);
+  const resetRolePlayGenerationStyle = React.useCallback(() => {
+    const preset = getPresetByKey("balanced");
+    if (!preset) return;
+    updateChatModelSettings(preset.settings);
+  }, [updateChatModelSettings]);
+  const handleApplyRolePlaySetup = React.useCallback(
+    async (payload: RolePlaySetupApplyPayload) => {
+      if (payload.clearIdentity) {
+        clearRolePlayIdentity();
+      }
+      if (payload.clearBehavior) {
+        clearPromptContext();
+      } else if (payload.behaviorTemplate) {
+        handleTemplateSelect(payload.behaviorTemplate);
+      }
+      if (payload.resetGenerationStyle) {
+        resetRolePlayGenerationStyle();
+      } else if (payload.generationPresetKey) {
+        const preset = getPresetByKey(payload.generationPresetKey);
+        if (preset && preset.key !== "custom") {
+          updateChatModelSettings(preset.settings);
+        }
+      }
+    },
+    [
+      clearPromptContext,
+      clearRolePlayIdentity,
+      handleTemplateSelect,
+      resetRolePlayGenerationStyle,
+      updateChatModelSettings,
+    ],
+  );
+  const handleApplyStartupTemplatePreview = React.useCallback(async () => {
+    if (!startupTemplatePreview?.rolePlay) {
+      handleApplyStartupTemplate();
+      return;
+    }
+
+    if (startupTemplatePreview.rolePlay.source === "role-play-setup") {
+      const nextScene =
+        startupTemplatePreview.rolePlay.scene ?? createDefaultActorSettings();
+      await saveActorSettingsForChat({
+        historyId,
+        serverChatId,
+        settings: nextScene,
+      });
+      setActorSettings(nextScene);
+      const preview = summarizeRolePlayScene(nextScene);
+      setActorPreviewAndTokens(preview.prompt, preview.tokenCount);
+    }
+
+    await handleApplySavedRolePlaySetup(startupTemplatePreview);
+  }, [
+    handleApplySavedRolePlaySetup,
+    handleApplyStartupTemplate,
+    historyId,
+    serverChatId,
+    setActorPreviewAndTokens,
+    setActorSettings,
+    startupTemplatePreview,
+  ]);
   const clearPinnedSourceContext = React.useCallback(() => {
     setRagPinnedResults([]);
   }, [setRagPinnedResults]);
@@ -3350,6 +3468,7 @@ export const PlaygroundForm = ({
     serverChatState,
     serverChatSource,
     selectedCharacter,
+    hasPersona: selectedAssistant?.kind === "persona",
     messageSteeringMode,
     messageSteeringForceNarrate,
     ragMediaIds,
@@ -3761,6 +3880,96 @@ export const PlaygroundForm = ({
     ],
   );
 
+  const behaviorTemplateMetadata = React.useMemo(
+    () =>
+      getPromptTemplateById(currentChatModelSettings.systemPromptTemplateId),
+    [currentChatModelSettings.systemPromptTemplateId],
+  );
+  const rolePlayScenePreview = React.useMemo(
+    () => summarizeRolePlayScene(actorSettings),
+    [actorSettings],
+  );
+  const rolePlayDocumentContextCount = Array.isArray(documentContext)
+    ? documentContext.length
+    : 0;
+  const rolePlayIdentity = React.useMemo<RolePlayIdentity | null>(() => {
+    if (
+      selectedAssistant?.kind === "character" ||
+      selectedAssistant?.kind === "persona"
+    ) {
+      return {
+        kind: selectedAssistant.kind,
+        id: selectedAssistant.id,
+        name: selectedAssistant.name,
+      };
+    }
+    if (selectedCharacter?.id || selectedCharacter?.name) {
+      return {
+        kind: "character",
+        id:
+          selectedCharacter?.id != null
+            ? String(selectedCharacter.id)
+            : undefined,
+        name: selectedCharacter?.name,
+      };
+    }
+    return null;
+  }, [selectedAssistant, selectedCharacter]);
+  const rolePlayState = React.useMemo(
+    () =>
+      deriveRolePlayState({
+        identity: rolePlayIdentity,
+        systemPrompt,
+        selectedSystemPrompt,
+        selectedQuickPrompt,
+        behaviorTemplate: behaviorTemplateMetadata,
+        scene: rolePlayScenePreview.active
+          ? {
+              active: true,
+              summary: rolePlayScenePreview.summary,
+            }
+          : null,
+        generationStyle:
+          currentPreset && currentPreset.key !== "custom"
+            ? {
+                key: currentPreset.key,
+                label: toText(
+                  t(
+                    `playground:presets.${currentPreset.key}.label`,
+                    currentPreset.label,
+                  ),
+                ),
+              }
+            : null,
+        context: {
+          pinnedCount: ragPinnedResults.length,
+          hasExternalContext:
+            selectedDocuments.length > 0 ||
+            uploadedFiles.length > 0 ||
+            contextFiles.length > 0 ||
+            rolePlayDocumentContextCount > 0 ||
+            Boolean(attachedResearchContext),
+        },
+      }),
+    [
+      attachedResearchContext,
+      behaviorTemplateMetadata,
+      contextFiles.length,
+      currentPreset,
+      ragPinnedResults.length,
+      rolePlayDocumentContextCount,
+      rolePlayIdentity,
+      rolePlayScenePreview.active,
+      rolePlayScenePreview.summary,
+      selectedDocuments.length,
+      selectedQuickPrompt,
+      selectedSystemPrompt,
+      systemPrompt,
+      t,
+      uploadedFiles.length,
+    ],
+  );
+
   const contextItems = usePlaygroundContextItems({
     selectedModel,
     modelSummaryLabel,
@@ -3798,6 +4007,13 @@ export const PlaygroundForm = ({
     openContextWindowModal,
     openSessionInsightsModal,
     updateChatModelSetting,
+    rolePlayState,
+    rolePlayCompatibility: rawPreview.rolePlayCompatibility,
+    onClearRolePlayIdentity: clearRolePlayIdentity,
+    onClearRolePlayBehavior: clearPromptContext,
+    onResetRolePlayGenerationStyle: resetRolePlayGenerationStyle,
+    onDisableCompareMode: compareModeActive ? toggleCompareMode : undefined,
+    onOpenRolePlaySetup: () => setRolePlaySetupOpen(true),
     t,
   });
 
@@ -3868,6 +4084,7 @@ export const PlaygroundForm = ({
     mcpSettingsOpen ||
     openModelSettings ||
     openActorSettings ||
+    rolePlaySetupOpen ||
     documentGeneratorOpen ||
     voiceModeSelectorOpen ||
     modelDropdownOpen ||
@@ -5258,9 +5475,11 @@ export const PlaygroundForm = ({
                                 systemPrompt={systemPrompt}
                                 setSystemPrompt={setSystemPrompt}
                                 setSelectedSystemPrompt={
-                                  setSelectedSystemPrompt
+                                  setSelectedSystemPromptForComposer
                                 }
-                                setSelectedQuickPrompt={setSelectedQuickPrompt}
+                                setSelectedQuickPrompt={
+                                  setSelectedQuickPromptForComposer
+                                }
                                 temporaryChat={temporaryChat}
                                 onToggleTemporaryChat={
                                   handleToggleTemporaryChat
@@ -5306,6 +5525,10 @@ export const PlaygroundForm = ({
                                 }
                                 onFocusConnectionCard={focusConnectionCard}
                                 contextItems={contextItems}
+                                rolePlayActions={{
+                                  onOpenRolePlaySetup: () =>
+                                    setRolePlaySetupOpen(true),
+                                }}
                               />,
                             )}
                           </div>
@@ -5674,7 +5897,7 @@ export const PlaygroundForm = ({
               preview={startupTemplatePreview}
               onClose={() => setStartupTemplatePreview(null)}
               onDelete={handleDeleteStartupTemplate}
-              onApply={handleApplyStartupTemplate}
+              onApply={handleApplyStartupTemplatePreview}
               promptDescription={startupTemplatePromptDescription}
               promptResolution={startupTemplatePromptResolution}
               preset={startupTemplatePreset}
@@ -5762,6 +5985,37 @@ export const PlaygroundForm = ({
             <LazyActorPopout
               open={openActorSettings}
               setOpen={setOpenActorSettings}
+            />
+          </React.Suspense>
+        )}
+        {rolePlaySetupOpen && (
+          <React.Suspense fallback={null}>
+            <LazyRolePlaySetupDrawer
+              open={rolePlaySetupOpen}
+              beforeState={rolePlayState}
+              historyId={historyId}
+              serverChatId={serverChatId}
+              characterId={
+                selectedCharacter?.id ??
+                (rolePlayIdentity?.kind === "character"
+                  ? rolePlayIdentity.id
+                  : null)
+              }
+              currentSystemPrompt={systemPrompt}
+              ragPinnedResultIds={ragPinnedResults.map((result) =>
+                String(result.id)
+              )}
+              savedRolePlaySetups={startupTemplates}
+              savedSetupDraftName={startupTemplateDraftName}
+              savedSetupNameFallback={startupTemplateNameFallback}
+              onClose={() => setRolePlaySetupOpen(false)}
+              onApply={handleApplyRolePlaySetup}
+              onSavedSetupDraftNameChange={setStartupTemplateDraftName}
+              onSaveRolePlaySetup={handleSaveRolePlaySetup}
+              onPreviewSavedSetup={handleOpenStartupTemplatePreview}
+              onApplySavedSetup={handleApplySavedRolePlaySetup}
+              onRenameSavedSetup={handleRenameStartupTemplate}
+              onDeleteSavedSetup={handleDeleteStartupTemplate}
             />
           </React.Suspense>
         )}

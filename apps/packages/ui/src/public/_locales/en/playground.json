@@ -524,6 +524,99 @@
   "composer_contextKnowledgeClose": {
     "message": "Close Search & Context"
   },
+  "composer_context_character": {
+    "message": "Character"
+  },
+  "composer_context_persona": {
+    "message": "Persona"
+  },
+  "composer_context_assistant": {
+    "message": "Assistant"
+  },
+  "composer_context_systemPrompt": {
+    "message": "System prompt"
+  },
+  "composer_context_behavior": {
+    "message": "Behavior"
+  },
+  "composer_context_customSystemPrompt": {
+    "message": "Custom"
+  },
+  "composer_context_modifiedBehaviorTemplate": {
+    "message": "{{title}} modified"
+  },
+  "composer_context_scene": {
+    "message": "Scene"
+  },
+  "composer_context_sceneActive": {
+    "message": "Active"
+  },
+  "composer_context_generationStyle": {
+    "message": "Generation style"
+  },
+  "composer_context_context": {
+    "message": "Context"
+  },
+  "composer_context_rolePlayPinnedExternal": {
+    "message": "{{count}} pinned + external"
+  },
+  "composer_context_rolePlayPinnedCount": {
+    "message": "{{count}} pinned"
+  },
+  "composer_context_rolePlayExternal": {
+    "message": "External"
+  },
+  "composer_modeCharacter": {
+    "message": "Character / Scene"
+  },
+  "composer_modeCharacterNotice": {
+    "message": "Character / scene settings opened."
+  },
+  "composer_modeCharacterActive": {
+    "message": "Active: {{name}}"
+  },
+  "composer_rolePlaySetup": {
+    "message": "Role-play setup"
+  },
+  "composer_rolePlayPreview": {
+    "message": "Role-play preview"
+  },
+  "composer_rolePlayLayers": {
+    "message": "Role-play layers"
+  },
+  "composer_chooseBehaviorTemplate": {
+    "message": "Choose behavior template"
+  },
+  "composer_clearIdentity": {
+    "message": "Clear identity"
+  },
+  "composer_clearBehavior": {
+    "message": "Clear behavior"
+  },
+  "composer_resetGeneration": {
+    "message": "Reset generation"
+  },
+  "composer_sceneEnabled": {
+    "message": "Scene enabled"
+  },
+  "composer_sceneNotes": {
+    "message": "Scene notes"
+  },
+  "composer_sceneNotesPlaceholder": {
+    "message": "Describe the current scene context."
+  },
+  "composer_sceneActive": {
+    "message": "Scene active"
+  },
+  "composer_sceneInactive": {
+    "message": "No scene draft"
+  },
+  "composer_clearScene": {
+    "message": "Clear scene"
+  },
+  "composer_resetScene": {
+    "message": "Reset scene"
+  },
   "composer_knowledgeSearch": {
     "message": "Search & Context"
   },
@@ -1653,7 +1746,10 @@
     "message": "Multi-model compare"
   },
   "presets_title": {
-    "message": "Parameter Presets"
+    "message": "Generation style"
+  },
+  "presets_generationStyle": {
+    "message": "Generation style"
   },
   "presets_creative_label": {
     "message": "Creative"
@@ -1746,25 +1842,25 @@
     "message": "Responses will be formatted as valid JSON"
   },
   "templates_title": {
-    "message": "System Prompt Templates"
+    "message": "System prompts"
   },
   "templates_button": {
-    "message": "Templates"
+    "message": "System prompts"
   },
   "templates_search": {
-    "message": "Search templates..."
+    "message": "Search system prompts..."
   },
   "templates_all": {
     "message": "All"
   },
   "templates_noResults": {
-    "message": "No templates found"
+    "message": "No system prompts found"
   },
   "templates_copy": {
-    "message": "Copy to clipboard"
+    "message": "Copy prompt"
   },
   "templates_use": {
-    "message": "Use template"
+    "message": "Use prompt"
   },
   "templates_category_general": {
     "message": "General"

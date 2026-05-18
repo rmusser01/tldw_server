@@ -10,62 +10,63 @@ import {
  */
 export type ChatModelSettings = {
   // Inference parameters
-  f16KV?: boolean
-  frequencyPenalty?: number
-  keepAlive?: string
-  logitsAll?: boolean
-  mirostat?: number
-  mirostatEta?: number
-  mirostatTau?: number
-  numBatch?: number
-  numCtx?: number
-  numGpu?: number
-  numGqa?: number
-  numKeep?: number
-  numPredict?: number
-  numThread?: number
-  penalizeNewline?: boolean
-  presencePenalty?: number
-  repeatLastN?: number
-  repeatPenalty?: number
-  ropeFrequencyBase?: number
-  ropeFrequencyScale?: number
-  temperature?: number
-  tfsZ?: number
-  topK?: number
-  topP?: number
-  typicalP?: number
-  useMLock?: boolean
-  useMMap?: boolean
-  useMlock?: boolean
-  vocabOnly?: boolean
-  seed?: number
-  minP?: number
+  f16KV?: boolean;
+  frequencyPenalty?: number;
+  keepAlive?: string;
+  logitsAll?: boolean;
+  mirostat?: number;
+  mirostatEta?: number;
+  mirostatTau?: number;
+  numBatch?: number;
+  numCtx?: number;
+  numGpu?: number;
+  numGqa?: number;
+  numKeep?: number;
+  numPredict?: number;
+  numThread?: number;
+  penalizeNewline?: boolean;
+  presencePenalty?: number;
+  repeatLastN?: number;
+  repeatPenalty?: number;
+  ropeFrequencyBase?: number;
+  ropeFrequencyScale?: number;
+  temperature?: number;
+  tfsZ?: number;
+  topK?: number;
+  topP?: number;
+  typicalP?: number;
+  useMLock?: boolean;
+  useMMap?: boolean;
+  useMlock?: boolean;
+  vocabOnly?: boolean;
+  seed?: number;
+  minP?: number;
 
   // System configuration
-  systemPrompt?: string
-  reasoningEffort?: string
-  thinking?: boolean
-  ocrLanguage?: string
+  systemPrompt?: string;
+  systemPromptTemplateId?: string;
+  reasoningEffort?: string;
+  thinking?: boolean;
+  ocrLanguage?: string;
 
   // History & injection settings
-  historyMessageLimit?: number
-  historyMessageOrder?: string
-  slashCommandInjectionMode?: string
+  historyMessageLimit?: number;
+  historyMessageOrder?: string;
+  slashCommandInjectionMode?: string;
 
   // API configuration
-  apiProvider?: string
-  extraHeaders?: string
-  extraBody?: string
-  llamaThinkingBudgetTokens?: number
-  llamaGrammarMode?: "none" | "library" | "inline"
-  llamaGrammarId?: string
-  llamaGrammarInline?: string
-  llamaGrammarOverride?: string
+  apiProvider?: string;
+  extraHeaders?: string;
+  extraBody?: string;
+  llamaThinkingBudgetTokens?: number;
+  llamaGrammarMode?: "none" | "library" | "inline";
+  llamaGrammarId?: string;
+  llamaGrammarInline?: string;
+  llamaGrammarOverride?: string;
 
   // Response format
-  jsonMode?: boolean
-}
+  jsonMode?: boolean;
+};
 
 /**
  * Store type combining settings with actions
@@ -86,62 +87,62 @@ type ChatModelSettingsStore = ChatModelSettings & {
   // Generic typed update method (replaces setX)
   updateSetting: <K extends keyof ChatModelSettings>(
     key: K,
-    value: ChatModelSettings[K]
-  ) => void
-  updateSettings: (updates: Partial<ChatModelSettings>) => void
-  reset: () => void
+    value: ChatModelSettings[K],
+  ) => void;
+  updateSettings: (updates: Partial<ChatModelSettings>) => void;
+  reset: () => void;
 
   // Individual setters (for backwards compatibility)
-  setF16KV: (value: boolean) => void
-  setFrequencyPenalty: (value: number) => void
-  setKeepAlive: (value: string) => void
-  setLogitsAll: (value: boolean) => void
-  setMirostat: (value: number) => void
-  setMirostatEta: (value: number) => void
-  setMirostatTau: (value: number) => void
-  setNumBatch: (value: number) => void
-  setNumCtx: (value: number) => void
-  setNumGpu: (value: number) => void
-  setNumGqa: (value: number) => void
-  setNumKeep: (value: number) => void
-  setNumPredict: (value: number | undefined) => void
-  setNumThread: (value: number) => void
-  setPenalizeNewline: (value: boolean) => void
-  setPresencePenalty: (value: number) => void
-  setRepeatLastN: (value: number) => void
-  setRepeatPenalty: (value: number) => void
-  setRopeFrequencyBase: (value: number) => void
-  setRopeFrequencyScale: (value: number) => void
-  setTemperature: (value: number) => void
-  setTfsZ: (value: number) => void
-  setTopK: (value: number) => void
-  setTopP: (value: number) => void
-  setTypicalP: (value: number) => void
-  setUseMLock: (value: boolean) => void
-  setUseMMap: (value: boolean) => void
-  setUseMlock: (value: boolean) => void
-  setVocabOnly: (value: boolean) => void
-  setSeed: (value: number | undefined) => void
-  setMinP: (value: number) => void
-  setSystemPrompt: (value: string) => void
-  setReasoningEffort: (value: string) => void
-  setThinking: (value: boolean) => void
-  setOcrLanguage: (value: string) => void
-  setHistoryMessageLimit: (value: number) => void
-  setHistoryMessageOrder: (value: string) => void
-  setSlashCommandInjectionMode: (value: string) => void
-  setApiProvider: (value: string) => void
-  setExtraHeaders: (value: string) => void
-  setExtraBody: (value: string) => void
-  setLlamaThinkingBudgetTokens: (value: number | undefined) => void
+  setF16KV: (value: boolean) => void;
+  setFrequencyPenalty: (value: number) => void;
+  setKeepAlive: (value: string) => void;
+  setLogitsAll: (value: boolean) => void;
+  setMirostat: (value: number) => void;
+  setMirostatEta: (value: number) => void;
+  setMirostatTau: (value: number) => void;
+  setNumBatch: (value: number) => void;
+  setNumCtx: (value: number) => void;
+  setNumGpu: (value: number) => void;
+  setNumGqa: (value: number) => void;
+  setNumKeep: (value: number) => void;
+  setNumPredict: (value: number | undefined) => void;
+  setNumThread: (value: number) => void;
+  setPenalizeNewline: (value: boolean) => void;
+  setPresencePenalty: (value: number) => void;
+  setRepeatLastN: (value: number) => void;
+  setRepeatPenalty: (value: number) => void;
+  setRopeFrequencyBase: (value: number) => void;
+  setRopeFrequencyScale: (value: number) => void;
+  setTemperature: (value: number) => void;
+  setTfsZ: (value: number) => void;
+  setTopK: (value: number) => void;
+  setTopP: (value: number) => void;
+  setTypicalP: (value: number) => void;
+  setUseMLock: (value: boolean) => void;
+  setUseMMap: (value: boolean) => void;
+  setUseMlock: (value: boolean) => void;
+  setVocabOnly: (value: boolean) => void;
+  setSeed: (value: number | undefined) => void;
+  setMinP: (value: number) => void;
+  setSystemPrompt: (value: string) => void;
+  setReasoningEffort: (value: string) => void;
+  setThinking: (value: boolean) => void;
+  setOcrLanguage: (value: string) => void;
+  setHistoryMessageLimit: (value: number) => void;
+  setHistoryMessageOrder: (value: string) => void;
+  setSlashCommandInjectionMode: (value: string) => void;
+  setApiProvider: (value: string) => void;
+  setExtraHeaders: (value: string) => void;
+  setExtraBody: (value: string) => void;
+  setLlamaThinkingBudgetTokens: (value: number | undefined) => void;
   setLlamaGrammarMode: (
-    value: "none" | "library" | "inline" | undefined
-  ) => void
-  setLlamaGrammarId: (value: string | undefined) => void
-  setLlamaGrammarInline: (value: string | undefined) => void
-  setLlamaGrammarOverride: (value: string | undefined) => void
-  setJsonMode: (value: boolean | undefined) => void
-}
+    value: "none" | "library" | "inline" | undefined,
+  ) => void;
+  setLlamaGrammarId: (value: string | undefined) => void;
+  setLlamaGrammarInline: (value: string | undefined) => void;
+  setLlamaGrammarOverride: (value: string | undefined) => void;
+  setJsonMode: (value: boolean | undefined) => void;
+};
 
 const INITIAL_STATE: ChatModelSettings = {
   f16KV: undefined,
@@ -176,6 +177,7 @@ const INITIAL_STATE: ChatModelSettings = {
   seed: undefined,
   minP: undefined,
   systemPrompt: undefined,
+  systemPromptTemplateId: undefined,
   reasoningEffort: undefined,
   thinking: undefined,
   ocrLanguage: undefined,
@@ -190,8 +192,8 @@ const INITIAL_STATE: ChatModelSettings = {
   llamaGrammarId: undefined,
   llamaGrammarInline: undefined,
   llamaGrammarOverride: undefined,
-  jsonMode: undefined
-}
+  jsonMode: undefined,
+};
 
 const EMPTY_GLOBAL_SETTINGS: ChatModelSettings = {}
 
@@ -245,12 +247,20 @@ const applyActiveSettingsUpdate = (
   state: ChatModelSettingsStore,
   updates: Partial<ChatModelSettings>
 ) => {
+  const normalizedUpdates = { ...updates }
+  if (
+    Object.prototype.hasOwnProperty.call(normalizedUpdates, "systemPrompt") &&
+    String(normalizedUpdates.systemPrompt || "").trim().length === 0
+  ) {
+    normalizedUpdates.systemPromptTemplateId = undefined
+  }
+
   const activeScope = trimScopeKey(state.activeSettingsScope)
 
   if (activeScope) {
     const scopedSettings = stripUndefinedScopedSettings({
       ...(state.scopedSettingsByModelKey[activeScope] || {}),
-      ...updates
+      ...normalizedUpdates
     })
     const scopedSettingsByModelKey = withScopedSettings(
       state.scopedSettingsByModelKey,
@@ -270,7 +280,7 @@ const applyActiveSettingsUpdate = (
 
   const globalSettings = stripUndefinedScopedSettings({
     ...state.globalSettings,
-    ...updates
+    ...normalizedUpdates
   })
 
   return {
@@ -481,5 +491,5 @@ export const useStoreChatModelSettings = createWithEqualityFn<ChatModelSettingsS
 
 // Expose for Playwright tests and debugging (development only)
 if (typeof window !== "undefined" && import.meta?.env?.DEV) {
-  ;(window as any).__tldw_useStoreChatModelSettings = useStoreChatModelSettings
+  (window as any).__tldw_useStoreChatModelSettings = useStoreChatModelSettings;
 }

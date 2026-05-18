@@ -332,4 +332,97 @@ describe("PromptSelect system prompt modal", () => {
       expect(trigger).toHaveFocus()
     })
   })
+
+  it("keeps current system prompt recovery actions visible when there are no saved prompts", async () => {
+    const user = userEvent.setup()
+    mocks.getAllPrompts.mockResolvedValue([])
+    renderPromptSelect({
+      selectedSystemPrompt: undefined,
+      systemPrompt: "Stay in character."
+    })
+
+    await user.click(
+      await screen.findByRole("button", { name: "selectAPrompt" })
+    )
+
+    expect(await screen.findByText(/no saved prompts/i)).toBeInTheDocument()
+    expect(
+      screen.getByRole("menuitem", { name: /edit current system prompt/i })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("menuitem", { name: /clear current system prompt/i })
+    ).toBeInTheDocument()
+  })
+
+  it("keeps current system prompt recovery actions visible when saved prompts exist", async () => {
+    const user = userEvent.setup()
+    renderPromptSelect({
+      selectedSystemPrompt: undefined,
+      systemPrompt: "Stay in character."
+    })
+
+    await user.click(
+      await screen.findByRole("button", { name: "selectAPrompt" })
+    )
+
+    expect(await screen.findByText(/Prompt One/i)).toBeInTheDocument()
+    expect(
+      screen.getByRole("menuitem", { name: /edit current system prompt/i })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("menuitem", { name: /clear current system prompt/i })
+    ).toBeInTheDocument()
+  })
+
+  it("edits and saves a current custom prompt when the prompt library is empty", async () => {
+    const user = userEvent.setup()
+    mocks.getAllPrompts.mockResolvedValue([])
+    const { props } = renderPromptSelect({
+      selectedSystemPrompt: undefined,
+      systemPrompt: "Stay in character."
+    })
+
+    await user.click(
+      await screen.findByRole("button", { name: "selectAPrompt" })
+    )
+    await user.click(
+      await screen.findByRole("menuitem", {
+        name: /edit current system prompt/i
+      })
+    )
+
+    const textarea = await screen.findByDisplayValue("Stay in character.")
+    await user.clear(textarea)
+    await user.type(textarea, "Speak as the station chief.")
+    await user.click(screen.getByRole("button", { name: /save/i }))
+
+    await waitFor(() => {
+      expect(props.setSystemPrompt).toHaveBeenCalledWith(
+        "Speak as the station chief."
+      )
+    })
+  })
+
+  it("clears a current custom prompt when the prompt library is empty", async () => {
+    const user = userEvent.setup()
+    mocks.getAllPrompts.mockResolvedValue([])
+    const { props } = renderPromptSelect({
+      selectedSystemPrompt: undefined,
+      systemPrompt: "Stay in character."
+    })
+
+    await user.click(
+      await screen.findByRole("button", { name: "selectAPrompt" })
+    )
+    await user.click(
+      await screen.findByRole("menuitem", {
+        name: /clear current system prompt/i
+      })
+    )
+
+    expect(props.setSystemPrompt).toHaveBeenCalledWith("")
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "selectAPrompt" })).toHaveFocus()
+    })
+  })
 })
