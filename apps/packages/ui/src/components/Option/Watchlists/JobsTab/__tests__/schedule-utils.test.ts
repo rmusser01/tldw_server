@@ -105,6 +105,8 @@ describe("schedule-utils", () => {
 
   it("returns null for unsupported cron patterns", () => {
     expect(parsePresetFromCron("0 8 1 * *")).toBeNull()
+    expect(parsePresetFromCron("*/1 * * * *")).toBeNull()
+    expect(parsePresetFromCron("*/4 * * * *")).toBeNull()
     expect(parsePresetFromCron("")).toBeNull()
   })
 

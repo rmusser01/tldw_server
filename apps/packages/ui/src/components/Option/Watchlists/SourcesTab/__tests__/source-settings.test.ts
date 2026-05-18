@@ -10,7 +10,11 @@ describe("source-settings", () => {
       {
         retention: { days: 30 },
         custom_identity: "source-slug",
-        scrape_rules: { title_selector: "css:.old-title" }
+        scrape_rules: {
+          title_selector: "css:.old-title",
+          pagination: { next_link_xpath: ".//a[@rel='next']/@href" },
+          custom_rule: "keep-me"
+        }
       },
       {
         scrape_list_url: "https://example.com/news",
@@ -33,10 +37,32 @@ describe("source-settings", () => {
         link_xpath: ".//a/@href",
         title_selector: "css:h2",
         summary_selector: "css:.deck",
-        limit: 20
+        limit: 20,
+        pagination: { next_link_xpath: ".//a[@rel='next']/@href" },
+        custom_rule: "keep-me"
       },
       top_n: 10,
       discover_method: "frontpage"
+    })
+  })
+
+  it("preserves unknown nested scrape rules when clearing UI-owned rule fields", () => {
+    expect(
+      buildSourceSettingsPayload(
+        {
+          scrape_rules: {
+            item_selector: "css:article",
+            pagination: { next_link_xpath: ".//a[@rel='next']/@href" }
+          }
+        },
+        {
+          scrape_item_selector: ""
+        }
+      )
+    ).toEqual({
+      scrape_rules: {
+        pagination: { next_link_xpath: ".//a[@rel='next']/@href" }
+      }
     })
   })
 

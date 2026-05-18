@@ -96,12 +96,20 @@ const toDiagnosticList = (value: unknown): string[] => {
 }
 
 const buildDiagnosticsLines = (
-  diagnostics: SourcePreviewDiagnostics | null | undefined
+  diagnostics: SourcePreviewDiagnostics | null | undefined,
+  t: (...args: any[]) => unknown
 ): string[] => {
   if (!diagnostics) return []
   const lines: string[] = []
   if (diagnostics.fetch_mode) {
-    lines.push(`Fetch mode: ${diagnostics.fetch_mode}`)
+    lines.push(
+      toText(
+        t("watchlists:sources.form.fetchModeLine", "Fetch mode: {{value}}", {
+          value: diagnostics.fetch_mode
+        }),
+        `Fetch mode: ${diagnostics.fetch_mode}`
+      )
+    )
   }
   lines.push(...toDiagnosticList(diagnostics.selector_errors))
   lines.push(...toDiagnosticList(diagnostics.selector_warnings))
@@ -109,7 +117,14 @@ const buildDiagnosticsLines = (
   lines.push(...toDiagnosticList(diagnostics.non_unique_warnings))
   lines.push(...toDiagnosticList(diagnostics.fragile_selector_warnings))
   if (diagnostics.dedupe_preview_key) {
-    lines.push(`Dedupe preview key: ${diagnostics.dedupe_preview_key}`)
+    lines.push(
+      toText(
+        t("watchlists:sources.form.dedupePreviewKeyLine", "Dedupe preview key: {{value}}", {
+          value: diagnostics.dedupe_preview_key
+        }),
+        `Dedupe preview key: ${diagnostics.dedupe_preview_key}`
+      )
+    )
   }
   return lines
 }
@@ -136,7 +151,7 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
   const isEditing = !!initialValues
   const testSourceId = typeof initialValues?.id === "number" ? initialValues.id : null
   const modalChrome = buildWatchlistsModalChrome(isConstrained, 500)
-  const diagnosticsLines = buildDiagnosticsLines(testResult?.diagnostics)
+  const diagnosticsLines = buildDiagnosticsLines(testResult?.diagnostics, t)
 
   useLayoutEffect(() => {
     if (open) {

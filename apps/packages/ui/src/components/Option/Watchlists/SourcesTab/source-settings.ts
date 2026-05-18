@@ -43,6 +43,25 @@ export const SOURCE_SETTINGS_FORM_FIELDS = [
   "skip_article_fetch"
 ] as const
 
+const UI_OWNED_SCRAPE_RULE_KEYS = [
+  "list_url",
+  "item_selector",
+  "link_xpath",
+  "url_xpath",
+  "title_selector",
+  "title_xpath",
+  "summary_selector",
+  "summary_xpath",
+  "content_selector",
+  "content_xpath",
+  "date_selector",
+  "date_xpath",
+  "guid_xpath",
+  "id_xpath",
+  "limit",
+  "skip_article_fetch"
+] as const
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value)
 
@@ -96,9 +115,18 @@ export const buildSourceSettingsPayload = (
 ): Record<string, unknown> | undefined => {
   const next: Record<string, unknown> = isRecord(existing) ? { ...existing } : {}
   const scrapeRules = buildScrapeRulesFromForm(values)
+  const retainedScrapeRules = isRecord(next.scrape_rules) ? { ...next.scrape_rules } : {}
 
-  if (scrapeRules) {
-    next.scrape_rules = scrapeRules
+  for (const key of UI_OWNED_SCRAPE_RULE_KEYS) {
+    delete retainedScrapeRules[key]
+  }
+
+  const mergedScrapeRules = scrapeRules
+    ? { ...retainedScrapeRules, ...scrapeRules }
+    : retainedScrapeRules
+
+  if (Object.keys(mergedScrapeRules).length > 0) {
+    next.scrape_rules = mergedScrapeRules
   } else {
     delete next.scrape_rules
   }

@@ -40,13 +40,13 @@ Created a code-grounded phased PRD/spec for /watchlists that reuses existing sou
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Design review follow-up: tightened the PRD so implementation cannot overpromise current code. Added explicit constraints for unknown source settings preservation, configurable dedupe identity as backend/API work, scheduled digest auto-output dependency, delivery status ownership on output artifacts, and persisted script/per-speaker/final audio artifacts.
+Design review follow-up: tightened the PRD so implementation cannot overpromise current code. Added explicit constraints for unknown source settings preservation, configurable dedupe identity as backend/API work, scheduled digest auto-output dependency, delivery status ownership on output artifacts, and persisting script/per-speaker/final audio artifacts.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added a design-review hardening pass to the Watchlists PRD before implementation planning. The PRD now explicitly separates verified current behavior from proposed backend/API work for configurable dedupe identity, preserves unknown source settings keys, distinguishes scheduled auto-output from manual test-run output creation, assigns delivery status to output artifacts, and requires persisted script/per-speaker/final audio artifacts for the optional briefing workflow. Verification: git diff --check passed for touched spec/task files; Bandit skipped because this is documentation/task metadata only.
+Added a design-review hardening pass to the Watchlists PRD before implementation planning. The PRD now explicitly separates verified current behavior from proposed backend/API work for configurable dedupe identity, preserves unknown source settings keys, distinguishes scheduled auto-output from manual test-run output creation, assigns delivery status to output artifacts, and requires persisting script/per-speaker/final audio artifacts for the optional briefing workflow. Verification: git diff --check passed for touched spec/task files; Bandit skipped because this is documentation/task metadata only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

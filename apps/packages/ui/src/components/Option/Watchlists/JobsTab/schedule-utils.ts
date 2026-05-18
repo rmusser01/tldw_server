@@ -1,3 +1,5 @@
+import { MIN_SCHEDULE_INTERVAL_MINUTES } from "./schedule-frequency"
+
 export type SchedulePresetKey = "interval" | "daily" | "weekdays" | "weekly"
 
 export type ScheduleIntervalUnit = "minutes" | "hours"
@@ -12,6 +14,11 @@ export interface PresetScheduleState {
   minute: number
   weekday: WeekdayToken
 }
+
+export const INTERVAL_MINUTES_MIN = MIN_SCHEDULE_INTERVAL_MINUTES
+export const INTERVAL_MINUTES_MAX = 59
+export const INTERVAL_HOURS_MIN = 1
+export const INTERVAL_HOURS_MAX = 23
 
 const WEEKDAY_MAP: Record<string, WeekdayToken> = {
   "0": "SUN",
@@ -71,10 +78,18 @@ export const buildCronFromPreset = (state: PresetScheduleState): string => {
   switch (state.preset) {
     case "interval": {
       if (intervalUnit === "minutes") {
-        const intervalMinutes = clampInteger(state.intervalValue, 5, 59)
+        const intervalMinutes = clampInteger(
+          state.intervalValue,
+          INTERVAL_MINUTES_MIN,
+          INTERVAL_MINUTES_MAX
+        )
         return `*/${intervalMinutes} * * * *`
       }
-      const intervalHours = clampInteger(state.intervalValue, 1, 23)
+      const intervalHours = clampInteger(
+        state.intervalValue,
+        INTERVAL_HOURS_MIN,
+        INTERVAL_HOURS_MAX
+      )
       return `${minute} */${intervalHours} * * *`
     }
     case "weekdays":
@@ -97,7 +112,11 @@ export const parsePresetFromCron = (
   const [minuteToken, hourToken, dayOfMonthToken, monthToken, dayOfWeekToken] = parts
   if (dayOfMonthToken !== "*" || monthToken !== "*") return null
 
-  const minuteStep = parseStepToken(minuteToken, 1, 59)
+  const minuteStep = parseStepToken(
+    minuteToken,
+    INTERVAL_MINUTES_MIN,
+    INTERVAL_MINUTES_MAX
+  )
   if (minuteStep !== null && hourToken === "*" && dayOfWeekToken === "*") {
     return {
       ...DEFAULT_PRESET_STATE,

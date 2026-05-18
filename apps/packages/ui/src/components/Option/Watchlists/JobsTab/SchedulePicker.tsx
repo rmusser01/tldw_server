@@ -7,6 +7,10 @@ import { trackWatchlistsPreventionTelemetry } from "@/utils/watchlists-preventio
 import {
   buildCronFromPreset,
   createDefaultPresetState,
+  INTERVAL_HOURS_MAX,
+  INTERVAL_HOURS_MIN,
+  INTERVAL_MINUTES_MAX,
+  INTERVAL_MINUTES_MIN,
   parsePresetFromCron,
   type PresetScheduleState,
   type ScheduleIntervalUnit,
@@ -198,8 +202,10 @@ export const SchedulePicker: React.FC<SchedulePickerProps> = ({
 
   const handleIntervalValueChange = (value: number | null) => {
     updatePresetState((previous) => {
-      const min = previous.intervalUnit === "minutes" ? 5 : 1
-      const max = previous.intervalUnit === "minutes" ? 59 : 23
+      const min =
+        previous.intervalUnit === "minutes" ? INTERVAL_MINUTES_MIN : INTERVAL_HOURS_MIN
+      const max =
+        previous.intervalUnit === "minutes" ? INTERVAL_MINUTES_MAX : INTERVAL_HOURS_MAX
       const parsed = typeof value === "number" && value >= min ? Math.floor(value) : min
       return {
         ...previous,
@@ -210,8 +216,8 @@ export const SchedulePicker: React.FC<SchedulePickerProps> = ({
 
   const handleIntervalUnitChange = (intervalUnit: ScheduleIntervalUnit) => {
     updatePresetState((previous) => {
-      const min = intervalUnit === "minutes" ? 5 : 1
-      const max = intervalUnit === "minutes" ? 59 : 23
+      const min = intervalUnit === "minutes" ? INTERVAL_MINUTES_MIN : INTERVAL_HOURS_MIN
+      const max = intervalUnit === "minutes" ? INTERVAL_MINUTES_MAX : INTERVAL_HOURS_MAX
       return {
         ...previous,
         intervalUnit,
@@ -329,8 +335,16 @@ export const SchedulePicker: React.FC<SchedulePickerProps> = ({
                 </div>
                 <InputNumber
                   aria-label={t("watchlists:schedule.intervalValueA11y", "Interval value")}
-                  min={presetState.intervalUnit === "minutes" ? 5 : 1}
-                  max={presetState.intervalUnit === "minutes" ? 59 : 23}
+                  min={
+                    presetState.intervalUnit === "minutes"
+                      ? INTERVAL_MINUTES_MIN
+                      : INTERVAL_HOURS_MIN
+                  }
+                  max={
+                    presetState.intervalUnit === "minutes"
+                      ? INTERVAL_MINUTES_MAX
+                      : INTERVAL_HOURS_MAX
+                  }
                   precision={0}
                   value={presetState.intervalValue}
                   onChange={handleIntervalValueChange}
