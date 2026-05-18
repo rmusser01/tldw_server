@@ -75,7 +75,11 @@ from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime as _is_e
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
 from tldw_Server_API.app.core.Watchlists import template_store
-from tldw_Server_API.app.core.Watchlists.fetchers import fetch_rss_feed, fetch_site_items_with_rules
+from tldw_Server_API.app.core.Watchlists.fetchers import (
+    fetch_rss_feed,
+    fetch_site_items_with_rules,
+    validate_selector_rules,
+)
 from tldw_Server_API.app.core.Watchlists.filters import evaluate_filters as _evaluate_filters
 from tldw_Server_API.app.core.Watchlists.filters import normalize_filters as _normalize_job_filters
 from tldw_Server_API.app.core.Watchlists.opml import generate_opml, parse_opml
@@ -166,6 +170,7 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
     SourceCheckNowItem,
     SourceCreateRequest,
     SourceDeleteResponse,
+    SourcePreviewDiagnostics,
     SourcesCheckNowRequest,
     SourcesCheckNowResponse,
     SourcesBulkCreateItem,
@@ -2289,6 +2294,101 @@ def _normalize_source_test_url(source_url: str, source_type: str) -> str:
     return target_url
 
 
+def _format_selector_diagnostic(issue: Any) -> str:
+    """Format selector validation output into one concise preview diagnostic."""
+    if not isinstance(issue, dict):
+        return str(issue)
+    key = str(issue.get("key") or "selector").strip() or "selector"
+    label = str(issue.get("error") or issue.get("warning") or issue.get("detail") or "issue")
+    detail = str(issue.get("detail") or "").strip()
+    if detail and detail != label:
+        label = f"{label}: {detail}"
+    selector = str(issue.get("selector") or "").strip()
+    count = issue.get("count")
+    summary = f"{key}: {label}"
+    if selector:
+        summary = f"{summary} ({selector})"
+    if isinstance(count, int):
+        summary = f"{summary}; count={count}"
+    return summary
+
+
+def _first_present_rule_key(rules: dict[str, Any], keys: tuple[str, ...]) -> str | None:
+    """Return the first configured scrape-rule key from a preferred key list."""
+    for key in keys:
+        value = rules.get(key)
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return key
+    return None
+
+
+_SOURCE_DEDUPE_IDENTITY_KEYS = (
+    "guid_xpath",
+    "guid_selector",
+    "id_xpath",
+    "id_selector",
+    "link_xpath",
+    "link_selector",
+    "url_xpath",
+    "url_selector",
+)
+
+
+def _infer_source_dedupe_preview_key(rules: dict[str, Any]) -> str:
+    """Infer which scrape-rule field will likely provide item identity."""
+    identity_key = _first_present_rule_key(
+        rules,
+        _SOURCE_DEDUPE_IDENTITY_KEYS,
+    )
+    if identity_key:
+        return identity_key
+    alternates = rules.get("alternates")
+    if isinstance(alternates, list):
+        for alt in alternates:
+            if not isinstance(alt, dict):
+                continue
+            identity_key = _first_present_rule_key(
+                alt,
+                _SOURCE_DEDUPE_IDENTITY_KEYS,
+            )
+            if identity_key:
+                return f"alternates.{identity_key}"
+    return "url"
+
+
+def _build_source_preview_diagnostics(
+    *,
+    fetch_mode: str,
+    scrape_rules: dict[str, Any] | None = None,
+) -> SourcePreviewDiagnostics:
+    """Build optional source-test diagnostics without changing preview item behavior."""
+    diagnostics = SourcePreviewDiagnostics(fetch_mode=fetch_mode)
+    if not scrape_rules:
+        return diagnostics
+
+    validation = validate_selector_rules(scrape_rules)
+    diagnostics.selector_errors = [
+        _format_selector_diagnostic(issue)
+        for issue in (validation.get("errors") or [])
+    ]
+    for issue in (validation.get("warnings") or []):
+        warning = issue.get("warning") if isinstance(issue, dict) else None
+        formatted = _format_selector_diagnostic(issue)
+        if warning == "no_matches":
+            diagnostics.no_match_warnings.append(formatted)
+        elif warning == "non_unique_selector":
+            diagnostics.non_unique_warnings.append(formatted)
+        elif warning == "fragile_selector":
+            diagnostics.fragile_selector_warnings.append(formatted)
+        else:
+            diagnostics.selector_warnings.append(formatted)
+    diagnostics.dedupe_preview_key = _infer_source_dedupe_preview_key(scrape_rules)
+    return diagnostics
+
+
 async def _build_source_preview_response(
     *,
     source_id: int,
@@ -2305,8 +2405,10 @@ async def _build_source_preview_response(
 
     items: list[dict[str, Any]] = []
     test_mode = _is_test_mode()
+    diagnostics: SourcePreviewDiagnostics | None = None
 
     if source_type.lower() == "rss":
+        diagnostics = _build_source_preview_diagnostics(fetch_mode="rss")
         try:
             res = await fetch_rss_feed(
                 normalized_url,
@@ -2325,6 +2427,10 @@ async def _build_source_preview_response(
             else None
         )
         if scrape_rules:
+            diagnostics = _build_source_preview_diagnostics(
+                fetch_mode="scrape_rules",
+                scrape_rules=scrape_rules,
+            )
             try:
                 items = await fetch_site_items_with_rules(
                     base_url=str(scrape_rules.get("list_url") or normalized_url),
@@ -2335,6 +2441,7 @@ async def _build_source_preview_response(
                 logger.debug(f"watchlists.test_source: scrape rules fetch failed: {exc}")
                 items = []
         elif test_mode:
+            diagnostics = _build_source_preview_diagnostics(fetch_mode="test_mode")
             items = [
                 {
                     "title": "Test scraped item 1",
@@ -2343,6 +2450,7 @@ async def _build_source_preview_response(
                 }
             ]
         else:
+            diagnostics = _build_source_preview_diagnostics(fetch_mode="discovery")
             try:
                 from tldw_Server_API.app.core.Watchlists.fetchers import fetch_site_top_links
 
@@ -2389,6 +2497,7 @@ async def _build_source_preview_response(
         ),
         ingestable=total,
         filtered=0,
+        diagnostics=diagnostics,
     )
 
 

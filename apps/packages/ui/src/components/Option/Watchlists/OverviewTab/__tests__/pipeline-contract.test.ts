@@ -67,6 +67,13 @@ describe("watchlists pipeline contract", () => {
         schedule_expr: "0 8 * * *",
         timezone: "UTC",
         output_prefs: expect.objectContaining({
+          auto_output: {
+            enabled: true,
+            type: "briefing_markdown",
+            format: "md",
+            template_name: "briefing_md",
+            template_version: 2
+          },
           template_name: "briefing_md",
           generate_audio: true,
           audio_voice: "alloy",
@@ -100,6 +107,18 @@ describe("watchlists pipeline contract", () => {
     })
 
     timezoneSpy.mockRestore()
+  })
+
+  it("does not auto-generate scheduled output for manual-only monitor drafts", () => {
+    expect(
+      toPipelineJobCreatePayload({
+        ...baseDraft,
+        schedulePreset: "none",
+        includeAudio: false,
+        emailRecipients: [],
+        createChatbook: false
+      }).output_prefs
+    ).not.toHaveProperty("auto_output")
   })
 
   it("propagates html template format into job and output payloads", () => {
