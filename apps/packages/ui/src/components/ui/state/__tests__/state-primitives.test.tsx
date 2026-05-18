@@ -34,6 +34,31 @@ describe("state primitives", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
   })
 
+  it("keeps raw endpoint details out of the primary capability message", () => {
+    render(
+      <RecoveryCallout
+        state="unavailable"
+        title="Sources are unavailable"
+        message="This server does not expose the Sources capability."
+        primaryAction={{ label: "Check server setup", onClick: vi.fn() }}
+        diagnostics={[
+          { label: "Method", value: "GET" },
+          { label: "Endpoint", value: "/api/v1/sources", code: true },
+          { label: "Status", value: "404 Not Found" }
+        ]}
+      />
+    )
+
+    const primaryState = screen.getByRole("heading", {
+      name: "Sources are unavailable"
+    }).closest("div")
+    const diagnostics = screen.getByLabelText("Diagnostics")
+
+    expect(primaryState).not.toHaveTextContent("/api/v1/sources")
+    expect(diagnostics).toHaveTextContent("/api/v1/sources")
+    expect(screen.getByRole("button", { name: "Check server setup" })).toBeInTheDocument()
+  })
+
   it("does not render an empty diagnostics section", () => {
     render(
       <StatePanel

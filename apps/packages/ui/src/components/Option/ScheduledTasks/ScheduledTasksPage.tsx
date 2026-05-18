@@ -1,6 +1,15 @@
 import React, { useState } from "react"
-import { Alert, Spin, Typography, message } from "antd"
+import { Spin, Typography, message } from "antd"
 import { useQuery } from "@tanstack/react-query"
+import { useNavigate } from "react-router-dom"
+import { useTranslation } from "react-i18next"
+import {
+  StatePanel,
+  buildCapabilityState,
+  classifyCapabilityError,
+  messageFromError,
+  statusFromError
+} from "@/components/ui/state"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import {
   createScheduledTaskReminder,
@@ -17,6 +26,8 @@ import { ReminderTaskEditor } from "./ReminderTaskEditor"
 const SCHEDULED_TASKS_PATH = "/api/v1/scheduled-tasks"
 
 export const ScheduledTasksPage: React.FC = () => {
+  const navigate = useNavigate()
+  const { t } = useTranslation(["scheduledTasks", "common"])
   const { config: connectionConfig, loading: connectionConfigLoading } =
     useCanonicalConnectionConfig()
   const [editorOpen, setEditorOpen] = useState(false)
@@ -129,42 +140,107 @@ export const ScheduledTasksPage: React.FC = () => {
   }
 
   const partialErrors = tasksQuery.data?.errors ?? []
+  const serverUrl = connectionConfig?.serverUrl?.trim()
+  const scheduledTasksFeatureName = t("scheduledTasks:title", "Scheduled tasks")
+  const scheduledTasksCapabilityName = t(
+    "scheduledTasks:capability.scheduledTasks",
+    "scheduled tasks"
+  )
+  const unsupportedState = buildCapabilityState({
+    kind: "unavailable",
+    featureName: scheduledTasksFeatureName,
+    capabilityName: scheduledTasksCapabilityName,
+    method: "GET",
+    endpoint: SCHEDULED_TASKS_PATH,
+    serverUrl,
+    primaryAction: {
+      label: t("scheduledTasks:actions.checkServerSetup", "Check server setup"),
+      onClick: () => {
+        navigate("/settings/health")
+      }
+    }
+  })
+  const loadErrorState = tasksQuery.isError
+    ? buildCapabilityState({
+        kind: classifyCapabilityError(tasksQuery.error),
+        featureName: scheduledTasksFeatureName,
+        capabilityName: scheduledTasksCapabilityName,
+        method: "GET",
+        endpoint: SCHEDULED_TASKS_PATH,
+        status: statusFromError(tasksQuery.error),
+        rawMessage: messageFromError(tasksQuery.error) || t(
+          "scheduledTasks:errors.overviewLoadFailed",
+          "The scheduled tasks overview could not be loaded."
+        ),
+        primaryAction: {
+          label: t("common:actions.retry", "Try again"),
+          onClick: () => {
+            void tasksQuery.refetch()
+          }
+        }
+      })
+    : null
+  const degradedState = tasksQuery.data?.partial
+    ? buildCapabilityState({
+        kind: "degraded",
+        featureName: scheduledTasksFeatureName,
+        rawMessage: partialErrors.length
+          ? partialErrors.join(", ")
+          : t(
+              "scheduledTasks:errors.partialOverview",
+              "The overview is partially available."
+            ),
+        primaryAction: {
+          label: t("common:actions.refresh", "Refresh"),
+          onClick: () => {
+            void tasksQuery.refetch()
+          }
+        }
+      })
+    : null
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <Typography.Title level={2} style={{ marginBottom: 0 }}>
-          Scheduled tasks
+          {scheduledTasksFeatureName}
         </Typography.Title>
         <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-          Review reminder tasks here. Watchlist jobs remain managed from Watchlists.
+          {t(
+            "scheduledTasks:description",
+            "Review reminder tasks here. Watchlist jobs remain managed from Watchlists."
+          )}
         </Typography.Paragraph>
       </div>
 
       {connectionConfigLoading || scheduledTasksSupported === null ? <Spin /> : null}
       {scheduledTasksSupported === false ? (
-        <Alert
-          type="info"
-          showIcon
-          title="Scheduled tasks unavailable"
-          description="Scheduled tasks endpoints are not available on this server."
+        <StatePanel
+          state={unsupportedState.state}
+          title={unsupportedState.title}
+          message={unsupportedState.message}
+          diagnostics={unsupportedState.diagnostics}
+          primaryAction={unsupportedState.primaryAction}
         />
       ) : null}
       {tasksQuery.isLoading ? <Spin /> : null}
-      {tasksQuery.isError ? (
-        <Alert
-          type="error"
-          showIcon
-          title="Unable to load scheduled tasks"
-          description={tasksQuery.error instanceof Error ? tasksQuery.error.message : "The scheduled tasks overview could not be loaded."}
+      {loadErrorState ? (
+        <StatePanel
+          state={loadErrorState.state}
+          title={loadErrorState.title}
+          message={loadErrorState.message}
+          diagnostics={loadErrorState.diagnostics}
+          primaryAction={loadErrorState.primaryAction}
+          role="alert"
         />
       ) : null}
-      {tasksQuery.data?.partial ? (
-        <Alert
-          type="warning"
-          showIcon
-          title="Some scheduled tasks could not be loaded"
-          description={partialErrors.length ? partialErrors.join(", ") : "The overview is partially available."}
+      {degradedState ? (
+        <StatePanel
+          state={degradedState.state}
+          title={degradedState.title}
+          message={degradedState.message}
+          diagnostics={degradedState.diagnostics}
+          primaryAction={degradedState.primaryAction}
         />
       ) : null}
 

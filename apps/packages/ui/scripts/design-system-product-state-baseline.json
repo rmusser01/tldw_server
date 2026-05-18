@@ -1793,39 +1793,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Integrations/IntegrationManagementPage.tsx:Alert#antd-alert-integrationmanagementpage-type-error-unable-t-f99jfb",
-    "path": "src/components/Option/Integrations/IntegrationManagementPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Integrations/IntegrationManagementPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Integrations/IntegrationManagementPage.tsx:Alert#antd-alert-integrationmanagementpage-type-info-line-335-e39svt",
-    "path": "src/components/Option/Integrations/IntegrationManagementPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Integrations/IntegrationManagementPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Integrations/IntegrationManagementPage.tsx:Alert#antd-alert-integrationmanagementpage-type-warning-unable-nor4s8",
-    "path": "src/components/Option/Integrations/IntegrationManagementPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Integrations/IntegrationManagementPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Integrations/IntegrationPolicyPanel.tsx:Alert#antd-alert-telegrampolicyeditor-type-error-line-336-tzh99k",
     "path": "src/components/Option/Integrations/IntegrationPolicyPanel.tsx",
     "rule": "antd-product-state-import",
@@ -2317,39 +2284,6 @@
     "state": "allowed_legacy_exception",
     "owner": "design-system",
     "reason": "Existing AntD Alert product-state UI in src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/ScheduledTasks/ScheduledTasksPage.tsx:Alert#antd-alert-scheduledtaskspage-type-error-unable-to-load-roy1gq",
-    "path": "src/components/Option/ScheduledTasks/ScheduledTasksPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/ScheduledTasks/ScheduledTasksPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/ScheduledTasks/ScheduledTasksPage.tsx:Alert#antd-alert-scheduledtaskspage-type-info-scheduled-tasks-1kjswvv",
-    "path": "src/components/Option/ScheduledTasks/ScheduledTasksPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/ScheduledTasks/ScheduledTasksPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/ScheduledTasks/ScheduledTasksPage.tsx:Alert#antd-alert-scheduledtaskspage-type-warning-some-schedule-1y680fr",
-    "path": "src/components/Option/ScheduledTasks/ScheduledTasksPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/ScheduledTasks/ScheduledTasksPage.tsx before the stable duplicate-id guard.",
     "replacement": "tldw design-system state primitive",
     "migrationQueue": "shared-product-state"
   },
@@ -2933,17 +2867,6 @@
     "state": "allowed_legacy_exception",
     "owner": "design-system",
     "reason": "Existing AntD Empty product-state UI in src/components/Option/SharedWithMe/index.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Sources/SourcesWorkspacePage.tsx:Alert",
-    "path": "src/components/Option/Sources/SourcesWorkspacePage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Sources/SourcesWorkspacePage.tsx before the guard.",
     "replacement": "tldw design-system state primitive",
     "migrationQueue": "shared-product-state"
   },
