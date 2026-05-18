@@ -54,7 +54,7 @@ test.describe("Hosted placeholder routes", () => {
         authedPage.getByRole("heading", { name: route.title })
       ).toBeVisible({ timeout: 15_000 })
 
-      await expect(authedPage.getAllByText(route.path)).toHaveCount(2)
+      await expect(authedPage.getByText(route.path, { exact: true })).toHaveCount(2)
 
       const primaryLink = authedPage.getByTestId("route-placeholder-primary")
       await expect(primaryLink).toHaveText(

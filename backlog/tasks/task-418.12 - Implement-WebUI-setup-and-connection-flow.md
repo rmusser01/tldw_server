@@ -4,7 +4,7 @@ title: Implement WebUI setup and connection flow
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-05-18 04:31'
+updated_date: '2026-05-18 04:35'
 labels:
   - ux
   - webui
@@ -39,8 +39,8 @@ Implement the Task 3 WebUI/extension UX remediation slice for first-run setup, h
 - [x] #5 Hosted-only OSS placeholders for signup/account/billing/auth recovery routes expose route context and appropriate primary actions instead of defaulting to chat.
 - [x] #6 /profile, /config, /privileges, and /404 recovery labels/actions are explicit and covered by tests.
 - [x] #7 Browser or Playwright QA evidence is recorded for setup/recovery routes, with environment gaps documented.
-- [ ] #8 No backend auth API changes, broad shell redesign, or route renaming are included.
-- [ ] #9 Focused unit/E2E checks and git diff --check are recorded.
+- [x] #8 No backend auth API changes, broad shell redesign, or route renaming are included.
+- [x] #9 Focused unit/E2E checks and git diff --check are recorded.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -63,24 +63,24 @@ Task 4 additional focused verification: bunx vitest run __tests__/navigation/log
 Task 5 profile/config/privileges/404 recovery: added page-level coverage for /profile and /config settings recovery, privileges redirect source/destination context, and 404 keyboard/action recovery. Patched /privileges to use route-specific redirect title/description, changed 404 and shared redirect/root fallback labels from chat-specific language to Open Home, and mirrored the 404 home label in the extension route shell. Verification: bunx vitest run __tests__/navigation/login-page.test.tsx __tests__/navigation/hosted-placeholder-pages.test.tsx __tests__/navigation/route-placeholder-component.test.tsx __tests__/navigation/route-redirect-component.test.tsx __tests__/navigation/not-found-page.test.tsx passed 5 files / 34 tests; rg found no remaining WebUI Go to Chat/not-found-go-chat/route-redirect-go-chat recovery strings; git diff --check passed.
 
 Task 6 browser QA: added e2e/workflows/setup-connection-flow.spec.ts covering / and /setup first-run states plus /login, /account, /signup, /billing, and 404 recovery at 1440px desktop and 390px mobile. The first Playwright run exposed a real Next shell gap: /setup still rendered the WebUI header/sidebar because the outer Next app shell did not treat /setup as setup-only. Patched pages/_app.tsx to bypass app gates and hide header/sidebar for /setup, and added app-layout unit coverage for that behavior. Verification: bunx vitest run __tests__/app/app-layout.test.tsx __tests__/navigation/login-page.test.tsx __tests__/navigation/hosted-placeholder-pages.test.tsx __tests__/navigation/route-placeholder-component.test.tsx __tests__/navigation/route-redirect-component.test.tsx __tests__/navigation/not-found-page.test.tsx passed 6 files / 45 tests. Browser QA: bunx playwright test e2e/workflows/setup-connection-flow.spec.ts --reporter=line passed 4 tests at desktop/mobile. Initial sandbox run failed to bind port 8080 with EPERM; reran with approved escalation for local Playwright dev server.
+
+Final verification gate: package UI focused unit gate passed (bunx vitest run src/types/__tests__/connection.test.ts src/store/__tests__/connection.test.ts src/routes/__tests__/option-index.setup-flow.test.tsx src/components/Option/Onboarding/__tests__/OnboardingConnectForm.design-system.test.tsx src/routes/__tests__/core-route-identity.test.tsx, 5 files / 44 tests; existing react-i18next warning only). Frontend focused unit gate passed (bunx vitest run __tests__/app/app-layout.test.tsx __tests__/navigation/login-page.test.tsx __tests__/navigation/hosted-placeholder-pages.test.tsx __tests__/navigation/route-placeholder-component.test.tsx __tests__/navigation/route-redirect-component.test.tsx __tests__/navigation/not-found-page.test.tsx, 6 files / 45 tests). Playwright browser gate passed after selector fixes (bunx playwright test e2e/login.spec.ts e2e/workflows/setup-connection-flow.spec.ts e2e/workflows/hosted-placeholder-routes.spec.ts --reporter=line, 14 tests). git diff --check passed. Scope check: no backend APIs, backend auth code, route renames, or broad visual redesign included. Bandit is not applicable to this frontend-only touched scope; no Python backend files were modified.
+
+Final known skips/blockers: none for the touched frontend scope. Bandit was documented as not applicable because no Python backend files were changed. Playwright needed escalated local dev-server binding after sandbox EPERM on port 8080; the rerun passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
+Implemented the setup/connection-flow remediation slice with focused tests and browser QA. The branch now locks connection-state derivation, / resolver behavior, /setup semantic shell behavior, self-host/hosted login policy, hosted-only placeholder routing, profile/config/privileges/404 recovery actions, and desktop/mobile Playwright coverage for setup/recovery routes. A browser-only /setup shell bug in the Next app wrapper was found and fixed. No backend APIs or route renames were changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
