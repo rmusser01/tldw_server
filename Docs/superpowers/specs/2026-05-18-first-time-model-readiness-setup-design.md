@@ -44,8 +44,9 @@ During brainstorming, the approved product decisions were:
   matching the backend guard.
 - After setup is complete, equivalent provisioning/setup controls become
   admin-only and use admin setup endpoints.
-- Readiness should cover chat, embeddings/RAG, transcription, secondary TTS,
-  and restart/config state.
+- Readiness should cover chat, embeddings/RAG, and speech readiness
+  (transcription primary, TTS secondary), plus restart/config/permission
+  overlays.
 
 ## Goals
 
@@ -99,9 +100,11 @@ Existing behavior:
   `setup_completed=false`.
 - `/api/v1/setup/status` reports setup state and placeholder fields.
 - `/api/v1/setup/config` reads and writes known `config.txt` keys.
-- `/api/v1/setup/complete` can submit an install plan.
+- `/api/v1/setup/complete` can submit an install plan through a background
+  task.
+- `/api/v1/setup/audio/provision` runs existing audio bundle provisioning, and
+  admin audio provisioning endpoints already exist after setup completion.
 - Setup access is local-first and guarded by setup-specific dependencies.
-- Admin audio installer endpoints already exist for post-setup provisioning.
 - Audio recommendations, provisioning, verification, readiness, and pack import
   already exist.
 - `InstallPlan` already supports STT, TTS, and embeddings.
@@ -174,8 +177,8 @@ curated bundle of choices for the lanes a new user cares about:
   model, optional test request.
 - Embeddings/RAG: embedding provider/model, local download plan or remote
   config, smoke embedding test.
-- Speech: STT bundle/profile, provisioning plan, verification target.
-- TTS: default TTS provider and verification target, shown secondary.
+- Speech: STT bundle/profile, provisioning plan, verification target, and
+  secondary TTS defaults/readiness metadata.
 
 Profiles should be machine-aware but transparent. The backend returns the
 recommendation, reasons, estimates, and warnings. The UI shows those details
@@ -183,7 +186,18 @@ before provisioning.
 
 ## Readiness Lanes
 
-All lanes should use a shared status vocabulary:
+Canonical lane IDs should be:
+
+- `chat`
+- `embeddings_rag`
+- `speech`
+
+The `speech` lane owns transcription as the primary readiness target and TTS as
+secondary readiness metadata. TTS only blocks completion when the selected
+profile explicitly requires it.
+
+All lanes should use a shared status vocabulary. Status values describe the
+lane outcome only:
 
 - `not_configured`: no useful selection has been made yet.
 - `previewed`: a selection exists and config/provisioning changes have been
@@ -196,12 +210,27 @@ All lanes should use a shared status vocabulary:
   changes, such as missing permission, disabled downloads, disabled package
   installs, missing OS dependency, or insufficient disk.
 - `skipped`: the user explicitly chose not to configure this lane now.
-- `restart_required`: config was changed and the server must restart before
-  readiness can be trusted.
 
 The frontend may group or label these statuses differently for presentation, but
 the backend should make the underlying state explicit enough that completion
 gating is not inferred from display text.
+
+Cross-lane overlays should be reported separately from lane status:
+
+- `restart_required`: config was changed and the server must restart before the
+  new configuration can be trusted.
+- `requires_admin`: the current user/session can view status but cannot perform
+  server-wide provisioning.
+- `remote_setup_blocked`: the WebUI cannot use first-run setup APIs because the
+  backend local/proxy setup guard rejected the request.
+- `network_unavailable`, `downloads_disabled`, and `package_installs_disabled`:
+  provisioning cannot continue until the operator changes environment or setup
+  flags.
+
+A lane must not be displayed as fully `ready` solely because config was written
+when `restart_required` is true. Until the restarted server is verified, show
+the lane as `previewed`, `ready_with_warnings`, or another explicit state plus
+the restart overlay.
 
 ### Chat Defaults
 
@@ -223,6 +252,13 @@ Readiness:
 - `skipped`: user explicitly skipped chat setup.
 - `failed`: provider credentials, endpoint reachability, or model validation
   failed.
+
+Hosted-provider API keys are write-only setup inputs. Preview responses may
+report `present`, `absent`, or `placeholder`, but must never echo the submitted
+secret. If implementation planning cannot reuse a safe existing secret write
+path, the WebUI should show manual `.env` or provider-secret instructions and
+mark the chat lane `blocked` or `skipped` instead of writing raw keys to an
+unsafe config surface.
 
 ### Embeddings And RAG
 
@@ -252,7 +288,12 @@ Mutation rule:
 Profile selection should preview config changes. Config changes and downloads
 must not happen until the user confirms and clicks `Provision now`.
 
-### Transcription
+Custom or trusted Hugging Face model entries belong in advanced mode only. The
+curated default profiles should use allowlisted known-safe choices and must not
+enable trust-remote-code-style behavior without a separate explicit
+acknowledgement.
+
+### Speech: Transcription Primary
 
 Purpose:
 Make media/audio ingestion workflows usable when users start transcribing files
@@ -271,7 +312,7 @@ Readiness:
 - `skipped`: user explicitly skips speech setup.
 - `failed`: primary STT path is unusable.
 
-### Secondary TTS
+### Speech: Secondary TTS
 
 Purpose:
 Keep voice output readiness visible without making it the headline for
@@ -303,6 +344,9 @@ Recommended additions:
 - `POST /api/v1/setup/readiness/provision`
   - Requires explicit confirmation.
   - Applies approved config changes and starts approved provisioning work.
+  - Returns quickly with an operation ID, status snapshot, or polling URL; the
+    WebUI must not depend on a long-held HTTP request for model downloads or
+    package installation.
 - `GET /api/v1/setup/readiness/status`
   - Returns lane-level readiness, install progress, last verification, warnings,
     and restart-required state.
@@ -316,6 +360,12 @@ existing setup guard layer. The important contract is behavioral:
 - post-setup use is admin-only
 - regular users never get server-wide provisioning controls
 
+V1 may reuse the existing setup install status machinery for first-run
+provisioning. If post-setup admin provisioning grows pause/resume/drain,
+multi-operation history, quotas, or admin operations beyond the current shared
+installer behavior, implementation planning should use the Jobs system rather
+than inventing a second durable operation runner.
+
 ## WebUI Design
 
 ### Entry
@@ -323,6 +373,14 @@ existing setup guard layer. The important contract is behavioral:
 When the WebUI detects a setup-required server, it should show a native setup
 screen instead of only the current connection onboarding. The screen should
 include a fallback link to the backend `/setup` page.
+
+The native WebUI path is available only when the configured API base URL can
+satisfy the backend setup guard: local first-run access while setup is required,
+or authenticated admin access when remote setup has explicitly been enabled.
+If the guard rejects WebUI requests because of host, proxy, origin, or remote
+access constraints, the WebUI should keep the fallback `/setup` link visible and
+show a concise operator-facing explanation rather than asking the user to weaken
+remote setup protections from the browser.
 
 When setup is complete:
 
@@ -345,8 +403,7 @@ Lanes:
 
 - Chat
 - Embeddings/RAG
-- Transcription
-- TTS, visually secondary within the speech group
+- Speech, with transcription primary and TTS visually secondary
 
 ### Profile Picker
 
@@ -366,8 +423,10 @@ available disk, platform, GPU/Apple Silicon signals, and existing config.
 Advanced mode should expose exact provider/model settings without changing the
 default experience:
 
-- Chat provider, API key, model, local endpoint URL, local model name.
-- Embedding provider, model ID, local path/ONNX option, trusted custom HF repo.
+- Chat provider, write-only API key field, model, local endpoint URL, local
+  model name.
+- Embedding provider, model ID, local path/ONNX option, trusted custom HF repo
+  behind explicit acknowledgement.
 - STT engine/model/profile.
 - TTS provider/voice/model.
 
@@ -376,26 +435,32 @@ Advanced mode must preserve the same preview and explicit provisioning gate.
 ## Data Flow
 
 1. WebUI checks `/api/v1/setup/status`.
-2. If setup is required, WebUI loads native setup using setup-first-run access.
-3. WebUI fetches readiness profiles and current readiness state.
-4. User selects a profile or advanced overrides.
-5. WebUI asks backend for a preview.
-6. Backend returns:
+2. If setup is required and the backend setup guard allows the request, WebUI
+   loads native setup using setup-first-run access.
+3. If the setup guard blocks the WebUI path, WebUI shows the fallback backend
+   `/setup` link and explains the local/proxy/admin requirement.
+4. WebUI fetches readiness profiles and current readiness state.
+5. User selects a profile or advanced overrides.
+6. WebUI asks backend for a preview.
+7. Backend returns:
    - proposed config updates
    - install plan
    - download/package estimates
    - verification targets
    - warnings and blockers
    - restart-required prediction
-7. User clicks `Provision now`.
-8. Backend persists approved config changes and starts approved installs or
-   downloads.
-9. WebUI polls readiness/install status.
-10. User runs verification, or verification runs after provisioning only when
+8. User clicks `Provision now`.
+9. Backend persists approved config changes and starts approved installs or
+   downloads as a pollable operation.
+10. WebUI polls readiness/install status.
+11. User runs verification, or verification runs after provisioning only when
    the profile preview already disclosed that check and the check is cheap,
    local, and non-mutating. Hosted model calls, expensive local model loads, and
    long audio checks require an explicit verification action.
-11. User marks setup complete through the existing `/api/v1/setup/complete`
+12. If config changes require restart, WebUI keeps the restart overlay visible
+    and does not present affected lanes as fully verified until the restarted
+    server reports readiness.
+13. User marks setup complete through the existing `/api/v1/setup/complete`
     flow, or a revised equivalent if implementation planning determines the
     existing endpoint must be extended. Completion is allowed only when all
     lanes are ready, ready with warnings, or explicitly skipped.
@@ -407,6 +472,8 @@ Setup completion should be allowed when:
 - every lane is `ready`, `ready_with_warnings`, or `skipped`
 - config writes are complete
 - the UI has clearly called out any required restart
+- skipped critical lanes include consequences and next actions, for example
+  "RAG search will be limited until embeddings are configured"
 
 A `failed` lane is never treated as complete by itself. The user must either
 remediate it until it reaches `ready` or `ready_with_warnings`, or explicitly
@@ -469,6 +536,9 @@ Security rules:
 - Preview payloads may say a secret is present, absent, or placeholder, but
   must not reveal values.
 - Provider tests must sanitize provider errors before display.
+- Hosted provider secrets should prefer existing `.env` or secret-handling
+  mechanisms. Raw secrets should not be written to `config.txt` unless the
+  current setup writer already treats that key as a write-only masked secret.
 - Regular users may see personal model preferences elsewhere, but this design is
   for server readiness and provisioning, not per-user preference editing.
 
@@ -480,13 +550,20 @@ Security rules:
   low disk, hosted preference, and local preference.
 - Preview tests proving config changes are explicit and limited to known keys.
 - Provision tests proving no download/install starts before `Provision now`.
+- Provision tests proving the endpoint returns a pollable status/operation and
+  does not require a long-held HTTP request.
 - Install-plan tests for embeddings, STT, and secondary TTS profile expansion.
 - Readiness tests for chat success/failure/skip.
 - Readiness tests for embeddings success/failure/skip.
 - Audio readiness tests using existing audio bundle verification paths.
 - Permission tests for local setup-required access and post-setup admin-only
   access.
+- Permission tests for WebUI fallback behavior when the setup guard rejects a
+  host/proxy/remote request.
 - Sanitization tests for provider/model verification errors.
+- Secret tests proving preview/status payloads never echo provider API keys.
+- Advanced trusted-model tests proving acknowledgement is required before a
+  custom trusted HF model can be provisioned.
 
 ### Frontend Tests
 
@@ -495,8 +572,9 @@ Security rules:
 - Curated profile selection updates lane previews.
 - Advanced overrides update preview without mutating config.
 - `Provision now` is required before provisioning starts.
-- Lane status rendering covers ready, warning, failed, blocked, skipped, and
-  restart-required.
+- Lane status rendering covers ready, warning, failed, blocked, and skipped.
+- Overlay rendering covers restart-required, admin-required, remote setup
+  blocked, downloads disabled, and package installs disabled.
 - Non-admin post-setup users see admin-required state.
 - Admin post-setup users can load the admin readiness/provisioning path.
 
@@ -508,6 +586,8 @@ Security rules:
 - Local endpoint profile with reachable/unreachable endpoint behavior.
 - Interrupted provisioning resumes from persisted status.
 - Setup completion accepts ready-with-warnings and explicit skips.
+- Restart-required flow keeps affected lanes from appearing fully verified until
+  the restarted backend is checked.
 
 ## Implementation Staging Guidance
 
@@ -540,8 +620,10 @@ independent slices.
   or a lightweight provider-validation helper.
 - Whether embedding smoke tests should use `/api/v1/embeddings` or lower-level
   provider/load helpers.
-- Whether restart-required should be calculated per key or returned as a
-  conservative profile-level flag in V1.
+- Whether restart-required overlays should be calculated per config key or
+  returned as a conservative profile-level flag in V1.
+- Whether first-run provisioning can stay on the existing setup installer status
+  path, and exactly when post-setup admin provisioning should graduate to Jobs.
 
 ## Definition Of Done For The Spec
 
