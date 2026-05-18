@@ -175,7 +175,7 @@
 - Test: `apps/packages/ui/src/services/__tests__/watchlists-overview.test.ts`
 - Test: new `apps/packages/ui/src/services/__tests__/watchlists-audio.test.ts`
 
-- [ ] **Step 1: Write failing type/service tests**
+- [x] **Step 1: Write failing type/service tests**
 
 Add service tests proving `getWatchlistRunAudio(123)` calls `/api/v1/watchlists/runs/123/audio`, and compile-time fixtures proving `WatchlistOutputCreate` accepts backend-supported audio fields.
 
@@ -199,7 +199,7 @@ const output: WatchlistOutputCreate = {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run:
 
@@ -210,7 +210,7 @@ bunx vitest run src/services/__tests__/watchlists-audio.test.ts src/components/O
 
 Expected: FAIL because the service helper and several output audio fields are missing or incomplete.
 
-- [ ] **Step 3: Add types and service helper**
+- [x] **Step 3: Add types and service helper**
 
 Add these types to `watchlists.ts`:
 
@@ -260,13 +260,13 @@ export const getWatchlistRunAudio = async (
 }
 ```
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run the command from Step 2 again.
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/packages/ui/src/types/watchlists.ts apps/packages/ui/src/services/watchlists.ts apps/packages/ui/src/services/__tests__/watchlists-audio.test.ts
@@ -284,7 +284,7 @@ git commit -m "feat: align watchlists audio contracts"
 - Test: `apps/packages/ui/src/components/Option/Watchlists/JobsTab/__tests__/schedule-utils.test.ts`
 - Test: `apps/packages/ui/src/components/Option/Watchlists/JobsTab/__tests__/SchedulePicker.help.test.tsx`
 
-- [ ] **Step 1: Write failing schedule tests**
+- [x] **Step 1: Write failing schedule tests**
 
 Add coverage for:
 
@@ -295,7 +295,7 @@ Add coverage for:
 - Weekly still works
 - Raw cron still available
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 ```bash
 cd apps/packages/ui
@@ -304,7 +304,7 @@ bunx vitest run src/components/Option/Watchlists/JobsTab/__tests__/schedule-util
 
 Expected: FAIL because presets are fixed to hourly/every6/daily/weekly.
 
-- [ ] **Step 3: Implement interval preset state**
+- [x] **Step 3: Implement interval preset state**
 
 Update `SchedulePresetKey` and state:
 
@@ -337,7 +337,7 @@ Keep custom cron as the escape hatch for schedules cron can express but the pres
 
 Update `parsePresetFromCron` so existing `*/6` schedules map into the interval model instead of appearing as raw cron after upgrade.
 
-- [ ] **Step 4: Update UI copy and controls**
+- [x] **Step 4: Update UI copy and controls**
 
 In `SchedulePicker.tsx`, use segmented/select controls for:
 
@@ -351,13 +351,13 @@ In `SchedulePicker.tsx`, use segmented/select controls for:
 
 Always show generated cron and a human-readable preview via `CronDisplay`.
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run the command from Step 2 again.
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Watchlists/JobsTab/schedule-utils.ts apps/packages/ui/src/components/Option/Watchlists/JobsTab/schedule-frequency.ts apps/packages/ui/src/components/Option/Watchlists/JobsTab/SchedulePicker.tsx apps/packages/ui/src/components/Option/Watchlists/JobsTab/__tests__/schedule-utils.test.ts apps/packages/ui/src/components/Option/Watchlists/JobsTab/__tests__/SchedulePicker.help.test.tsx
@@ -376,7 +376,7 @@ git commit -m "feat: add variable watchlist cadence controls"
 - Test: `apps/packages/ui/src/components/Option/Watchlists/SourcesTab/__tests__/SourceFormModal.test-source.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/Watchlists/SourcesTab/__tests__/SourceFormModal.forum-help.test.tsx`
 
-- [ ] **Step 1: Write failing source settings tests**
+- [x] **Step 1: Write failing source settings tests**
 
 Cover:
 
@@ -386,7 +386,7 @@ Cover:
 - Empty advanced fields do not create noisy settings.
 - Forum source option is enabled only when watchlists settings report `forums_enabled`.
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 ```bash
 cd apps/packages/ui
@@ -395,7 +395,7 @@ bunx vitest run src/components/Option/Watchlists/SourcesTab/__tests__/source-set
 
 Expected: FAIL because settings are not exposed or submitted.
 
-- [ ] **Step 3: Implement pure merge helpers**
+- [x] **Step 3: Implement pure merge helpers**
 
 Add helpers:
 
@@ -411,7 +411,7 @@ export const mergeSourceSettings = (
 
 Use more specific functions for scrape rules, so fields can be deleted intentionally without wiping unrelated advanced settings.
 
-- [ ] **Step 4: Update `SourceFormModal`**
+- [x] **Step 4: Update `SourceFormModal`**
 
 Change `onSubmit` values to include `settings`.
 
@@ -432,7 +432,7 @@ await testWatchlistSourceDraft(
 )
 ```
 
-- [ ] **Step 5: Add validation display placeholders**
+- [x] **Step 5: Add validation display placeholders**
 
 Show a compact diagnostics block when preview response includes:
 
@@ -445,13 +445,13 @@ Show a compact diagnostics block when preview response includes:
 
 Do not invent those fields in the UI if the backend does not return them yet; render only when present.
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 Run the command from Step 2 again.
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Watchlists/SourcesTab/source-settings.ts apps/packages/ui/src/components/Option/Watchlists/SourcesTab/SourceFormModal.tsx apps/packages/ui/src/components/Option/Watchlists/SourcesTab/SourcesTab.tsx apps/packages/ui/src/components/Option/Watchlists/SourcesTab/__tests__/source-settings.test.ts apps/packages/ui/src/components/Option/Watchlists/SourcesTab/__tests__/SourceFormModal.test-source.test.tsx apps/packages/ui/src/components/Option/Watchlists/SourcesTab/__tests__/SourceFormModal.forum-help.test.tsx
