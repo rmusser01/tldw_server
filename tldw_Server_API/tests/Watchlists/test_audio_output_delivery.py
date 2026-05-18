@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -193,14 +193,17 @@ class TestGetRunAudioEndpoint:
             ),
             patch(
                 "tldw_Server_API.app.core.DB_Management.db_path_utils.DatabasePaths.get_user_base_directory",
-                side_effect=RuntimeError("db path error"),
+                side_effect=RuntimeError("db path error /private/secret/workflows.db"),
             ),
         ):
             result = await get_run_audio(run_id=1, target_user_id=None, current_user=user, db=db)
 
         assert result["status"] == "unknown"
         assert result["task_id"] == "task_fail"
-        assert "error" in result
+        assert result["error"] == "artifact_lookup_failed"
+        assert result["fallback_reason"] == "artifact_lookup_failed"
+        assert "db path error" not in json.dumps(result)
+        assert "/private/secret" not in json.dumps(result)
 
     @pytest.mark.asyncio
     async def test_paginated_scan_returns_pending_when_no_matching_run(self):
@@ -419,6 +422,73 @@ class TestGetRunAudioEndpoint:
         assert result["artifact_id"] == "art_audio_deep_paged"
         assert mock_wf_db.list_runs.call_count == 21
         assert mock_wf_db.list_runs.call_args_list[-1].kwargs["offset"] == 1000
+
+    @pytest.mark.asyncio
+    async def test_cross_user_audio_lookup_uses_resolved_workflow_tenant(self):
+        """Admin cross-user audio lookup should not filter workflow runs by the admin tenant."""
+        from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
+
+        run = SimpleNamespace(
+            id=44,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
+            stats_json=json.dumps({"audio_briefing_task_id": "task_cross_user"}),
+            error_msg=None,
+        )
+        target_db = MagicMock()
+        target_db.get_run.return_value = run
+
+        current_db = MagicMock()
+        user = MagicMock()
+        user.role = "admin"
+        user.id = 1
+        user.tenant_id = "admin-tenant"
+
+        matching_run = SimpleNamespace(
+            run_id="wf_target_44",
+            status="completed",
+            metadata_json=json.dumps({"watchlist_run_id": 44}),
+        )
+        audio_art = SimpleNamespace(
+            id="art_cross_user",
+            type="tts_audio",
+            uri="file:///tmp/cross-user-briefing.mp3",
+            size_bytes=444,
+            mime_type="audio/mpeg",
+            metadata_json=json.dumps({"multi_voice": True}),
+        )
+
+        mock_wf_db = MagicMock()
+        mock_wf_db.list_runs.return_value = [matching_run]
+        mock_wf_db.list_artifacts.return_value = [audio_art]
+
+        with (
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists._resolve_target_watchlists_context",
+                new=AsyncMock(return_value=(2, target_db)),
+            ),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists._resolve_watchlist_workflow_tenant_id",
+                new=AsyncMock(return_value="target-tenant"),
+            ),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.db_path_utils.DatabasePaths.get_user_base_directory",
+                return_value="/tmp/target_user",  # nosec B108
+            ),
+            patch("os.path.exists", return_value=True),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.Workflows_DB.WorkflowsDatabase",
+                return_value=mock_wf_db,
+            ),
+        ):
+            result = await get_run_audio(run_id=44, target_user_id=2, current_user=user, db=current_db)
+
+        assert result["status"] == "completed"
+        assert result["artifact_id"] == "art_cross_user"
+        assert mock_wf_db.list_runs.call_args.kwargs["tenant_id"] == "target-tenant"
+        assert mock_wf_db.list_runs.call_args.kwargs["tenant_id"] != "admin-tenant"
 
     @pytest.mark.asyncio
     async def test_prefers_final_or_mixed_artifact_when_multiple_candidates(self):

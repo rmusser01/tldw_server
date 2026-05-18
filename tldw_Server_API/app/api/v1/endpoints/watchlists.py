@@ -864,6 +864,37 @@ async def _resolve_target_watchlists_context(
     return resolved_user_id, target_db
 
 
+def _normalize_workflow_tenant_id(value: Any) -> str | None:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return str(value)
+    return None
+
+
+async def _resolve_watchlist_workflow_tenant_id(*, current_user: User, resolved_user_id: int) -> str:
+    """Resolve the tenant scope used by the target user's workflow database."""
+    current_user_id = _safe_int(getattr(current_user, "id", None), -1)
+    if current_user_id == int(resolved_user_id):
+        return _normalize_workflow_tenant_id(getattr(current_user, "tenant_id", None)) or "default"
+
+    try:
+        from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+
+        users_repo = await AuthnzUsersRepo.from_pool()
+        target_user = await users_repo.get_user_by_id(int(resolved_user_id))
+    except (*_WATCHLISTS_NONCRITICAL_EXCEPTIONS, _DatabaseError) as exc:
+        logger.debug(f"watchlists.resolve_workflow_tenant failed for user={resolved_user_id}: {exc}")
+        return "default"
+
+    if isinstance(target_user, dict):
+        return _normalize_workflow_tenant_id(target_user.get("tenant_id")) or "default"
+    return "default"
+
+
 def _build_email_bodies(content: str | None, fmt: str, title: str, preferred: str = "auto") -> tuple[str, str]:
     raw = content or ""
     mode = preferred.lower()
@@ -4742,7 +4773,10 @@ async def get_run_audio(
             raise HTTPException(status_code=404, detail="no_workflow_db")
 
         wf_db = WorkflowsDatabase(db_path=wf_db_path)
-        tenant_id = str(getattr(current_user, "tenant_id", "default"))
+        tenant_id = await _resolve_watchlist_workflow_tenant_id(
+            current_user=current_user,
+            resolved_user_id=int(resolved_user_id),
+        )
         wf_user_id = str(resolved_user_id)
         scan_page_size = 50
         matching_run = None
@@ -5053,7 +5087,7 @@ async def get_run_audio(
     except HTTPException:
         raise
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(f"Failed to look up audio artifact for run {run_id}: {exc}")
+        logger.opt(exception=exc).warning(f"Failed to look up audio artifact for run {run_id}")
         return {
             "run_id": run_id,
             "task_id": task_id,
@@ -5063,8 +5097,8 @@ async def get_run_audio(
             "script_artifact": None,
             "speaker_artifacts": [],
             "final_artifact": None,
-            "fallback_reason": None,
-            "error": str(exc),
+            "fallback_reason": "artifact_lookup_failed",
+            "error": "artifact_lookup_failed",
         }
 
 
