@@ -11,6 +11,13 @@ type SaveOptions = {
   shouldContinue?: () => boolean
 }
 
+type CacheEntryMetadata = Pick<
+  MediaReadAlongAudioCacheEntry,
+  'id' | 'lastUsedAt' | 'sizeBytes'
+>
+
+const CACHE_METADATA_INDEX = '[lastUsedAt+sizeBytes+id]'
+
 let cacheDisabledForSession = false
 
 const isQuotaExceededError = (error: unknown): boolean => {
@@ -27,11 +34,23 @@ const canContinueSave = (options: SaveOptions): boolean => {
   return true
 }
 
-const listEntries = async (): Promise<MediaReadAlongAudioCacheEntry[]> => {
-  if (typeof table().toArray === 'function') {
-    return await table().toArray()
+const toCacheEntryMetadata = (key: unknown): CacheEntryMetadata | null => {
+  if (!Array.isArray(key) || key.length < 3) return null
+  const [lastUsedAt, sizeBytes, id] = key
+  if (typeof id !== 'string') return null
+
+  return {
+    id,
+    lastUsedAt: Number(lastUsedAt) || 0,
+    sizeBytes: Number(sizeBytes) || 0
   }
-  return await table().orderBy('lastUsedAt').toArray()
+}
+
+const listEntryMetadata = async (): Promise<CacheEntryMetadata[]> => {
+  const keys = await table().orderBy(CACHE_METADATA_INDEX).keys()
+  return keys
+    .map(toCacheEntryMetadata)
+    .filter((entry): entry is CacheEntryMetadata => entry !== null)
 }
 
 const resolveMaxEntries = (maxEntries: number): number => {
@@ -46,8 +65,7 @@ const evictLeastRecentlyUsed = async (
   options: SaveOptions,
   forceOne = false
 ): Promise<boolean> => {
-  const entries = await listEntries()
-  const sorted = [...entries].sort((a, b) => a.lastUsedAt - b.lastUsedAt)
+  const sorted = await listEntryMetadata()
   const idsToDelete: string[] = []
   const existingEntry = sorted.find((entry) => entry.id === incomingEntry.id)
   let totalBytesAfterWrite =
@@ -125,15 +143,20 @@ export const getMediaReadAlongAudioCacheEntry = async (
 ): Promise<MediaReadAlongAudioCacheEntry | undefined> => {
   if (cacheDisabledForSession) return undefined
 
+  let entry: MediaReadAlongAudioCacheEntry | undefined
   try {
-    const entry = await table().get(id)
-    if (!entry) return undefined
-
-    await table().update(id, { lastUsedAt: Date.now() })
-    return entry
+    entry = await table().get(id)
   } catch {
     return undefined
   }
+  if (!entry) return undefined
+
+  try {
+    await table().update(id, { lastUsedAt: Date.now() })
+  } catch {
+    // Metadata updates are best effort; do not discard a valid cached blob.
+  }
+  return entry
 }
 
 export const saveMediaReadAlongAudioCacheEntry = async (

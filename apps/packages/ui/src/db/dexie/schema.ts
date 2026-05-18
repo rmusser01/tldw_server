@@ -390,7 +390,7 @@ export class PageAssistDexieDB extends Dexie {
       audiobookChapterAssets: 'id, projectId, chapterId, createdAt',
       ttsClips: 'id, createdAt, historyId, serverChatId, messageId, serverMessageId, provider',
       sttRecordings: 'id, createdAt',
-      mediaReadAlongAudioCache: 'id, createdAt, lastUsedAt, mediaId, mediaKind, segmentId, settingsSignature, textHash'
+      mediaReadAlongAudioCache: 'id, createdAt, lastUsedAt, [lastUsedAt+sizeBytes+id], mediaId, mediaKind, segmentId, settingsSignature, textHash'
     });
   }
 }

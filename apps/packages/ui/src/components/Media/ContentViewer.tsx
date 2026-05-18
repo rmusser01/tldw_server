@@ -147,6 +147,13 @@ const getReadAlongScrollBehavior = (): ScrollBehavior => {
     : 'smooth'
 }
 
+const escapeCssAttributeValue = (value: string): string => {
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+    return CSS.escape(value)
+  }
+  return value.replace(/["\\]/g, '\\$&')
+}
+
 // Metadata helpers moved to useContentMetadata hook
 
 interface ContentViewerProps {
@@ -412,9 +419,9 @@ export function ContentViewer({
     const body = contentBodyRef.current
     if (!body) return
 
-    const activeNode = Array.from(
-      body.querySelectorAll<HTMLElement>('[data-read-along-segment-id]')
-    ).find((node) => node.dataset.readAlongSegmentId === activeSegmentId)
+    const activeNode = body.querySelector<HTMLElement>(
+      `[data-read-along-segment-id="${escapeCssAttributeValue(activeSegmentId)}"]`
+    )
     if (!activeNode) return
 
     const container = contentScrollContainerRef.current

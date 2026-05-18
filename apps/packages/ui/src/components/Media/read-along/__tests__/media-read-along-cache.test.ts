@@ -8,8 +8,12 @@ const { rows, mockTable, putState, tableState } = vi.hoisted(() => {
     afterCommit: undefined as ((row: any) => void) | undefined
   }
   const tableState = {
-    afterToArray: undefined as (() => void) | undefined
+    afterListMetadata: undefined as (() => void) | undefined,
+    failUpdateForId: undefined as string | undefined
   }
+  const collectionToArray = vi.fn(async () => {
+    throw new Error('metadata listing should not load cache rows')
+  })
 
   const mockTable = {
     put: vi.fn(async (row: any) => {
@@ -26,6 +30,9 @@ const { rows, mockTable, putState, tableState } = vi.hoisted(() => {
     }),
     get: vi.fn(async (id: string) => rows.get(id)),
     update: vi.fn(async (id: string, changes: Record<string, unknown>) => {
+      if (tableState.failUpdateForId === id) {
+        throw new Error('IndexedDB metadata update failed')
+      }
       const current = rows.get(id)
       if (!current) return 0
       rows.set(id, { ...current, ...changes })
@@ -38,17 +45,24 @@ const { rows, mockTable, putState, tableState } = vi.hoisted(() => {
       for (const id of ids) rows.delete(id)
     }),
     toArray: vi.fn(async () => {
-      const values = Array.from(rows.values())
-      tableState.afterToArray?.()
-      return values
+      throw new Error('metadata listing should not load cache rows')
     }),
     orderBy: vi.fn((field: string) => ({
-      toArray: vi.fn(async () => {
-        const all = Array.from(rows.values())
-        all.sort((a, b) => a[field] - b[field])
-        tableState.afterToArray?.()
-        return all
-      })
+      keys: vi.fn(async () => {
+        expect(field).toBe('[lastUsedAt+sizeBytes+id]')
+        const keys = Array.from(rows.values())
+          .sort((a, b) => {
+            const lastUsedDelta = a.lastUsedAt - b.lastUsedAt
+            if (lastUsedDelta !== 0) return lastUsedDelta
+            const sizeDelta = a.sizeBytes - b.sizeBytes
+            if (sizeDelta !== 0) return sizeDelta
+            return String(a.id).localeCompare(String(b.id))
+          })
+          .map((row) => [row.lastUsedAt, row.sizeBytes, row.id])
+        tableState.afterListMetadata?.()
+        return keys
+      }),
+      toArray: collectionToArray
     }))
   }
 
@@ -97,7 +111,8 @@ describe('media read-along audio cache', () => {
     putState.throwQuotaTimes = 0
     putState.beforeCommit = undefined
     putState.afterCommit = undefined
-    tableState.afterToArray = undefined
+    tableState.afterListMetadata = undefined
+    tableState.failUpdateForId = undefined
     vi.clearAllMocks()
     resetMediaReadAlongAudioCacheSessionForTests()
   })
@@ -127,6 +142,20 @@ describe('media read-along audio cache', () => {
     )
   })
 
+  it('returns a cached entry when the best-effort last-used update fails', async () => {
+    const entry = cacheEntry({ id: 'update-fails' })
+    rows.set(entry.id, entry)
+    tableState.failUpdateForId = entry.id
+
+    const result = await getMediaReadAlongAudioCacheEntry(entry.id)
+
+    expect(result).toBe(entry)
+    expect(mockTable.update).toHaveBeenCalledWith(
+      entry.id,
+      expect.objectContaining({ lastUsedAt: expect.any(Number) })
+    )
+  })
+
   it('evicts least recently used entries before writes that exceed the byte cap', async () => {
     rows.set('oldest', cacheEntry({ id: 'oldest', lastUsedAt: 10, sizeBytes: 700 }))
     rows.set('middle', cacheEntry({ id: 'middle', lastUsedAt: 20, sizeBytes: 200 }))
@@ -138,6 +167,21 @@ describe('media read-along audio cache', () => {
     )
 
     expect(mockTable.bulkDelete).toHaveBeenCalledWith(['oldest'])
+    expect(rows.has('oldest')).toBe(false)
+    expect(rows.has('incoming')).toBe(true)
+  })
+
+  it('uses metadata index keys for eviction without loading cached blobs', async () => {
+    rows.set('oldest', cacheEntry({ id: 'oldest', lastUsedAt: 10, sizeBytes: 700 }))
+    rows.set('newest', cacheEntry({ id: 'newest', lastUsedAt: 30, sizeBytes: 100 }))
+
+    await saveMediaReadAlongAudioCacheEntry(
+      cacheEntry({ id: 'incoming', sizeBytes: 250 }),
+      { maxBytes: 1000 }
+    )
+
+    expect(mockTable.orderBy).toHaveBeenCalledWith('[lastUsedAt+sizeBytes+id]')
+    expect(mockTable.toArray).not.toHaveBeenCalled()
     expect(rows.has('oldest')).toBe(false)
     expect(rows.has('incoming')).toBe(true)
   })
@@ -193,7 +237,7 @@ describe('media read-along audio cache', () => {
     rows.set('oldest', cacheEntry({ id: 'oldest', lastUsedAt: 10, sizeBytes: 900 }))
     const entry = cacheEntry({ id: 'guarded-before-delete', sizeBytes: 200 })
     let allowSave = true
-    tableState.afterToArray = () => {
+    tableState.afterListMetadata = () => {
       allowSave = false
     }
 
@@ -277,7 +321,7 @@ describe('media read-along audio cache', () => {
     putState.throwQuotaTimes = 1
     let allowSave = true
     let reads = 0
-    tableState.afterToArray = () => {
+    tableState.afterListMetadata = () => {
       reads += 1
       if (reads === 2) {
         allowSave = false

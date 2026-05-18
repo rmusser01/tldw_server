@@ -9,6 +9,10 @@ import type { ReadAlongSelection } from '../types'
 const cacheEntries = new Map<string, { blob: Blob; mimeType: string; format: string }>()
 const abortControllers: AbortController[] = []
 const audioInstances: MockAudio[] = []
+const audioListenerOptions: Array<{
+  type: string
+  options: boolean | AddEventListenerOptions | undefined
+}> = []
 const eventLog: string[] = []
 
 let providerContext: TtsProviderContext
@@ -74,6 +78,15 @@ class MockAudio extends EventTarget {
     super()
     this.src = src
     audioInstances.push(this)
+  }
+
+  addEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject | null,
+    options?: boolean | AddEventListenerOptions
+  ): void {
+    audioListenerOptions.push({ type, options })
+    super.addEventListener(type, listener, options)
   }
 }
 
@@ -251,6 +264,7 @@ describe('useMediaReadAlongSession', () => {
     cacheEntries.clear()
     abortControllers.length = 0
     audioInstances.length = 0
+    audioListenerOptions.length = 0
     eventLog.length = 0
     objectUrlCounter = 0
     playRejects = false
@@ -326,6 +340,22 @@ describe('useMediaReadAlongSession', () => {
       eventLog.indexOf('cache:get:cache:media-1:0:sentence:0:15:tldw|||1|mp3|')
     )
     expect(eventLog.findIndex((entry) => entry.startsWith('synthesize:'))).toBe(-1)
+  })
+
+  it('registers generated audio terminal listeners as one-shot handlers', async () => {
+    const { result } = setupHook()
+
+    await act(async () => {
+      await result.current.start('selection')
+    })
+
+    await waitFor(() => expect(audioInstances[0]?.play).toHaveBeenCalledTimes(1))
+    expect(audioListenerOptions).toEqual(
+      expect.arrayContaining([
+        { type: 'ended', options: { once: true } },
+        { type: 'error', options: { once: true } }
+      ])
+    )
   })
 
   it('start("from-here") queues beyond the rendered window', async () => {

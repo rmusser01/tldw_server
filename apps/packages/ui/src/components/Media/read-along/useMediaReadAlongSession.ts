@@ -586,28 +586,36 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
           session.objectUrl = objectUrl
           session.audio = audio
 
-          audio.addEventListener('ended', () => {
-            revokeObjectUrl(objectUrl)
-            if (session.objectUrl === objectUrl) {
-              session.objectUrl = null
-            }
-            if (!isCurrentPlayAttempt(session, playToken)) return
-            if (sourceIndex < sources.length - 1) {
-              void playSourceAt(sourceIndex + 1).catch((error) => {
-                if (!isCurrentPlayAttempt(session, playToken) || isAbortError(error)) {
-                  return
-                }
-                markSegmentError(errorMessage(error))
-              })
-              return
-            }
-            void playSegmentRef.current(session, index + 1)
-          })
-          audio.addEventListener('error', () => {
-            revokeObjectUrl(objectUrl)
-            if (!isCurrentPlayAttempt(session, playToken)) return
-            markSegmentError('Generated audio playback failed')
-          })
+          audio.addEventListener(
+            'ended',
+            () => {
+              revokeObjectUrl(objectUrl)
+              if (session.objectUrl === objectUrl) {
+                session.objectUrl = null
+              }
+              if (!isCurrentPlayAttempt(session, playToken)) return
+              if (sourceIndex < sources.length - 1) {
+                void playSourceAt(sourceIndex + 1).catch((error) => {
+                  if (!isCurrentPlayAttempt(session, playToken) || isAbortError(error)) {
+                    return
+                  }
+                  markSegmentError(errorMessage(error))
+                })
+                return
+              }
+              void playSegmentRef.current(session, index + 1)
+            },
+            { once: true }
+          )
+          audio.addEventListener(
+            'error',
+            () => {
+              revokeObjectUrl(objectUrl)
+              if (!isCurrentPlayAttempt(session, playToken)) return
+              markSegmentError('Generated audio playback failed')
+            },
+            { once: true }
+          )
 
           mutateState(session.token, {
             status: 'playing',
