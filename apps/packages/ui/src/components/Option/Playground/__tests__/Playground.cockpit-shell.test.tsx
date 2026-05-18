@@ -73,6 +73,15 @@ const cockpitChatRenderState = vi.hoisted(() => ({
   starterDeckSignals: [] as Array<boolean | undefined>,
 }));
 
+const tldwClientState = vi.hoisted(() => ({
+  getCharacter: vi.fn(async (id: string | number) => ({
+    id,
+    name: "Route Character",
+  })),
+  initialize: vi.fn(async () => null),
+  getResearchBundle: vi.fn(async () => null),
+}));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, defaultValue?: string) => defaultValue || key,
@@ -140,6 +149,10 @@ vi.mock("@/services/app", () => ({
 vi.mock("@/services/chat-settings", () => ({
   syncChatSettingsForServerChat: (params: unknown) =>
     chatSettingsState.syncChatSettingsForServerChat(params),
+}));
+
+vi.mock("@/services/tldw/TldwApiClient", () => ({
+  tldwClient: tldwClientState,
 }));
 
 vi.mock("@/db/dexie/helpers", () => ({
@@ -253,11 +266,20 @@ vi.mock("react-router-dom", async () => {
   return {
     ...actual,
     useNavigate: () => vi.fn(),
+    useLocation: () => ({
+      pathname: window.location.pathname || "/chat",
+      search: window.location.search || "",
+      hash: window.location.hash || "",
+      state: null,
+      key: "test-location",
+    }),
   };
 });
 
 describe("Playground cockpit shell", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    window.history.replaceState({}, "", "/chat");
     storageState.values.clear();
     messageOptionState.value.messages = [];
     messageOptionState.value.history = [];
@@ -269,11 +291,16 @@ describe("Playground cockpit shell", () => {
     messageOptionState.value.selectedQuickPrompt = null;
     messageOptionState.value.selectedAssistant = null;
     messageOptionState.value.selectedCharacter = null;
+    messageOptionState.value.setSelectedCharacter = vi.fn();
     messageOptionState.value.contextFiles = [];
     messageOptionState.value.regenerateLastMessage = vi.fn();
     sessionPersistenceState.value.sessionScopeReady = true;
     chatSettingsState.syncChatSettingsForServerChat.mockClear();
     cockpitChatRenderState.starterDeckSignals = [];
+    tldwClientState.getCharacter.mockImplementation(async (id: string | number) => ({
+      id,
+      name: "Route Character",
+    }));
   });
 
   it("renders the cockpit rails, main chat surface, and status strip by default", async () => {
@@ -304,6 +331,31 @@ describe("Playground cockpit shell", () => {
     expect(
       await screen.findByTestId("playground-empty-mode-deck"),
     ).toBeInTheDocument();
+  });
+
+  it("honors first-class character route intent in the chat shell", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/chat?mode=character&characterId=char-route",
+    );
+
+    render(<Playground />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("playground-active-chat-mode")).toHaveTextContent(
+        "Character Chat",
+      );
+    });
+    await waitFor(() => {
+      expect(tldwClientState.getCharacter).toHaveBeenCalledWith("char-route");
+    });
+    expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "char-route",
+        name: "Route Character",
+      }),
+    );
   });
 
   it("hides the starter deck when the composer has unsent draft text", async () => {

@@ -13,6 +13,7 @@ import {
   buildCharacterChatReadiness,
   getCharacterChatReadinessCopy
 } from "@/utils/chat-model-availability"
+import { buildCharacterChatPath } from "@/routes/route-paths"
 import { buildCharacterSelectionPayload } from "../utils"
 
 type CharacterQuickChatMessage = {
@@ -318,7 +319,7 @@ export function useCharacterQuickChat(deps: UseCharacterQuickChatDeps) {
     setMessages(mappedMessages)
 
     await closeQuickChat({ preserveSession: true })
-    navigate("/")
+    navigate(buildCharacterChatPath({ characterId: characterSelection.id }))
     setTimeout(() => {
       focusComposer()
     }, 0)

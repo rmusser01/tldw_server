@@ -3165,6 +3165,18 @@ export const PlaygroundForm = ({
         return;
       }
       if (mode === "character") {
+        const hasCharacterIdentity =
+          selectedAssistant?.kind === "character" || Boolean(selectedCharacter?.id);
+        if (hasCharacterIdentity) {
+          setModeAnnouncement(
+            t(
+              "playground:starter.noticeCharacterActive",
+              "Character Chat mode active. Continue with the selected character.",
+            ),
+          );
+          textAreaFocus();
+          return;
+        }
         dispatchOpenAssistantSelect({
           tab: "character",
           source: "playground-starter",
@@ -3217,6 +3229,8 @@ export const PlaygroundForm = ({
     notificationApi,
     openKnowledgePanel,
     selectedModel,
+    selectedAssistant,
+    selectedCharacter?.id,
     setChatMode,
     setCompareMode,
     setCompareSelectedModels,

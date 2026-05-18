@@ -996,7 +996,7 @@ describe("PlaygroundForm role-play starter", () => {
     const user = userEvent.setup()
     renderRolePlayStarterHarness()
 
-    await user.click(screen.getByRole("button", { name: /chat as a character/i }))
+    await user.click(screen.getByRole("button", { name: /character chat/i }))
 
     expect(
       await screen.findByRole("button", { name: /select character or persona/i })

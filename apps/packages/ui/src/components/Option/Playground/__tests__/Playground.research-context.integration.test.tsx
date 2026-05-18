@@ -499,7 +499,14 @@ vi.mock("react-router-dom", async () => {
     await vi.importActual<typeof import("react-router-dom")>("react-router-dom")
   return {
     ...actual,
-    useNavigate: () => vi.fn()
+    useNavigate: () => vi.fn(),
+    useLocation: () => ({
+      pathname: window.location.pathname || "/chat",
+      search: window.location.search || "",
+      hash: window.location.hash || "",
+      state: null,
+      key: "test-location"
+    })
   }
 })
 

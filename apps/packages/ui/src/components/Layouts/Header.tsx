@@ -14,6 +14,8 @@ import { useDarkMode } from "@/hooks/useDarkmode"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import type { Character } from "@/types/character"
 import { dispatchOpenAssistantSelect } from "@/utils/assistant-select-events"
+import { dispatchCharacterChatModeIntent } from "@/utils/character-chat-mode-intent"
+import { buildCharacterChatPath } from "@/routes/route-paths"
 import {
   tldwClient,
   type ConversationShareLinkSummary,
@@ -145,14 +147,26 @@ export const Header: React.FC<Props> = ({
 
   const startCharacterChat = React.useCallback(() => {
     setTemporaryChat(false)
-    clearChat()
+    const characterId = selectedCharacter?.id ?? null
+    if (!isChatRoute) {
+      navigate(buildCharacterChatPath({ characterId }))
+      return
+    }
+    dispatchCharacterChatModeIntent({
+      source: "chat-header",
+      characterId
+    })
     if (!selectedCharacter?.id) {
       dispatchOpenAssistantSelect({
         tab: "character",
         source: "chat-header"
       })
+      return
     }
-  }, [clearChat, selectedCharacter, setTemporaryChat])
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("tldw:focus-composer"))
+    }
+  }, [isChatRoute, navigate, selectedCharacter, setTemporaryChat])
 
   const refreshShareLinks = React.useCallback(async () => {
     if (!serverChatId) {
