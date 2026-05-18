@@ -11,6 +11,16 @@ export type CharacterChatRouteIntent = {
   characterId: string | null
 }
 
+const CHARACTER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/
+
+export const normalizeCharacterChatCharacterId = (
+  value: string | null
+): string | null => {
+  const trimmed = value?.trim() ?? ""
+  if (!trimmed) return null
+  return CHARACTER_ID_PATTERN.test(trimmed) ? trimmed : null
+}
+
 export const getCharacterChatRouteIntent = (
   search: string
 ): CharacterChatRouteIntent | null => {
@@ -19,10 +29,9 @@ export const getCharacterChatRouteIntent = (
   if (mode !== "character") return null
   return {
     mode: "character",
-    characterId:
-      params.get("characterId")?.trim() ||
-      params.get("character_id")?.trim() ||
-      null
+    characterId: normalizeCharacterChatCharacterId(
+      params.get("characterId") ?? params.get("character_id")
+    )
   }
 }
 

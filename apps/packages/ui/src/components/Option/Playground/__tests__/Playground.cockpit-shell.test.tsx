@@ -358,6 +358,123 @@ describe("Playground cockpit shell", () => {
     );
   });
 
+  it("does not re-enforce route character intent after a manual character switch", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/chat?mode=character&characterId=char-route",
+    );
+
+    const { rerender } = render(<Playground />);
+
+    await waitFor(() => {
+      expect(tldwClientState.getCharacter).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "char-route",
+          name: "Route Character",
+        }),
+      );
+    });
+
+    tldwClientState.getCharacter.mockClear();
+    messageOptionState.value.setSelectedCharacter.mockClear();
+    messageOptionState.value.selectedCharacter = {
+      id: "manual-character",
+      name: "Manual Character",
+    };
+
+    rerender(<Playground />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("playground-active-chat-mode")).toHaveTextContent(
+        "Manual Character",
+      );
+    });
+    expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
+    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled();
+  });
+
+  it("uses a typed fallback when route character hydration returns no character", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/chat?mode=character&characterId=missing-character",
+    );
+    tldwClientState.getCharacter.mockResolvedValueOnce(null);
+
+    render(<Playground />);
+
+    await waitFor(() => {
+      expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith({
+        id: "missing-character",
+        name: "Character missing-character",
+      });
+    });
+  });
+
+  it("does not write a partial character when header intent only changes mode", async () => {
+    render(<Playground />);
+
+    await screen.findByTestId("playground-cockpit-shell");
+    fireEvent(
+      window,
+      new CustomEvent("tldw:character-chat-mode-intent", {
+        detail: { characterId: "char-event" },
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("playground-active-chat-mode")).toHaveTextContent(
+        "Character Chat",
+      );
+    });
+    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled();
+  });
+
+  it("resets character workflow for non-character starter modes", async () => {
+    storageState.values.set("playgroundChatWorkflowMode", "character");
+
+    render(<Playground />);
+
+    expect(
+      await screen.findByTestId("playground-active-chat-mode"),
+    ).toHaveTextContent("Character Chat");
+
+    fireEvent(
+      window,
+      new CustomEvent("tldw:playground-starter-selected", {
+        detail: { mode: "compare" },
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("playground-active-chat-mode")).toHaveTextContent(
+        "Standard chat",
+      );
+    });
+    expect(storageState.values.get("playgroundChatWorkflowMode")).toBe(
+      "standard",
+    );
+  });
+
+  it("does not show persona names under the Character Chat mode chip", async () => {
+    storageState.values.set("playgroundChatWorkflowMode", "character");
+    messageOptionState.value.selectedAssistant = {
+      kind: "persona",
+      id: "persona-1",
+      name: "Persona One",
+    };
+
+    render(<Playground />);
+
+    const modeChip = await screen.findByTestId("playground-active-chat-mode");
+    expect(modeChip).toHaveTextContent("Character Chat");
+    expect(modeChip).not.toHaveTextContent("Persona One");
+  });
+
   it("hides the starter deck when the composer has unsent draft text", async () => {
     render(<Playground />);
 

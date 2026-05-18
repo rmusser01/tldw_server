@@ -52,12 +52,27 @@ Final verification after rebase/race fix:
 - bunx vitest run src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx src/components/Option/Playground/__tests__/Playground.sticky-composer-layout.integration.test.tsx --maxWorkers=1 --no-file-parallelism passed: 5 files, 43 tests.
 - Bandit not run: touched implementation is TypeScript/TSX plus Backlog metadata only; no Python source changed.
 - Known local artifact: real backend startup generated two untracked watchlist template files under tldw_Server_API/Config_Files/templates/watchlists; they are not part of this task and were left untracked.
+PR review remediation reopened TASK-431. Live PR #1846 review sweep found actionable Qodo/Gemini/CodeRabbit comments in Playground route-intent handling: one-shot route hydration to avoid reverting manual character switches, validation for URL characterId before API hydration, no partial fallback set from header intent, fallback on null character responses, route flag included in first-render workflow state, reset for all non-character starter modes, and character-only label rendering in the Character Chat chip.
+PR review feedback addressed for #1846:
+- Consolidated character route-intent parsing and normalized URL characterId before hydration, so malformed ids such as ../secret do not trigger backend character hydration.
+- Made route character hydration one-shot per route id with in-flight/applied guards so manual character switches are not reverted by the URL effect.
+- Removed partial selected-character writes from the header character-mode event; the header now changes mode only.
+- Added typed fallback character handling for null/failed route hydration responses.
+- Kept route-requested Character Chat active on first render, reset all non-character starter modes back to standard workflow, and limited the mode chip secondary label to actual character assistants/characters rather than persona names.
+
+Verification after PR review fixes:
+- git diff --check passed.
+- bunx vitest run src/utils/__tests__/character-chat-mode-intent.test.ts src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx --maxWorkers=1 --no-file-parallelism --reporter=verbose passed: 2 files, 22 tests.
+- bunx vitest run src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx src/components/Option/Playground/__tests__/Playground.sticky-composer-layout.integration.test.tsx --maxWorkers=1 --no-file-parallelism --reporter=verbose passed: 5 files, 43 tests. Existing test stderr about tldw server not configured remained non-fatal.
+- Real backend/WebUI smoke used uvicorn on http://127.0.0.1:8000 and Next.js on http://localhost:8081 with a Playwright browser. /chat?mode=character&characterId=..%2Fsecret displayed Character Chat and made zero /api/v1/characters requests; /chat?mode=character&characterId=missing-character displayed Character Chat and made the expected real backend /api/v1/characters/missing-character request, which returned 404.
+- Bandit not run: only TypeScript/TSX UI files and Backlog metadata changed; no Python source changed.
+- Left unrelated untracked watchlist template files out of the task/commit.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented Phase 1 first-class Character Chat mode for /chat: durable character workflow state, /chat?mode=character URL bootstrapping with optional characterId hydration, header/starter intent dispatch without silent chat clearing, /characters launch handoff URLs, extension/WebUI URL consistency, and visible active chat-mode feedback. Real-backend browser verification found and drove a fix for a storage hydration race so route character intent remains visible on first load.
+Implemented Phase 1 first-class Character Chat mode for /chat and addressed PR #1846 review feedback: durable character workflow state, validated route characterId handling, one-shot route hydration that does not revert manual switches, mode-only header intent dispatch, typed fallback hydration, broad non-character starter reset, character-only chip labels, and /characters launch handoff. Verified with focused Vitest coverage and a real backend/WebUI browser smoke against uvicorn and Next.js.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

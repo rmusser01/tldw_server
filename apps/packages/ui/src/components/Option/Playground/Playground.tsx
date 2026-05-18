@@ -115,8 +115,8 @@ import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return";
 import {
   CHARACTER_CHAT_MODE_INTENT_EVENT,
   getCharacterChatRouteIntent,
-  type CharacterChatModeIntentDetail,
 } from "@/utils/character-chat-mode-intent";
+import type { Character } from "@/types/character";
 
 const toText = (value: unknown): string =>
   typeof value === "string" ? value : String(value);
@@ -404,6 +404,10 @@ export const Playground = () => {
     typeof setTimeout
   > | null>(null);
   const initializePlaygroundRef = React.useRef(false);
+  const routeCharacterIntentAppliedRef = React.useRef<string | null>(null);
+  const routeCharacterIntentInFlightRef = React.useRef<string | null>(null);
+  const routeCharacterIntentRequestRef = React.useRef(0);
+  const translationRef = React.useRef(t);
   const previousThreadRef = React.useRef<string | null>(null);
   const stableHistoryId = historyId && historyId !== "temp" ? historyId : null;
   const showStarterDeck =
@@ -412,21 +416,26 @@ export const Playground = () => {
     !stableHistoryId &&
     !serverChatId &&
     !composerHasDraft;
-  const routeCharacterIntentId = React.useMemo(
-    () => getCharacterChatRouteIntent(location.search)?.characterId ?? null,
+  const routeCharacterIntent = React.useMemo(
+    () => getCharacterChatRouteIntent(location.search),
     [location.search],
   );
-  const routeRequestsCharacterMode = React.useMemo(
-    () => Boolean(getCharacterChatRouteIntent(location.search)),
-    [location.search],
-  );
+  const routeCharacterIntentId = routeCharacterIntent?.characterId ?? null;
+  const routeRequestsCharacterMode = Boolean(routeCharacterIntent);
   const normalizedChatWorkflowMode =
     normalizeChatWorkflowMode(chatWorkflowMode);
   const characterWorkflowActive =
+    routeRequestsCharacterMode ||
     characterModeIntentActive ||
     normalizedChatWorkflowMode === "character" ||
     selectedAssistant?.kind === "character" ||
     Boolean(selectedCharacter?.id);
+  const activeCharacterModeLabel =
+    selectedAssistant?.kind === "character"
+      ? selectedAssistant.name
+      : selectedAssistant
+        ? null
+        : selectedCharacter?.name ?? null;
   const setRouteContext = useChatSurfaceCoordinatorStore(
     (state) => state.setRouteContext,
   );
@@ -464,24 +473,14 @@ export const Playground = () => {
   }, [setRouteContext]);
 
   React.useEffect(() => {
+    translationRef.current = t;
+  }, [t]);
+
+  React.useEffect(() => {
     if (typeof window === "undefined") return;
-    const handleCharacterModeIntent = (event: Event) => {
-      const detail = (event as CustomEvent<CharacterChatModeIntentDetail>)
-        .detail;
+    const handleCharacterModeIntent = () => {
       setCharacterModeIntentActive(true);
       void setChatWorkflowMode("character");
-      const intentCharacterId =
-        detail?.characterId == null ? "" : String(detail.characterId).trim();
-      if (intentCharacterId) {
-        void setSelectedCharacter({
-          id: intentCharacterId,
-          name: toText(
-            t("playground:characterChat.characterFallback", "Character {{id}}", {
-              id: intentCharacterId,
-            } as any),
-          ),
-        } as any);
-      }
     };
     const handleStarterSelected = (event: Event) => {
       const detail = (event as CustomEvent<{ mode?: unknown }>).detail;
@@ -491,7 +490,7 @@ export const Playground = () => {
         void setChatWorkflowMode("character");
         return;
       }
-      if (mode === "general" || mode === "rag" || mode === "knowledge") {
+      if (mode) {
         setCharacterModeIntentActive(false);
         void setChatWorkflowMode("standard");
       }
@@ -514,48 +513,71 @@ export const Playground = () => {
         handleStarterSelected as EventListener,
       );
     };
-  }, [setChatWorkflowMode, setSelectedCharacter, t]);
+  }, [setChatWorkflowMode]);
 
   React.useEffect(() => {
     if (!routeRequestsCharacterMode) return;
     setCharacterModeIntentActive(true);
     void setChatWorkflowMode("character");
-    if (!routeCharacterIntentId) return;
-    const selectedCharacterId =
-      selectedCharacter?.id == null ? null : String(selectedCharacter.id);
-    if (selectedCharacterId === routeCharacterIntentId) return;
+  }, [routeRequestsCharacterMode, setChatWorkflowMode]);
 
-    let cancelled = false;
+  React.useEffect(() => {
+    if (!routeCharacterIntentId) return;
+    if (routeCharacterIntentAppliedRef.current === routeCharacterIntentId) {
+      return;
+    }
+    if (routeCharacterIntentInFlightRef.current === routeCharacterIntentId) {
+      return;
+    }
+
+    const requestId = routeCharacterIntentRequestRef.current + 1;
+    routeCharacterIntentRequestRef.current = requestId;
+    routeCharacterIntentInFlightRef.current = routeCharacterIntentId;
+    const fallbackCharacterName = toText(
+      translationRef.current(
+        "playground:characterChat.characterFallback",
+        "Character {{id}}",
+        {
+          id: routeCharacterIntentId,
+        },
+      ),
+    ).replace("{{id}}", routeCharacterIntentId);
+    const fallbackCharacter: Character = {
+      id: routeCharacterIntentId,
+      name: fallbackCharacterName,
+    };
     void tldwClient
       .getCharacter(routeCharacterIntentId)
       .then((character) => {
-        if (cancelled || !character) return;
-        void setSelectedCharacter(character);
+        if (routeCharacterIntentRequestRef.current !== requestId) return;
+        routeCharacterIntentAppliedRef.current = routeCharacterIntentId;
+        void setSelectedCharacter(character || fallbackCharacter);
       })
       .catch(() => {
-        if (cancelled) return;
-        void setSelectedCharacter({
-          id: routeCharacterIntentId,
-          name: toText(
-            t(
-              "playground:characterChat.characterFallback",
-              "Character {{id}}",
-              { id: routeCharacterIntentId } as any,
-            ),
-          ),
-        } as any);
+        if (routeCharacterIntentRequestRef.current !== requestId) return;
+        routeCharacterIntentAppliedRef.current = routeCharacterIntentId;
+        void setSelectedCharacter(fallbackCharacter);
+      })
+      .finally(() => {
+        if (routeCharacterIntentRequestRef.current !== requestId) return;
+        routeCharacterIntentInFlightRef.current = null;
       });
     return () => {
-      cancelled = true;
+      if (routeCharacterIntentRequestRef.current === requestId) {
+        routeCharacterIntentRequestRef.current += 1;
+      }
     };
   }, [
     routeCharacterIntentId,
-    routeRequestsCharacterMode,
-    selectedCharacter?.id,
-    setChatWorkflowMode,
     setSelectedCharacter,
-    t,
   ]);
+
+  React.useEffect(() => {
+    if (!routeCharacterIntentId) {
+      routeCharacterIntentAppliedRef.current = null;
+      routeCharacterIntentInFlightRef.current = null;
+    }
+  }, [routeCharacterIntentId]);
 
   React.useEffect(() => {
     const handleReadinessState = (event: Event) => {
@@ -2603,10 +2625,9 @@ export const Playground = () => {
                         ),
                       )
                     : toText(t("playground:regions.standardChat", "Standard chat"))}
-                  {characterWorkflowActive &&
-                  (selectedAssistant?.name || selectedCharacter?.name) ? (
+                  {characterWorkflowActive && activeCharacterModeLabel ? (
                     <span className="ml-1 max-w-[14rem] truncate text-text">
-                      {selectedAssistant?.name || selectedCharacter?.name}
+                      {activeCharacterModeLabel}
                     </span>
                   ) : null}
                 </span>

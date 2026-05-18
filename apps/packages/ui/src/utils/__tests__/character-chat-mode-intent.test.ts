@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from "vitest"
 import {
   CHARACTER_CHAT_MODE_INTENT_EVENT,
   dispatchCharacterChatModeIntent,
-  getCharacterChatRouteIntent
+  getCharacterChatRouteIntent,
+  normalizeCharacterChatCharacterId
 } from "../character-chat-mode-intent"
 
 describe("character chat mode intent", () => {
@@ -22,6 +23,20 @@ describe("character chat mode intent", () => {
   it("ignores non-character chat modes", () => {
     expect(getCharacterChatRouteIntent("?mode=rag&characterId=char-1")).toBeNull()
     expect(getCharacterChatRouteIntent("?characterId=char-1")).toBeNull()
+  })
+
+  it("validates route character ids before hydration", () => {
+    expect(normalizeCharacterChatCharacterId("char-1")).toBe("char-1")
+    expect(normalizeCharacterChatCharacterId("303")).toBe("303")
+    expect(normalizeCharacterChatCharacterId("../secret")).toBeNull()
+    expect(normalizeCharacterChatCharacterId("char 1")).toBeNull()
+    expect(normalizeCharacterChatCharacterId("a".repeat(129))).toBeNull()
+    expect(
+      getCharacterChatRouteIntent("?mode=character&characterId=../secret")
+    ).toEqual({
+      mode: "character",
+      characterId: null
+    })
   })
 
   it("dispatches durable character chat mode intent", () => {
