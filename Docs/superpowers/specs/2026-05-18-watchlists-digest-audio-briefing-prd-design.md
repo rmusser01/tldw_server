@@ -42,17 +42,6 @@ These are verified implementation facts that the PRD must build on.
 - Current source modal gap: `SourceFormModal` only captures name, URL, source type, and tags, and tests only URL/type. It does not expose `settings`, `scrape_rules`, dedupe identity, selector validation, top-link discovery, history, or per-source backoff/seen controls.
 - Current audio UI gap: `JobFormModal` exposes a simple audio toggle, voice, speed, duration, test sample, background URI, and raw voice-map JSON. It does not expose speaker count, speaker roles, script review, per-speaker generation, per-speaker audio artifacts, or final mix status.
 
-## 2.1 Design Review Corrections Added Before Implementation Planning
-
-The review found the PRD directionally correct, but several requirements needed tighter implementation boundaries before being converted into an engineering plan.
-
-- Configurable dedupe identity is a required product/API improvement, not a verified current capability. The current system has per-source seen state and a fixed key fallback order; user-editable identity rules need backend work.
-- Typed source settings must be additive. The UI must read and write known fields without deleting unknown `settings` keys already used by advanced users or future backend features.
-- Scheduled digest/newsletter delivery depends on monitor output preferences. A run only creates recurring reports when `job_output_prefs.auto_output.enabled` or an equivalent backend contract is set; one-off test runs can still use explicit output creation.
-- Email delivery state belongs to the output artifact. Setup can validate availability and recipients, but success/failure/skipped status must be attached to the generated output or delivery attempt.
-- Multi-speaker audio requires persisted intermediate artifacts. The UI cannot credibly show script review, per-speaker generation, retry, or final mixing unless the workflow persists script, per-speaker clips, final mix, and fallback reason.
-- The guided pipeline must be additive. It should launch from an empty-state or primary CTA and reuse existing tabs/components; it must not remove the current full-control watchlists workflow used by news, OSINT, and CTI users.
-
 ## 3. Personas
 
 ### First-Time News User
@@ -96,7 +85,7 @@ Sources own fetch/extraction/dedupe identity:
 - URL and source type.
 - RSS normalization and conditional fetch metadata.
 - Website extraction rules: selectors, schema DSL, pagination, alternates, discovery settings.
-- Dedupe identity configuration: default key order is existing behavior; advanced user-editable rules for GUID, canonical URL, selector-derived ID, title, or content hash fallback require backend/API support before the UI exposes them as more than preview text.
+- Dedupe identity configuration: default key order is existing behavior; advanced rules can choose GUID, canonical URL, selector-derived ID, title, or content hash fallback.
 - Per-source seen state, backoff, disabled/deferred status, test results, and selector validation.
 
 ### Per-Monitor Ownership
@@ -168,23 +157,23 @@ Monitors own workflow intent:
 
 - R1: Add typed frontend support for all backend watchlist output audio fields, including `generate_audio`, target minutes, voice/model/speed, language, provider/model, persona fields, background options, and `voice_map`.
 - R2: Add a typed frontend service for `GET /watchlists/runs/{run_id}/audio`.
-- R3: Add source settings types for common scrape rules and discovery/dedupe options while keeping raw advanced JSON escape hatches and preserving unknown `settings` keys on edit.
+- R3: Add source settings types for common scrape rules and discovery/dedupe options while keeping raw advanced JSON escape hatches.
 - R4: Make `SourceFormModal` submit source `settings` instead of dropping them.
 - R5: Make forum source UI capability-driven from `/watchlists/settings`; disabled only when `forums_enabled` is false.
 - R6: Add recognition-friendly variable cadence controls that generate cron and honor the existing backend minimum interval.
-- R7: Expose `auto_output.enabled` in job output settings so scheduled monitors can create digest reports automatically; keep explicit output creation for test runs and manual previews.
-- R8: Surface email/chatbook delivery availability in setup review and attach skipped/failed/sent statuses to output artifacts after generation.
+- R7: Expose `auto_output.enabled` in job output settings so scheduled monitors can create digest reports automatically.
+- R8: Surface email/chatbook delivery availability and skipped/failed statuses in setup review and output preview.
 - R9: Keep existing tabs, aliases, deep links, and "Show all views" behavior intact.
 
 ### P1: Guided Pipeline MVP Inside `/watchlists`
 
 - R10: Replace the current partial "Briefing pipeline builder" with a complete create pipeline flow covering sources, monitor, digest/newsletter, optional 1-4 speaker audio, and review.
-- R11: Source setup must show fetch/extraction test results, selector validation warnings, dedupe identity preview, and whether a source will use RSS, scrape rules, or top-link discovery. If selector validation is not externally reachable today, add a route or expand source test responses to return those diagnostics.
+- R11: Source setup must show fetch/extraction test results, selector validation warnings, dedupe identity preview, and whether a source will use RSS, scrape rules, or top-link discovery.
 - R12: Monitor setup must show filter impact preview, include-only behavior, cadence summary, next run time, and delivery/audio expectations.
 - R13: Digest setup must preview rendered Markdown/HTML where run context exists, and show a credible sample otherwise.
 - R14: Email setup must validate recipients before save and explain fallback-to-user-email behavior only when relevant.
 - R15: Audio setup must support 1-4 speakers through structured controls, not raw JSON only.
-- R16: Audio MVP must produce visible script, per-speaker script/audio status, final mixed output status, and playable final audio inside `/watchlists`; this requires workflow/output artifact persistence, not just polling final audio status.
+- R16: Audio MVP must produce visible script, per-speaker script/audio status, final mixed output status, and playable final audio inside `/watchlists`.
 - R17: On run completion, Reports must show digest output, delivery status, audio task status, final audio player, and retry entry points.
 - R18: Activity must show when a run has an output, pending audio task, skipped audio, failed audio, or final audio artifact.
 
@@ -215,57 +204,39 @@ Goal: Remove the current frontend/backend mismatch without changing the full use
 
 Deliverables:
 
-- TypeScript contract updates for output audio fields and source settings, including a safe merge path that preserves unknown advanced `settings` keys.
+- TypeScript contract updates for output audio fields and source settings.
 - `getWatchlistRunAudio(runId)` service helper.
 - Source form pass-through for `settings`.
-- Selector/source-test response contract that returns validation diagnostics, or a new validation endpoint if the existing test route cannot return them cleanly.
 - Forum UI reads `/watchlists/settings`.
 - Schedule picker supports every N minutes/hours/days/weeks and custom cron.
 - Job output prefs UI exposes `auto_output.enabled`.
 - Reports and Activity can show pending/final audio status from existing APIs.
-- Structured audio cast payload shape for 1-4 speakers, with raw `voice_map` retained as an advanced escape hatch.
 
 Success criteria:
 
 - Existing watchlists tests still pass.
 - Users can configure every 5 hours without writing cron.
 - Frontend can create an output with `generate_audio: true` using typed fields.
-- Editing typed source settings does not delete unknown settings keys.
 - A run with `audio_briefing_task_id` displays pending/final audio state.
 
 ### Phase 1: End-To-End Guided MVP
 
 Goal: A first-time user can complete the core workflow inside `/watchlists`.
 
-Phase 1 should be built in dependency order. Do not start by building the full wizard shell if the output/audio contracts cannot yet support the promises shown in the UI.
+Deliverables:
 
-#### Phase 1A: Guided Source And Monitor Setup
-
-- Additive "Create pipeline" entry point from empty state and current overview.
-- Source preview panel with extraction warnings, dedupe key preview, source settings preservation, and fallback explanation.
-- Monitor preview panel with filter and include-only impact, cadence summary, next run time, and explicit create/run/schedule options.
-
-#### Phase 1B: Digest And Newsletter Output
-
-- Digest/newsletter setup with template selection, `auto_output.enabled` for scheduled monitors, and explicit output creation for one-off test runs.
-- Email setup with recipient validation, availability status, and clear post-run delivery status.
-- Reports view showing digest content, source/filter/output provenance, and delivery status.
-
-#### Phase 1C: Optional Audio Briefing
-
+- "Create pipeline" wizard with Sources, Monitor, Digest, Audio, Review.
+- Source preview panel with extraction warnings, dedupe key preview, and fallback explanation.
+- Monitor preview panel with filter and include-only impact.
+- Digest/newsletter setup with auto-output and email delivery.
 - Optional 1-4 speaker audio setup with structured speaker controls.
 - Script review and per-speaker generation state inside `/watchlists`.
-- Workflow/output metadata that persists script, per-speaker artifacts, final audio, and fallback reason.
-- Reports view showing script, per-speaker artifacts, final audio player, and audio retry entry points.
-
-Shared recovery states:
-
+- Reports view showing digest, delivery, script, per-speaker artifacts, final audio.
 - Recovery states for source test failure, empty preview, invalid schedule, invalid email, output render failure, skipped email, pending audio, failed audio, and fallback single-voice audio.
 
 Success criteria:
 
-- First-time user can create a source-backed monitor, run it, and review a digest without leaving `/watchlists`.
-- If audio is enabled, the user can review the script, inspect per-speaker generation state, and play the final audio without leaving `/watchlists`.
+- First-time user can create a pipeline, run it, review a digest, and play optional audio without leaving `/watchlists`.
 - The UI tells the user what will happen next before save.
 - Failures identify source, monitor, delivery, output, or audio stage.
 
@@ -315,12 +286,10 @@ Success criteria:
 | P0 | Both | Core audio output fields exist in backend but not in frontend `WatchlistOutputCreate` type. | Backend schema has `generate_audio` and audio fields; frontend output create type does not. | R1 |
 | P0 | Both | Run audio artifact endpoint exists but shared UI service does not expose it. | Backend `GET /runs/{run_id}/audio`; frontend search only finds `/api/v1/audio/speech`. | R2, R17, R18 |
 | P0 | First-time | Source settings exist but source modal drops them. | Backend source create/update persists `settings_json`; `SourceFormModal` onSubmit only includes name/url/type/tags. | R3, R4, R11 |
-| P0 | Power user | Typed source settings could accidentally erase advanced raw settings if implemented as replacement JSON. | Source `settings_json` is arbitrary today; advanced users may already rely on keys the first typed UI does not understand. | R3, R4, R25 |
 | P0 | First-time | Arbitrary cadence is possible but hidden behind cron. | Backend cron/min interval support; frontend presets only hourly/every6/daily/weekly. | R6 |
 | P0 | Both | Scheduled digest auto-output exists but is not first-class in current setup. | Pipeline reads `job_output_prefs.auto_output.enabled`; current builder mostly creates output after run or sets template defaults. | R7, R13 |
 | P0 | Both | Email delivery exists but availability/skipped states are not setup-visible enough. | `NotificationsService` may return `skipped: notifications_unavailable`; output preview shows statuses only after output. | R8, R14, R17 |
 | P1 | First-time | Website scraping setup lacks extraction-rule guidance and validation. | `validate_selector_rules` exists; Source UI does not expose it. | R11 |
-| P1 | Both | User-editable dedupe identity is desired but not verified as configurable in the current pipeline. | Current code has per-source seen state and fixed fallback key derivation; the UI cannot honestly offer custom identity rules until API support exists. | R11, R28 |
 | P1 | Both | Audio UI is too low-level and does not support user mental model of 1-4 speakers. | Current UI has voice/speed/duration plus raw voice-map JSON; backend workflow composes multi-voice script. | R15, R16 |
 | P1 | Operator | Audio workflow status is disconnected from watchlists run recovery. | Run stats store `audio_briefing_task_id`; endpoint scans Workflow artifacts. UI does not expose full lifecycle. | R17, R18, R30 |
 | P1 | Power user | Source dedupe seen state exists but is not usable as setup/recovery control. | Per-source seen APIs exist; source UI does not expose dedupe identity/reset as part of setup. | R11, R28 |
@@ -348,16 +317,13 @@ Success criteria:
 - Update `apps/packages/ui/src/types/watchlists.ts`.
 - Update `apps/packages/ui/src/services/watchlists.ts`.
 - Extend `SourceFormModal`, `SourcesTab`, `JobFormModal`, `SchedulePicker`, `OverviewTab`, `RunsTab`, `OutputsTab`, and `OutputPreviewDrawer`.
-- Add a source-rule editor with simple fields first, raw JSON fallback, and read-modify-write preservation of unknown settings keys.
+- Add a source-rule editor with simple fields first and raw JSON fallback.
 - Add a speaker/cast editor that writes structured output prefs and can derive `voice_map`.
-- Keep "Create pipeline" as an additive guided path; do not remove or simplify the current full-tab workflow to ship the wizard.
 
 ### Backend/API-Owned
 
 - Add explicit Pydantic schemas for common `source.settings` and scrape-rule validation responses while preserving arbitrary advanced keys.
 - Expose selector validation through a route if not already externally reachable.
-- Add or document API support for configurable source dedupe identity before exposing editable dedupe-key controls beyond preview/reset.
-- Add a structured `audio_cast` or equivalent speaker schema while preserving `voice_map` for advanced/manual use.
 - Add first-class audio status shape to run detail responses so the frontend does not need to stitch run stats, workflow scans, and output artifacts manually.
 - Add safe retry endpoints for delivery/audio-only retry if existing workflow/task APIs are too generic for `/watchlists`.
 - Add output metadata for script, per-speaker artifacts, final mix, and fallback reason.
@@ -391,10 +357,9 @@ Success criteria:
 ## 13. Testing Requirements
 
 - Unit tests for schedule preset generation, every-N cadence validation, source settings serialization, source rule validation UI helpers, and audio cast payload generation.
-- Frontend component tests for source modal settings, unknown settings preservation, pipeline wizard steps, schedule picker, output delivery statuses, run audio status, and audio preview.
-- Backend tests for source settings validation, dedupe identity configuration once added, run audio status, output delivery metadata, `auto_output.enabled`, and audio workflow metadata.
-- Workflow tests proving script, per-speaker audio, final mix, and fallback reason are persisted when audio is enabled.
-- E2E tests for empty-state first-time pipeline creation, digest generation, scheduled auto-output, email configuration validation, optional 1-speaker audio, optional 3-speaker audio, and power-user full-layout clone/run/preview flow.
+- Frontend component tests for source modal settings, pipeline wizard steps, schedule picker, output delivery statuses, run audio status, and audio preview.
+- Backend tests for source settings validation, run audio status, output delivery metadata, `auto_output.enabled`, and audio workflow metadata.
+- E2E tests for empty-state first-time pipeline creation, digest generation, email configuration validation, optional 1-speaker audio, optional 3-speaker audio, and power-user full-layout clone/run/preview flow.
 - Regression tests to ensure existing tabs, deep links, OPML import/export, templates, item review, and command palette behavior still work.
 
 ## 14. Real Risks And Resolved Non-Questions
@@ -410,31 +375,27 @@ Resolved by code inspection:
 
 Real risks:
 
-- Existing source settings are untyped and could become another raw JSON trap unless the PRD creates a typed simple path without deleting unknown advanced keys.
-- Configurable dedupe identity is not proven as an existing backend setting; exposing it as editable UI before API support would be misleading.
+- Existing source settings are untyped and could become another raw JSON trap unless the PRD creates a typed simple path.
 - The existing audio workflow may not currently persist all intermediate artifacts needed for script review and per-speaker recovery; that requires workflow/output metadata work.
-- Email availability may depend on AuthNZ email configuration; setup must expose skipped/unavailable honestly, and recurring email requires generated outputs from auto-output or equivalent scheduler support.
+- Email availability may depend on AuthNZ email configuration; setup must expose skipped/unavailable honestly.
 - Adding guided workflow must not hide existing OSINT/CTI workflows or slow expert paths.
 - The UI must not imply scheduled outputs will be created unless `auto_output.enabled` or an equivalent backend path is actually set.
 
 ## 15. Implementation Priority
 
 1. Phase 0 contract alignment.
-2. Variable cadence UI and source settings pass-through with unknown-key preservation.
-3. Source validation diagnostics and honest dedupe identity preview.
-4. Auto-output and delivery state surfacing.
-5. Run audio service/status in Activity and Reports.
-6. Guided source/monitor/digest flow.
-7. Structured 1-4 speaker audio controls and persisted script/per-speaker/final artifacts.
-8. Power-user reuse and batch operations.
-9. Operator diagnostics and retry controls.
-10. Feature-flagged forum source setup.
+2. Variable cadence UI and source settings pass-through.
+3. Auto-output and delivery state surfacing.
+4. Run audio service/status in Activity and Reports.
+5. Complete guided pipeline MVP.
+6. Structured 1-4 speaker audio controls and artifact display.
+7. Power-user reuse and batch operations.
+8. Operator diagnostics and retry controls.
+9. Feature-flagged forum source setup.
 
 ## 16. Acceptance Criteria
 
 - A first-time user can create a source-backed monitor, choose a variable cadence, configure digest/newsletter output, enable email, enable optional 1-4 speaker audio, run once, preview the digest, and play the final audio inside `/watchlists`.
-- Scheduled digest/newsletter creation uses monitor output preferences and does not rely on a manual post-run output action.
-- Optional audio shows script, per-speaker generation state/artifacts, final mix, and fallback reason when applicable.
 - A power user can keep using the full tabbed interface, raw cron, templates, source imports, batch source operations, item review, and advanced controls.
 - An operator can identify source, filter, output, email, and audio failures from `/watchlists` and retry or recover the correct stage.
 - Existing watchlists APIs and UI flows are extended, not replaced.
