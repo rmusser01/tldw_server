@@ -3,6 +3,12 @@
   "selectAPrompt": "Select a Prompt",
   "githubRepository": "GitHub Repository",
   "settings": "Settings",
+  "setupRoute": {
+    "title": "Setup Wizard",
+    "panelTitle": "Connect your server",
+    "panelMessage": "Guided connection setup for production use.",
+    "startAction": "Start setup"
+  },
   "connectionCard": {
     "headlineMissing": "Connect tldw Assistant to your server",
     "headlineSearching": "Searching for your tldw server…",

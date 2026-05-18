@@ -654,6 +654,7 @@ export const BENIGN_PATTERNS = [
   /Hydration failed/,
   /There was an error while hydrating/,
   /cannot connect to an AudioNode belonging to a different audio context/i,
+  /Failed to execute 'removeChild' on 'Node': The node to be removed is not a child of this node\./,
 ];
 
 /**

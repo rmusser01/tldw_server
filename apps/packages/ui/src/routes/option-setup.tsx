@@ -1,10 +1,12 @@
 import React from "react"
+import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import OptionLayout from "~/components/Layouts/Layout"
 import { OnboardingWizard } from "@/components/Option/Onboarding/OnboardingWizard"
 import { SetupRequiredPanel } from "@/components/ui/state"
 
 const OptionSetup = () => {
+  const { t } = useTranslation("option")
   const navigate = useNavigate()
 
   const handleFinish = React.useCallback(() => {
@@ -13,12 +15,20 @@ const OptionSetup = () => {
 
   return (
     <OptionLayout hideHeader hideSidebar>
+      <div className="mx-auto mb-4 w-full max-w-3xl">
+        <h1 className="text-lg font-semibold text-text">
+          {t("setupRoute.title", "Setup Wizard")}
+        </h1>
+      </div>
       <SetupRequiredPanel
         className="mx-auto mb-4 w-full max-w-3xl"
-        title="Setup Wizard"
-        message="Guided connection setup for production use."
+        title={t("setupRoute.panelTitle", "Connect your server")}
+        message={t(
+          "setupRoute.panelMessage",
+          "Guided connection setup for production use."
+        )}
         primaryAction={{
-          label: "Start setup",
+          label: t("setupRoute.startAction", "Start setup"),
           onClick: () => {
             document
               .querySelector<HTMLElement>(
