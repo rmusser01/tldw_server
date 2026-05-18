@@ -1,10 +1,10 @@
 ---
 id: TASK-418.14
 title: Implement WebUI settings and model provider remediation
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-18 17:07'
+updated_date: '2026-05-18 18:03'
 labels:
   - ux
   - webui
@@ -32,12 +32,12 @@ Implement the WP5 settings and model/provider UX remediation slice for WebUI/ext
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Settings navigation has task-led groups and no visible dotted i18n keys.
-- [ ] #2 /settings/provider-keys has a user-facing label and remains searchable/filterable from settings navigation.
-- [ ] #3 Routine settings are separated from data/import/export/reset actions while preserving existing reset safeguards.
+- [x] #1 Settings navigation has task-led groups and no visible dotted i18n keys.
+- [x] #2 /settings/provider-keys has a user-facing label and remains searchable/filterable from settings navigation.
+- [x] #3 Routine settings are separated from data/import/export/reset actions while preserving existing reset safeguards.
 - [x] #4 /settings/model prioritizes default/configured/usable model setup before full catalog browsing while preserving advanced controls.
 - [x] #5 Prompt Library, Prompt Studio, and Prompt Studio settings route intent remains distinct and covered by tests.
-- [ ] #6 Focused Vitest settings/model tests, settings browser workflow checks, WP4 responsive landmarks, git diff --check, and applicable security checks are recorded.
+- [x] #6 Focused Vitest settings/model tests, settings browser workflow checks, WP4 responsive landmarks, git diff --check, and applicable security checks are recorded.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -64,12 +64,14 @@ Verification: bunx vitest run src/components/Option/Models/__tests__/ModelsBody.
 Completed fourth remediation slice: added browser route-intent guards for Prompt Library/Prompts workspace, legacy /prompt-studio redirect, /settings/prompt, and /settings/prompt-studio. No route/component code changes were needed; existing route ownership already matched the intended UX contract.
 
 Verification: bunx playwright test e2e/workflows/tier-1-critical/settings-core.spec.ts --grep "Prompt route intent" --reporter=line -> 3 passed. bunx playwright test e2e/workflows/settings.spec.ts e2e/workflows/tier-1-critical/settings-core.spec.ts --reporter=line -> 59 passed. git diff --check passed.
+
+Final verification 2026-05-18: focused UI Vitest suite passed 11 files / 41 tests; settings Playwright workflow pair passed 59 tests; WP4 responsive landmarks passed 12 tests including /settings and /settings/model; git diff --check passed. Documentation governance scans for the child plan and TASK-418.2 produced no placeholder/trailing-whitespace/non-ASCII findings and diff-check passed. Bandit was not run because this slice touched frontend TypeScript/TSX, Playwright tests, Markdown, locale JSON, and Backlog files only. Full apps/packages/ui TypeScript remains blocked by pre-existing repo-wide baseline debt outside this slice; first failures are in audio, chat composer, common prompt utils, quick-ingest, flashcards, playground, services, and route baseline tests before this branch’s settings/model files.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed WP5 settings/model-provider UX remediation for WebUI/extension. Implemented task-led settings grouping, user-facing Provider Keys navigation, separate Data Management settings for import/export/reset, configured-first /settings/model defaults and provider readiness, model utility coverage, and browser route-intent guards for /prompts, /prompt-studio, /settings/prompt, and /settings/prompt-studio. Verification passed for focused Vitest settings/model coverage, settings Playwright workflows, WP4 responsive landmarks, and diff/governance checks. Full TypeScript remains blocked by existing unrelated baseline debt; Bandit is not applicable to this frontend/docs-only slice.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
@@ -78,10 +80,10 @@ Verification: bunx playwright test e2e/workflows/tier-1-critical/settings-core.s
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
