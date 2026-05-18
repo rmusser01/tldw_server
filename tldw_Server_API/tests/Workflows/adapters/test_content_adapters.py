@@ -2040,15 +2040,15 @@ class TestAudioBriefingComposeAdapter:
 
         mock_response = {
             "choices": [
-                {"message": {"content": ("[HOST]: Welcome to the briefing.\n" "[ANALYST]: Here is the analysis.")}}
+                {"message": {"content": ("[SPEAKER1]: Welcome to the briefing.\n" "[ANALYST]: Here is the analysis.")}}
             ]
         }
         audio_cast = {
             "speaker_count": 2,
             "speakers": [
                 {
-                    "id": "host",
-                    "label": "Host",
+                    "id": "speaker1",
+                    "label": "Speaker 1",
                     "role": "anchor",
                     "voice": "af_bella",
                 },
@@ -2074,10 +2074,12 @@ class TestAudioBriefingComposeAdapter:
             result = await run_audio_briefing_compose_adapter(config, base_context)
 
         system_prompt = mock_llm.call_args.kwargs["system_message"]
+        assert "[SPEAKER1]" in system_prompt
         assert "[ANALYST]" in system_prompt
         assert "expert commentary" in system_prompt
         assert "REPORTER" not in system_prompt
-        assert result["voice_assignments"]["HOST"] == "af_bella"
+        assert result["sections"][0]["voice"] == "SPEAKER1"
+        assert result["voice_assignments"]["SPEAKER1"] == "af_bella"
         assert result["voice_assignments"]["ANALYST"] == "am_adam"
 
     @pytest.mark.asyncio

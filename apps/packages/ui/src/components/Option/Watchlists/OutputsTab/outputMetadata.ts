@@ -23,6 +23,7 @@ export interface DeliveryDisclosureSummary {
 export interface AudioArtifactSummary {
   label: string
   uri?: string
+  displayName?: string
   downloadUrl?: string
   mimeType?: string
   speakerId?: string
@@ -78,6 +79,26 @@ const asNonEmptyString = (value: unknown): string | undefined => {
   if (typeof value !== "string") return undefined
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : undefined
+}
+
+const asSafeDownloadUrl = (value: unknown): string | undefined => {
+  const url = asNonEmptyString(value)
+  if (!url) return undefined
+  const lower = url.toLowerCase()
+  if (url.startsWith("/api/") || lower.startsWith("https://") || lower.startsWith("http://")) {
+    return url
+  }
+  return undefined
+}
+
+const getArtifactLocationDisplayName = (value: unknown): string | undefined => {
+  const location = asNonEmptyString(value)
+  if (!location) return undefined
+  const withoutFragment = location.split("#", 1)[0]
+  const withoutQuery = withoutFragment.split("?", 1)[0]
+  const withoutScheme = withoutQuery.replace(/^file:\/+/i, "")
+  const segments = withoutScheme.split(/[\\/]+/).filter(Boolean)
+  return segments.length > 0 ? segments[segments.length - 1] : undefined
 }
 
 const asPositiveInteger = (value: unknown): number | undefined => {
@@ -413,8 +434,15 @@ const normalizeAudioArtifact = (
   fallbackLabel: string
 ): AudioArtifactSummary | undefined => {
   if (typeof value === "string") {
-    const uri = asNonEmptyString(value)
-    return uri ? { label: fallbackLabel, uri } : undefined
+    const rawLocation = asNonEmptyString(value)
+    if (!rawLocation) return undefined
+    const safeUri = asSafeDownloadUrl(rawLocation)
+    return {
+      label: fallbackLabel,
+      uri: safeUri,
+      displayName: getArtifactLocationDisplayName(rawLocation),
+      downloadUrl: safeUri
+    }
   }
 
   if (!isRecord(value)) return undefined
@@ -430,8 +458,9 @@ const normalizeAudioArtifact = (
     asNonEmptyString(value.storage_path) ||
     asNonEmptyString(value.path)
   const downloadUrl =
-    asNonEmptyString(value.download_url) ||
-    asNonEmptyString(value.downloadUrl)
+    asSafeDownloadUrl(value.download_url) ||
+    asSafeDownloadUrl(value.downloadUrl) ||
+    asSafeDownloadUrl(uri)
   const mimeType =
     asNonEmptyString(value.mime_type) ||
     asNonEmptyString(value.mimeType)
@@ -444,7 +473,8 @@ const normalizeAudioArtifact = (
 
   return {
     label,
-    uri,
+    uri: asSafeDownloadUrl(uri),
+    displayName: getArtifactLocationDisplayName(uri),
     downloadUrl,
     mimeType,
     speakerId
@@ -480,9 +510,9 @@ export const getAudioStatusSummary = (
         .filter((entry): entry is AudioArtifactSummary => entry !== undefined)
     : []
   const downloadUrl =
-    asNonEmptyString(record?.download_url) ||
+    asSafeDownloadUrl(record?.download_url) ||
     finalArtifact?.downloadUrl ||
-    asNonEmptyString(record?.audio_uri)
+    asSafeDownloadUrl(record?.audio_uri)
   const fallbackReason =
     asNonEmptyString(record?.fallback_reason) ||
     asNonEmptyString(record?.fallbackReason)

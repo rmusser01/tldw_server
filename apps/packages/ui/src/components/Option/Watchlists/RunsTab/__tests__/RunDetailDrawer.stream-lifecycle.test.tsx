@@ -393,7 +393,9 @@ describe("RunDetailDrawer stream lifecycle", () => {
       expect(mocks.getWatchlistRunAudioMock).toHaveBeenCalledWith(10)
     })
     expect(screen.getByText("Audio briefing")).toBeInTheDocument()
-    expect(screen.getByText("Pending")).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText("Pending")).toBeInTheDocument()
+    })
   })
 
   it("displays completed audio with a final download link", async () => {

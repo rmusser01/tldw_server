@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from loguru import logger
+from starlette.concurrency import run_in_threadpool
 
 # ---------------------------------------------------------------------------
 # Built-in workflow definition
@@ -172,7 +173,13 @@ async def trigger_audio_briefing(
 
     # Gather scraped items for this run
     try:
-        scraped_items, _ = db.list_items(run_id=run_id, status="ingested", limit=100, offset=0)
+        scraped_items, _ = await run_in_threadpool(
+            db.list_items,
+            run_id=run_id,
+            status="ingested",
+            limit=100,
+            offset=0,
+        )
     except Exception as exc:
         logger.warning(f"Audio briefing: could not load scraped items for run {run_id}: {exc}")
         return None

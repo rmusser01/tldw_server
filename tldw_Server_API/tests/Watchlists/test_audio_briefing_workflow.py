@@ -246,10 +246,21 @@ class TestTriggerAudioBriefing:
         mock_scheduler = AsyncMock()
         mock_scheduler.enqueue.return_value = "task_abc123"
 
-        with patch(
-            "tldw_Server_API.app.core.Scheduler.get_global_scheduler",
-            new_callable=AsyncMock,
-            return_value=mock_scheduler,
+        async def run_sync_in_test(fn, *args, **kwargs):
+            return fn(*args, **kwargs)
+
+        with (
+            patch(
+                "tldw_Server_API.app.core.Watchlists.audio_briefing_workflow.run_in_threadpool",
+                new_callable=AsyncMock,
+                side_effect=run_sync_in_test,
+                create=True,
+            ) as mock_threadpool,
+            patch(
+                "tldw_Server_API.app.core.Scheduler.get_global_scheduler",
+                new_callable=AsyncMock,
+                return_value=mock_scheduler,
+            ),
         ):
             result = await trigger_audio_briefing(
                 user_id=1,
@@ -283,6 +294,7 @@ class TestTriggerAudioBriefing:
         assert len(task.payload["inputs"]["items"]) == 2
         assert task.payload["metadata"]["watchlist_job_id"] == 42
         assert task.payload["metadata"]["watchlist_run_id"] == 7
+        mock_threadpool.assert_awaited_once()
         db.list_items.assert_called_once_with(run_id=7, status="ingested", limit=100, offset=0)
 
     @pytest.mark.asyncio

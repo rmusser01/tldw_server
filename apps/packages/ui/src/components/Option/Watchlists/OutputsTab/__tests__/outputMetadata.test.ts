@@ -4,6 +4,7 @@ import {
   buildRegenerateOutputRequest,
   getDeliveryStatusColor,
   getDeliveryStatusLabel,
+  getAudioStatusSummary,
   getAlertCount,
   getExcludedItemCount,
   getIncludedItemCount,
@@ -167,6 +168,35 @@ describe("outputMetadata helpers", () => {
     expect(getOutputMimeType(markdownOutput.format)).toBe("text/markdown")
     expect(getOutputFileExtension(audioOutput)).toBe("mp3")
     expect(getOutputFileExtension(markdownOutput)).toBe("md")
+  })
+
+  it("does not expose file artifact paths as audio download targets", () => {
+    const summary = getAudioStatusSummary({
+      status: "completed",
+      audio_uri: "file:///srv/tldw/watchlists/runs/9/final.mp3",
+      final_artifact: {
+        title: "Final mix",
+        uri: "file:///srv/tldw/watchlists/runs/9/final.mp3"
+      },
+      script_artifact: {
+        title: "Briefing script",
+        uri: "file:///srv/tldw/watchlists/runs/9/briefing_script.md",
+        download_url: "/api/v1/watchlists/runs/9/audio/script/download"
+      }
+    })
+
+    expect(summary.downloadUrl).toBeUndefined()
+    expect(summary.finalArtifact).toMatchObject({
+      label: "Final mix",
+      displayName: "final.mp3"
+    })
+    expect(summary.finalArtifact?.uri).toBeUndefined()
+    expect(summary.scriptArtifact).toMatchObject({
+      label: "Briefing script",
+      displayName: "briefing_script.md",
+      downloadUrl: "/api/v1/watchlists/runs/9/audio/script/download"
+    })
+    expect(summary.scriptArtifact?.uri).toBeUndefined()
   })
 
   it("returns artifact labels and tag colors by output kind", () => {

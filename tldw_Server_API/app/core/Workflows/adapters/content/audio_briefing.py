@@ -38,7 +38,7 @@ _DEFAULT_VOICE_MAP: dict[str, str] = {
     "ANALYST": "bf_emma",
 }
 
-_VOICE_MARKER_RE = re.compile(r"^\[([A-Z_]+)\]:\s*", re.MULTILINE)
+_VOICE_MARKER_RE = re.compile(r"^\[([A-Z0-9_]+)\]:\s*", re.MULTILINE)
 _REASONING_BLOCK_RE = re.compile(
     r"<(?:think|thinking|reasoning)>[\s\S]*?</(?:think|thinking|reasoning)>\s*",
     flags=re.IGNORECASE,

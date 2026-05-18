@@ -23,6 +23,7 @@ import {
   restoreFocusToElement
 } from "../shared/focus-management"
 import {
+  type AudioArtifactSummary,
   getDeliveryStatusColor,
   getOutputArtifactLabel,
   getOutputFileExtension,
@@ -241,6 +242,26 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
   const renderAudioArtifactGraph = () => {
     if (!audioSummary.requested) return null
 
+    const renderArtifact = (artifact: AudioArtifactSummary, key: string) => (
+      <div key={key}>
+        <div className="font-medium text-text">{artifact.label}</div>
+        {artifact.displayName ? <div>{artifact.displayName}</div> : null}
+        {artifact.downloadUrl ? (
+          <a
+            href={artifact.downloadUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary hover:underline"
+            aria-label={t("watchlists:outputs.openAudioArtifactAria", "Open {{label}}", {
+              label: artifact.label
+            })}
+          >
+            {t("watchlists:outputs.openAudioArtifact", "Open")}
+          </a>
+        ) : null}
+      </div>
+    )
+
     return (
       <div className="space-y-2" data-testid="output-preview-audio-artifacts">
         <div className="flex flex-wrap items-center gap-2">
@@ -258,30 +279,13 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
         )}
         <div className="grid gap-2 text-xs text-text-muted sm:grid-cols-2">
           {audioSummary.scriptArtifact && (
-            <div>
-              <span className="font-medium text-text">
-                {audioSummary.scriptArtifact.label}
-              </span>
-              {audioSummary.scriptArtifact.uri ? (
-                <div>{audioSummary.scriptArtifact.uri}</div>
-              ) : null}
-            </div>
+            renderArtifact(audioSummary.scriptArtifact, "script")
           )}
           {audioSummary.speakerArtifacts.map((artifact, index) => (
-            <div key={`${artifact.speakerId || artifact.label}-${index}`}>
-              <span className="font-medium text-text">{artifact.label}</span>
-              {artifact.uri ? <div>{artifact.uri}</div> : null}
-            </div>
+            renderArtifact(artifact, `${artifact.speakerId || artifact.label}-${index}`)
           ))}
           {audioSummary.finalArtifact && (
-            <div>
-              <span className="font-medium text-text">
-                {audioSummary.finalArtifact.label}
-              </span>
-              {audioSummary.finalArtifact.uri ? (
-                <div>{audioSummary.finalArtifact.uri}</div>
-              ) : null}
-            </div>
+            renderArtifact(audioSummary.finalArtifact, "final")
           )}
         </div>
       </div>

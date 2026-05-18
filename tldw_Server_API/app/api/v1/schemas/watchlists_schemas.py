@@ -907,6 +907,8 @@ class WatchlistOutputDeliveries(BaseModel):
 
 
 class WatchlistAudioCastSpeaker(BaseModel):
+    """Defines one named speaker for generated watchlist audio briefings."""
+
     id: str = Field(..., min_length=1, max_length=64)
     label: str = Field(..., min_length=1, max_length=128)
     role: str | None = Field(default=None, max_length=128)
@@ -915,11 +917,15 @@ class WatchlistAudioCastSpeaker(BaseModel):
 
 
 class WatchlistAudioCast(BaseModel):
+    """Defines the structured one-to-four speaker cast for an audio output."""
+
     speaker_count: int = Field(..., ge=1, le=4)
     speakers: list[WatchlistAudioCastSpeaker]
 
 
 class WatchlistAudioArtifactSummary(BaseModel):
+    """Summarizes a script, speaker clip, or final audio artifact for a run."""
+
     artifact_id: str | int | None = None
     type: str | None = None
     uri: str | None = None
@@ -933,6 +939,8 @@ class WatchlistAudioArtifactSummary(BaseModel):
 
 
 class WatchlistRunAudioResponse(BaseModel):
+    """Response payload for watchlist run audio status and artifact metadata."""
+
     run_id: int
     task_id: str | None = None
     status: str

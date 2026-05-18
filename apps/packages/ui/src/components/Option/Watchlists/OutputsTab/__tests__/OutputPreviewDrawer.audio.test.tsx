@@ -114,23 +114,26 @@ describe("OutputPreviewDrawer audio support", () => {
               fallback_reason: "Speaker B voice failed; used fallback single voice.",
               script_artifact: {
                 title: "Briefing script",
-                uri: "watchlists/runs/9/script.md"
+                uri: "file:///srv/tldw/watchlists/runs/9/script.md",
+                download_url: "/api/v1/watchlists/runs/9/audio/script/download"
               },
               speaker_artifacts: [
                 {
                   speaker_id: "host",
                   label: "Host",
-                  uri: "watchlists/runs/9/host.mp3"
+                  uri: "file:///srv/tldw/watchlists/runs/9/host.mp3"
                 },
                 {
                   speaker_id: "analyst",
                   label: "Analyst",
-                  uri: "watchlists/runs/9/analyst.mp3"
+                  uri: "file:///srv/tldw/watchlists/runs/9/analyst.mp3",
+                  download_url: "/api/v1/watchlists/runs/9/audio/speakers/analyst/download"
                 }
               ],
               final_artifact: {
                 title: "Final mix",
-                uri: "watchlists/runs/9/final.mp3"
+                uri: "file:///srv/tldw/watchlists/runs/9/final.mp3",
+                download_url: "/api/v1/watchlists/runs/9/audio/final/download"
               }
             }
           }
@@ -148,6 +151,22 @@ describe("OutputPreviewDrawer audio support", () => {
     expect(screen.getByText("Host")).toBeInTheDocument()
     expect(screen.getByText("Analyst")).toBeInTheDocument()
     expect(screen.getByText("Final mix")).toBeInTheDocument()
+    expect(screen.getByText("script.md")).toBeInTheDocument()
+    expect(screen.getByText("host.mp3")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Open Briefing script" })).toHaveAttribute(
+      "href",
+      "/api/v1/watchlists/runs/9/audio/script/download"
+    )
+    expect(screen.getByRole("link", { name: "Open Analyst" })).toHaveAttribute(
+      "href",
+      "/api/v1/watchlists/runs/9/audio/speakers/analyst/download"
+    )
+    expect(screen.getByRole("link", { name: "Open Final mix" })).toHaveAttribute(
+      "href",
+      "/api/v1/watchlists/runs/9/audio/final/download"
+    )
+    expect(screen.queryByText(/file:\/\//)).not.toBeInTheDocument()
+    expect(screen.queryByText(/srv\/tldw/)).not.toBeInTheDocument()
     expect(screen.getByText(/Speaker B voice failed/)).toBeInTheDocument()
   })
 
