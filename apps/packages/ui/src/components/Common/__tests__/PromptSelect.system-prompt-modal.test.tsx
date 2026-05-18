@@ -354,6 +354,26 @@ describe("PromptSelect system prompt modal", () => {
     ).toBeInTheDocument()
   })
 
+  it("keeps current system prompt recovery actions visible when saved prompts exist", async () => {
+    const user = userEvent.setup()
+    renderPromptSelect({
+      selectedSystemPrompt: undefined,
+      systemPrompt: "Stay in character."
+    })
+
+    await user.click(
+      await screen.findByRole("button", { name: "selectAPrompt" })
+    )
+
+    expect(await screen.findByText(/Prompt One/i)).toBeInTheDocument()
+    expect(
+      screen.getByRole("menuitem", { name: /edit current system prompt/i })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("menuitem", { name: /clear current system prompt/i })
+    ).toBeInTheDocument()
+  })
+
   it("edits and saves a current custom prompt when the prompt library is empty", async () => {
     const user = userEvent.setup()
     mocks.getAllPrompts.mockResolvedValue([])

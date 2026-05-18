@@ -278,6 +278,10 @@ export const PromptSelect: React.FC<Props> = ({
       }
     })
 
+    if (currentSystemPromptRecoveryItems.length > 0) {
+      items.push(...currentSystemPromptRecoveryItems)
+    }
+
     // If no groups (shouldn't happen, but fallback)
     if (items.length === 0) {
       return filteredData.map(createPromptItem)

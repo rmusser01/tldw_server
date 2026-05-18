@@ -958,7 +958,7 @@ export const PlaygroundForm = ({
   const [sttSegEmbeddingsModel] = useStorage("sttSegEmbeddingsModel", "");
   const [selectedCharacter, setSelectedCharacter] =
     useSelectedCharacter<Character | null>(null);
-  const [selectedAssistant] = useSelectedAssistant(null);
+  const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null);
   const [defaultCharacter, setDefaultCharacter] = useStorage<Character | null>(
     {
       key: DEFAULT_CHARACTER_STORAGE_KEY,
@@ -1477,6 +1477,7 @@ export const PlaygroundForm = ({
     setSelectedQuickPrompt,
     setSystemPrompt,
     setSelectedCharacter,
+    setSelectedAssistant,
     setRagPinnedResults,
     updateChatModelSettings,
     compareModeActive,

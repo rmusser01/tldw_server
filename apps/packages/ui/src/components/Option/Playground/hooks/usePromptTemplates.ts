@@ -16,6 +16,10 @@ import { detectCurrentPreset, getPresetByKey } from "../ParameterPresets";
 import type { PromptTemplate } from "../SystemPromptTemplates";
 import type { Prompt } from "@/db/dexie/types";
 import type { ChatModelSettings } from "@/store/model";
+import {
+  personaToAssistantSelection,
+  type AssistantSelection,
+} from "@/types/assistant-selection";
 import type { Character } from "@/types/character";
 
 // ---------------------------------------------------------------------------
@@ -42,6 +46,9 @@ export interface UsePromptTemplatesDeps {
   setSelectedQuickPrompt: (prompt: string | null) => void;
   setSystemPrompt: (prompt: string) => void;
   setSelectedCharacter: (character: any) => void;
+  setSelectedAssistant: (
+    assistant: AssistantSelection | null,
+  ) => Promise<void> | void;
   setRagPinnedResults: (results: any[]) => void;
   updateChatModelSettings: (settings: Partial<ChatModelSettings>) => void;
   /** Compare mode (needed when applying template to sync model selection) */
@@ -81,6 +88,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
     setSelectedQuickPrompt,
     setSystemPrompt,
     setSelectedCharacter,
+    setSelectedAssistant,
     setRagPinnedResults,
     updateChatModelSettings,
     compareModeActive,
@@ -313,14 +321,34 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
         setSelectedSystemPrompt(undefined);
       }
       setSystemPrompt(resolvedPromptContent);
-      updateChatModelSettings({ systemPromptTemplateId: undefined });
 
       const preset = getPresetByKey(template.presetKey);
-      if (preset && preset.key !== "custom") {
-        updateChatModelSettings(preset.settings);
-      }
+      const behaviorTemplateId =
+        template.rolePlay?.behavior?.templateId?.trim() || undefined;
+      updateChatModelSettings({
+        ...(preset && preset.key !== "custom" ? preset.settings : {}),
+        systemPromptTemplateId: behaviorTemplateId,
+      });
 
-      void setSelectedCharacter(template.character || null);
+      const rolePlayIdentity = template.rolePlay?.identity;
+      if (rolePlayIdentity?.kind === "persona") {
+        void setSelectedAssistant(
+          personaToAssistantSelection({
+            id: String(rolePlayIdentity.id),
+            name: rolePlayIdentity.name,
+          }),
+        );
+      } else if (rolePlayIdentity?.kind === "character") {
+        void setSelectedCharacter(
+          template.character ||
+            ({
+              id: String(rolePlayIdentity.id),
+              name: rolePlayIdentity.name,
+            } as Character),
+        );
+      } else {
+        void setSelectedCharacter(template.character || null);
+      }
       setRagPinnedResults(template.ragPinnedResults || []);
     },
     [
@@ -328,6 +356,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
       promptLibrary,
       setCompareSelectedModels,
       setRagPinnedResults,
+      setSelectedAssistant,
       setSelectedCharacter,
       setSelectedModel,
       setSelectedSystemPrompt,
