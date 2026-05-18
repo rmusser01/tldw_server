@@ -302,6 +302,12 @@ const resolveStorageKey = (key: unknown): string => {
   return ""
 }
 
+const expectDesignSystemAlertForText = (text: string) => {
+  const alert = screen.getByText(text).closest('[data-ds-component="Alert"]')
+  expect(alert).not.toBeNull()
+  return alert as HTMLElement
+}
+
 const openAdvancedFilters = async (
   user: ReturnType<typeof userEvent.setup>
 ) => {
@@ -1636,7 +1642,9 @@ describe("CharactersManager first-use onboarding", () => {
     await user.click(saveButton)
 
     await waitFor(() => {
-      const latestCall = tldwClientMock.updateCharacter.mock.calls.at(-1)
+      const latestCall = tldwClientMock.updateCharacter.mock.calls.at(-1) as unknown as
+        | [string, Record<string, unknown>]
+        | undefined
       expect(latestCall?.[0]).toBe("folder-edit-1")
       expect(latestCall?.[1]).toEqual(
         expect.objectContaining({
@@ -3179,7 +3187,9 @@ describe("CharactersManager first-use onboarding", () => {
     fireEvent.submit(editFormElement as HTMLFormElement)
 
     await waitFor(() => {
-      const latestCall = tldwClientMock.updateCharacter.mock.calls.at(-1)
+      const latestCall = tldwClientMock.updateCharacter.mock.calls.at(-1) as unknown as
+        | [string, Record<string, unknown>]
+        | undefined
       expect(latestCall?.[0]).toBe("char-edit-flow")
       expect(latestCall?.[1]).toEqual(
         expect.objectContaining({
@@ -3537,6 +3547,9 @@ describe("CharactersManager first-use onboarding", () => {
         "Saved characters are still available. Configure a chat model, then return here to continue with No Model Character."
       )
     ).toBeInTheDocument()
+    expectDesignSystemAlertForText(
+      "Choose a chat model before chatting as No Model Character"
+    )
     expect(screen.getByRole("link", { name: "Open model settings" })).toHaveAttribute(
       "href",
       "/settings/model"
@@ -3603,6 +3616,9 @@ describe("CharactersManager first-use onboarding", () => {
         "Saved characters are still available. Configure a chat model, then return here to continue with Intent Character."
       )
     ).toBeInTheDocument()
+    expectDesignSystemAlertForText(
+      "Choose a chat model before chatting as Intent Character"
+    )
     expect(screen.getByRole("link", { name: "Open model settings" })).toHaveAttribute(
       "href",
       "/settings/model"
