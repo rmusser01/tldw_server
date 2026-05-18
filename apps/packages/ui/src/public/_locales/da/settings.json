@@ -3352,5 +3352,23 @@
   },
   "generalSettings_settings_chatRichTextStyles_quoteBackgroundColor": {
     "message": "Citatbaggrundsfarve"
+  },
+  "navigation_connect": {
+    "message": "Forbindelse"
+  },
+  "navigation_aiModels": {
+    "message": "AI og modeller"
+  },
+  "navigation_experience": {
+    "message": "Oplevelse"
+  },
+  "navigation_knowledgeWorkspace": {
+    "message": "Viden og arbejdsområde"
+  },
+  "navigation_safetyAdmin": {
+    "message": "Sikkerhed og administration"
+  },
+  "providerKeys_navTitle": {
+    "message": "Udbydernøgler"
   }
 }

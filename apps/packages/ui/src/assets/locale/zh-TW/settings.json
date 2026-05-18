@@ -3,7 +3,12 @@
     "serverAndAuth": "伺服器與驗證",
     "knowledgeTools": "知識工具",
     "workspace": "工作區",
-    "about": "關於"
+    "about": "關於",
+    "connect": "連線",
+    "aiModels": "AI 與模型",
+    "experience": "體驗",
+    "knowledgeWorkspace": "知識與工作區",
+    "safetyAdmin": "安全與管理"
   },
   "healthNav": "健康",
   "worldBooksNav": "世界書",
@@ -1674,5 +1679,8 @@
     "subtitle": "設定快速匯入的預設值、預設集與行為。"
   },
   "acpPlaygroundNav": "ACP 實驗場",
-  "skillsNav": "技能"
+  "skillsNav": "技能",
+  "providerKeys": {
+    "navTitle": "供應商金鑰"
+  }
 }

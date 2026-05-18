@@ -3,7 +3,12 @@
     "serverAndAuth": "Server och autentisering",
     "knowledgeTools": "Kunskapsverktyg",
     "workspace": "Arbetsyta",
-    "about": "Om"
+    "about": "Om",
+    "connect": "Anslutning",
+    "aiModels": "AI och modeller",
+    "experience": "Upplevelse",
+    "knowledgeWorkspace": "Kunskap och arbetsyta",
+    "safetyAdmin": "Säkerhet och administration"
   },
   "healthNav": "Hälsa",
   "worldBooksNav": "Världböcker",
@@ -1659,5 +1664,8 @@
     "subtitle": "Konfigurera standardvärden, förinställningar och beteende för snabb import."
   },
   "acpPlaygroundNav": "ACP-lekplats",
-  "skillsNav": "Färdigheter"
+  "skillsNav": "Färdigheter",
+  "providerKeys": {
+    "navTitle": "Leverantörsnycklar"
+  }
 }

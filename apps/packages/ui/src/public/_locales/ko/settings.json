@@ -3352,5 +3352,23 @@
   },
   "generalSettings_settings_chatRichTextStyles_quoteBackgroundColor": {
     "message": "인용문 배경 색상"
+  },
+  "navigation_connect": {
+    "message": "연결"
+  },
+  "navigation_aiModels": {
+    "message": "AI 및 모델"
+  },
+  "navigation_experience": {
+    "message": "경험"
+  },
+  "navigation_knowledgeWorkspace": {
+    "message": "지식 및 작업 공간"
+  },
+  "navigation_safetyAdmin": {
+    "message": "안전 및 관리"
+  },
+  "providerKeys_navTitle": {
+    "message": "제공자 키"
   }
 }

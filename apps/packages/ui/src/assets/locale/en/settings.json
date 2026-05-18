@@ -1,8 +1,10 @@
 {
   "navigation": {
-    "serverAndAuth": "Server & Auth",
-    "knowledgeTools": "Knowledge Tools",
-    "workspace": "Workspace",
+    "connect": "Connect",
+    "aiModels": "AI & Models",
+    "experience": "Experience",
+    "knowledgeWorkspace": "Knowledge & Workspace",
+    "safetyAdmin": "Safety & Admin",
     "about": "About"
   },
   "healthNav": "Health & Diagnostics",
@@ -33,6 +35,9 @@
   "splashSettingsNav": "Splash screens",
   "familyGuardrailsWizardNav": "Family Guardrails Wizard",
   "guardianNav": "Guardian & Monitoring",
+  "providerKeys": {
+    "navTitle": "Provider Keys"
+  },
   "familyWizard": {
     "title": "Family Guardrails Wizard",
     "subtitle": "Template-first setup for guardians, dependents, and moderation acceptance tracking.",

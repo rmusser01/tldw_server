@@ -3,7 +3,12 @@
     "serverAndAuth": "Сервер та автентифікація",
     "knowledgeTools": "Інструменти знань",
     "workspace": "Робочий простір",
-    "about": "Про нас"
+    "about": "Про нас",
+    "connect": "Підключення",
+    "aiModels": "ШІ та моделі",
+    "experience": "Досвід",
+    "knowledgeWorkspace": "Знання та робочий простір",
+    "safetyAdmin": "Безпека та адміністрування"
   },
   "healthNav": "Стан",
   "worldBooksNav": "Книги світу",
@@ -1659,5 +1664,8 @@
     "subtitle": "Налаштуйте значення за замовчуванням, пресети та поведінку швидкого додавання."
   },
   "acpPlaygroundNav": "Пісочниця ACP",
-  "skillsNav": "Навички"
+  "skillsNav": "Навички",
+  "providerKeys": {
+    "navTitle": "Ключі провайдерів"
+  }
 }

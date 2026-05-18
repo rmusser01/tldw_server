@@ -3349,5 +3349,23 @@
   },
   "generalSettings_settings_chatRichTextStyles_quoteBackgroundColor": {
     "message": "رنگ پس‌زمینه نقل‌قول"
+  },
+  "navigation_connect": {
+    "message": "اتصال"
+  },
+  "navigation_aiModels": {
+    "message": "هوش مصنوعی و مدل‌ها"
+  },
+  "navigation_experience": {
+    "message": "تجربه"
+  },
+  "navigation_knowledgeWorkspace": {
+    "message": "دانش و فضای کاری"
+  },
+  "navigation_safetyAdmin": {
+    "message": "ایمنی و مدیریت"
+  },
+  "providerKeys_navTitle": {
+    "message": "کلیدهای ارائه‌دهنده"
   }
 }

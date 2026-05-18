@@ -3349,5 +3349,23 @@
   },
   "generalSettings_settings_chatRichTextStyles_quoteBackgroundColor": {
     "message": "Цвет фона цитаты"
+  },
+  "navigation_connect": {
+    "message": "Подключение"
+  },
+  "navigation_aiModels": {
+    "message": "ИИ и модели"
+  },
+  "navigation_experience": {
+    "message": "Опыт"
+  },
+  "navigation_knowledgeWorkspace": {
+    "message": "Знания и рабочее пространство"
+  },
+  "navigation_safetyAdmin": {
+    "message": "Безопасность и администрирование"
+  },
+  "providerKeys_navTitle": {
+    "message": "Ключи провайдеров"
   }
 }

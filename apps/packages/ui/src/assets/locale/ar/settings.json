@@ -3,7 +3,12 @@
     "serverAndAuth": "الخادم والمصادقة",
     "knowledgeTools": "أدوات المعرفة",
     "workspace": "مساحة العمل",
-    "about": "نبذة"
+    "about": "نبذة",
+    "connect": "الاتصال",
+    "aiModels": "الذكاء الاصطناعي والنماذج",
+    "experience": "التجربة",
+    "knowledgeWorkspace": "المعرفة ومساحة العمل",
+    "safetyAdmin": "السلامة والإدارة"
   },
   "healthNav": "الحالة",
   "worldBooksNav": "كتب العوالم",
@@ -1659,5 +1664,8 @@
     "subtitle": "اضبط القيم الافتراضية والإعدادات المسبقة وسلوك الإدخال السريع."
   },
   "acpPlaygroundNav": "ساحة ACP",
-  "skillsNav": "المهارات"
+  "skillsNav": "المهارات",
+  "providerKeys": {
+    "navTitle": "مفاتيح المزوّدين"
+  }
 }

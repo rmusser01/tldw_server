@@ -3,7 +3,12 @@
     "serverAndAuth": "サーバーと認証",
     "knowledgeTools": "ナレッジツール",
     "workspace": "ワークスペース",
-    "about": "情報"
+    "about": "情報",
+    "connect": "接続",
+    "aiModels": "AI とモデル",
+    "experience": "体験",
+    "knowledgeWorkspace": "ナレッジとワークスペース",
+    "safetyAdmin": "安全性と管理"
   },
   "healthNav": "ヘルス",
   "worldBooksNav": "ワールドブック",
@@ -1662,5 +1667,8 @@
     "subtitle": "クイック取り込みの既定値、プリセット、動作を設定します。"
   },
   "acpPlaygroundNav": "ACPプレイグラウンド",
-  "skillsNav": "スキル"
+  "skillsNav": "スキル",
+  "providerKeys": {
+    "navTitle": "プロバイダーキー"
+  }
 }

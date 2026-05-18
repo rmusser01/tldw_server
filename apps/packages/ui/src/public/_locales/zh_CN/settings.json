@@ -3355,5 +3355,23 @@
   },
   "generalSettings_settings_chatRichTextStyles_quoteBackgroundColor": {
     "message": "引用背景颜色"
+  },
+  "navigation_connect": {
+    "message": "连接"
+  },
+  "navigation_aiModels": {
+    "message": "AI 与模型"
+  },
+  "navigation_experience": {
+    "message": "体验"
+  },
+  "navigation_knowledgeWorkspace": {
+    "message": "知识与工作区"
+  },
+  "navigation_safetyAdmin": {
+    "message": "安全与管理"
+  },
+  "providerKeys_navTitle": {
+    "message": "提供商密钥"
   }
 }

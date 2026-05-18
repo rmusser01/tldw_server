@@ -3,7 +3,12 @@
     "serverAndAuth": "服务器与认证",
     "knowledgeTools": "知识工具",
     "workspace": "工作区",
-    "about": "关于"
+    "about": "关于",
+    "connect": "连接",
+    "aiModels": "AI 与模型",
+    "experience": "体验",
+    "knowledgeWorkspace": "知识与工作区",
+    "safetyAdmin": "安全与管理"
   },
   "healthNav": "健康",
   "worldBooksNav": "世界书籍",
@@ -1663,5 +1668,8 @@
     "subtitle": "配置快速导入的默认值、预设和行为。"
   },
   "acpPlaygroundNav": "ACP 实验场",
-  "skillsNav": "技能"
+  "skillsNav": "技能",
+  "providerKeys": {
+    "navTitle": "提供商密钥"
+  }
 }

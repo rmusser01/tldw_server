@@ -3352,5 +3352,23 @@
   },
   "generalSettings_settings_chatRichTextStyles_quoteBackgroundColor": {
     "message": "Color de fondo de cita"
+  },
+  "navigation_connect": {
+    "message": "Conectar"
+  },
+  "navigation_aiModels": {
+    "message": "IA y modelos"
+  },
+  "navigation_experience": {
+    "message": "Experiencia"
+  },
+  "navigation_knowledgeWorkspace": {
+    "message": "Conocimiento y área de trabajo"
+  },
+  "navigation_safetyAdmin": {
+    "message": "Seguridad y administración"
+  },
+  "providerKeys_navTitle": {
+    "message": "Claves de proveedores"
   }
 }

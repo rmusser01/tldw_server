@@ -3349,5 +3349,23 @@
   },
   "generalSettings_settings_chatRichTextStyles_quoteBackgroundColor": {
     "message": "Колір тла цитати"
+  },
+  "navigation_connect": {
+    "message": "Підключення"
+  },
+  "navigation_aiModels": {
+    "message": "ШІ та моделі"
+  },
+  "navigation_experience": {
+    "message": "Досвід"
+  },
+  "navigation_knowledgeWorkspace": {
+    "message": "Знання та робочий простір"
+  },
+  "navigation_safetyAdmin": {
+    "message": "Безпека та адміністрування"
+  },
+  "providerKeys_navTitle": {
+    "message": "Ключі провайдерів"
   }
 }
