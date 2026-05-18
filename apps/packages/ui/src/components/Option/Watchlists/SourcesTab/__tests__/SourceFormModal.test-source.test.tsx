@@ -131,7 +131,14 @@ describe("SourceFormModal test-source preflight", () => {
     setViewport(1024)
     formApi.validateFields.mockResolvedValue({
       url: "https://example.com/feed.xml",
-      source_type: "rss"
+      source_type: "rss",
+      scrape_item_selector: "",
+      scrape_link_selector: "",
+      scrape_title_selector: "",
+      scrape_summary_selector: "",
+      scrape_limit: null,
+      source_top_n: null,
+      discover_method: "auto"
     })
   })
 
@@ -196,7 +203,8 @@ describe("SourceFormModal test-source preflight", () => {
       expect(mocks.testWatchlistSourceDraft).toHaveBeenCalledWith(
         {
           url: "https://example.com/feed.xml",
-          source_type: "rss"
+          source_type: "rss",
+          settings: null
         },
         { limit: 10 }
       )
@@ -209,6 +217,98 @@ describe("SourceFormModal test-source preflight", () => {
     expect(
       screen.getByText("Run Test Feed to validate URL/type connectivity before saving.")
     ).toBeInTheDocument()
+  })
+
+  it("passes draft source settings to preflight", async () => {
+    formApi.validateFields.mockResolvedValue({
+      url: "https://example.com/news",
+      source_type: "site",
+      scrape_item_selector: "css:article",
+      scrape_link_selector: ".//a/@href",
+      scrape_title_selector: "css:h2",
+      scrape_summary_selector: "css:.summary",
+      scrape_limit: 10,
+      source_top_n: null,
+      discover_method: "auto"
+    })
+    mocks.testWatchlistSourceDraft.mockResolvedValue({
+      items: [],
+      total: 1,
+      ingestable: 1,
+      filtered: 0
+    })
+
+    render(
+      <SourceFormModal
+        open
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+        existingTags={[]}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Test Feed" }))
+
+    await waitFor(() => {
+      expect(mocks.testWatchlistSourceDraft).toHaveBeenCalledWith(
+        {
+          url: "https://example.com/news",
+          source_type: "site",
+          settings: {
+            scrape_rules: {
+              item_selector: "css:article",
+              link_xpath: ".//a/@href",
+              title_selector: "css:h2",
+              summary_selector: "css:.summary",
+              limit: 10
+            }
+          }
+        },
+        { limit: 10 }
+      )
+    })
+  })
+
+  it("renders optional source validation diagnostics from preview", async () => {
+    formApi.validateFields.mockResolvedValue({
+      url: "https://example.com/news",
+      source_type: "site",
+      scrape_item_selector: "css:article",
+      scrape_link_selector: ".//a/@href",
+      scrape_title_selector: "css:h2",
+      scrape_limit: 10,
+      source_top_n: null,
+      discover_method: "auto"
+    })
+    mocks.testWatchlistSourceDraft.mockResolvedValue({
+      items: [],
+      total: 1,
+      ingestable: 1,
+      filtered: 0,
+      diagnostics: {
+        fetch_mode: "scrape_rules",
+        selector_warnings: ["title selector matched 0 nodes"],
+        dedupe_preview_key: "guid_xpath"
+      }
+    })
+
+    render(
+      <SourceFormModal
+        open
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+        existingTags={[]}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Test Feed" }))
+
+    await waitFor(() => {
+      expect(screen.getByText("Validation diagnostics")).toBeInTheDocument()
+      expect(screen.getByText("Fetch mode: scrape_rules")).toBeInTheDocument()
+      expect(screen.getByText("title selector matched 0 nodes")).toBeInTheDocument()
+      expect(screen.getByText("Dedupe preview key: guid_xpath")).toBeInTheDocument()
+    })
   })
 
   it("shows inline remediation guidance when draft preflight fails", async () => {

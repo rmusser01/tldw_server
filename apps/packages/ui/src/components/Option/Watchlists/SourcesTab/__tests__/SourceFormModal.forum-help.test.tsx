@@ -75,4 +75,22 @@ describe("SourceFormModal forum type guidance", () => {
     ).toBeInTheDocument()
     expect(screen.getByText("Forum (coming soon)")).toBeInTheDocument()
   })
+
+  it("enables forum source option when the backend capability is enabled", () => {
+    render(
+      <SourceFormModal
+        open
+        forumsEnabled
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+        existingTags={[]}
+      />
+    )
+
+    expect(
+      screen.queryByText("Forum monitoring is coming soon. Use RSS Feed or Website for now.")
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText("Forum (coming soon)")).not.toBeInTheDocument()
+    expect(screen.getByText("Forum")).toBeInTheDocument()
+  })
 })

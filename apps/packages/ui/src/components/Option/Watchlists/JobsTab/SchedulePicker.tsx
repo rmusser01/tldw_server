@@ -7,8 +7,13 @@ import { trackWatchlistsPreventionTelemetry } from "@/utils/watchlists-preventio
 import {
   buildCronFromPreset,
   createDefaultPresetState,
+  INTERVAL_HOURS_MAX,
+  INTERVAL_HOURS_MIN,
+  INTERVAL_MINUTES_MAX,
+  INTERVAL_MINUTES_MIN,
   parsePresetFromCron,
   type PresetScheduleState,
+  type ScheduleIntervalUnit,
   type SchedulePresetKey,
   type WeekdayToken
 } from "./schedule-utils"
@@ -44,6 +49,11 @@ const WEEKDAY_OPTIONS: Array<{ value: WeekdayToken; label: string }> = [
   { value: "FRI", label: "Friday" },
   { value: "SAT", label: "Saturday" },
   { value: "SUN", label: "Sunday" }
+]
+
+const INTERVAL_UNIT_OPTIONS: Array<{ value: ScheduleIntervalUnit; label: string }> = [
+  { value: "hours", label: "Hours" },
+  { value: "minutes", label: "Minutes" }
 ]
 
 const CRON_FIELDS = 5
@@ -135,19 +145,11 @@ export const SchedulePicker: React.FC<SchedulePickerProps> = ({
     () =>
       [
         {
-          value: "hourly",
-          label: t("watchlists:schedule.preset.hourly.label", "Every hour"),
+          value: "interval",
+          label: t("watchlists:schedule.preset.interval.label", "Every N hours/minutes"),
           description: t(
-            "watchlists:schedule.preset.hourly.description",
-            "Runs once each hour at the selected minute."
-          )
-        },
-        {
-          value: "every6hours",
-          label: t("watchlists:schedule.preset.every6hours.label", "Every 6 hours"),
-          description: t(
-            "watchlists:schedule.preset.every6hours.description",
-            "Runs four times each day at the selected minute."
+            "watchlists:schedule.preset.interval.description",
+            "Runs repeatedly at the interval you choose."
           )
         },
         {
@@ -156,6 +158,14 @@ export const SchedulePicker: React.FC<SchedulePickerProps> = ({
           description: t(
             "watchlists:schedule.preset.daily.description",
             "Runs every day at the selected time."
+          )
+        },
+        {
+          value: "weekdays",
+          label: t("watchlists:schedule.preset.weekdays.label", "Weekdays"),
+          description: t(
+            "watchlists:schedule.preset.weekdays.description",
+            "Runs Monday through Friday at the selected time."
           )
         },
         {
@@ -188,6 +198,32 @@ export const SchedulePicker: React.FC<SchedulePickerProps> = ({
 
   const handlePresetChange = (preset: SchedulePresetKey) => {
     updatePresetState((previous) => ({ ...previous, preset }))
+  }
+
+  const handleIntervalValueChange = (value: number | null) => {
+    updatePresetState((previous) => {
+      const min =
+        previous.intervalUnit === "minutes" ? INTERVAL_MINUTES_MIN : INTERVAL_HOURS_MIN
+      const max =
+        previous.intervalUnit === "minutes" ? INTERVAL_MINUTES_MAX : INTERVAL_HOURS_MAX
+      const parsed = typeof value === "number" && value >= min ? Math.floor(value) : min
+      return {
+        ...previous,
+        intervalValue: Math.min(max, parsed)
+      }
+    })
+  }
+
+  const handleIntervalUnitChange = (intervalUnit: ScheduleIntervalUnit) => {
+    updatePresetState((previous) => {
+      const min = intervalUnit === "minutes" ? INTERVAL_MINUTES_MIN : INTERVAL_HOURS_MIN
+      const max = intervalUnit === "minutes" ? INTERVAL_MINUTES_MAX : INTERVAL_HOURS_MAX
+      return {
+        ...previous,
+        intervalUnit,
+        intervalValue: Math.min(max, Math.max(min, previous.intervalValue))
+      }
+    })
   }
 
   const handleMinuteChange = (value: number | null) => {
@@ -291,12 +327,56 @@ export const SchedulePicker: React.FC<SchedulePickerProps> = ({
         </div>
 
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
-          {(presetState.preset === "daily" || presetState.preset === "weekly") && (
+          {presetState.preset === "interval" && (
+            <>
+              <div>
+                <div className="mb-1 text-xs text-text-muted">
+                  {t("watchlists:schedule.intervalValue", "Every")}
+                </div>
+                <InputNumber
+                  aria-label={t("watchlists:schedule.intervalValueA11y", "Interval value")}
+                  min={
+                    presetState.intervalUnit === "minutes"
+                      ? INTERVAL_MINUTES_MIN
+                      : INTERVAL_HOURS_MIN
+                  }
+                  max={
+                    presetState.intervalUnit === "minutes"
+                      ? INTERVAL_MINUTES_MAX
+                      : INTERVAL_HOURS_MAX
+                  }
+                  precision={0}
+                  value={presetState.intervalValue}
+                  onChange={handleIntervalValueChange}
+                  className="w-full"
+                />
+              </div>
+              <div>
+                <div className="mb-1 text-xs text-text-muted">
+                  {t("watchlists:schedule.intervalUnit", "Unit")}
+                </div>
+                <Select
+                  aria-label={t("watchlists:schedule.intervalUnitA11y", "Interval unit")}
+                  value={presetState.intervalUnit}
+                  onChange={(value) => handleIntervalUnitChange(value as ScheduleIntervalUnit)}
+                  options={INTERVAL_UNIT_OPTIONS.map((item) => ({
+                    value: item.value,
+                    label: t(`watchlists:schedule.intervalUnitOption.${item.value}`, item.label)
+                  }))}
+                  className="w-full"
+                />
+              </div>
+            </>
+          )}
+          {(presetState.preset === "daily" ||
+            presetState.preset === "weekdays" ||
+            presetState.preset === "weekly") && (
             <div>
               <div className="mb-1 text-xs text-text-muted">
                 {t("watchlists:schedule.hour", "Hour")}
               </div>
               <InputNumber
+                aria-label={t("watchlists:schedule.hourA11y", "Hour")}
                 min={0}
                 max={23}
                 precision={0}
@@ -306,31 +386,36 @@ export const SchedulePicker: React.FC<SchedulePickerProps> = ({
               />
             </div>
           )}
-          <div>
-            <div className="mb-1 text-xs text-text-muted">
-              {t("watchlists:schedule.minute", "Minute")}
+          {(presetState.preset !== "interval" || presetState.intervalUnit === "hours") && (
+            <div>
+              <div className="mb-1 text-xs text-text-muted">
+                {t("watchlists:schedule.minute", "Minute")}
+              </div>
+              <InputNumber
+                aria-label={t("watchlists:schedule.minuteA11y", "Minute")}
+                min={0}
+                max={59}
+                precision={0}
+                value={presetState.minute}
+                onChange={handleMinuteChange}
+                className="w-full"
+              />
             </div>
-            <InputNumber
-              min={0}
-              max={59}
-              precision={0}
-              value={presetState.minute}
-              onChange={handleMinuteChange}
-              className="w-full"
-            />
-          </div>
+          )}
           {presetState.preset === "weekly" && (
             <div>
               <div className="mb-1 text-xs text-text-muted">
                 {t("watchlists:schedule.weekday", "Weekday")}
               </div>
               <Select
+                aria-label={t("watchlists:schedule.weekdayA11y", "Weekday")}
                 value={presetState.weekday}
                 onChange={(value) => handleWeekdayChange(value as WeekdayToken)}
                 options={WEEKDAY_OPTIONS.map((item) => ({
                   value: item.value,
                   label: t(`watchlists:schedule.weekdayOption.${item.value}`, item.label)
                 }))}
+                className="w-full"
               />
             </div>
           )}
