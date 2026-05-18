@@ -167,6 +167,7 @@
     "providerChangeHelper": "Abra o seletor de provedores abaixo para alternar entre Navegador, tldw, OpenAI ou Supersonic.",
     "changeProvider": "Alterar provedor",
     "title": "Playground Texto-Fala",
+    "routeTitle": "Texto para fala",
     "subtitle": "Experimente texto-fala e ajuste provedores, modelos e vozes.",
     "currentProvider": "Provedor atual",
     "settingsIntro": "Ajuste o provedor de texto-fala, modelo e voz. Essas configurações são reutilizadas quando você reproduz áudio do chat ou da mídia.",

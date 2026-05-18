@@ -2237,7 +2237,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
   }
 
   const pageTitle = isLockedTtsRoute
-    ? t("playground:speech.ttsRouteTitle", "TTS Playground")
+    ? t("playground:speech.textToSpeechRouteTitle", "Text to Speech")
     : t("playground:speech.title", "Speech Playground")
   const pageSubtitle = isLockedTtsRoute
     ? t(
@@ -2260,7 +2260,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
 
   return (
     <PageShell maxWidthClassName="max-w-5xl" className="py-6">
-      <Title level={3} className="!mb-1">{pageTitle}</Title>
+      <Title level={1} className="!mb-1 !text-2xl">{pageTitle}</Title>
       <Text type="secondary">{pageSubtitle}</Text>
 
       <div className="mt-4 space-y-4">

@@ -157,7 +157,7 @@ const TtsPlaygroundPage: React.FC = () => {
     if (typeof window === "undefined" || !window.speechSynthesis) return
     try {
       window.speechSynthesis.cancel()
-    } catch {}
+    } catch (_error) { void _error }
     browserQueueRef.current = []
     browserUtteranceRef.current = null
     setBrowserIsSpeaking(false)
@@ -487,14 +487,14 @@ const TtsPlaygroundPage: React.FC = () => {
     if (!el) return
     try {
       el.scrollIntoView({ block: "center" })
-    } catch {}
+    } catch (_error) { void _error }
     ;(el as HTMLElement).focus()
   }
 
   return (
     <PageShell maxWidthClassName="max-w-3xl" className="py-6">
-      <Title level={3} className="!mb-1">
-        {t("playground:tts.title", "TTS Playground")}
+      <Title level={1} className="!mb-1 !text-2xl">
+        {t("playground:tts.routeTitle", "Text to Speech")}
       </Title>
       <Text type="secondary">
         {t(

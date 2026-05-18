@@ -167,6 +167,7 @@
     "providerChangeHelper": "Åbn udbydervælgeren nedenfor for at skifte mellem Browser, tldw, OpenAI eller Supersonic.",
     "changeProvider": "Skift udbyder",
     "title": "TTS-legeplads",
+    "routeTitle": "Tekst til tale",
     "subtitle": "Prøv tekst-til-tale og juster udbydere, modeller og stemmer.",
     "currentProvider": "Aktuel udbyder",
     "settingsIntro": "Juster TTS-udbyder, model og stemme. Disse indstillinger bruges igen, når du afspiller lyd fra chat eller medier.",

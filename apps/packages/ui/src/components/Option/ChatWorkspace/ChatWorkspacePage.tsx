@@ -130,7 +130,8 @@ export const ChatWorkspacePage = () => {
   )
 
   return (
-    <div data-testid="chat-workspace-page" className="h-full min-h-0 w-full">
+    <div data-testid="chat-workspace-page" className="h-full min-h-0 w-full min-w-0">
+      <h1 className="sr-only">Chat Workspace</h1>
       <ChatWorkspaceConsole
         workspaceId={workspaceId}
         workspaceName={scopeLabel}

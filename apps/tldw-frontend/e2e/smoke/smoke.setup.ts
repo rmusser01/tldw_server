@@ -1,4 +1,5 @@
 import { test as base, expect, Page } from "@playwright/test"
+import { randomUUID } from "node:crypto"
 
 /**
  * Diagnostics data collected during page visits
@@ -96,17 +97,26 @@ export const SMOKE_LOAD_TIMEOUT = resolveSmokeLoadTimeoutMs()
 /**
  * Auth configuration for smoke tests
  */
+const resolveSmokeApiKey = (): string => {
+  const configured =
+    process.env.TLDW_API_KEY ||
+    process.env.TLDW_E2E_API_KEY ||
+    process.env.SINGLE_USER_API_KEY
+
+  if (configured?.trim()) {
+    return configured.trim()
+  }
+
+  return `smoke-${randomUUID()}`
+}
+
 export const AUTH_CONFIG = {
   serverUrl:
     process.env.TLDW_SERVER_URL ||
     process.env.TLDW_E2E_SERVER_URL ||
     process.env.E2E_TEST_BASE_URL ||
     "http://127.0.0.1:8000",
-  apiKey:
-    process.env.TLDW_API_KEY ||
-    process.env.TLDW_E2E_API_KEY ||
-    process.env.SINGLE_USER_API_KEY ||
-    "THIS-IS-A-SECURE-KEY-123-FAKE-KEY",
+  apiKey: resolveSmokeApiKey(),
   allowOffline: process.env.TLDW_E2E_ALLOW_OFFLINE !== "0"
 }
 
@@ -140,19 +150,21 @@ export async function seedAuth(
   await page.addInitScript(
     (cfg) => {
       const readStorageValue = (key: string) => {
+        const raw = localStorage.getItem(key)
+        if (raw == null) return undefined
         try {
-          const raw = localStorage.getItem(key)
-          if (raw == null) return undefined
           return JSON.parse(raw)
-        } catch {
-          return localStorage.getItem(key) ?? undefined
+        } catch (_error) {
+          return raw
         }
       }
 
       const writeStorageValue = (key: string, value: unknown) => {
-        try {
-          localStorage.setItem(key, JSON.stringify(value))
-        } catch {}
+        localStorage.setItem(key, JSON.stringify(value))
+      }
+
+      const reportShimError = (label: string, error: unknown) => {
+        console.warn(`[tldw smoke storage shim] ${label}`, error)
       }
 
       const installChromeStorageShim = () => {
@@ -172,7 +184,9 @@ export async function seedAuth(
           for (const listener of listeners) {
             try {
               listener(changes, area)
-            } catch {}
+            } catch (error) {
+              reportShimError("onChanged listener failed", error)
+            }
           }
         }
 
@@ -210,7 +224,9 @@ export async function seedAuth(
             if (typeof callback === "function") {
               try {
                 callback(result)
-              } catch {}
+              } catch (error) {
+                reportShimError("get callback failed", error)
+              }
             }
             return result
           },
@@ -227,7 +243,9 @@ export async function seedAuth(
             if (typeof callback === "function") {
               try {
                 callback()
-              } catch {}
+              } catch (error) {
+                reportShimError("set callback failed", error)
+              }
             }
           },
           remove: async (keys: string | string[], callback?: () => void) => {
@@ -235,9 +253,7 @@ export async function seedAuth(
             const changes: Record<string, { oldValue: unknown; newValue: unknown }> = {}
             for (const key of values) {
               const oldValue = readStorageValue(key)
-              try {
-                localStorage.removeItem(key)
-              } catch {}
+              localStorage.removeItem(key)
               changes[key] = { oldValue, newValue: undefined }
             }
             if (Object.keys(changes).length > 0) {
@@ -246,7 +262,9 @@ export async function seedAuth(
             if (typeof callback === "function") {
               try {
                 callback()
-              } catch {}
+              } catch (error) {
+                reportShimError("remove callback failed", error)
+              }
             }
           },
           clear: async (callback?: () => void) => {
@@ -256,23 +274,25 @@ export async function seedAuth(
               if (!key) continue
               changes[key] = { oldValue: readStorageValue(key), newValue: undefined }
             }
-            try {
-              localStorage.clear()
-            } catch {}
+            localStorage.clear()
             if (Object.keys(changes).length > 0) {
               emitChanges(changes, "sync")
             }
             if (typeof callback === "function") {
               try {
                 callback()
-              } catch {}
+              } catch (error) {
+                reportShimError("clear callback failed", error)
+              }
             }
           },
           getBytesInUse: async (_keys?: unknown, callback?: (bytes: number) => void) => {
             if (typeof callback === "function") {
               try {
                 callback(0)
-              } catch {}
+              } catch (error) {
+                reportShimError("getBytesInUse callback failed", error)
+              }
             }
             return 0
           }
@@ -318,51 +338,24 @@ export async function seedAuth(
         accessToken: cfg.accessToken
       }
 
-      try {
-        localStorage.setItem(
-          "tldwConfig",
-          JSON.stringify(authConfig)
-        )
-      } catch {}
-      try {
-        const chromeLike = (window as unknown as { chrome?: any }).chrome
-        chromeLike?.storage?.sync?.set?.({ tldwConfig: authConfig })
-        chromeLike?.storage?.local?.set?.({ tldwConfig: authConfig })
-        chromeLike?.storage?.sync?.set?.({ isMigrated: true })
-        chromeLike?.storage?.local?.set?.({ isMigrated: true })
-      } catch {}
-      try {
-        localStorage.setItem("isMigrated", "true")
-      } catch {}
+      localStorage.setItem("tldwConfig", JSON.stringify(authConfig))
+      localStorage.setItem("isMigrated", "true")
       // Backward-compat for routes still reading legacy top-level keys.
-      try {
-        localStorage.setItem("serverUrl", cfg.serverUrl)
-      } catch {}
-      try {
-        localStorage.setItem("tldwServerUrl", cfg.serverUrl)
-      } catch {}
-      try {
-        localStorage.setItem("authMode", cfg.authMode)
-      } catch {}
-      try {
-        localStorage.setItem("apiKey", cfg.apiKey)
-      } catch {}
-      try {
-        localStorage.setItem("accessToken", cfg.accessToken)
-      } catch {}
-      try {
-        localStorage.setItem("__tldw_first_run_complete", "true")
-      } catch {}
-      try {
-        localStorage.setItem("assistant_setup_dismissed", "true")
-      } catch {}
-      try {
-        if (cfg.allowOffline) {
-          localStorage.setItem("__tldw_allow_offline", "true")
-        } else {
-          localStorage.removeItem("__tldw_allow_offline")
-        }
-      } catch {}
+      localStorage.setItem("serverUrl", cfg.serverUrl)
+      localStorage.setItem("tldwServerUrl", cfg.serverUrl)
+      localStorage.setItem("authMode", cfg.authMode)
+      localStorage.setItem("apiKey", cfg.apiKey)
+      localStorage.setItem("accessToken", cfg.accessToken)
+      localStorage.setItem("__tldw_first_run_complete", "true")
+      localStorage.setItem("assistant_setup_dismissed", "true")
+      localStorage.setItem("__tldw_test_bypass", "true")
+      localStorage.setItem("dw-tips-tour-completed", "true")
+      localStorage.setItem("document-workspace-onboarding-dismissed", "true")
+      if (cfg.allowOffline) {
+        localStorage.setItem("__tldw_allow_offline", "true")
+      } else {
+        localStorage.removeItem("__tldw_allow_offline")
+      }
     },
     cfg
   )
@@ -831,7 +824,9 @@ function normalizeRoutePath(routePath: string): string {
     if (routePath.startsWith("http://") || routePath.startsWith("https://")) {
       return new URL(routePath).pathname
     }
-  } catch {}
+  } catch (_error) {
+    // Invalid absolute URLs fall back to simple route-path stripping below.
+  }
   return routePath.split("?")[0]?.split("#")[0] || routePath
 }
 
