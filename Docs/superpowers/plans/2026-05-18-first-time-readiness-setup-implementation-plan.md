@@ -84,10 +84,9 @@ Docs:
 **Files:**
 - Create: `tldw_Server_API/app/core/Setup/readiness_models.py`
 - Create: `tldw_Server_API/app/core/Setup/readiness_profiles.py`
-- Modify: `tldw_Server_API/app/api/v1/schemas/setup_schemas.py`
 - Test: `tldw_Server_API/tests/Setup/test_setup_readiness_profiles.py`
 
-- [ ] **Step 1: Write failing tests for canonical lane/status/overlay semantics**
+- [x] **Step 1: Write failing tests for canonical lane/status/overlay semantics**
 
 ```python
 from tldw_Server_API.app.core.Setup.readiness_profiles import build_readiness_profiles
@@ -105,13 +104,13 @@ def test_profiles_return_canonical_lanes_and_restart_overlay(sample_setup_snapsh
     assert all(lane["status"] != "restart_required" for lane in response["lanes"])
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_setup_readiness_profiles.py -q`
 
 Expected: FAIL with `ModuleNotFoundError` or missing `build_readiness_profiles`.
 
-- [ ] **Step 3: Add minimal model and profile builder**
+- [x] **Step 3: Add minimal model and profile builder**
 
 Implementation outline:
 
@@ -145,18 +144,17 @@ OVERLAYS = (
 - `supported_overlays`: known overlay IDs.
 - `setup_access`: first-run/admin availability metadata.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_setup_readiness_profiles.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Setup/readiness_models.py \
   tldw_Server_API/app/core/Setup/readiness_profiles.py \
-  tldw_Server_API/app/api/v1/schemas/setup_schemas.py \
   tldw_Server_API/tests/Setup/test_setup_readiness_profiles.py
 git commit -m "feat: add setup readiness profile models"
 ```
