@@ -2,9 +2,15 @@ import { Select, Spin } from "antd"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { Link } from "react-router-dom"
 import { browser } from "wxt/browser"
 import { AvailableModelsList } from "./AvailableModelsList"
-import { formatModelsLastRefreshedTime } from "./modelsDisplayUtils"
+import {
+  buildConfiguredFirstModelOptions,
+  formatModelsLastRefreshedTime,
+  summarizeProviderReadiness,
+  type ModelDisplayEntry
+} from "./modelsDisplayUtils"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { tldwClient, tldwModels } from "@/services/tldw"
 import { useStorage } from "@plasmohq/storage/hook"
@@ -80,9 +86,24 @@ export const ModelsBody = () => {
     retry: false
   })
 
+  const {
+    data: providerKeysStatus,
+    isLoading: providerKeysLoading,
+    error: providerKeysError
+  } = useQuery({
+    queryKey: ["tldw-provider-keys-summary"],
+    queryFn: async () => tldwClient.listUserProviderKeys(),
+    staleTime: 30 * 1000,
+    retry: false
+  })
+
   const openaiOauthStatusCode = useMemo(
     () => getStatusCode(openaiOauthStatusError),
     [openaiOauthStatusError]
+  )
+  const providerKeysStatusCode = useMemo(
+    () => getStatusCode(providerKeysError),
+    [providerKeysError]
   )
 
   const openaiOauthUnavailable = useMemo(
@@ -96,6 +117,29 @@ export const ModelsBody = () => {
   const openaiAuthSource = openaiOauthStatus?.auth_source ?? "none"
   const openaiOauthConnected = Boolean(openaiOauthStatus?.connected)
   const openaiOauthActive = openaiAuthSource === "oauth"
+  const providerKeysUnavailable =
+    providerKeysStatusCode === 403 ||
+    providerKeysStatusCode === 404 ||
+    providerKeysStatusCode === 501
+
+  const configuredProviderKeys = useMemo(() => {
+    const keys = new Set<string>()
+    for (const item of providerKeysStatus?.items ?? []) {
+      if (!item.has_key) continue
+      const normalized = normalizeProviderKey(item.provider)
+      if (normalized && normalized !== "unknown") {
+        keys.add(normalized)
+      }
+    }
+    if (
+      openaiOauthConnected ||
+      openaiAuthSource === "oauth" ||
+      openaiAuthSource === "api_key"
+    ) {
+      keys.add("openai")
+    }
+    return keys
+  }, [openaiAuthSource, openaiOauthConnected, providerKeysStatus])
 
   const openaiOauthChip = useMemo(() => {
     if (openaiOauthActive && openaiOauthConnected) {
@@ -149,35 +193,62 @@ export const ModelsBody = () => {
       .sort((a, b) => a.label.localeCompare(b.label))
   }, [availableModels])
 
+  const toModelDisplayEntry = useCallback(
+    (model: (typeof availableModels)[number]): ModelDisplayEntry | null => {
+      const rawProvider = model.details?.provider ?? model.provider
+      if (!rawProvider) return null
+      const normalizedProvider = normalizeProviderKey(rawProvider)
+      if (!normalizedProvider || normalizedProvider === "unknown") return null
+      return {
+        id: model.model,
+        provider: getProviderDisplayName(rawProvider),
+        nickname: model.nickname,
+        configured: configuredProviderKeys.has(normalizedProvider),
+        usable: true,
+        selected: selectedModel === model.model
+      }
+    },
+    [configuredProviderKeys, selectedModel]
+  )
+
+  const modelDisplayEntries = useMemo(
+    () =>
+      availableModels
+        .map(toModelDisplayEntry)
+        .filter((model): model is ModelDisplayEntry => model !== null),
+    [availableModels, toModelDisplayEntry]
+  )
+
+  const providerReadiness = useMemo(
+    () => summarizeProviderReadiness(modelDisplayEntries),
+    [modelDisplayEntries]
+  )
+
+  const defaultProviderLabel = normalizedDefaultProvider
+    ? getProviderDisplayName(normalizedDefaultProvider)
+    : t("settings:onboarding.defaults.providerAuto", "Auto (from model)")
+  const defaultModelLabel =
+    selectedModel && !isAutoModelId(selectedModel)
+      ? selectedModel
+      : t("settings:onboarding.defaults.modelAuto", "Auto (route on server)")
+
   const modelOptions = useMemo(() => {
-    return [
-      {
-        value: "auto",
-        label: t(
-          "settings:onboarding.defaults.modelAuto",
-          "Auto (route on server)"
-        )
-      },
-      ...availableModels
+    const modelEntries = availableModels
       .filter((model) => {
         if (!normalizedDefaultProvider) return true
         const rawProvider = model.details?.provider ?? model.provider
         if (!rawProvider) return false
         return normalizeProviderKey(rawProvider) === normalizedDefaultProvider
       })
-      .map((model) => {
-        const rawProvider = model.details?.provider ?? model.provider
-        const providerLabel = rawProvider
-          ? getProviderDisplayName(rawProvider)
-          : t("settings:onboarding.defaults.providerUnknown", "Provider")
-        const modelLabel = model.nickname || model.model
-        return {
-          value: model.model,
-          label: `${providerLabel} - ${modelLabel}`
-        }
-      })
-    ]
-  }, [availableModels, normalizedDefaultProvider, t])
+      .map(toModelDisplayEntry)
+      .filter((model): model is ModelDisplayEntry => model !== null)
+    return buildConfiguredFirstModelOptions(modelEntries, {
+      autoLabel: t(
+        "settings:onboarding.defaults.modelAuto",
+        "Auto (route on server)"
+      )
+    })
+  }, [availableModels, normalizedDefaultProvider, t, toModelDisplayEntry])
 
   const handleProviderChange = useCallback(
     (value: string) => {
@@ -521,6 +592,94 @@ export const ModelsBody = () => {
                     )}
                   </p>
                 </div>
+              </div>
+            )}
+          </div>
+          <div className="mt-4 rounded-2xl border border-border/70 bg-surface p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-text">
+                  {t("settings:models.readiness.title", "Provider readiness")}
+                </div>
+                <p className="mt-1 text-xs text-text-subtle">
+                  {t(
+                    "settings:models.readiness.subtitle",
+                    "Review usable providers and saved defaults before browsing the full catalog."
+                  )}
+                </p>
+              </div>
+              <span className="inline-flex items-center rounded-full border border-border/80 bg-surface2 px-2.5 py-1 text-[11px] font-medium text-text-subtle">
+                {modelsLoading
+                  ? t("common:loading.title", "Loading...")
+                  : t("settings:models.readiness.usableSummary", {
+                      defaultValue: "{{count}} usable",
+                      count: providerReadiness.usableProviders
+                    })}
+              </span>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-md border border-border/70 bg-surface2 p-3">
+                <div className="text-[11px] font-medium uppercase tracking-wide text-text-subtle">
+                  {t(
+                    "settings:models.readiness.defaultProvider",
+                    "Default provider"
+                  )}
+                </div>
+                <div className="mt-1 text-sm font-medium text-text">
+                  {defaultProviderLabel}
+                </div>
+              </div>
+              <div className="rounded-md border border-border/70 bg-surface2 p-3">
+                <div className="text-[11px] font-medium uppercase tracking-wide text-text-subtle">
+                  {t("settings:models.readiness.defaultModel", "Default model")}
+                </div>
+                <div className="mt-1 text-sm font-medium text-text">
+                  {defaultModelLabel}
+                </div>
+              </div>
+              <div className="rounded-md border border-border/70 bg-surface2 p-3">
+                <div className="text-[11px] font-medium uppercase tracking-wide text-text-subtle">
+                  {t(
+                    "settings:models.readiness.configuredProviders",
+                    "Configured providers"
+                  )}
+                </div>
+                <div className="mt-1 text-sm font-medium text-text">
+                  {providerKeysLoading
+                    ? t("common:loading.title", "Loading...")
+                    : providerKeysUnavailable
+                      ? t(
+                          "settings:models.readiness.keysUnavailable",
+                          "Account keys unavailable"
+                        )
+                      : t("settings:models.readiness.configuredCount", {
+                          defaultValue: "{{count}} configured",
+                          count: providerReadiness.configuredProviders
+                        })}
+                </div>
+              </div>
+              <div className="rounded-md border border-border/70 bg-surface2 p-3">
+                <div className="text-[11px] font-medium uppercase tracking-wide text-text-subtle">
+                  {t("settings:models.readiness.usableProviders", "Usable providers")}
+                </div>
+                <div className="mt-1 text-sm font-medium text-text">
+                  {t("settings:models.readiness.usableCount", {
+                    defaultValue: "{{count}} usable",
+                    count: providerReadiness.usableProviders
+                  })}
+                </div>
+              </div>
+            </div>
+            {availableModels.length === 0 && !modelsLoading && (
+              <div className="mt-4 flex flex-wrap gap-2 text-xs">
+                <Link className="text-primary hover:underline" to="/settings/tldw">
+                  {t("settings:models.readiness.configureServer", "Configure server")}
+                </Link>
+                <Link
+                  className="text-primary hover:underline"
+                  to="/settings/provider-keys">
+                  {t("settings:models.readiness.configureKeys", "Manage provider keys")}
+                </Link>
               </div>
             )}
           </div>

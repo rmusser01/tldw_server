@@ -4,7 +4,7 @@ title: Implement WebUI settings and model provider remediation
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-05-18 15:17'
+updated_date: '2026-05-18 15:24'
 labels:
   - ux
   - webui
@@ -35,7 +35,7 @@ Implement the WP5 settings and model/provider UX remediation slice for WebUI/ext
 - [ ] #1 Settings navigation has task-led groups and no visible dotted i18n keys.
 - [ ] #2 /settings/provider-keys has a user-facing label and remains searchable/filterable from settings navigation.
 - [ ] #3 Routine settings are separated from data/import/export/reset actions while preserving existing reset safeguards.
-- [ ] #4 /settings/model prioritizes default/configured/usable model setup before full catalog browsing while preserving advanced controls.
+- [x] #4 /settings/model prioritizes default/configured/usable model setup before full catalog browsing while preserving advanced controls.
 - [ ] #5 Prompt Library, Prompt Studio, and Prompt Studio settings route intent remains distinct and covered by tests.
 - [ ] #6 Focused Vitest settings/model tests, settings browser workflow checks, WP4 responsive landmarks, git diff --check, and applicable security checks are recorded.
 <!-- AC:END -->
@@ -56,6 +56,10 @@ Verification: bunx vitest run src/components/Layouts/__tests__/settings-nav.guar
 Completed second remediation slice: split high-risk data management actions out of routine General Settings into /settings/data; preserved the existing import/export flow, Firefox private-mode sync, typed RESET confirmation, danger reset button, reload cancellation, and storage-clearing code path. Added settings nav Data Management group, source locale keys, and regenerated public settings locale mirrors.
 
 Verification: bunx vitest run src/components/Option/Settings/__tests__/GeneralSettings.test.tsx src/components/Option/Settings/__tests__/DataManagementSettings.test.tsx src/components/Option/Settings/__tests__/system-settings.highlight-preview.test.ts src/components/Layouts/__tests__/settings-nav.guardian.test.ts src/components/Layouts/__tests__/settings-layout-filter.test.tsx src/components/Layouts/__tests__/settings-layout-focus-order.test.tsx src/components/Layouts/__tests__/settings-layout-active-route.test.ts -> 7 files / 31 tests passed. git diff --check passed. bunx tsc --noEmit --pretty false remains blocked by existing unrelated TypeScript baseline failures before touched settings files, starting in audio/chat/flashcards test fixtures.
+
+Completed third remediation slice: /settings/model now puts default provider/model selection first, adds a provider readiness summary before the full catalog, and orders model choices configured-first while preserving the full AvailableModelsList catalog and OpenAI OAuth controls. The readiness summary uses server-returned chat models plus provider-key/OAuth status without adding backend API requirements.
+
+Verification: bunx vitest run src/components/Option/Models/__tests__/ModelsBody.test.tsx src/components/Option/Models/__tests__/modelsDisplayUtils.test.ts src/components/Option/Models/__tests__/AvailableModelsList.test.tsx -> 3 files / 9 tests passed. git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
