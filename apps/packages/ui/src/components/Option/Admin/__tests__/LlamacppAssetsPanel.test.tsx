@@ -2,7 +2,12 @@ import React from "react"
 import { describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { LlamacppAssetsPanel } from "../LlamacppAssetsPanel"
-import type { LlamacppAssetsResponse } from "@/types/llamacpp-admin"
+import type {
+  LlamacppAcquisitionJobListResponse,
+  LlamacppAssetImportPreviewResponse,
+  LlamacppAssetDownloadRequest,
+  LlamacppAssetsResponse
+} from "@/types/llamacpp-admin"
 
 const mockAssets: LlamacppAssetsResponse = {
   assets: [
@@ -62,6 +67,53 @@ const mockAssets: LlamacppAssetsResponse = {
   ],
   warnings: ["One imported folder could not be read."],
   scan_limited: false
+}
+
+const mockImportPreview: LlamacppAssetImportPreviewResponse = {
+  folder: {
+    asset_id: "folder:preview",
+    kind: "folder",
+    identity_basis: "resolved_path",
+    path: "/external/models",
+    resolved_path: "/external/models",
+    display_name: "models",
+    source: "imported_folder",
+    size_bytes: null,
+    modified_at: null,
+    metadata: {},
+    capabilities: ["asset_folder"],
+    mmproj_asset_ids: [],
+    base_model_asset_ids: [],
+    warnings: []
+  },
+  assets: [mockAssets.assets[0]!, mockAssets.assets[1]!],
+  asset_counts: {
+    gguf: 1,
+    mmproj: 1
+  },
+  warnings: ["Preview skipped unreadable sidecar file."],
+  scan_limited: false,
+  will_persist: false
+}
+
+const mockDownloads: LlamacppAcquisitionJobListResponse = {
+  jobs: [
+    {
+      job_id: "42",
+      status: "running",
+      operation: "download",
+      queue: "acquisition",
+      source_label: "Toy model",
+      destination_path: "/models/toy.gguf",
+      asset_id: null,
+      progress: {
+        progress_percent: 25,
+        progress_message: "downloading"
+      },
+      warnings: ["Checksum will be verified after download."],
+      error_message: null
+    }
+  ]
 }
 
 describe("LlamacppAssetsPanel", () => {
@@ -160,5 +212,103 @@ describe("LlamacppAssetsPanel", () => {
       expect(onImportFolder).toHaveBeenCalledWith("/external/models")
     })
     expect(folderInput.value).toBe("/external/models")
+  })
+
+  it("previews local folder imports before confirming persistence", async () => {
+    const onPreviewImportFolder = vi.fn().mockResolvedValue(true)
+    const onImportFolder = vi.fn().mockResolvedValue(true)
+
+    render(
+      <LlamacppAssetsPanel
+        assets={{ assets: [], warnings: [], scan_limited: false }}
+        loading={false}
+        registeringPath={false}
+        importingFolder={false}
+        previewingFolder={false}
+        importPreview={mockImportPreview}
+        error={null}
+        onRegisterPath={vi.fn()}
+        onPreviewImportFolder={onPreviewImportFolder}
+        onImportFolder={onImportFolder}
+        onReload={vi.fn()}
+      />
+    )
+
+    const folderInput = screen.getByLabelText("Import local asset folder") as HTMLInputElement
+    fireEvent.change(folderInput, { target: { value: "/external/models" } })
+    fireEvent.click(screen.getByRole("button", { name: "Preview folder" }))
+
+    await waitFor(() => {
+      expect(onPreviewImportFolder).toHaveBeenCalledWith("/external/models")
+    })
+
+    expect(screen.getByText("Import preview")).toBeTruthy()
+    expect(screen.getByText("GGUF: 1")).toBeTruthy()
+    expect(screen.getByText("mmproj: 1")).toBeTruthy()
+    expect(screen.getByText("Preview skipped unreadable sidecar file.")).toBeTruthy()
+    expect(onImportFolder).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm import" }))
+
+    await waitFor(() => {
+      expect(onImportFolder).toHaveBeenCalledWith("/external/models")
+    })
+  })
+
+  it("queues downloads and renders cancellable acquisition status", async () => {
+    const onStartDownload =
+      vi.fn<(payload: LlamacppAssetDownloadRequest) => Promise<boolean>>()
+        .mockResolvedValue(true)
+    const onCancelDownload = vi.fn().mockResolvedValue(true)
+
+    render(
+      <LlamacppAssetsPanel
+        assets={{ assets: [], warnings: [], scan_limited: false }}
+        loading={false}
+        registeringPath={false}
+        importingFolder={false}
+        error={null}
+        downloads={mockDownloads}
+        startingDownload={false}
+        cancelingDownloadId={null}
+        onRegisterPath={vi.fn()}
+        onImportFolder={vi.fn()}
+        onStartDownload={onStartDownload}
+        onCancelDownload={onCancelDownload}
+        onReload={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole("button", { name: "Queue download" })).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText("Download source URL"), {
+      target: { value: "https://example.com/toy.gguf" }
+    })
+    fireEvent.change(screen.getByLabelText("Download destination directory"), {
+      target: { value: "/models" }
+    })
+    fireEvent.change(screen.getByLabelText("Download filename"), {
+      target: { value: "toy.gguf" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Queue download" }))
+
+    await waitFor(() => {
+      expect(onStartDownload).toHaveBeenCalledWith({
+        url: "https://example.com/toy.gguf",
+        destination_dir: "/models",
+        filename: "toy.gguf"
+      } satisfies Partial<LlamacppAssetDownloadRequest>)
+    })
+
+    expect(screen.getByText("Toy model")).toBeTruthy()
+    expect(screen.getByText("running")).toBeTruthy()
+    expect(screen.getByText("25%")).toBeTruthy()
+    expect(screen.getByText("Checksum will be verified after download.")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel download 42" }))
+
+    await waitFor(() => {
+      expect(onCancelDownload).toHaveBeenCalledWith("42")
+    })
   })
 })

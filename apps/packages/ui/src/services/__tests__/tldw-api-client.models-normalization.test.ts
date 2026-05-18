@@ -123,4 +123,69 @@ describe("TldwApiClient getModels normalization", () => {
     expect(requests[1]?.body).toEqual({ name: "Default", model_id: "gguf:default" })
     expect(requests[2]?.body).toEqual({ name: "Updated" })
   })
+
+  it("routes llama.cpp acquisition workflow methods", async () => {
+    const requests: Array<{ path?: string; method?: string; body?: unknown }> = []
+    mocks.bgRequest.mockImplementation(
+      async (request: { path?: string; method?: string; body?: unknown }) => {
+        requests.push(request)
+        if (request.path === "/api/v1/llamacpp/assets/import-folder/preview") {
+          return {
+            folder: {},
+            assets: [],
+            asset_counts: {},
+            warnings: [],
+            scan_limited: false,
+            will_persist: false
+          }
+        }
+        if (request.path === "/api/v1/llamacpp/assets/downloads") {
+          return request.method === "GET"
+            ? { jobs: [] }
+            : {
+                job_id: "42",
+                status: "queued",
+                operation: "download",
+                queue: "acquisition",
+                progress: {},
+                warnings: []
+              }
+        }
+        return {
+          job_id: "42",
+          status: request.method === "DELETE" ? "canceled" : "running",
+          operation: "download",
+          queue: "acquisition",
+          progress: {},
+          warnings: []
+        }
+      }
+    )
+
+    const client = new TldwApiClient()
+
+    await client.previewLlamacppAssetFolder("/models")
+    await client.startLlamacppAssetDownload({
+      url: "https://example.com/model.gguf",
+      destination_dir: "/models",
+      filename: "model.gguf"
+    })
+    await client.listLlamacppAssetDownloads()
+    await client.getLlamacppAssetDownload("42")
+    await client.cancelLlamacppAssetDownload("42")
+
+    expect(requests.map((request) => [request.method, request.path])).toEqual([
+      ["POST", "/api/v1/llamacpp/assets/import-folder/preview"],
+      ["POST", "/api/v1/llamacpp/assets/downloads"],
+      ["GET", "/api/v1/llamacpp/assets/downloads"],
+      ["GET", "/api/v1/llamacpp/assets/downloads/42"],
+      ["DELETE", "/api/v1/llamacpp/assets/downloads/42"]
+    ])
+    expect(requests[0]?.body).toEqual({ path: "/models" })
+    expect(requests[1]?.body).toEqual({
+      url: "https://example.com/model.gguf",
+      destination_dir: "/models",
+      filename: "model.gguf"
+    })
+  })
 })

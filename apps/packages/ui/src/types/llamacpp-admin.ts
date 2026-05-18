@@ -132,6 +132,43 @@ export interface LlamacppAssetsResponse {
   scan_limited: boolean
 }
 
+export interface LlamacppAssetImportPreviewResponse {
+  folder: LlamacppAsset
+  assets: LlamacppAsset[]
+  asset_counts: Record<string, number>
+  warnings: string[]
+  scan_limited: boolean
+  will_persist: boolean
+}
+
+export interface LlamacppAssetDownloadRequest {
+  url: string
+  destination_dir?: string | null
+  filename?: string | null
+  expected_sha256?: string | null
+  expected_size_bytes?: number | null
+  source_label?: string | null
+  overwrite?: boolean
+  register_asset?: boolean
+}
+
+export interface LlamacppAcquisitionJobResponse {
+  job_id: string
+  status: string
+  operation: "download"
+  queue: string
+  source_label?: string | null
+  destination_path?: string | null
+  asset_id?: string | null
+  progress: Record<string, unknown>
+  warnings: string[]
+  error_message?: string | null
+}
+
+export interface LlamacppAcquisitionJobListResponse {
+  jobs: LlamacppAcquisitionJobResponse[]
+}
+
 export interface LlamacppUseInChatResponse {
   provider: string
   endpoint: string

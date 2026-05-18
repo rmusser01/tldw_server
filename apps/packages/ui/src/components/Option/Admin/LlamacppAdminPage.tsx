@@ -5,6 +5,9 @@ import { PageShell } from "@/components/Common/PageShell"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type {
+  LlamacppAcquisitionJobListResponse,
+  LlamacppAssetDownloadRequest,
+  LlamacppAssetImportPreviewResponse,
   LlamacppAssetsResponse,
   LlamacppConfigResponse,
   LlamacppHardwareSnapshotResponse,
@@ -120,11 +123,16 @@ export const LlamacppAdminPage: React.FC = () => {
   const { t } = useTranslation(["option", "settings", "common"])
   const initialLoadRef = React.useRef(false)
   const presetFileInputRef = React.useRef<HTMLInputElement | null>(null)
+  const refreshedDownloadJobIdsRef = React.useRef<Set<string>>(new Set())
 
   const [config, setConfig] = React.useState<LlamacppConfigResponse | null>(null)
   const [status, setStatus] = React.useState<LlamacppStatus | null>(null)
   const [inventory, setInventory] = React.useState<LlamacppInventoryResponse | null>(null)
   const [assets, setAssets] = React.useState<LlamacppAssetsResponse | null>(null)
+  const [assetImportPreview, setAssetImportPreview] =
+    React.useState<LlamacppAssetImportPreviewResponse | null>(null)
+  const [assetDownloads, setAssetDownloads] =
+    React.useState<LlamacppAcquisitionJobListResponse | null>(null)
   const [hardware, setHardware] = React.useState<LlamacppHardwareSnapshotResponse | null>(null)
   const [runtimeProfiles, setRuntimeProfiles] = React.useState<LlamacppProfile[]>([])
   const [runtimeInstances, setRuntimeInstances] = React.useState<LlamacppRuntime[]>([])
@@ -136,7 +144,11 @@ export const LlamacppAdminPage: React.FC = () => {
   const [loadingRuntimes, setLoadingRuntimes] = React.useState(true)
   const [registeringPath, setRegisteringPath] = React.useState(false)
   const [registeringAssetPath, setRegisteringAssetPath] = React.useState(false)
+  const [previewingAssetFolder, setPreviewingAssetFolder] = React.useState(false)
   const [importingAssetFolder, setImportingAssetFolder] = React.useState(false)
+  const [loadingAssetDownloads, setLoadingAssetDownloads] = React.useState(false)
+  const [startingAssetDownload, setStartingAssetDownload] = React.useState(false)
+  const [cancelingAssetDownloadId, setCancelingAssetDownloadId] = React.useState<string | null>(null)
 
   const [statusError, setStatusError] = React.useState<string | null>(null)
   const [inventoryError, setInventoryError] = React.useState<string | null>(null)
@@ -250,6 +262,32 @@ export const LlamacppAdminPage: React.FC = () => {
     }
   }, [])
 
+  const loadAssetDownloads = React.useCallback(async () => {
+    try {
+      setLoadingAssetDownloads(true)
+      const data = await tldwClient.listLlamacppAssetDownloads()
+      setAssetDownloads(data)
+      const completedJobs = (data.jobs || []).filter((job) =>
+        ["completed", "succeeded", "done"].includes(job.status.toLowerCase())
+      )
+      const newlyCompleted = completedJobs.filter(
+        (job) => !refreshedDownloadJobIdsRef.current.has(job.job_id)
+      )
+      if (newlyCompleted.length > 0) {
+        newlyCompleted.forEach((job) => {
+          refreshedDownloadJobIdsRef.current.add(job.job_id)
+        })
+        await loadAssets()
+      }
+    } catch (error: unknown) {
+      setAssetError(
+        sanitizeAdminErrorMessage(error, "Failed to load Llama.cpp asset downloads.")
+      )
+    } finally {
+      setLoadingAssetDownloads(false)
+    }
+  }, [loadAssets])
+
   const loadRuntimePlane = React.useCallback(async () => {
     try {
       setLoadingRuntimes(true)
@@ -292,11 +330,13 @@ export const LlamacppAdminPage: React.FC = () => {
       loadStatus(),
       loadInventory(),
       loadAssets(),
+      loadAssetDownloads(),
       loadHardware(),
       loadRuntimePlane()
     ])
   }, [
     loadAssets,
+    loadAssetDownloads,
     loadConfig,
     loadHardware,
     loadInventory,
@@ -368,11 +408,30 @@ export const LlamacppAdminPage: React.FC = () => {
     }
   }
 
+  const handlePreviewAssetFolder = async (path: string): Promise<boolean> => {
+    try {
+      setPreviewingAssetFolder(true)
+      setAssetError(null)
+      const preview = await tldwClient.previewLlamacppAssetFolder(path)
+      setAssetImportPreview(preview)
+      return true
+    } catch (error: unknown) {
+      setAssetImportPreview(null)
+      setAssetError(
+        sanitizeAdminErrorMessage(error, "Failed to preview Llama.cpp asset folder.")
+      )
+      return false
+    } finally {
+      setPreviewingAssetFolder(false)
+    }
+  }
+
   const handleImportAssetFolder = async (path: string): Promise<boolean> => {
     try {
       setImportingAssetFolder(true)
       setAssetError(null)
       await tldwClient.importLlamacppAssetFolder(path)
+      setAssetImportPreview(null)
       await loadAssets()
       return true
     } catch (error: unknown) {
@@ -382,6 +441,42 @@ export const LlamacppAdminPage: React.FC = () => {
       return false
     } finally {
       setImportingAssetFolder(false)
+    }
+  }
+
+  const handleStartAssetDownload = async (
+    payload: LlamacppAssetDownloadRequest
+  ): Promise<boolean> => {
+    try {
+      setStartingAssetDownload(true)
+      setAssetError(null)
+      await tldwClient.startLlamacppAssetDownload(payload)
+      await loadAssetDownloads()
+      return true
+    } catch (error: unknown) {
+      setAssetError(
+        sanitizeAdminErrorMessage(error, "Failed to queue Llama.cpp asset download.")
+      )
+      return false
+    } finally {
+      setStartingAssetDownload(false)
+    }
+  }
+
+  const handleCancelAssetDownload = async (jobId: string): Promise<boolean> => {
+    try {
+      setCancelingAssetDownloadId(jobId)
+      setAssetError(null)
+      await tldwClient.cancelLlamacppAssetDownload(jobId)
+      await loadAssetDownloads()
+      return true
+    } catch (error: unknown) {
+      setAssetError(
+        sanitizeAdminErrorMessage(error, "Failed to cancel Llama.cpp asset download.")
+      )
+      return false
+    } finally {
+      setCancelingAssetDownloadId(null)
     }
   }
 
@@ -739,10 +834,20 @@ export const LlamacppAdminPage: React.FC = () => {
               assets={assets}
               loading={loadingAssets}
               registeringPath={registeringAssetPath}
+              previewingFolder={previewingAssetFolder}
               importingFolder={importingAssetFolder}
+              importPreview={assetImportPreview}
+              downloads={assetDownloads}
+              loadingDownloads={loadingAssetDownloads}
+              startingDownload={startingAssetDownload}
+              cancelingDownloadId={cancelingAssetDownloadId}
               error={assetError}
               onRegisterPath={handleRegisterAssetPath}
+              onPreviewImportFolder={handlePreviewAssetFolder}
               onImportFolder={handleImportAssetFolder}
+              onStartDownload={handleStartAssetDownload}
+              onCancelDownload={handleCancelAssetDownload}
+              onReloadDownloads={loadAssetDownloads}
               onReload={loadAssets}
             />
 
