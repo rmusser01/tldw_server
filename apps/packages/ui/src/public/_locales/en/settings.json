@@ -5842,5 +5842,17 @@
   },
   "generalSettings_stt_noModelsAlert": {
     "message": "No STT models available on your server. Configure a transcription engine to enable speech-to-text."
+  },
+  "navigation_dataManagement": {
+    "message": "Data Management"
+  },
+  "dataManagement_navTitle": {
+    "message": "Data Management"
+  },
+  "dataManagement_title": {
+    "message": "Data Management"
+  },
+  "dataManagement_description": {
+    "message": "Export, import, sync, or reset local extension and WebUI data."
   }
 }

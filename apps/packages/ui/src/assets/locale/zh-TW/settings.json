@@ -8,7 +8,8 @@
     "aiModels": "AI 與模型",
     "experience": "體驗",
     "knowledgeWorkspace": "知識與工作區",
-    "safetyAdmin": "安全與管理"
+    "safetyAdmin": "安全與管理",
+    "dataManagement": "資料管理"
   },
   "healthNav": "健康",
   "worldBooksNav": "世界書",
@@ -1682,5 +1683,8 @@
   "skillsNav": "技能",
   "providerKeys": {
     "navTitle": "供應商金鑰"
+  },
+  "dataManagement": {
+    "navTitle": "資料管理"
   }
 }

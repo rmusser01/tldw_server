@@ -3370,5 +3370,11 @@
   },
   "providerKeys_navTitle": {
     "message": "Leverandørnøkler"
+  },
+  "navigation_dataManagement": {
+    "message": "Dataadministrasjon"
+  },
+  "dataManagement_navTitle": {
+    "message": "Dataadministrasjon"
   }
 }

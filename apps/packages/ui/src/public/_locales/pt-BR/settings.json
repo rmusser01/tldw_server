@@ -3394,5 +3394,11 @@
   },
   "providerKeys_navTitle": {
     "message": "Chaves de provedores"
+  },
+  "navigation_dataManagement": {
+    "message": "Gerenciamento de dados"
+  },
+  "dataManagement_navTitle": {
+    "message": "Gerenciamento de dados"
   }
 }

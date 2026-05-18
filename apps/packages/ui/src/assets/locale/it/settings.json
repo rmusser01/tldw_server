@@ -8,7 +8,8 @@
     "aiModels": "IA e modelli",
     "experience": "Esperienza",
     "knowledgeWorkspace": "Conoscenza e area di lavoro",
-    "safetyAdmin": "Sicurezza e amministrazione"
+    "safetyAdmin": "Sicurezza e amministrazione",
+    "dataManagement": "Gestione dati"
   },
   "healthNav": "Stato",
   "worldBooksNav": "Libri del mondo",
@@ -1678,5 +1679,8 @@
   "skillsNav": "Competenze",
   "providerKeys": {
     "navTitle": "Chiavi provider"
+  },
+  "dataManagement": {
+    "navTitle": "Gestione dati"
   }
 }

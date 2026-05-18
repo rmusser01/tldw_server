@@ -3370,5 +3370,11 @@
   },
   "providerKeys_navTitle": {
     "message": "제공자 키"
+  },
+  "navigation_dataManagement": {
+    "message": "데이터 관리"
+  },
+  "dataManagement_navTitle": {
+    "message": "데이터 관리"
   }
 }

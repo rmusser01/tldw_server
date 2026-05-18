@@ -3367,5 +3367,11 @@
   },
   "providerKeys_navTitle": {
     "message": "مفاتيح المزوّدين"
+  },
+  "navigation_dataManagement": {
+    "message": "إدارة البيانات"
+  },
+  "dataManagement_navTitle": {
+    "message": "إدارة البيانات"
   }
 }

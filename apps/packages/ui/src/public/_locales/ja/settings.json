@@ -3370,5 +3370,11 @@
   },
   "providerKeys_navTitle": {
     "message": "プロバイダーキー"
+  },
+  "navigation_dataManagement": {
+    "message": "データ管理"
+  },
+  "dataManagement_navTitle": {
+    "message": "データ管理"
   }
 }

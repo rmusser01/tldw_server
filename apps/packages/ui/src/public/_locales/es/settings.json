@@ -3370,5 +3370,11 @@
   },
   "providerKeys_navTitle": {
     "message": "Claves de proveedores"
+  },
+  "navigation_dataManagement": {
+    "message": "Gestión de datos"
+  },
+  "dataManagement_navTitle": {
+    "message": "Gestión de datos"
   }
 }

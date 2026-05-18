@@ -28,6 +28,7 @@ const NAV_GROUPS: Array<{ key: NavGroupKey; titleToken: string }> = [
     titleToken: "settings:navigation.knowledgeWorkspace"
   },
   { key: "safetyAdmin", titleToken: "settings:navigation.safetyAdmin" },
+  { key: "dataManagement", titleToken: "settings:navigation.dataManagement" },
   { key: "about", titleToken: "settings:navigation.about" }
 ]
 

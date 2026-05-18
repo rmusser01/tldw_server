@@ -124,8 +124,10 @@ describe("settings nav guardian gating", () => {
       "navigation.experience",
       "navigation.knowledgeWorkspace",
       "navigation.safetyAdmin",
+      "navigation.dataManagement",
       "navigation.about",
-      "providerKeys.navTitle"
+      "providerKeys.navTitle",
+      "dataManagement.navTitle"
     ]
 
     for (const locale of fs.readdirSync(localeRoot)) {
@@ -159,6 +161,7 @@ describe("settings nav guardian gating", () => {
       "experience",
       "knowledgeWorkspace",
       "safetyAdmin",
+      "dataManagement",
       "about"
     ])
     expect(pathsByGroup.connect).toEqual(
@@ -172,6 +175,7 @@ describe("settings nav guardian gating", () => {
     expect(pathsByGroup.experience).toEqual(
       expect.arrayContaining(["/settings", "/settings/chat"])
     )
+    expect(pathsByGroup.dataManagement).toEqual(["/settings/data"])
   })
 
   it("keeps only settings-prefixed routes in settings navigation", () => {

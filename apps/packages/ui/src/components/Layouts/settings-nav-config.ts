@@ -8,6 +8,7 @@ import {
   BrainCircuitIcon,
   ClipboardList,
   CombineIcon,
+  DatabaseIcon,
   Eye,
   FlaskConical,
   ImageIcon,
@@ -34,6 +35,7 @@ export type NavGroupKey =
   | "experience"
   | "knowledgeWorkspace"
   | "safetyAdmin"
+  | "dataManagement"
   | "about"
 
 export type SettingsNavRouteMeta = {
@@ -66,6 +68,13 @@ export const SETTINGS_ROUTE_NAV_ITEMS: SettingsNavRouteMeta[] = [
     labelToken: "settings:providerKeys.navTitle",
     icon: ServerIcon,
     order: 2
+  },
+  {
+    path: "/settings/data",
+    group: "dataManagement",
+    labelToken: "settings:dataManagement.navTitle",
+    icon: DatabaseIcon,
+    order: 1
   },
   {
     path: "/settings/model",

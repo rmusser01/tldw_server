@@ -3370,5 +3370,11 @@
   },
   "providerKeys_navTitle": {
     "message": "പ്രൊവൈഡർ കീകൾ"
+  },
+  "navigation_dataManagement": {
+    "message": "ഡാറ്റ മാനേജ്മെന്റ്"
+  },
+  "dataManagement_navTitle": {
+    "message": "ഡാറ്റ മാനേജ്മെന്റ്"
   }
 }

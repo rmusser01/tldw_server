@@ -5,7 +5,8 @@
     "experience": "Experience",
     "knowledgeWorkspace": "Knowledge & Workspace",
     "safetyAdmin": "Safety & Admin",
-    "about": "About"
+    "about": "About",
+    "dataManagement": "Data Management"
   },
   "healthNav": "Health & Diagnostics",
   "worldBooksNav": "World Books",
@@ -2404,5 +2405,10 @@
   },
   "serverOverview": {
     "docsUrl": "https://github.com/rmusser01/tldw_browser_assistant"
+  },
+  "dataManagement": {
+    "navTitle": "Data Management",
+    "title": "Data Management",
+    "description": "Export, import, sync, or reset local extension and WebUI data."
   }
 }

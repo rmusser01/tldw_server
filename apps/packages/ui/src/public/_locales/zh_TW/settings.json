@@ -3382,5 +3382,11 @@
   },
   "providerKeys_navTitle": {
     "message": "供應商金鑰"
+  },
+  "navigation_dataManagement": {
+    "message": "資料管理"
+  },
+  "dataManagement_navTitle": {
+    "message": "資料管理"
   }
 }

@@ -8,7 +8,8 @@
     "aiModels": "AI og modeller",
     "experience": "Oplevelse",
     "knowledgeWorkspace": "Viden og arbejdsområde",
-    "safetyAdmin": "Sikkerhed og administration"
+    "safetyAdmin": "Sikkerhed og administration",
+    "dataManagement": "Datahåndtering"
   },
   "healthNav": "Sundhed",
   "worldBooksNav": "Verdensbøger",
@@ -1667,5 +1668,8 @@
   "skillsNav": "Færdigheder",
   "providerKeys": {
     "navTitle": "Udbydernøgler"
+  },
+  "dataManagement": {
+    "navTitle": "Datahåndtering"
   }
 }

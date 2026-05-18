@@ -3388,5 +3388,11 @@
   },
   "providerKeys_navTitle": {
     "message": "Chiavi provider"
+  },
+  "navigation_dataManagement": {
+    "message": "Gestione dati"
+  },
+  "dataManagement_navTitle": {
+    "message": "Gestione dati"
   }
 }

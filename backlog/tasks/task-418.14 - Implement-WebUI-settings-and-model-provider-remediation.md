@@ -4,7 +4,7 @@ title: Implement WebUI settings and model provider remediation
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-05-18 15:11'
+updated_date: '2026-05-18 15:17'
 labels:
   - ux
   - webui
@@ -52,6 +52,10 @@ Started implementation in clean worktree codex/webui-settings-models from origin
 Completed first remediation slice: regrouped Settings navigation around user tasks (Connect, AI & Models, Experience, Knowledge & Workspace, Safety & Admin, About); fixed Provider Keys nav token; added locale guards for nav labels across source locales; regenerated public settings locale mirrors with the existing sync script.
 
 Verification: bunx vitest run src/components/Layouts/__tests__/settings-nav.guardian.test.ts src/components/Layouts/__tests__/settings-layout-labels.test.tsx src/components/Layouts/__tests__/settings-layout-filter.test.tsx src/components/Layouts/__tests__/settings-layout-focus-order.test.tsx src/components/Layouts/__tests__/settings-layout-active-route.test.ts -> 5 files / 29 tests passed.
+
+Completed second remediation slice: split high-risk data management actions out of routine General Settings into /settings/data; preserved the existing import/export flow, Firefox private-mode sync, typed RESET confirmation, danger reset button, reload cancellation, and storage-clearing code path. Added settings nav Data Management group, source locale keys, and regenerated public settings locale mirrors.
+
+Verification: bunx vitest run src/components/Option/Settings/__tests__/GeneralSettings.test.tsx src/components/Option/Settings/__tests__/DataManagementSettings.test.tsx src/components/Option/Settings/__tests__/system-settings.highlight-preview.test.ts src/components/Layouts/__tests__/settings-nav.guardian.test.ts src/components/Layouts/__tests__/settings-layout-filter.test.tsx src/components/Layouts/__tests__/settings-layout-focus-order.test.tsx src/components/Layouts/__tests__/settings-layout-active-route.test.ts -> 7 files / 31 tests passed. git diff --check passed. bunx tsc --noEmit --pretty false remains blocked by existing unrelated TypeScript baseline failures before touched settings files, starting in audio/chat/flashcards test fixtures.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

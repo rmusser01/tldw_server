@@ -3370,5 +3370,11 @@
   },
   "providerKeys_navTitle": {
     "message": "Udbydernøgler"
+  },
+  "navigation_dataManagement": {
+    "message": "Datahåndtering"
+  },
+  "dataManagement_navTitle": {
+    "message": "Datahåndtering"
   }
 }

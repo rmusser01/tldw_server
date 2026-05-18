@@ -3367,5 +3367,11 @@
   },
   "providerKeys_navTitle": {
     "message": "کلیدهای ارائه‌دهنده"
+  },
+  "navigation_dataManagement": {
+    "message": "مدیریت داده"
+  },
+  "dataManagement_navTitle": {
+    "message": "مدیریت داده"
   }
 }

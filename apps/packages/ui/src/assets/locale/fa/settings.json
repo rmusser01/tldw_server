@@ -8,7 +8,8 @@
     "aiModels": "هوش مصنوعی و مدل‌ها",
     "experience": "تجربه",
     "knowledgeWorkspace": "دانش و فضای کاری",
-    "safetyAdmin": "ایمنی و مدیریت"
+    "safetyAdmin": "ایمنی و مدیریت",
+    "dataManagement": "مدیریت داده"
   },
   "healthNav": "سلامت",
   "worldBooksNav": "کتاب‌های جهان",
@@ -1667,5 +1668,8 @@
   "skillsNav": "مهارت‌ها",
   "providerKeys": {
     "navTitle": "کلیدهای ارائه‌دهنده"
+  },
+  "dataManagement": {
+    "navTitle": "مدیریت داده"
   }
 }

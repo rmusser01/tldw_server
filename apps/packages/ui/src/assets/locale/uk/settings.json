@@ -8,7 +8,8 @@
     "aiModels": "ШІ та моделі",
     "experience": "Досвід",
     "knowledgeWorkspace": "Знання та робочий простір",
-    "safetyAdmin": "Безпека та адміністрування"
+    "safetyAdmin": "Безпека та адміністрування",
+    "dataManagement": "Керування даними"
   },
   "healthNav": "Стан",
   "worldBooksNav": "Книги світу",
@@ -1667,5 +1668,8 @@
   "skillsNav": "Навички",
   "providerKeys": {
     "navTitle": "Ключі провайдерів"
+  },
+  "dataManagement": {
+    "navTitle": "Керування даними"
   }
 }

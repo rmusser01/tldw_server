@@ -3367,5 +3367,11 @@
   },
   "providerKeys_navTitle": {
     "message": "Ключи провайдеров"
+  },
+  "navigation_dataManagement": {
+    "message": "Управление данными"
+  },
+  "dataManagement_navTitle": {
+    "message": "Управление данными"
   }
 }

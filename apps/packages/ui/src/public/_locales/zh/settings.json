@@ -3373,5 +3373,11 @@
   },
   "providerKeys_navTitle": {
     "message": "提供商密钥"
+  },
+  "navigation_dataManagement": {
+    "message": "数据管理"
+  },
+  "dataManagement_navTitle": {
+    "message": "数据管理"
   }
 }

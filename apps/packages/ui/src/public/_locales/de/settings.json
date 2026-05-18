@@ -3385,5 +3385,11 @@
   },
   "providerKeys_navTitle": {
     "message": "Anbieter-Schlüssel"
+  },
+  "navigation_dataManagement": {
+    "message": "Datenverwaltung"
+  },
+  "dataManagement_navTitle": {
+    "message": "Datenverwaltung"
   }
 }

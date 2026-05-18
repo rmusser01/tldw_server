@@ -8,7 +8,8 @@
     "aiModels": "AI とモデル",
     "experience": "体験",
     "knowledgeWorkspace": "ナレッジとワークスペース",
-    "safetyAdmin": "安全性と管理"
+    "safetyAdmin": "安全性と管理",
+    "dataManagement": "データ管理"
   },
   "healthNav": "ヘルス",
   "worldBooksNav": "ワールドブック",
@@ -1670,5 +1671,8 @@
   "skillsNav": "スキル",
   "providerKeys": {
     "navTitle": "プロバイダーキー"
+  },
+  "dataManagement": {
+    "navTitle": "データ管理"
   }
 }
