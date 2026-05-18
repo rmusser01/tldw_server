@@ -3,6 +3,10 @@ import { buildQuery } from "../client-utils"
 import { appendPathQuery } from "../path-utils"
 import type {
   LlamacppAsset,
+  LlamacppAcquisitionJobListResponse,
+  LlamacppAcquisitionJobResponse,
+  LlamacppAssetDownloadRequest,
+  LlamacppAssetImportPreviewResponse,
   LlamacppAssetsResponse,
   LlamacppConfigResponse,
   LlamacppConfigUpdateRequest,
@@ -384,6 +388,53 @@ export const modelsAudioMethods = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: { path }
+    })
+  },
+
+  async previewLlamacppAssetFolder(
+    path: string
+  ): Promise<LlamacppAssetImportPreviewResponse> {
+    return await bgRequest<LlamacppAssetImportPreviewResponse>({
+      path: "/api/v1/llamacpp/assets/import-folder/preview",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { path }
+    })
+  },
+
+  async startLlamacppAssetDownload(
+    payload: LlamacppAssetDownloadRequest
+  ): Promise<LlamacppAcquisitionJobResponse> {
+    return await bgRequest<LlamacppAcquisitionJobResponse>({
+      path: "/api/v1/llamacpp/assets/downloads",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async listLlamacppAssetDownloads(): Promise<LlamacppAcquisitionJobListResponse> {
+    return await bgRequest<LlamacppAcquisitionJobListResponse>({
+      path: "/api/v1/llamacpp/assets/downloads",
+      method: "GET"
+    })
+  },
+
+  async getLlamacppAssetDownload(
+    jobId: string | number
+  ): Promise<LlamacppAcquisitionJobResponse> {
+    return await bgRequest<LlamacppAcquisitionJobResponse>({
+      path: `/api/v1/llamacpp/assets/downloads/${encodeURIComponent(String(jobId))}`,
+      method: "GET"
+    })
+  },
+
+  async cancelLlamacppAssetDownload(
+    jobId: string | number
+  ): Promise<LlamacppAcquisitionJobResponse> {
+    return await bgRequest<LlamacppAcquisitionJobResponse>({
+      path: `/api/v1/llamacpp/assets/downloads/${encodeURIComponent(String(jobId))}`,
+      method: "DELETE"
     })
   },
 
