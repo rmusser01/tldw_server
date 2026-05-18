@@ -37,6 +37,7 @@ export const DataManagementSettings = () => {
   const [resetModalOpen, setResetModalOpen] = useState(false)
   const [resetInput, setResetInput] = useState("")
   const [resetting, setResetting] = useState(false)
+  const importInputRef = React.useRef<HTMLInputElement | null>(null)
   const reloadTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
   React.useEffect(() => {
@@ -172,7 +173,6 @@ export const DataManagementSettings = () => {
       })
     },
     onError: (error) => {
-      console.log(error)
       notification.error({
         message: t(
           "settings:systemNotifications.syncError",
@@ -250,9 +250,12 @@ export const DataManagementSettings = () => {
         <span className="text-text">
           {t("generalSettings.systemData.import.label", { defaultValue: t("generalSettings.system.import.label", { defaultValue: "Import Chat History, Knowledge Base, and Prompts" }) as string })}
         </span>
-        <label
-          htmlFor="import"
-          className="flex w-full cursor-pointer items-center justify-center rounded-md bg-primary px-4 py-2 text-white transition-colors hover:bg-primaryStrong sm:w-auto">
+        <button
+          type="button"
+          disabled={importDataMutation.isPending}
+          aria-disabled={importDataMutation.isPending}
+          onClick={() => importInputRef.current?.click()}
+          className="flex w-full cursor-pointer items-center justify-center rounded-md bg-primary px-4 py-2 text-white transition-colors hover:bg-primaryStrong disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto">
           {importDataMutation.isPending ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -260,8 +263,9 @@ export const DataManagementSettings = () => {
           ) : (
             t("generalSettings.systemData.import.button", { defaultValue: t("generalSettings.system.import.button", { defaultValue: "Import Data" }) as string })
           )}
-        </label>
+        </button>
         <input
+          ref={importInputRef}
           type="file"
           accept=".json"
           id="import"

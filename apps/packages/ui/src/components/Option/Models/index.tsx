@@ -20,6 +20,7 @@ import {
   normalizeProviderKey
 } from "@/utils/provider-registry"
 import { isAutoModelId } from "@/utils/resolve-api-provider"
+import { isConfiguredUsableModel } from "@/hooks/playground/modelSelectorUtils"
 
 interface RefreshResponse {
   ok: boolean
@@ -44,6 +45,49 @@ const getStatusCode = (error: unknown): number | null => {
     return null
   }
   return maybeStatus
+}
+
+const getRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : null
+
+const getBooleanFromModelPaths = (
+  model: unknown,
+  keys: string[]
+): boolean | null => {
+  const root = getRecord(model)
+  if (!root) return null
+  const details = getRecord(root.details)
+  const metadata = getRecord(root.metadata)
+
+  for (const key of keys) {
+    const value = root[key] ?? details?.[key] ?? metadata?.[key]
+    if (typeof value === "boolean") return value
+  }
+
+  return null
+}
+
+const getModelConfiguredSignal = (model: unknown): boolean | null => {
+  const configuredKeys = [
+    "is_configured",
+    "isConfigured",
+    "configured",
+    "provider_is_configured",
+    "providerIsConfigured",
+    "provider_configured",
+    "providerConfigured"
+  ]
+  let sawConfigured = false
+
+  for (const key of configuredKeys) {
+    const value = getBooleanFromModelPaths(model, [key])
+    if (value === false) return false
+    if (value === true) sawConfigured = true
+  }
+
+  return sawConfigured ? true : null
 }
 
 export const ModelsBody = () => {
@@ -121,6 +165,8 @@ export const ModelsBody = () => {
     providerKeysStatusCode === 403 ||
     providerKeysStatusCode === 404 ||
     providerKeysStatusCode === 501
+  const providerKeysLoadFailed =
+    Boolean(providerKeysError) && !providerKeysUnavailable
 
   const configuredProviderKeys = useMemo(() => {
     const keys = new Set<string>()
@@ -199,12 +245,18 @@ export const ModelsBody = () => {
       if (!rawProvider) return null
       const normalizedProvider = normalizeProviderKey(rawProvider)
       if (!normalizedProvider || normalizedProvider === "unknown") return null
+      const configuredSignal = getModelConfiguredSignal(model)
+      const configured =
+        configuredSignal === false
+          ? false
+          : configuredProviderKeys.has(normalizedProvider) ||
+            configuredSignal === true
       return {
         id: model.model,
         provider: getProviderDisplayName(rawProvider),
         nickname: model.nickname,
-        configured: configuredProviderKeys.has(normalizedProvider),
-        usable: true,
+        configured,
+        usable: configured && isConfiguredUsableModel(model),
         selected: selectedModel === model.model
       }
     },
@@ -652,6 +704,11 @@ export const ModelsBody = () => {
                           "settings:models.readiness.keysUnavailable",
                           "Account keys unavailable"
                         )
+                      : providerKeysLoadFailed
+                        ? t(
+                            "settings:models.readiness.keysLoadFailed",
+                            "Unable to load account keys"
+                          )
                       : t("settings:models.readiness.configuredCount", {
                           defaultValue: "{{count}} configured",
                           count: providerReadiness.configuredProviders

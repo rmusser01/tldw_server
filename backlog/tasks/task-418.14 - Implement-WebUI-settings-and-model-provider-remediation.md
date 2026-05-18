@@ -4,7 +4,7 @@ title: Implement WebUI settings and model provider remediation
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-18 19:40'
+updated_date: '2026-05-18 19:49'
 labels:
   - ux
   - webui
@@ -72,6 +72,10 @@ Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1845
 PR #1845 review follow-up 2026-05-18: Gemini flagged the reset reload timer in DataManagementSettings because handleResetAll uses a bare setTimeout while the component cleanup and import cancellation use reloadTimeoutRef. Reopening the task to route the reset reload timer through the existing ref and verify the focused settings tests.
 
 PR #1845 review follow-up verification 2026-05-18: added a regression test proving the reset reload timer is cleared on DataManagementSettings unmount, then stored the reset timer in reloadTimeoutRef and nulled it before window.location.reload. Targeted test passed before broad rerun: bunx vitest run src/components/Option/Settings/__tests__/DataManagementSettings.test.tsx -> 1 file / 2 tests passed. Broader focused settings/model Vitest suite passed 11 files / 42 tests. git diff --check passed. bunx tsc --noEmit --pretty false remains blocked by existing repo-wide UI baseline errors outside this touched settings slice, with no touched settings file diagnostics in the observed output.
+
+PR #1845 second review sweep 2026-05-18: CodeRabbit/Qodo added actionable comments after commit c229a70aa. Current items to verify/fix: locale directory filtering in settings nav guardian, provider-key error handling in model readiness UI, keyboard-accessible import trigger, exact prompt settings URL assertion, duplicate FINAL_SUMMARY markers in TASK-418.14 and TASK-418.2, raw syncFirefoxData error logging, and model usability/configuration derived from server catalog fields.
+
+PR #1845 second review sweep verification 2026-05-18: fixed the new CodeRabbit/Qodo comments by filtering locale guard iteration to directories, showing provider-key load failures separately from configured counts, deriving model configured/usable state from provider keys plus server model flags, replacing the import label with a disabled-aware button that clicks the hidden file input, removing raw syncFirefoxData error logging, tightening the prompt settings URL assertion, and removing duplicate FINAL_SUMMARY markers from TASK-418.14 and TASK-418.2. Verification: affected Vitest tests passed 3 files / 21 tests; broader focused settings/model Vitest suite passed 11 files / 45 tests; git diff --check passed. Focused Playwright prompt-route command was rerun outside the sandbox after a port-bind EPERM, but skipped 3 tests because the E2E fixture marked the backend server unavailable. bunx tsc --noEmit --pretty false still fails on existing repo-wide UI baseline diagnostics outside this touched slice.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -80,10 +84,8 @@ PR #1845 review follow-up verification 2026-05-18: added a regression test provi
 Completed WP5 settings/model-provider UX remediation for WebUI/extension. Implemented task-led settings grouping, user-facing Provider Keys navigation, separate Data Management settings for import/export/reset, configured-first /settings/model defaults and provider readiness, model utility coverage, and browser route-intent guards for /prompts, /prompt-studio, /settings/prompt, and /settings/prompt-studio. Verification passed for focused Vitest settings/model coverage, settings Playwright workflows, WP4 responsive landmarks, and diff/governance checks. Full TypeScript remains blocked by existing unrelated baseline debt; Bandit is not applicable to this frontend/docs-only slice.
 
 PR review follow-up: addressed Gemini's reset reload timeout comment by routing the reset reload through reloadTimeoutRef so import cancellation and unmount cleanup can clear it. Added focused regression coverage and re-ran the focused settings/model suite.
-<!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
+Second PR review sweep: addressed all still-actionable CodeRabbit/Qodo comments available at the time of refresh, including import accessibility, model readiness correctness, provider-key error state, guard/test hardening, raw error logging, and Backlog marker cleanup.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

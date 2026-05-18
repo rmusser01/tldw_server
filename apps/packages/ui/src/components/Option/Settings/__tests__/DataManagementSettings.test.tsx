@@ -95,6 +95,16 @@ describe("DataManagementSettings", () => {
     expect(screen.getByRole("button", { name: /reset all/i })).toBeInTheDocument()
   })
 
+  it("opens the hidden import file input from a keyboard-focusable button", () => {
+    const clickSpy = vi.spyOn(HTMLInputElement.prototype, "click")
+
+    render(<DataManagementSettings />)
+
+    fireEvent.click(screen.getByRole("button", { name: /import data/i }))
+
+    expect(clickSpy).toHaveBeenCalled()
+  })
+
   it("clears the scheduled reset reload when the data surface unmounts", async () => {
     vi.useFakeTimers()
     const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout")

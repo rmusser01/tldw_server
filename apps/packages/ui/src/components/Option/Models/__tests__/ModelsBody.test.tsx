@@ -107,7 +107,9 @@ describe("ModelsBody", () => {
       },
       {
         model: "remote-b",
-        provider: "openai"
+        provider: "openai",
+        catalog_only: true,
+        provider_is_configured: false
       }
     ])
     mocks.getOpenAIOAuthStatus.mockResolvedValue({
@@ -142,10 +144,42 @@ describe("ModelsBody", () => {
       readiness.compareDocumentPosition(catalog) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
     expect(screen.getByText("1 configured")).toBeInTheDocument()
-    expect(screen.getAllByText("2 usable").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("1 usable").length).toBeGreaterThan(0)
     expect(screen.getByText("Default provider")).toBeInTheDocument()
     expect(screen.getAllByText("Ollama").length).toBeGreaterThan(0)
     expect(screen.getAllByText("Default model").length).toBeGreaterThan(0)
     expect(screen.getByText("local-a")).toBeInTheDocument()
+  })
+
+  it("uses server model configuration fields when provider-key details are empty", async () => {
+    mocks.fetchChatModels.mockResolvedValue([
+      {
+        model: "configured-server-model",
+        provider: "anthropic",
+        is_configured: true,
+        provider_is_configured: true
+      },
+      {
+        model: "catalog-reference-model",
+        provider: "openrouter",
+        catalog_only: true,
+        is_configured: true,
+        provider_is_configured: true
+      }
+    ])
+    mocks.listUserProviderKeys.mockResolvedValue({ items: [] })
+
+    renderModelsBody()
+
+    expect(await screen.findByText("2 configured")).toBeInTheDocument()
+    expect(screen.getAllByText("1 usable").length).toBeGreaterThan(0)
+  })
+
+  it("does not show configured key counts when provider-key lookup fails", async () => {
+    mocks.listUserProviderKeys.mockRejectedValue({ status: 500 })
+
+    renderModelsBody()
+
+    expect(await screen.findByText("Unable to load account keys")).toBeInTheDocument()
   })
 })

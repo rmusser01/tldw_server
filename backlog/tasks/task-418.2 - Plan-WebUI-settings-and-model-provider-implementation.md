@@ -62,8 +62,6 @@ Implementation follow-through recorded 2026-05-18: child task TASK-418.14 comple
 Completed the documentation-only child implementation plan for WP5 settings and model/provider remediation. The plan defines route scope, settings grouping, provider-key label repair, configured-first model UX, destructive-action separation, tests, and browser QA gates without changing product code.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

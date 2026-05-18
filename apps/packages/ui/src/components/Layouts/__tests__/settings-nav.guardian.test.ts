@@ -130,7 +130,12 @@ describe("settings nav guardian gating", () => {
       "dataManagement.navTitle"
     ]
 
-    for (const locale of fs.readdirSync(localeRoot)) {
+    const locales = fs
+      .readdirSync(localeRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+
+    for (const locale of locales) {
       const settingsPath = path.join(localeRoot, locale, "settings.json")
       expect(
         fs.existsSync(settingsPath),

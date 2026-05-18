@@ -136,7 +136,7 @@ test.describe("Settings", () => {
       })
       await settings.waitForReady()
 
-      await expect(authedPage).toHaveURL(/\/settings\/prompt/)
+      await expect(authedPage).toHaveURL(/\/settings\/prompt(?:\?.*)?$/)
       await expect(
         authedPage.getByRole("heading", { name: "Prompts workspace" })
       ).toBeVisible({ timeout: 20_000 })
