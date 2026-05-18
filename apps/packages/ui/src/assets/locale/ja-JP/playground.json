@@ -167,6 +167,7 @@
     "providerChangeHelper": "下のプロバイダー選択から Browser、tldw、OpenAI、Supersonic を切り替えられます。",
     "changeProvider": "プロバイダーを変更",
     "title": "TTS プレイグラウンド",
+    "routeTitle": "テキスト読み上げ",
     "subtitle": "テキスト読み上げを試して、プロバイダー、モデル、ボイスを調整できます。",
     "currentProvider": "現在のプロバイダー",
     "settingsIntro": "TTS のプロバイダー、モデル、ボイスを調整します。これらの設定はチャットやメディアから音声を再生するときに再利用されます。",

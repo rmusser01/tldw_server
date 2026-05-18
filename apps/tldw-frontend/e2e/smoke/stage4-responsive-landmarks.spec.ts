@@ -78,10 +78,8 @@ async function installReadinessMocks(page: Page): Promise<void> {
 async function seedResponsiveRouteState(page: Page): Promise<void> {
   await seedAuth(page);
   await page.addInitScript(() => {
-    try {
-      localStorage.setItem('stickyChatInput', 'true');
-      localStorage.setItem('playgroundComposerOptionsExpanded', 'false');
-    } catch {}
+    localStorage.setItem('stickyChatInput', 'true');
+    localStorage.setItem('playgroundComposerOptionsExpanded', 'false');
   });
 }
 

@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test"
+import type { Page } from "@playwright/test"
+import { expect, seedAuth, test } from "./smoke.setup"
 
 /**
  * Mobile-viewport smoke for {V1, V3, V5} at narrow widths. The plan
@@ -21,50 +22,15 @@ import { expect, test, type Page } from "@playwright/test"
  */
 
 const bypassOnboarding = async (page: Page) => {
+  await seedAuth(page)
   await page.addInitScript(() => {
-    const authConfig = {
-      serverUrl: "http://127.0.0.1:8000",
-      authMode: "single-user",
-      apiKey: "THIS-IS-A-SECURE-KEY-123-FAKE-KEY",
-    }
-
-    try {
-      window.localStorage.setItem("assistant_setup_dismissed", "true")
-    } catch {
-      /* ignore */
-    }
-    try {
-      window.localStorage.setItem("__tldw_first_run_complete", "true")
-    } catch {
-      /* ignore */
-    }
-    try {
-      window.localStorage.setItem("__tldw_allow_offline", "true")
-    } catch {
-      /* ignore */
-    }
-    try {
-      window.localStorage.setItem("__tldw_test_bypass", "true")
-    } catch {
-      /* ignore */
-    }
-    try {
-      window.localStorage.setItem("tldwConfig", JSON.stringify(authConfig))
-      window.localStorage.setItem("apiKey", authConfig.apiKey)
-      window.localStorage.setItem("authMode", authConfig.authMode)
-    } catch {
-      /* ignore */
-    }
+    window.localStorage.setItem("playgroundComposerOptionsExpanded", "false")
   })
 }
 
 const setVariant = (variant: "v1" | "v3" | "v5") => async (page: Page) => {
   await page.addInitScript((v: string) => {
-    try {
-      window.localStorage.setItem("tldw:composerVariant", v)
-    } catch {
-      /* ignore */
-    }
+    window.localStorage.setItem("tldw:composerVariant", v)
   }, variant)
 }
 

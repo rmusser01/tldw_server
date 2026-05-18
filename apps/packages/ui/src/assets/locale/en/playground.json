@@ -655,6 +655,7 @@
   },
   "tts": {
     "title": "TTS Playground",
+    "routeTitle": "Text to Speech",
     "subtitle": "Try out text-to-speech and tweak providers, models, and voices.",
     "currentProvider": "Current provider",
     "settingsIntro": "Adjust your TTS provider, model, and voice. These settings are reused when you play audio from chat or media.",

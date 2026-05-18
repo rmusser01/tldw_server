@@ -168,6 +168,7 @@
     "providerChangeHelper": "Cambia de proveedor para obtener lista de pistas y controles de reproducción.",
     "changeProvider": "Cambiar proveedor",
     "title": "Playground de TTS",
+    "routeTitle": "Texto a voz",
     "subtitle": "Prueba texto a voz y ajusta proveedores, modelos y voces.",
     "currentProvider": "Proveedor actual",
     "settingsIntro": "Ajusta tu proveedor de TTS, modelo y voz. Estos ajustes se reutilizan cuando reproduces audio desde el chat o medios.",
