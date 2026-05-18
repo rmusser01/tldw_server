@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-18 07:08'
+updated_date: '2026-05-18 07:14'
 labels:
   - watchlists
   - frontend
@@ -14,6 +14,8 @@ labels:
   - audio
   - cadence
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/1838'
 ---
 
 ## Description
@@ -50,6 +52,8 @@ Bandit: skipped; touched runtime code is TypeScript frontend only.
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented PR1 frontend slice for watchlists digest/audio workflow: audio contract alignment, variable cadence controls, source settings preservation with scrape_rules, draft preflight settings, and forum capability gating. Verification recorded in final response.
+
+Draft PR: https://github.com/rmusser01/tldw_server/pull/1838
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
