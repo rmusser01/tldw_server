@@ -865,6 +865,7 @@ async def _resolve_target_watchlists_context(
 
 
 def _normalize_workflow_tenant_id(value: Any) -> str | None:
+    """Coerce a tenant identifier to a non-empty string when it is safe to use."""
     if isinstance(value, str):
         stripped = value.strip()
         return stripped or None
