@@ -220,6 +220,19 @@ def _patch_provider_config_writes(monkeypatch) -> None:  # noqa: ANN001
         ("get", "/api/v1/llamacpp/metrics", None),
         ("get", "/api/v1/llamacpp/logs/tail", None),
         ("get", "/api/v1/llamacpp/hardware", None),
+        ("get", "/api/v1/llamacpp/profiles", None),
+        ("post", "/api/v1/llamacpp/profiles", {"name": "Default", "model_path": "/models/model.gguf"}),
+        ("get", "/api/v1/llamacpp/profiles/default", None),
+        ("put", "/api/v1/llamacpp/profiles/default", {"name": "Updated"}),
+        ("delete", "/api/v1/llamacpp/profiles/default", None),
+        ("post", "/api/v1/llamacpp/profiles/default/start", None),
+        ("post", "/api/v1/llamacpp/profiles/default/stop", None),
+        ("post", "/api/v1/llamacpp/profiles/default/pause", None),
+        ("post", "/api/v1/llamacpp/profiles/default/resume", None),
+        ("post", "/api/v1/llamacpp/profiles/default/use-in-chat", None),
+        ("get", "/api/v1/llamacpp/instances", None),
+        ("get", "/api/v1/llamacpp/instances/default", None),
+        ("get", "/api/v1/llamacpp/instances/default/logs/tail", None),
         ("post", "/api/v1/llamacpp/assets/import-folder/preview", {"path": "/models"}),
         ("post", "/api/v1/llamacpp/assets/downloads", {"url": "https://example.com/model.gguf"}),
         ("get", "/api/v1/llamacpp/assets/downloads", None),
@@ -239,6 +252,8 @@ def test_llamacpp_lifecycle_401_when_principal_unavailable(
     with TestClient(app) as client:
         if method == "post":
             resp = client.post(path, json=payload or {})
+        elif method == "put":
+            resp = client.put(path, json=payload or {})
         elif method == "delete":
             resp = client.delete(path)
         else:
@@ -260,6 +275,19 @@ def test_llamacpp_lifecycle_401_when_principal_unavailable(
         ("get", "/api/v1/llamacpp/metrics", None),
         ("get", "/api/v1/llamacpp/logs/tail", None),
         ("get", "/api/v1/llamacpp/hardware", None),
+        ("get", "/api/v1/llamacpp/profiles", None),
+        ("post", "/api/v1/llamacpp/profiles", {"name": "Default", "model_path": "/models/model.gguf"}),
+        ("get", "/api/v1/llamacpp/profiles/default", None),
+        ("put", "/api/v1/llamacpp/profiles/default", {"name": "Updated"}),
+        ("delete", "/api/v1/llamacpp/profiles/default", None),
+        ("post", "/api/v1/llamacpp/profiles/default/start", None),
+        ("post", "/api/v1/llamacpp/profiles/default/stop", None),
+        ("post", "/api/v1/llamacpp/profiles/default/pause", None),
+        ("post", "/api/v1/llamacpp/profiles/default/resume", None),
+        ("post", "/api/v1/llamacpp/profiles/default/use-in-chat", None),
+        ("get", "/api/v1/llamacpp/instances", None),
+        ("get", "/api/v1/llamacpp/instances/default", None),
+        ("get", "/api/v1/llamacpp/instances/default/logs/tail", None),
         ("post", "/api/v1/llamacpp/assets/import-folder/preview", {"path": "/models"}),
         ("post", "/api/v1/llamacpp/assets/downloads", {"url": "https://example.com/model.gguf"}),
         ("get", "/api/v1/llamacpp/assets/downloads", None),
@@ -284,6 +312,8 @@ def test_llamacpp_lifecycle_403_when_missing_admin_role(
     with TestClient(app) as client:
         if method == "post":
             resp = client.post(path, json=payload or {})
+        elif method == "put":
+            resp = client.put(path, json=payload or {})
         elif method == "delete":
             resp = client.delete(path)
         else:

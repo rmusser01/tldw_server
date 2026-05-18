@@ -336,6 +336,7 @@ def test_v1_start_by_model_targets_default_profile_only():
             json={"model_id": "gguf:abc", "server_args": {"port": 8181}},
         )
         status = client.get("/api/v1/llamacpp/status")
+        instances = client.get("/api/v1/llamacpp/instances")
         logs = client.get("/api/v1/llamacpp/logs/tail?lines=3")
         stopped = client.post("/api/v1/llamacpp/stop_server", json={})
 
@@ -345,6 +346,13 @@ def test_v1_start_by_model_targets_default_profile_only():
     assert supervisor.started_profile_ids == [DEFAULT_PROFILE_ID]
     assert status.json()["backend"] == "llamacpp"
     assert status.json()["status"] == "running"
+    assert "runtimes" not in status.json()
+    assert "profiles" not in status.json()
+    assert {runtime["profile_id"] for runtime in instances.json()["runtimes"]} == {
+        DEFAULT_PROFILE_ID,
+        "one",
+        "two",
+    }
     assert logs.json()["lines"] == ["first", "second"]
     assert supervisor.tail_requests == [(DEFAULT_PROFILE_ID, 3)]
     assert stopped.json()["status"] == "stopped"
@@ -471,6 +479,30 @@ def test_v1_start_server_uses_supervisor_default_when_legacy_handler_exists():
     assert status.json()["model"] == "/models/tiny.gguf"
     assert stopped.json()["status"] == "stopped"
     assert handler.stop_calls == 0
+
+
+@pytest.mark.unit
+def test_v1_log_tail_returns_conflict_when_default_runtime_is_stopped():
+    supervisor = _SupervisorStub()
+    supervisor.profiles[DEFAULT_PROFILE_ID] = LlamaCppProfile(
+        profile_id=DEFAULT_PROFILE_ID,
+        name="Default",
+        model_path="/models/default.gguf",
+        host="127.0.0.1",
+        port=8181,
+    )
+    supervisor.runtimes[DEFAULT_PROFILE_ID] = LlamaCppRuntime(
+        profile_id=DEFAULT_PROFILE_ID,
+        state=LlamaCppRuntimeState.STOPPED,
+    )
+    app = _make_app_with_manager(_ManagerStub(supervisor))
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/llamacpp/logs/tail?lines=3")
+
+    assert response.status_code == 409
+    assert "not running" in response.json()["detail"].lower()
+    assert supervisor.tail_requests == []
 
 
 @pytest.mark.unit

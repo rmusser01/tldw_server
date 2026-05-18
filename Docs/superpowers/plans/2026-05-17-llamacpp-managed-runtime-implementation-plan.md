@@ -238,7 +238,7 @@ git commit -m "fix: harden llama.cpp profile launch validation"
 - Test: `tldw_Server_API/tests/LLM_Local/test_llamacpp_lifecycle_api_contract.py`
 - Test: `tldw_Server_API/tests/AuthNZ_Unit/test_llamacpp_permissions_claims.py`
 
-- [ ] **Step 1: Write failing compatibility tests**
+- [x] **Step 1: Write failing compatibility tests**
 
 Add TestClient coverage for:
 - `POST /api/v1/llamacpp/start_server` updates/starts only the default profile;
@@ -248,7 +248,7 @@ Add TestClient coverage for:
 - `GET /api/v1/llamacpp/logs/tail` maps default-profile stopped/not-running state to HTTP 409;
 - all new profile/runtime routes require admin permissions.
 
-- [ ] **Step 2: Run API tests to verify failure**
+- [x] **Step 2: Run API tests to verify failure**
 
 ```bash
 python -m pytest \
@@ -259,7 +259,9 @@ python -m pytest \
 
 Expected: FAIL only for newly added coverage.
 
-- [ ] **Step 3: Patch endpoint/schema gaps**
+Result: FAIL as expected for `test_v1_log_tail_returns_conflict_when_default_runtime_is_stopped`; existing compatibility/auth coverage stayed green.
+
+- [x] **Step 3: Patch endpoint/schema gaps**
 
 Keep response mappings narrow:
 - 400 for validation/path/config mistakes;
@@ -267,7 +269,7 @@ Keep response mappings narrow:
 - 409 for stopped/not-running state conflicts;
 - 500 only for unexpected provider write failures or internal errors.
 
-- [ ] **Step 4: Run API tests**
+- [x] **Step 4: Run API tests**
 
 ```bash
 python -m pytest \
@@ -278,7 +280,9 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit Task 3**
+Result: PASS, 79 passed, 5 warnings.
+
+- [x] **Step 5: Commit Task 3**
 
 ```bash
 git add \

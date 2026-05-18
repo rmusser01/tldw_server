@@ -1019,9 +1019,14 @@ async def tail_llamacpp_logs_endpoint(
     supervisor = getattr(llm_manager, "llamacpp_supervisor", None)
     if supervisor is not None:
         try:
+            runtime = supervisor.get_runtime(DEFAULT_PROFILE_ID)
+            if runtime.state != LlamaCppRuntimeState.RUNNING:
+                raise HTTPException(status_code=409, detail="Managed llama.cpp server is not running.")
             return await run_in_threadpool(supervisor.tail_logs, DEFAULT_PROFILE_ID, lines)
         except LlamaCppProfileNotFoundError as e:
             raise HTTPException(status_code=409, detail="Managed llama.cpp server is not running.") from e
+        except HTTPException:
+            raise
         except Exception as e:
             raise _supervisor_error_to_http(e, llm_manager, "Unexpected error tailing Llama.cpp default logs") from e
 
