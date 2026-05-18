@@ -4,22 +4,19 @@ title: Implement WebUI setup and connection flow
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-18 04:36'
+updated_date: 2026-05-18 04:36
 labels:
-  - ux
-  - webui
-  - extension
-  - implementation
-  - setup
+- ux
+- webui
+- extension
+- implementation
+- setup
 dependencies: []
 documentation:
-  - >-
-    Docs/superpowers/plans/2026-05-17-webui-setup-connection-flow-implementation-plan.md
-  - >-
-    Docs/superpowers/plans/2026-05-17-webui-extension-ux-remediation-implementation-plan.md
-  - >-
-    Docs/superpowers/specs/2026-05-17-webui-extension-ux-remediation-program-design.md
-  - Docs/Reviews/WEBUI_EXTENSION_UX_HCI_AUDIT_2026_05_17.md
+- Docs/superpowers/plans/2026-05-17-webui-setup-connection-flow-implementation-plan.md
+- Docs/superpowers/plans/2026-05-17-webui-extension-ux-remediation-implementation-plan.md
+- Docs/superpowers/specs/2026-05-17-webui-extension-ux-remediation-program-design.md
+- Docs/Reviews/WEBUI_EXTENSION_UX_HCI_AUDIT_2026_05_17.md
 parent_task_id: TASK-418
 priority: high
 ---
@@ -72,7 +69,7 @@ Final known skips/blockers: none for the touched frontend scope. Bandit was docu
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the setup/connection-flow remediation slice with focused tests and browser QA. The branch now locks connection-state derivation, / resolver behavior, /setup semantic shell behavior, self-host/hosted login policy, hosted-only placeholder routing, profile/config/privileges/404 recovery actions, and desktop/mobile Playwright coverage for setup/recovery routes. A browser-only /setup shell bug in the Next app wrapper was found and fixed. No backend APIs or route renames were changed.
+Implemented the setup/connection-flow remediation slice and completed PR #1837 review fixes. Review follow-up moved the /setup route labels through the existing option i18n namespace, added English locale entries for runtime and extension locale bundles, and made the setup/recovery Playwright route QA deployment-aware for hosted and self-host/default modes. Verification after review fixes: package UI focused Vitest gate passed 5 files / 44 tests; frontend focused Vitest gate passed 6 files / 45 tests; i18n namespace smoke passed 1 file / 1 test; default/self-host Playwright route gate passed 12 tests; hosted-mode Playwright route gate passed 12 tests; git diff --check passed. Bandit remains not applicable because the touched scope is frontend TypeScript/JSON/backlog only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

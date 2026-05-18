@@ -28,6 +28,10 @@ const PLACEHOLDER_ROUTES = [
   },
 ];
 
+const hostedMode =
+  String(process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE || '').trim().toLowerCase() ===
+  'hosted';
+
 async function seedFirstRunIncomplete(page: Page): Promise<void> {
   await seedAuth(page);
   await page.addInitScript(() => {
@@ -90,7 +94,14 @@ test.describe('Setup and recovery route QA', () => {
       await seedFirstRunIncomplete(page);
 
       await page.goto('/', { waitUntil: 'domcontentloaded' });
-      await expect(page.getByRole('heading', { level: 1, name: /Home Onboarding/i })).toBeVisible({
+      await expect(
+        page.getByRole('heading', {
+          level: 1,
+          name: hostedMode
+            ? /Start with the narrow hosted path, keep self-host when you need full control\./i
+            : /Home Onboarding/i,
+        })
+      ).toBeVisible({
         timeout: 15_000,
       });
       await expectOnePageHeading(page, `${viewport.label} /`);
@@ -116,10 +127,19 @@ test.describe('Setup and recovery route QA', () => {
       await seedAuth(page);
 
       await page.goto('/login?next=%2Faccount', { waitUntil: 'domcontentloaded' });
-      await expect(page).toHaveURL(/\/settings\/tldw\?next=%2Faccount/, {
-        timeout: 15_000,
-      });
+      if (hostedMode) {
+        await expect(page).toHaveURL(/\/login\?next=%2Faccount/, {
+          timeout: 15_000,
+        });
+      } else {
+        await expect(page).toHaveURL(/\/settings\/tldw\?next=%2Faccount/, {
+          timeout: 15_000,
+        });
+      }
       await expectNoHorizontalOverflow(page, `${viewport.label} /login redirect`);
+
+      const expectedPrimaryText = hostedMode ? 'Open Login' : 'Open Local Auth Settings';
+      const expectedPrimaryHref = hostedMode ? '/login' : '/settings/tldw';
 
       for (const route of PLACEHOLDER_ROUTES) {
         await page.goto(route.path, { waitUntil: 'domcontentloaded' });
@@ -129,12 +149,10 @@ test.describe('Setup and recovery route QA', () => {
         await expect(page.getByRole('heading', { level: 1, name: route.heading })).toBeVisible();
         await expectOnePageHeading(page, `${viewport.label} ${route.path}`);
         await expect(page.getByText(route.path, { exact: true })).toHaveCount(2);
-        await expect(page.getByTestId('route-placeholder-primary')).toHaveText(
-          'Open Local Auth Settings'
-        );
+        await expect(page.getByTestId('route-placeholder-primary')).toHaveText(expectedPrimaryText);
         await expect(page.getByTestId('route-placeholder-primary')).toHaveAttribute(
           'href',
-          '/settings/tldw'
+          expectedPrimaryHref
         );
         await expectNoHorizontalOverflow(page, `${viewport.label} ${route.path}`);
       }

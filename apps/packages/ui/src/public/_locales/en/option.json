@@ -11,6 +11,18 @@
   "settings": {
     "message": "Settings"
   },
+  "setupRoute_title": {
+    "message": "Setup Wizard"
+  },
+  "setupRoute_panelTitle": {
+    "message": "Connect your server"
+  },
+  "setupRoute_panelMessage": {
+    "message": "Guided connection setup for production use."
+  },
+  "setupRoute_startAction": {
+    "message": "Start setup"
+  },
   "connectionCard_headlineMissing": {
     "message": "Connect tldw Assistant to your server"
   },
