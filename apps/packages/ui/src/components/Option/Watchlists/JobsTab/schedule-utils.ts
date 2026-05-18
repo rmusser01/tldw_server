@@ -1,9 +1,13 @@
-export type SchedulePresetKey = "hourly" | "every6hours" | "daily" | "weekly"
+export type SchedulePresetKey = "interval" | "daily" | "weekdays" | "weekly"
+
+export type ScheduleIntervalUnit = "minutes" | "hours"
 
 export type WeekdayToken = "SUN" | "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT"
 
 export interface PresetScheduleState {
   preset: SchedulePresetKey
+  intervalValue: number
+  intervalUnit: ScheduleIntervalUnit
   hour: number
   minute: number
   weekday: WeekdayToken
@@ -29,6 +33,8 @@ const WEEKDAY_MAP: Record<string, WeekdayToken> = {
 
 const DEFAULT_PRESET_STATE: PresetScheduleState = {
   preset: "daily",
+  intervalValue: 1,
+  intervalUnit: "hours",
   hour: 9,
   minute: 0,
   weekday: "MON"
@@ -45,16 +51,34 @@ export const normalizeWeekdayToken = (value: unknown): WeekdayToken => {
   return WEEKDAY_MAP[value.toUpperCase()] || DEFAULT_PRESET_STATE.weekday
 }
 
+export const normalizeIntervalUnit = (value: unknown): ScheduleIntervalUnit => {
+  return value === "minutes" ? "minutes" : "hours"
+}
+
+const parseStepToken = (token: string, min: number, max: number): number | null => {
+  if (!token.startsWith("*/")) return null
+  const parsed = Number(token.slice(2))
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) return null
+  return parsed
+}
+
 export const buildCronFromPreset = (state: PresetScheduleState): string => {
   const minute = clampInteger(state.minute, 0, 59)
   const hour = clampInteger(state.hour, 0, 23)
   const weekday = normalizeWeekdayToken(state.weekday)
+  const intervalUnit = normalizeIntervalUnit(state.intervalUnit)
 
   switch (state.preset) {
-    case "hourly":
-      return `${minute} * * * *`
-    case "every6hours":
-      return `${minute} */6 * * *`
+    case "interval": {
+      if (intervalUnit === "minutes") {
+        const intervalMinutes = clampInteger(state.intervalValue, 5, 59)
+        return `*/${intervalMinutes} * * * *`
+      }
+      const intervalHours = clampInteger(state.intervalValue, 1, 23)
+      return `${minute} */${intervalHours} * * *`
+    }
+    case "weekdays":
+      return `${minute} ${hour} * * MON-FRI`
     case "weekly":
       return `${minute} ${hour} * * ${weekday}`
     case "daily":
@@ -73,24 +97,37 @@ export const parsePresetFromCron = (
   const [minuteToken, hourToken, dayOfMonthToken, monthToken, dayOfWeekToken] = parts
   if (dayOfMonthToken !== "*" || monthToken !== "*") return null
 
+  const minuteStep = parseStepToken(minuteToken, 1, 59)
+  if (minuteStep !== null && hourToken === "*" && dayOfWeekToken === "*") {
+    return {
+      ...DEFAULT_PRESET_STATE,
+      preset: "interval",
+      intervalValue: minuteStep,
+      intervalUnit: "minutes"
+    }
+  }
+
   const minute = Number(minuteToken)
   if (!Number.isInteger(minute) || minute < 0 || minute > 59) return null
 
   if (hourToken === "*" && dayOfWeekToken === "*") {
     return {
-      preset: "hourly",
-      hour: DEFAULT_PRESET_STATE.hour,
-      minute,
-      weekday: DEFAULT_PRESET_STATE.weekday
+      ...DEFAULT_PRESET_STATE,
+      preset: "interval",
+      intervalValue: 1,
+      intervalUnit: "hours",
+      minute
     }
   }
 
-  if (hourToken === "*/6" && dayOfWeekToken === "*") {
+  const hourStep = parseStepToken(hourToken, 1, 23)
+  if (hourStep !== null && dayOfWeekToken === "*") {
     return {
-      preset: "every6hours",
-      hour: DEFAULT_PRESET_STATE.hour,
-      minute,
-      weekday: DEFAULT_PRESET_STATE.weekday
+      ...DEFAULT_PRESET_STATE,
+      preset: "interval",
+      intervalValue: hourStep,
+      intervalUnit: "hours",
+      minute
     }
   }
 
@@ -99,16 +136,26 @@ export const parsePresetFromCron = (
 
   if (dayOfWeekToken === "*") {
     return {
+      ...DEFAULT_PRESET_STATE,
       preset: "daily",
       hour,
-      minute,
-      weekday: DEFAULT_PRESET_STATE.weekday
+      minute
+    }
+  }
+
+  if (dayOfWeekToken.toUpperCase() === "MON-FRI") {
+    return {
+      ...DEFAULT_PRESET_STATE,
+      preset: "weekdays",
+      hour,
+      minute
     }
   }
 
   const weekday = WEEKDAY_MAP[dayOfWeekToken.toUpperCase()]
   if (!weekday) return null
   return {
+    ...DEFAULT_PRESET_STATE,
     preset: "weekly",
     hour,
     minute,
@@ -119,4 +166,3 @@ export const parsePresetFromCron = (
 export const createDefaultPresetState = (): PresetScheduleState => ({
   ...DEFAULT_PRESET_STATE
 })
-
