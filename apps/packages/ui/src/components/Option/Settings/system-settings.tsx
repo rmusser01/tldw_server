@@ -68,7 +68,11 @@ export const DataManagementSettings = () => {
         message: t("settings:systemNotifications.resetSuccess", "All data has been reset")
       })
       setResetInput("")
-      setTimeout(() => {
+      if (reloadTimeoutRef.current) {
+        clearTimeout(reloadTimeoutRef.current)
+      }
+      reloadTimeoutRef.current = setTimeout(() => {
+        reloadTimeoutRef.current = null
         window.location.reload()
       }, 1500)
     } catch (e) {

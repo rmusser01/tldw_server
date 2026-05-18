@@ -4,7 +4,7 @@ title: Implement WebUI settings and model provider remediation
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-18 19:13'
+updated_date: '2026-05-18 19:40'
 labels:
   - ux
   - webui
@@ -68,12 +68,18 @@ Verification: bunx playwright test e2e/workflows/tier-1-critical/settings-core.s
 Final verification 2026-05-18: focused UI Vitest suite passed 11 files / 41 tests; settings Playwright workflow pair passed 59 tests; WP4 responsive landmarks passed 12 tests including /settings and /settings/model; git diff --check passed. Documentation governance scans for the child plan and TASK-418.2 produced no placeholder/trailing-whitespace/non-ASCII findings and diff-check passed. Bandit was not run because this slice touched frontend TypeScript/TSX, Playwright tests, Markdown, locale JSON, and Backlog files only. Full apps/packages/ui TypeScript remains blocked by pre-existing repo-wide baseline debt outside this slice; first failures are in audio, chat composer, common prompt utils, quick-ingest, flashcards, playground, services, and route baseline tests before this branch’s settings/model files.
 
 Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1845
+
+PR #1845 review follow-up 2026-05-18: Gemini flagged the reset reload timer in DataManagementSettings because handleResetAll uses a bare setTimeout while the component cleanup and import cancellation use reloadTimeoutRef. Reopening the task to route the reset reload timer through the existing ref and verify the focused settings tests.
+
+PR #1845 review follow-up verification 2026-05-18: added a regression test proving the reset reload timer is cleared on DataManagementSettings unmount, then stored the reset timer in reloadTimeoutRef and nulled it before window.location.reload. Targeted test passed before broad rerun: bunx vitest run src/components/Option/Settings/__tests__/DataManagementSettings.test.tsx -> 1 file / 2 tests passed. Broader focused settings/model Vitest suite passed 11 files / 42 tests. git diff --check passed. bunx tsc --noEmit --pretty false remains blocked by existing repo-wide UI baseline errors outside this touched settings slice, with no touched settings file diagnostics in the observed output.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Completed WP5 settings/model-provider UX remediation for WebUI/extension. Implemented task-led settings grouping, user-facing Provider Keys navigation, separate Data Management settings for import/export/reset, configured-first /settings/model defaults and provider readiness, model utility coverage, and browser route-intent guards for /prompts, /prompt-studio, /settings/prompt, and /settings/prompt-studio. Verification passed for focused Vitest settings/model coverage, settings Playwright workflows, WP4 responsive landmarks, and diff/governance checks. Full TypeScript remains blocked by existing unrelated baseline debt; Bandit is not applicable to this frontend/docs-only slice.
+
+PR review follow-up: addressed Gemini's reset reload timeout comment by routing the reset reload through reloadTimeoutRef so import cancellation and unmount cleanup can clear it. Added focused regression coverage and re-ran the focused settings/model suite.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
