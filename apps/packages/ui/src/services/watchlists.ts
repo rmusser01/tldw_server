@@ -53,6 +53,7 @@ import type {
   WatchlistOutputEvidenceResponse,
   WatchlistReportReadiness,
   WatchlistRun,
+  WatchlistRunAudioStatus,
   WatchlistSettings,
   WatchlistSource,
   WatchlistSourceCreate,
@@ -668,6 +669,15 @@ export const getWatchlistRun = async (runId: number): Promise<WatchlistRun> => {
 export const getRunDetails = async (runId: number): Promise<RunDetailResponse> => {
   return bgRequest<RunDetailResponse>({
     path: `/api/v1/watchlists/runs/${runId}/details?include_tallies=true` as any,
+    method: "GET"
+  })
+}
+
+export const getWatchlistRunAudio = async (
+  runId: number
+): Promise<WatchlistRunAudioStatus> => {
+  return bgRequest<WatchlistRunAudioStatus>({
+    path: `/api/v1/watchlists/runs/${runId}/audio` as any,
     method: "GET"
   })
 }

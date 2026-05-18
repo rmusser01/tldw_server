@@ -141,12 +141,31 @@ export interface JobScope {
 }
 
 export interface JobOutputPrefs {
+  auto_output?: {
+    enabled?: boolean
+    type?: string
+    format?: "md" | "html"
+    template_name?: string
+    template_version?: number
+  }
   generate_audio?: boolean
   target_audio_minutes?: number
+  audio_model?: string
   audio_voice?: string
   audio_speed?: number
   background_audio_uri?: string
+  background_volume?: number
+  background_delay_ms?: number
+  background_fade_seconds?: number
+  audio_language?: string
+  llm_provider?: string
+  llm_model?: string
+  persona_summarize?: boolean
+  persona_id?: string
+  persona_provider?: string
+  persona_model?: string
   voice_map?: Record<string, string>
+  audio_cast?: WatchlistAudioCast
   retention?: {
     default_seconds?: number
     temporary_seconds?: number
@@ -283,6 +302,35 @@ export interface RunDetailResponse {
   log_path?: string | null
   truncated?: boolean
   filtered_sample?: Array<Record<string, unknown>> | null
+}
+
+export interface WatchlistAudioCastSpeaker {
+  id: string
+  label: string
+  role?: string
+  voice: string
+  persona?: string
+}
+
+export interface WatchlistAudioCast {
+  speaker_count: 1 | 2 | 3 | 4
+  speakers: WatchlistAudioCastSpeaker[]
+}
+
+export interface WatchlistRunAudioStatus {
+  run_id: number
+  task_id?: string | null
+  status: "pending" | "running" | "completed" | "failed" | "unknown" | string
+  audio_uri?: string | null
+  download_url?: string | null
+  artifact_id?: string | number | null
+  size_bytes?: number | null
+  mime_type?: string | null
+  script_artifact?: Record<string, unknown> | null
+  speaker_artifacts?: Array<Record<string, unknown>>
+  final_artifact?: Record<string, unknown> | null
+  fallback_reason?: string | null
+  error?: string | null
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -670,6 +718,24 @@ export interface WatchlistOutputCreate {
   allow_weak_evidence?: boolean
   template_name?: string
   template_version?: number
+  generate_audio?: boolean
+  target_audio_minutes?: number
+  audio_model?: string
+  audio_voice?: string
+  audio_speed?: number
+  background_audio_uri?: string
+  background_volume?: number
+  background_delay_ms?: number
+  background_fade_seconds?: number
+  audio_language?: string
+  llm_provider?: string
+  llm_model?: string
+  persona_summarize?: boolean
+  persona_id?: string
+  persona_provider?: string
+  persona_model?: string
+  voice_map?: Record<string, string>
+  audio_cast?: WatchlistAudioCast
   retention_seconds?: number
   temporary?: boolean
   deliveries?: {
