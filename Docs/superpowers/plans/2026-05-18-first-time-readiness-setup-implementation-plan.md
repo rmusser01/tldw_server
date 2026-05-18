@@ -277,10 +277,9 @@ git commit -m "feat: add setup readiness preview contract"
 
 **Files:**
 - Modify: `tldw_Server_API/app/api/v1/endpoints/setup.py`
-- Modify: `tldw_Server_API/app/api/v1/schemas/setup_schemas.py`
 - Test: `tldw_Server_API/tests/Setup/test_setup_readiness_api.py`
 
-- [ ] **Step 1: Write failing endpoint tests**
+- [x] **Step 1: Write failing endpoint tests**
 
 ```python
 def test_readiness_profiles_available_during_local_first_run(client, monkeypatch):
@@ -307,13 +306,13 @@ def test_readiness_status_reports_overlays_separately(client, monkeypatch):
     assert all(lane["status"] != "restart_required" for lane in payload["lanes"])
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_setup_readiness_api.py -q`
 
 Expected: FAIL with 404 for new endpoints.
 
-- [ ] **Step 3: Add read-only endpoints**
+- [x] **Step 3: Add read-only endpoints**
 
 Add to `setup.py`:
 
@@ -323,17 +322,16 @@ Add to `setup.py`:
 
 Use `Depends(require_local_setup_access)` for first-run routes. Keep `openapi_extra={"security": []}` consistent with existing local setup endpoints.
 
-- [ ] **Step 4: Run targeted API tests**
+- [x] **Step 4: Run targeted API tests**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_setup_readiness_api.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/endpoints/setup.py \
-  tldw_Server_API/app/api/v1/schemas/setup_schemas.py \
   tldw_Server_API/tests/Setup/test_setup_readiness_api.py
 git commit -m "feat: expose setup readiness read APIs"
 ```

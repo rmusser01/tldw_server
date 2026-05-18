@@ -35,6 +35,8 @@ from tldw_Server_API.app.api.v1.schemas.setup_schemas import (
     SetupCompleteResponse,
     SetupConfigUpdateResponse,
     SetupInstallStatusResponse,
+    SetupReadinessPreviewRequest,
+    SetupReadinessPreviewResponse,
     SetupResetResponse,
     SetupStatusResponse,
 )
@@ -50,6 +52,8 @@ from tldw_Server_API.app.core.Setup.audio_bundle_catalog import (
 )
 from tldw_Server_API.app.core.Setup.install_schema import InstallPlan
 from tldw_Server_API.app.core.Setup.install_manager import execute_install_plan
+from tldw_Server_API.app.core.Setup.readiness_profiles import build_readiness_profiles
+from tldw_Server_API.app.core.Setup.readiness_service import preview_readiness_selection
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 from tldw_Server_API.app.services.auth_service import mark_user_verified
 
@@ -260,6 +264,36 @@ def _get_audio_install_status(*, allow_completed_when_disabled: bool = False) ->
     return JSONResponse(install_status)
 
 
+def _ensure_setup_readiness_available(status_snapshot: dict[str, Any]) -> None:
+    """Validate whether first-run setup readiness routes should be visible."""
+
+    if not status_snapshot["enabled"]:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Setup flow not enabled in config.txt")
+    if not status_snapshot["needs_setup"]:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail="Setup already completed. Use the admin setup readiness endpoints.",
+        )
+
+
+def _build_setup_readiness_profiles_payload() -> dict[str, Any]:
+    """Build the read-only first-run setup readiness profile/status payload."""
+
+    status_snapshot = setup_manager.get_status_snapshot()
+    _ensure_setup_readiness_available(status_snapshot)
+    recommendations = _build_audio_recommendations_response(
+        prefer_offline_runtime=True,
+        allow_hosted_fallbacks=True,
+    )
+    payload = build_readiness_profiles(
+        setup_status=status_snapshot,
+        config_snapshot=setup_manager.get_config_snapshot(),
+        audio_recommendations=recommendations,
+    )
+    payload["overlays"] = list(payload.get("active_overlays", []))
+    return payload
+
+
 @router.get("/audio/recommendations", openapi_extra={"security": []}, response_model=AudioRecommendationsResponse)
 async def get_audio_recommendations(
     prefer_offline_runtime: bool = True,
@@ -272,6 +306,40 @@ async def get_audio_recommendations(
         prefer_offline_runtime=prefer_offline_runtime,
         allow_hosted_fallbacks=allow_hosted_fallbacks,
     )
+
+
+@router.get("/readiness/profiles", openapi_extra={"security": []})
+async def get_setup_readiness_profiles(
+    _guard: None = Depends(require_local_setup_access),
+) -> dict[str, Any]:
+    """Return first-run setup readiness profiles and current lane summaries."""
+
+    return _build_setup_readiness_profiles_payload()
+
+
+@router.get("/readiness/status", openapi_extra={"security": []})
+async def get_setup_readiness_status(
+    _guard: None = Depends(require_local_setup_access),
+) -> dict[str, Any]:
+    """Return the current first-run setup readiness status snapshot."""
+
+    return _build_setup_readiness_profiles_payload()
+
+
+@router.post(
+    "/readiness/preview",
+    openapi_extra={"security": []},
+    response_model=SetupReadinessPreviewResponse,
+)
+async def preview_setup_readiness(
+    payload: SetupReadinessPreviewRequest,
+    _guard: None = Depends(require_local_setup_access),
+) -> SetupReadinessPreviewResponse:
+    """Preview setup readiness changes without writing config or provisioning assets."""
+
+    status_snapshot = setup_manager.get_status_snapshot()
+    _ensure_setup_readiness_available(status_snapshot)
+    return preview_readiness_selection(payload)
 
 
 def _build_audio_recommendations_response(
