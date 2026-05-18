@@ -35,6 +35,8 @@ modified_files:
 - apps/packages/ui/src/components/Option/Speech/SpeechPlaygroundPage.tsx
 - apps/packages/ui/src/components/Option/Speech/__tests__/SpeechPlaygroundPage.render.test.tsx
 - apps/packages/ui/src/components/Option/ChatWorkspace/ChatWorkspacePage.tsx
+references:
+- https://github.com/rmusser01/tldw_server/pull/1839
 ---
 
 ## Description
@@ -69,7 +71,7 @@ Implemented route-level h1 coverage, shared min-width containment, mobile-safe s
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented WP4 responsive shell and landmarks. Added a 12-route Playwright gate for one h1 plus no page-level horizontal overflow at 390px, included it in the Stage 4 smoke script, fixed /chat sticky composer viewport containment, added route headings for settings/model/sources/MCP/STT/TTS/chat workspace, removed settings mobile nav forced width, constrained prompt mobile tabs, and stabilized smoke setup against backend/tour overlays. Verification: focused Vitest 9 files/55 tests passed; final affected Vitest 4 files/22 tests passed; responsive landmark Playwright 12/12 passed; updated Stage 4 smoke 28 passed/1 skipped; adjacent chat/sidebar/accessibility smoke 12/12 passed; design-system state verifier passed; git diff --check passed. Bandit skipped because this slice only touches frontend TypeScript/TSX, Playwright tests, package script, and Backlog task metadata.
+Implemented WP4 responsive shell and landmarks. Added a 12-route Playwright gate for one h1 plus no page-level horizontal overflow at 390px, included it in the Stage 4 smoke script, fixed /chat sticky composer viewport containment, added route headings for settings/model/sources/MCP/STT/TTS/chat workspace, removed settings mobile nav forced width, constrained prompt mobile tabs, and stabilized smoke setup against backend/tour overlays. Verification: focused Vitest 9 files/55 tests passed; final affected Vitest 4 files/22 tests passed; responsive landmark Playwright 12/12 passed; updated Stage 4 smoke 28 passed/1 skipped; adjacent chat/sidebar/accessibility smoke 12/12 passed; design-system state verifier passed; git diff --check passed. PR: https://github.com/rmusser01/tldw_server/pull/1839. Bandit skipped because this slice only touches frontend TypeScript/TSX, Playwright tests, package script, and Backlog task metadata.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
