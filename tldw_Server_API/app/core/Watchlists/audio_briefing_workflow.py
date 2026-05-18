@@ -30,6 +30,7 @@ AUDIO_BRIEFING_WORKFLOW_DEF: dict[str, Any] = {
                 "model": "{{ inputs.llm_model }}",
                 "multi_voice": True,
                 "voice_map": "{{ inputs.voice_map }}",
+                "audio_cast": "{{ inputs.audio_cast }}",
                 "persona_summarize": "{{ inputs.persona_summarize }}",
                 "persona_id": "{{ inputs.persona_id }}",
                 "persona_provider": "{{ inputs.persona_provider }}",
@@ -89,11 +90,41 @@ AUDIO_BRIEFING_WORKFLOW_DEF: dict[str, Any] = {
 }
 
 
+def _normalize_audio_cast_voice_map(audio_cast: Any) -> dict[str, str] | None:
+    """Build a voice_map-compatible marker map from structured audio_cast speakers."""
+    if not isinstance(audio_cast, dict):
+        return None
+    speakers = audio_cast.get("speakers")
+    if not isinstance(speakers, list):
+        return None
+
+    voice_map: dict[str, str] = {}
+    for speaker in speakers:
+        if not isinstance(speaker, dict):
+            continue
+        voice = speaker.get("voice")
+        if not isinstance(voice, str) or not voice.strip():
+            continue
+        raw_key = speaker.get("id") or speaker.get("label")
+        if not isinstance(raw_key, str) or not raw_key.strip():
+            continue
+        normalized_key = "".join(char.upper() if char.isalnum() else "_" for char in raw_key.strip()).strip("_")
+        if normalized_key:
+            voice_map[normalized_key] = voice.strip()
+
+    return voice_map or None
+
+
 def _build_workflow_inputs(
     items: list[dict[str, Any]],
     output_prefs: dict[str, Any],
 ) -> dict[str, Any]:
     """Build workflow inputs dict from watchlist output_prefs."""
+    audio_cast = output_prefs.get("audio_cast")
+    voice_map = output_prefs.get("voice_map")
+    if not isinstance(voice_map, dict):
+        voice_map = _normalize_audio_cast_voice_map(audio_cast)
+
     return {
         "items": items,
         "target_audio_minutes": output_prefs.get("target_audio_minutes", 10),
@@ -103,7 +134,8 @@ def _build_workflow_inputs(
         "tts_speed": output_prefs.get("audio_speed") or 1.0,
         "llm_provider": output_prefs.get("llm_provider"),
         "llm_model": output_prefs.get("llm_model"),
-        "voice_map": output_prefs.get("voice_map"),
+        "voice_map": voice_map,
+        "audio_cast": audio_cast if isinstance(audio_cast, dict) else None,
         "persona_summarize": bool(output_prefs.get("persona_summarize", False)),
         "persona_id": output_prefs.get("persona_id"),
         "persona_provider": output_prefs.get("persona_provider"),
@@ -140,9 +172,7 @@ async def trigger_audio_briefing(
 
     # Gather scraped items for this run
     try:
-        scraped_items, _ = db.list_items(
-            run_id=run_id, status="ingested", limit=100, offset=0
-        )
+        scraped_items, _ = db.list_items(run_id=run_id, status="ingested", limit=100, offset=0)
     except Exception as exc:
         logger.warning(f"Audio briefing: could not load scraped items for run {run_id}: {exc}")
         return None
@@ -166,11 +196,13 @@ async def trigger_audio_briefing(
                 "snippet": getattr(item, "snippet", ""),
                 "source_url": getattr(item, "source_url", ""),
             }
-        items.append({
-            "title": row.get("title", ""),
-            "summary": row.get("summary", row.get("snippet", "")),
-            "url": row.get("url", row.get("source_url", "")),
-        })
+        items.append(
+            {
+                "title": row.get("title", ""),
+                "summary": row.get("summary", row.get("snippet", "")),
+                "url": row.get("url", row.get("source_url", "")),
+            }
+        )
 
     workflow_inputs = _build_workflow_inputs(items, output_prefs)
 
@@ -198,8 +230,7 @@ async def trigger_audio_briefing(
         )
         task_id = await scheduler.enqueue(task)
         logger.info(
-            f"Audio briefing workflow enqueued for watchlist run {run_id}, "
-            f"task_id={task_id}, items={len(items)}"
+            f"Audio briefing workflow enqueued for watchlist run {run_id}, " f"task_id={task_id}, items={len(items)}"
         )
         return task_id
     except Exception as exc:

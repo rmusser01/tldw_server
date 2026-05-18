@@ -61,7 +61,6 @@ def client_with_mutable_user(monkeypatch, tmp_path):
 
 def test_sources_crud_and_tags(client_with_user):
 
-
     c = client_with_user
 
     # Create groups for source membership updates
@@ -304,8 +303,8 @@ def test_sources_check_now_reports_run_errors_and_missing_sources(client_with_us
     assert by_source[source_id]["detail"] == "run_trigger_failed"
     assert by_source[999999]["status"] == "not_found"
 
-def test_source_group_validation_and_idempotent_create(client_with_user):
 
+def test_source_group_validation_and_idempotent_create(client_with_user):
 
     c = client_with_user
 
@@ -501,8 +500,8 @@ def test_job_delete_and_restore_fidelity(client_with_user):
     assert restored_filters["filters"][0]["action"] == "include"
     assert restored_filters["filters"][0]["value"] == {"keywords": ["ai"]}
 
-def test_bulk_sources_and_groups_and_jobs(client_with_user):
 
+def test_bulk_sources_and_groups_and_jobs(client_with_user):
 
     c = client_with_user
 
@@ -641,13 +640,7 @@ def test_create_job_email_validation_returns_structured_detail(client_with_user)
             "schedule_expr": None,
             "timezone": "UTC",
             "active": True,
-            "output_prefs": {
-                "deliveries": {
-                    "email": {
-                        "recipients": ["valid@example.com", "bad-email", "also bad"]
-                    }
-                }
-            },
+            "output_prefs": {"deliveries": {"email": {"recipients": ["valid@example.com", "bad-email", "also bad"]}}},
         },
     )
     detail = _assert_watchlists_validation_error(
@@ -678,11 +671,7 @@ def test_update_job_email_validation_returns_structured_detail(client_with_user)
 
     update_resp = c.patch(
         f"/api/v1/watchlists/jobs/{job_id}",
-        json={
-            "output_prefs": {
-                "deliveries": {"email": {"recipients": ["not-an-email"]}}
-            }
-        },
+        json={"output_prefs": {"deliveries": {"email": {"recipients": ["not-an-email"]}}}},
     )
     detail = _assert_watchlists_validation_error(
         update_resp,
@@ -749,6 +738,7 @@ def test_cancel_run_endpoint_rejects_terminal_runs(client_with_user):
     assert payload["status"] == "completed"
     assert payload["message"] == "run_not_cancellable"
 
+
 def test_forum_sources_feature_flag(client_with_user, monkeypatch):
     c = client_with_user
 
@@ -798,7 +788,6 @@ def test_watchlists_run_stream_ws(client_with_user, tmp_path):
 
 
 def test_items_and_outputs_flow(client_with_user, monkeypatch):
-
 
     c = client_with_user
     monkeypatch.setenv("TEST_MODE", "1")
@@ -990,7 +979,9 @@ def test_items_and_outputs_flow(client_with_user, monkeypatch):
     db_template = r.json()
     assert db_template["name"] == db_template_name
 
-    r = c.post("/api/v1/watchlists/outputs", json={"run_id": run_id, "template_name": db_template_name, "temporary": True})
+    r = c.post(
+        "/api/v1/watchlists/outputs", json={"run_id": run_id, "template_name": db_template_name, "temporary": True}
+    )
     assert r.status_code == 200, r.text
     db_output = r.json()
     assert db_output["version"] == 4
@@ -1027,7 +1018,9 @@ def test_items_and_outputs_flow(client_with_user, monkeypatch):
     assert "Markdown summary template" in template_detail["description"]
 
     # Generate output using stored template
-    r = c.post("/api/v1/watchlists/outputs", json={"run_id": run_id, "template_name": legacy_template_name, "temporary": True})
+    r = c.post(
+        "/api/v1/watchlists/outputs", json={"run_id": run_id, "template_name": legacy_template_name, "temporary": True}
+    )
     assert r.status_code == 200, r.text
     templated = r.json()
     assert templated["version"] == 5
@@ -1048,7 +1041,9 @@ def test_items_and_outputs_flow(client_with_user, monkeypatch):
     assert r.status_code == 200, r.text
     colliding_db_template = r.json()
 
-    r = c.post("/api/v1/watchlists/outputs", json={"run_id": run_id, "template_name": legacy_template_name, "temporary": True})
+    r = c.post(
+        "/api/v1/watchlists/outputs", json={"run_id": run_id, "template_name": legacy_template_name, "temporary": True}
+    )
     assert r.status_code == 200, r.text
     collision_output = r.json()
     assert collision_output["version"] == 6
@@ -1069,7 +1064,6 @@ def test_items_and_outputs_flow(client_with_user, monkeypatch):
 
 
 def test_watchlists_outputs_variants_and_ingest(client_with_user, monkeypatch):
-
 
     c = client_with_user
     monkeypatch.setenv("TEST_MODE", "1")
@@ -1262,7 +1256,6 @@ def test_watchlists_outputs_pagination_excludes_mixed_origin_rows(client_with_us
 
 def test_preview_site_sources_returns_items(client_with_user, monkeypatch):
 
-
     c = client_with_user
     monkeypatch.delenv("TEST_MODE", raising=False)
 
@@ -1270,6 +1263,7 @@ def test_preview_site_sources_returns_items(client_with_user, monkeypatch):
         return [{"title": "Stub Item", "url": "https://example.com/x", "summary": "Stub summary"}]
 
     from tldw_Server_API.app.api.v1.endpoints import watchlists as watchlists_endpoints
+
     monkeypatch.setattr(watchlists_endpoints, "fetch_site_items_with_rules", _fake_fetch)
 
     # Create site source
@@ -1302,7 +1296,6 @@ def test_preview_site_sources_returns_items(client_with_user, monkeypatch):
 
 
 def test_output_deliveries_email_and_chatbook(client_with_user, monkeypatch, tmp_path):
-
 
     c = client_with_user
     monkeypatch.setenv("TEST_MODE", "1")
@@ -1374,7 +1367,6 @@ def test_output_deliveries_email_and_chatbook(client_with_user, monkeypatch, tmp
 
 def test_outputs_generate_audio_payload_triggers_workflow_and_updates_run_stats(client_with_user, monkeypatch):
 
-
     c = client_with_user
     monkeypatch.setenv("TEST_MODE", "1")
 
@@ -1401,6 +1393,22 @@ def test_outputs_generate_audio_payload_triggers_workflow_and_updates_run_stats(
     r = c.post(f"/api/v1/watchlists/jobs/{job_id}/run")
     assert r.status_code == 200, r.text
     run_id = r.json()["id"]
+    audio_cast = {
+        "speaker_count": 2,
+        "speakers": [
+            {
+                "id": "host",
+                "label": "Host",
+                "role": "anchor",
+                "voice": "af_bella",
+            },
+            {
+                "id": "analyst",
+                "label": "Analyst",
+                "voice": "am_adam",
+            },
+        ],
+    }
 
     with patch(
         "tldw_Server_API.app.core.Watchlists.audio_briefing_workflow.trigger_audio_briefing",
@@ -1428,6 +1436,7 @@ def test_outputs_generate_audio_payload_triggers_workflow_and_updates_run_stats(
                 "persona_provider": "openai",
                 "persona_model": "gpt-4o-mini",
                 "voice_map": {"HOST": "af_bella"},
+                "audio_cast": audio_cast,
             },
         )
     assert r.status_code == 200, r.text
@@ -1459,6 +1468,7 @@ def test_outputs_generate_audio_payload_triggers_workflow_and_updates_run_stats(
     assert kwargs["output_prefs"]["persona_provider"] == "openai"
     assert kwargs["output_prefs"]["persona_model"] == "gpt-4o-mini"
     assert kwargs["output_prefs"]["voice_map"] == {"HOST": "af_bella"}
+    assert kwargs["output_prefs"]["audio_cast"] == audio_cast
 
     r = c.get(f"/api/v1/watchlists/runs/{run_id}")
     assert r.status_code == 200, r.text
@@ -1467,7 +1477,6 @@ def test_outputs_generate_audio_payload_triggers_workflow_and_updates_run_stats(
 
 
 def test_outputs_generate_audio_false_does_not_trigger_workflow(client_with_user, monkeypatch):
-
 
     c = client_with_user
     monkeypatch.setenv("TEST_MODE", "1")

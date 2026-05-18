@@ -7,6 +7,7 @@ Implements minimal CRUD and semantics per PRD:
 
 Scraping and scheduling are stubbed; runs are created on trigger.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -43,7 +44,12 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from loguru import logger
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import FileResponse
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, resolve_user_id_for_request, User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    get_request_user,
+    rbac_rate_limit,
+    resolve_user_id_for_request,
+    User,
+)
 
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
@@ -111,6 +117,7 @@ from tldw_Server_API.app.services.outputs_service import (
 try:
     from tldw_Server_API.app.core.Notifications import NotificationsService  # type: ignore
 except (ImportError, OSError):
+
     class NotificationsService:  # type: ignore
         def __init__(self, *, user_id: int, user_email: str | None = None) -> None:
             self.user_id = user_id
@@ -127,7 +134,11 @@ except (ImportError, OSError):
             fallback_to_user_email: bool = True,
         ) -> Any:
             # Minimal shim for tests; report skipped
-            return type("_Result", (), {"channel": "email", "status": "skipped", "details": {"reason": "notifications_unavailable"}})()
+            return type(
+                "_Result",
+                (),
+                {"channel": "email", "status": "skipped", "details": {"reason": "notifications_unavailable"}},
+            )()
 
         def deliver_chatbook(
             self,
@@ -141,7 +152,12 @@ except (ImportError, OSError):
             model: str = "watchlists",
             conversation_id: int | None = None,
         ) -> Any:
-            return type("_Result", (), {"channel": "chatbook", "status": "skipped", "details": {"reason": "notifications_unavailable"}})()
+            return type(
+                "_Result",
+                (),
+                {"channel": "chatbook", "status": "skipped", "details": {"reason": "notifications_unavailable"}},
+            )()
+
 
 from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E402
     Group,
@@ -215,6 +231,7 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
     WatchlistOutputCreateRequest,
     WatchlistOutputEvidenceResponse,
     WatchlistOutputsListResponse,
+    WatchlistRunAudioResponse,
     WatchlistReportReadiness,
     WatchlistsListResponse,
     WatchlistUpdateRequest,
@@ -274,9 +291,7 @@ WATCHLISTS_DELETE_RESTORE_WINDOW_SECONDS = max(
 )
 
 _TEMPLATE_NAME_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
-_WATCHLIST_MIN_SCHEDULE_INTERVAL_MINUTES = max(
-    1, int(os.getenv("WATCHLIST_MIN_SCHEDULE_INTERVAL_MINUTES", "5") or 5)
-)
+_WATCHLIST_MIN_SCHEDULE_INTERVAL_MINUTES = max(1, int(os.getenv("WATCHLIST_MIN_SCHEDULE_INTERVAL_MINUTES", "5") or 5))
 _EMAIL_RECIPIENT_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 _WATCHLISTS_UX_BASELINE = {
@@ -359,18 +374,14 @@ def _build_thresholds(
         setup_completion_percent,
         float(_WATCHLISTS_UX_BASELINE["uc1_f1_first_source_setup_percent"]),
     )
-    setup_status: Literal["ok", "potential_breach"] = (
-        "potential_breach" if setup_delta <= -10.0 else "ok"
-    )
+    setup_status: Literal["ok", "potential_breach"] = "potential_breach" if setup_delta <= -10.0 else "ok"
 
     backend_first_output_percent = _to_percent(float(uc2_backend.get("first_output_success_rate") or 0.0))
     first_output_delta = _percent_delta(
         backend_first_output_percent,
         float(_WATCHLISTS_UX_BASELINE["uc2_f2_text_output_success_percent"]),
     )
-    first_output_status: Literal["ok", "potential_breach"] = (
-        "potential_breach" if first_output_delta <= -10.0 else "ok"
-    )
+    first_output_status: Literal["ok", "potential_breach"] = "potential_breach" if first_output_delta <= -10.0 else "ok"
 
     onboarding_first_output_median = float(timings.get("median_seconds_to_first_output_success") or 0.0)
     baseline_seconds = float(_WATCHLISTS_UX_BASELINE["uc1_f2_time_to_first_review_seconds"])
@@ -379,9 +390,7 @@ def _build_thresholds(
         if baseline_seconds > 0 and onboarding_first_output_median > 0
         else 0.0
     )
-    timing_status: Literal["ok", "potential_breach"] = (
-        "potential_breach" if timing_ratio >= 1.25 else "ok"
-    )
+    timing_status: Literal["ok", "potential_breach"] = "potential_breach" if timing_ratio >= 1.25 else "ok"
 
     return [
         WatchlistTelemetryThresholdSummary(
@@ -892,9 +901,11 @@ def _compute_next_run(cron: str | None, timezone: str | None) -> str | None:
         return None
     try:
         from apscheduler.triggers.cron import CronTrigger
+
         tz = _normalize_tz(timezone) or "UTC"
         trigger = CronTrigger.from_crontab(cron, timezone=tz)
         from datetime import datetime
+
         now = datetime.now(trigger.timezone)
         nxt = trigger.get_next_fire_time(None, now)
         return nxt.isoformat() if nxt else None
@@ -994,9 +1005,7 @@ def _find_invalid_email_recipients(recipients: list[str]) -> list[str]:
     return invalid
 
 
-def _detect_schedule_interval_minutes(
-    schedule_expr: str | None, timezone: str | None
-) -> float | None:
+def _detect_schedule_interval_minutes(schedule_expr: str | None, timezone: str | None) -> float | None:
     expr = str(schedule_expr or "").strip()
     if not expr:
         return None
@@ -1041,10 +1050,7 @@ def _validate_job_request(
 
     if enforce_schedule:
         detected_interval = _detect_schedule_interval_minutes(schedule_expr, timezone)
-        if (
-            detected_interval is not None
-            and detected_interval < _WATCHLIST_MIN_SCHEDULE_INTERVAL_MINUTES
-        ):
+        if detected_interval is not None and detected_interval < _WATCHLIST_MIN_SCHEDULE_INTERVAL_MINUTES:
             _raise_watchlists_validation_error(
                 rule="schedule_too_frequent",
                 message_key="watchlists:jobs.form.scheduleTooFrequent",
@@ -1053,9 +1059,7 @@ def _validate_job_request(
                     f"Minimum interval is every {_WATCHLIST_MIN_SCHEDULE_INTERVAL_MINUTES} minutes."
                 ),
                 remediation_key="watchlists:schedule.tooFrequentRemediation",
-                remediation=(
-                    "Increase schedule interval to meet the minimum cadence."
-                ),
+                remediation=("Increase schedule interval to meet the minimum cadence."),
                 meta={
                     "minimum_minutes": _WATCHLIST_MIN_SCHEDULE_INTERVAL_MINUTES,
                     "detected_interval_minutes": round(detected_interval, 3),
@@ -1204,11 +1208,9 @@ def _resolve_report_preset(requested: str | None, watchlist_row: Any | None) -> 
 
 
 def _source_rows_for_report(db: WatchlistsDatabase, items: list[Any]) -> dict[int, Any]:
-    source_ids = sorted({
-        int(getattr(item, "source_id"))
-        for item in items
-        if getattr(item, "source_id", None) is not None
-    })
+    source_ids = sorted(
+        {int(getattr(item, "source_id")) for item in items if getattr(item, "source_id", None) is not None}
+    )
     sources: dict[int, Any] = {}
     for source_id in source_ids:
         try:
@@ -1228,9 +1230,7 @@ def _report_metadata_from_snapshot(
     source_summary = snapshot.get("source_summary") if isinstance(snapshot.get("source_summary"), dict) else {}
     warnings = readiness.get("warnings") if isinstance(readiness.get("warnings"), list) else []
     weak_warning_count = sum(
-        1
-        for warning in warnings
-        if isinstance(warning, dict) and str(warning.get("severity") or "warning") != "info"
+        1 for warning in warnings if isinstance(warning, dict) and str(warning.get("severity") or "warning") != "info"
     )
     return {
         "report_preset": preset,
@@ -1478,6 +1478,7 @@ _YT_HOST_RE = re.compile(r"(^|\.)youtube\.com$|(^|\.)youtu\.be$", re.IGNORECASE)
 def _is_youtube_url(url: str) -> bool:
     try:
         from urllib.parse import urlparse
+
         host = (urlparse(url).hostname or "").lower()
         # Strip leading 'www.'
         if host.startswith("www."):
@@ -1497,6 +1498,7 @@ def _is_youtube_feed_url(url: str) -> bool:
     """
     try:
         from urllib.parse import parse_qs, urlparse
+
         u = urlparse(url)
         path_ok = u.path.lower().startswith("/feeds/videos.xml")
         if not path_ok:
@@ -1516,6 +1518,7 @@ def _normalize_youtube_feed_url(url: str) -> str | None:
     """
     try:
         from urllib.parse import parse_qs, urlparse
+
         u = urlparse(url)
         raw_qs = parse_qs(u.query or "")
         # Normalize query keys to lowercase for case-insensitive lookup
@@ -1756,11 +1759,12 @@ def _read_log_tail(
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         return None, 0, None, False
 
+
 @router.post("/sources", response_model=Source, summary="Create a source")
 async def create_source(
     payload: SourceCreateRequest = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
     response: Response = None,  # type: ignore[assignment]
 ):
     try:
@@ -1831,7 +1835,7 @@ async def list_sources(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _, target_db = await _resolve_target_watchlists_context(
         current_user=current_user,
@@ -1910,7 +1914,7 @@ async def export_sources_opml(
         description="Admin-only: export sources for another user ID.",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _, target_db = await _resolve_target_watchlists_context(
         current_user=current_user,
@@ -1926,9 +1930,11 @@ async def export_sources_opml(
         # Apply tag filter manually (AND semantics)
         if tag:
             needed = [t.strip().lower() for t in tag if t and str(t).strip()]
+
             def _has_all_tags(src) -> bool:
                 src_tags = [str(t).strip().lower() for t in (getattr(src, "tags", []) or [])]
                 return all(n in src_tags for n in needed)
+
             rows = [r for r in rows if _has_all_tags(r)]
     else:
         rows, _ = target_db.list_sources(q=None, tag_names=tag, limit=10000, offset=0)
@@ -1953,7 +1959,7 @@ async def import_sources_opml(
     group_id: int | None = Form(None),
     watchlist_id: int | None = Form(None),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
     response: Response = None,  # type: ignore[assignment]
 ):
     content = await file.read()
@@ -1989,7 +1995,9 @@ async def import_sources_opml(
                 if watchlist_id is not None:
                     db.add_source_to_watchlist(int(watchlist_id), int(existing.id))
                 items.append(
-                    SourcesImportItem(url=url_str, name=existing.name, id=existing.id, status="skipped", error="duplicate_source")
+                    SourcesImportItem(
+                        url=url_str, name=existing.name, id=existing.id, status="skipped", error="duplicate_source"
+                    )
                 )
                 skipped += 1
                 continue
@@ -2021,7 +2029,9 @@ async def import_sources_opml(
         user_id=current_user.id,
         events=companion_events,
     )
-    return SourcesImportResponse(items=items, total=(created + skipped + errors), created=created, skipped=skipped, errors=errors)
+    return SourcesImportResponse(
+        items=items, total=(created + skipped + errors), created=created, skipped=skipped, errors=errors
+    )
 
 
 @router.post(
@@ -2033,7 +2043,7 @@ async def import_sources_opml(
 async def check_sources_now(
     payload: SourcesCheckNowRequest = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     source_ids: list[int] = []
     seen_ids: set[int] = set()
@@ -2189,7 +2199,7 @@ async def get_source(
         description="Admin-only: fetch a source from another user ID.",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _, target_db = await _resolve_target_watchlists_context(
         current_user=current_user,
@@ -2222,7 +2232,7 @@ async def get_source_seen_stats(
         description="Include up to N recent seen keys (0 disables key list).",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     resolved_user_id = await _resolve_target_watchlists_user_id(current_user, target_user_id)
     target_db = _resolve_watchlists_db_for_target_user(current_user, db, resolved_user_id)
@@ -2262,7 +2272,7 @@ async def clear_source_seen_state(
         description="Also clear source defer/backoff state when true.",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     resolved_user_id = await _resolve_target_watchlists_user_id(current_user, target_user_id)
     target_db = _resolve_watchlists_db_for_target_user(current_user, db, resolved_user_id)
@@ -2370,11 +2380,8 @@ def _build_source_preview_diagnostics(
         return diagnostics
 
     validation = validate_selector_rules(scrape_rules)
-    diagnostics.selector_errors = [
-        _format_selector_diagnostic(issue)
-        for issue in (validation.get("errors") or [])
-    ]
-    for issue in (validation.get("warnings") or []):
+    diagnostics.selector_errors = [_format_selector_diagnostic(issue) for issue in (validation.get("errors") or [])]
+    for issue in validation.get("warnings") or []:
         warning = issue.get("warning") if isinstance(issue, dict) else None
         formatted = _format_selector_diagnostic(issue)
         if warning == "no_matches":
@@ -2422,9 +2429,7 @@ async def _build_source_preview_response(
             items = []
     elif source_type.lower() in {"site", "forum"}:
         scrape_rules = (
-            safe_settings.get("scrape_rules")
-            if isinstance(safe_settings.get("scrape_rules"), dict)
-            else None
+            safe_settings.get("scrape_rules") if isinstance(safe_settings.get("scrape_rules"), dict) else None
         )
         if scrape_rules:
             diagnostics = _build_source_preview_diagnostics(
@@ -2506,7 +2511,7 @@ async def test_source_draft(
     payload: SourceTestRequest = Body(...),
     limit: int = Query(20, ge=1, le=200),
     _current_user: User = Depends(get_request_user),
-    _db = Depends(get_watchlists_db_for_user),
+    _db=Depends(get_watchlists_db_for_user),
 ):
     return await _build_source_preview_response(
         source_id=0,
@@ -2522,7 +2527,7 @@ async def test_source(
     source_id: int = Path(..., ge=1),
     limit: int = Query(20, ge=1, le=200),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _ = current_user
     try:
@@ -2552,7 +2557,7 @@ async def update_source(
     source_id: int = Path(..., ge=1),
     payload: SourceUpdateRequest = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
     response: Response = None,  # type: ignore[assignment]
 ):
     # Determine target source_type/url for validation
@@ -2560,7 +2565,9 @@ async def update_source(
         existing = db.get_source(source_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="source_not_found") from None
-    target_type = str(payload.source_type) if (getattr(payload, "source_type", None) is not None) else str(existing.source_type)
+    target_type = (
+        str(payload.source_type) if (getattr(payload, "source_type", None) is not None) else str(existing.source_type)
+    )
     target_url = str(payload.url) if (getattr(payload, "url", None) is not None) else str(existing.url)
     _raise_if_forum_disabled(target_type)
     # Normalize/validate when target_type is rss and URL is YouTube
@@ -2630,7 +2637,7 @@ async def update_source(
 async def delete_source(
     source_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     existing_source = None
     try:
@@ -2662,7 +2669,7 @@ async def delete_source(
 async def restore_source(
     source_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
         row = db.restore_source(source_id)
@@ -2683,33 +2690,13 @@ async def restore_source(
 
 
 @router.post(
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     "/sources/bulk",
     response_model=SourcesBulkCreateResponse,
     summary="Bulk create sources with per-entry status",
     description=(
         "Creates multiple sources and returns per-entry status. "
         "Each item is either created or returns an error with reason.\n\n"
-        "Validation: When `source_type=\"rss\"` and the URL is a YouTube link, only canonical RSS feeds "
+        'Validation: When `source_type="rss"` and the URL is a YouTube link, only canonical RSS feeds '
         "are accepted (e.g., https://www.youtube.com/feeds/videos.xml?channel_id=..., playlist_id=..., user=...). "
         "Non-feed YouTube URLs are rejected per-entry with error `invalid_youtube_rss_url`. "
         "Tags must be non-empty strings; invalid tags are rejected per-entry with `invalid_tag_names`."
@@ -2718,7 +2705,7 @@ async def restore_source(
 async def bulk_create_sources(
     payload: SourcesBulkCreateRequest,
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     items: list[SourcesBulkCreateItem] = []
     companion_events: list[dict[str, Any]] = []
@@ -2890,7 +2877,7 @@ async def list_tags(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     limit = size
     offset = (page - 1) * limit
@@ -2915,10 +2902,12 @@ async def list_tags(
 async def create_group(
     payload: GroupCreateRequest,
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
-        row = db.create_group(name=payload.name, description=payload.description, parent_group_id=payload.parent_group_id)
+        row = db.create_group(
+            name=payload.name, description=payload.description, parent_group_id=payload.parent_group_id
+        )
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         raise HTTPException(status_code=400, detail="group_create_failed") from None
     return Group(id=row.id, name=row.name, description=row.description, parent_group_id=row.parent_group_id)
@@ -2930,7 +2919,7 @@ async def list_groups(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     limit = size
     offset = (page - 1) * limit
@@ -2953,7 +2942,7 @@ async def update_group(
     group_id: int = Path(..., ge=1),
     payload: GroupUpdateRequest = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
         row = db.update_group(group_id, payload.model_dump(exclude_unset=True))
@@ -2966,7 +2955,7 @@ async def update_group(
 async def delete_group(
     group_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     ok = db.delete_group(group_id)
     if not ok:
@@ -2980,7 +2969,7 @@ async def delete_group(
 @router.get("/settings", summary="Get watchlists defaults")
 async def get_watchlist_settings(
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ) -> dict[str, Any]:
     """Return watchlists runtime defaults and active backend type for the current user."""
     backend_label = "sqlite"
@@ -3006,7 +2995,7 @@ async def get_watchlist_settings(
 async def record_watchlists_onboarding_telemetry(
     payload: WatchlistOnboardingTelemetryIngestRequest,
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ) -> WatchlistOnboardingTelemetryIngestResponse:
     """Record a single onboarding telemetry event and return accept/reject outcome."""
     _ = current_user
@@ -3039,7 +3028,7 @@ async def get_watchlists_onboarding_telemetry_summary(
     since: str | None = Query(default=None),
     until: str | None = Query(default=None),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ) -> WatchlistOnboardingTelemetrySummaryResponse:
     """Summarize onboarding telemetry counters/rates/timings for an optional time window."""
     started = time.perf_counter()
@@ -3077,8 +3066,8 @@ async def get_watchlists_rc_telemetry_summary(
     since: str | None = Query(default=None),
     until: str | None = Query(default=None),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
-    collections_db = Depends(get_collections_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
+    collections_db=Depends(get_collections_db_for_user),
 ) -> WatchlistRcTelemetrySummaryResponse:
     """Return combined onboarding, IA, and UC2 backend telemetry for RC reporting."""
     started = time.perf_counter()
@@ -3161,7 +3150,7 @@ async def get_watchlists_rc_telemetry_summary(
 async def record_watchlists_ia_experiment_telemetry(
     payload: WatchlistIaExperimentTelemetryIngestRequest,
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     accepted = False
     try:
@@ -3190,7 +3179,7 @@ async def get_watchlists_ia_experiment_telemetry_summary(
     since: str | None = Query(default=None),
     until: str | None = Query(default=None),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
         items = db.summarize_ia_experiment_events(since=since, until=until)
@@ -3204,7 +3193,7 @@ async def get_watchlists_ia_experiment_telemetry_summary(
 async def create_job(
     payload: JobCreateRequest,
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     ingest_prefs = payload.ingest_prefs.model_dump(exclude_none=True) if payload.ingest_prefs else None
     output_prefs = _merge_output_prefs(payload.output_prefs or {}, ingest_prefs)
@@ -3251,6 +3240,7 @@ async def create_job(
     try:
         if row.schedule_expr:
             from tldw_Server_API.app.services.workflows_scheduler import get_workflows_scheduler
+
             svc = get_workflows_scheduler()
             sid = svc.create(
                 tenant_id=str(getattr(current_user, "tenant_id", "default")),
@@ -3275,8 +3265,10 @@ async def create_job(
         try:
             if row.schedule_expr:
                 from uuid import uuid4
+
                 sid = uuid4().hex
                 from tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB import WorkflowsSchedulerDB
+
                 wfdb = WorkflowsSchedulerDB(user_id=int(current_user.id))
                 wfdb.create_schedule(
                     id=sid,
@@ -3323,14 +3315,18 @@ async def create_job(
     )
 
 
-@router.post("/jobs/{job_id}/preview", response_model=PreviewResponse, summary="Preview candidates and filter decisions without ingestion")
+@router.post(
+    "/jobs/{job_id}/preview",
+    response_model=PreviewResponse,
+    summary="Preview candidates and filter decisions without ingestion",
+)
 async def preview_job(
     job_id: int = Path(..., ge=1),
     limit: int = Query(20, ge=1, le=200, description="Max candidates to return across all sources"),
     per_source: int = Query(10, ge=1, le=100, description="Max candidates per source"),
     include_content: bool = Query(False, description="Reserved; previews return summary only for now"),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
         job = db.get_job(job_id)
@@ -3426,25 +3422,31 @@ async def preview_job(
         try:
             if str(src.source_type).lower() == "rss":
                 if test_mode:
-                    per_items = [{
-                        "title": "Test Item",
-                        "url": "https://example.com/test",
-                        "summary": "Preview sample",
-                        "published": datetime.now(timezone.utc).isoformat(),
-                        "author": None,
-                    }]
+                    per_items = [
+                        {
+                            "title": "Test Item",
+                            "url": "https://example.com/test",
+                            "summary": "Preview sample",
+                            "published": datetime.now(timezone.utc).isoformat(),
+                            "author": None,
+                        }
+                    ]
                 else:
-                    feed = await fetch_rss_feed(str(src.url), etag=None, last_modified=None, tenant_id=str(current_user.id))
+                    feed = await fetch_rss_feed(
+                        str(src.url), etag=None, last_modified=None, tenant_id=str(current_user.id)
+                    )
                     per_items = feed.get("items") or []
             else:
                 if test_mode:
-                    per_items = [{
-                        "title": "Site Item",
-                        "url": getattr(src, "url", None) or "https://example.com/",
-                        "summary": "Preview sample",
-                        "content": "",
-                        "author": None,
-                    }]
+                    per_items = [
+                        {
+                            "title": "Site Item",
+                            "url": getattr(src, "url", None) or "https://example.com/",
+                            "summary": "Preview sample",
+                            "content": "",
+                            "author": None,
+                        }
+                    ]
                 else:
                     cfg = {}
                     try:
@@ -3477,7 +3479,7 @@ async def preview_job(
             action, meta = _evaluate_filters(job_filters, candidate)
             # Determine final decision with include-only gating
             decision = "filtered" if action == "exclude" or include_gating_active and action != "include" else "ingest"
-            flagged = (action == "flag")
+            flagged = action == "flag"
             if decision == "ingest":
                 total_ingestable += 1
             else:
@@ -3494,14 +3496,10 @@ async def preview_job(
                     matched_action=action,  # type: ignore[arg-type]
                     matched_filter_key=(meta.get("key") if isinstance(meta, dict) else None),
                     matched_filter_id=(
-                        int(meta["id"])
-                        if isinstance(meta, dict) and meta.get("id") is not None
-                        else None
+                        int(meta["id"]) if isinstance(meta, dict) and meta.get("id") is not None else None
                     ),
                     matched_filter_type=(
-                        meta.get("type")
-                        if isinstance(meta, dict) and isinstance(meta.get("type"), str)
-                        else None
+                        meta.get("type") if isinstance(meta, dict) and isinstance(meta.get("type"), str) else None
                     ),  # type: ignore[arg-type]
                     flagged=flagged,
                 )
@@ -3535,7 +3533,7 @@ async def list_jobs(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _, target_db = await _resolve_target_watchlists_context(
         current_user=current_user,
@@ -3594,7 +3592,7 @@ async def get_job(
         description="Admin-only: fetch a job from another user ID.",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _, target_db = await _resolve_target_watchlists_context(
         current_user=current_user,
@@ -3636,7 +3634,7 @@ async def update_job(
     job_id: int = Path(..., ge=1),
     payload: JobUpdateRequest = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     patch = payload.model_dump(exclude_unset=True)
     try:
@@ -3708,6 +3706,7 @@ async def update_job(
     # Sync with workflows scheduler (create/update/enable/disable)
     try:
         from tldw_Server_API.app.services.workflows_scheduler import get_workflows_scheduler
+
         svc = get_workflows_scheduler()
         if r.wf_schedule_id:
             upd: dict[str, Any] = {}
@@ -3743,8 +3742,10 @@ async def update_job(
                     logger.debug(f"Watchlists: schedule create during update failed, fallback: {_e}")
                     try:
                         from uuid import uuid4
+
                         sid = uuid4().hex
                         from tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB import WorkflowsSchedulerDB
+
                         wfdb = WorkflowsSchedulerDB(user_id=int(current_user.id))
                         wfdb.create_schedule(
                             id=sid,
@@ -3796,7 +3797,7 @@ async def update_job(
 async def list_watchlist_clusters(
     watchlist_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
         db.get_job(watchlist_id)
@@ -3811,7 +3812,7 @@ async def add_watchlist_cluster(
     watchlist_id: int = Path(..., ge=1),
     cluster_id: int = Body(..., embed=True, ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
         db.get_job(watchlist_id)
@@ -3826,7 +3827,7 @@ async def remove_watchlist_cluster(
     watchlist_id: int = Path(..., ge=1),
     cluster_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
         db.get_job(watchlist_id)
@@ -3846,13 +3847,14 @@ async def remove_watchlist_cluster(
 async def delete_job(
     job_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     # Try to delete linked schedule if present
     try:
         r = db.get_job(job_id)
         if getattr(r, "wf_schedule_id", None):
             from tldw_Server_API.app.services.workflows_scheduler import get_workflows_scheduler
+
             get_workflows_scheduler().delete(r.wf_schedule_id)  # type: ignore[arg-type]
             with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
                 db.set_job_schedule_id(job_id, None)
@@ -3876,7 +3878,7 @@ async def delete_job(
 async def restore_job(
     job_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
         row = db.restore_job(job_id)
@@ -3977,7 +3979,7 @@ async def replace_job_filters(
     job_id: int = Path(..., ge=1),
     payload: WatchlistFiltersPayload = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
     response: Response = None,  # type: ignore[assignment]
 ):
     try:
@@ -3987,7 +3989,11 @@ async def replace_job_filters(
     updated = db.set_job_filters(job_id, payload.model_dump())
     # Normalize and return
     try:
-        parsed = json.loads(updated.job_filters_json or "{}") if getattr(updated, "job_filters_json", None) else {"filters": []}
+        parsed = (
+            json.loads(updated.job_filters_json or "{}")
+            if getattr(updated, "job_filters_json", None)
+            else {"filters": []}
+        )
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         parsed = {"filters": []}
     return WatchlistFiltersPayload(**parsed) if isinstance(parsed, dict) else WatchlistFiltersPayload(filters=[])
@@ -3999,7 +4005,7 @@ async def append_job_filters(
     job_id: int = Path(..., ge=1),
     payload: WatchlistFiltersPayload = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
     response: Response = None,  # type: ignore[assignment]
 ):
     try:
@@ -4022,7 +4028,7 @@ async def append_job_filters(
 async def trigger_run(
     job_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
         # Ensure job exists before execution
@@ -4071,7 +4077,7 @@ async def list_runs_for_job(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _enforce_runs_admin_if_configured(current_user)
     _, target_db = await _resolve_target_watchlists_context(
@@ -4082,7 +4088,18 @@ async def list_runs_for_job(
     limit = size
     offset = (page - 1) * limit
     rows, total = target_db.list_runs_for_job(job_id, limit=limit, offset=offset)
-    items = [Run(id=r.id, job_id=r.job_id, status=r.status, started_at=r.started_at, finished_at=r.finished_at, stats=(json.loads(r.stats_json or "{}") if r.stats_json else None), error_msg=r.error_msg) for r in rows]
+    items = [
+        Run(
+            id=r.id,
+            job_id=r.job_id,
+            status=r.status,
+            started_at=r.started_at,
+            finished_at=r.finished_at,
+            stats=(json.loads(r.stats_json or "{}") if r.stats_json else None),
+            error_msg=r.error_msg,
+        )
+        for r in rows
+    ]
     has_more = (offset + len(items)) < int(total or 0)
     return RunsListResponse(
         items=items,
@@ -4110,7 +4127,7 @@ async def list_runs_global(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _enforce_runs_admin_if_configured(current_user)
     _, target_db = await _resolve_target_watchlists_context(
@@ -4179,7 +4196,7 @@ async def export_runs_csv(
         description="Tallies export mode when include_tallies=true. Use 'aggregate' to export global filter-key totals.",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _enforce_runs_admin_if_configured(current_user)
     _, target_db = await _resolve_target_watchlists_context(
@@ -4309,6 +4326,7 @@ async def export_runs_csv(
         },
     )
 
+
 @router.get("/runs/{run_id}", response_model=Run, summary="Get a run")
 async def get_run(
     run_id: int = Path(..., ge=1),
@@ -4318,7 +4336,7 @@ async def get_run(
         description="Admin-only: fetch a run from another user ID.",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _enforce_runs_admin_if_configured(current_user)
     _, target_db = await _resolve_target_watchlists_context(
@@ -4330,7 +4348,15 @@ async def get_run(
         r = target_db.get_run(run_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="run_not_found") from None
-    return Run(id=r.id, job_id=r.job_id, status=r.status, started_at=r.started_at, finished_at=r.finished_at, stats=(json.loads(r.stats_json or "{}") if r.stats_json else None), error_msg=r.error_msg)
+    return Run(
+        id=r.id,
+        job_id=r.job_id,
+        status=r.status,
+        started_at=r.started_at,
+        finished_at=r.finished_at,
+        stats=(json.loads(r.stats_json or "{}") if r.stats_json else None),
+        error_msg=r.error_msg,
+    )
 
 
 @router.post("/runs/{run_id}/cancel", response_model=RunCancelResponse, summary="Cancel a run")
@@ -4342,7 +4368,7 @@ async def cancel_run(
         description="Admin-only: cancel a run for another user ID.",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _enforce_runs_admin_if_configured(current_user)
     _, target_db = await _resolve_target_watchlists_context(
@@ -4401,14 +4427,16 @@ async def cancel_run(
 async def get_run_details(
     run_id: int = Path(..., ge=1),
     include_tallies: bool = Query(False, description="When true, include filter_tallies in the response"),
-    filtered_sample_max: int = Query(5, ge=0, le=50, description="Optional number of filtered items to include as a sample"),
+    filtered_sample_max: int = Query(
+        5, ge=0, le=50, description="Optional number of filtered items to include as a sample"
+    ),
     target_user_id: int | None = Query(
         None,
         ge=1,
         description="Admin-only: fetch run details for another user ID.",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
     response: Response = None,  # type: ignore[assignment]
 ):
     _enforce_runs_admin_if_configured(current_user)
@@ -4480,7 +4508,11 @@ async def get_run_details(
             tallies = stats.get("filter_tallies")
             if isinstance(tallies, dict):
                 # Coerce values to int
-                tallies_out = {str(k): int(v) for k, v in tallies.items() if isinstance(k, (str, int)) and isinstance(v, (int, float))}
+                tallies_out = {
+                    str(k): int(v)
+                    for k, v in tallies.items()
+                    if isinstance(k, (str, int)) and isinstance(v, (int, float))
+                }
         except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
             tallies_out = None
 
@@ -4661,7 +4693,7 @@ async def stream_run(
 @router.get(
     "/runs/{run_id}/audio",
     summary="Get audio briefing artifact for a run",
-    response_model=None,
+    response_model=WatchlistRunAudioResponse,
 )
 async def get_run_audio(
     run_id: int = Path(..., ge=1),
@@ -4715,6 +4747,7 @@ async def get_run_audio(
         scan_page_size = 50
         scan_max_pages = 20
         matching_run = None
+        matching_run_metadata: dict[str, Any] = {}
 
         def _load_metadata(value: Any) -> dict[str, Any]:
             if isinstance(value, dict):
@@ -4754,6 +4787,7 @@ async def get_run_audio(
                 meta = _run_metadata(wf_run)
                 if str(meta.get("watchlist_run_id")) == str(run_id):
                     matching_run = wf_run
+                    matching_run_metadata = meta
                     break
 
             if matching_run:
@@ -4799,6 +4833,7 @@ async def get_run_audio(
 
         if not used_legacy_artifacts_api:
             artifacts = wf_db.list_artifacts_for_run(str(matching_run_id))
+
         def _coerce_artifact_id_rank(value: Any) -> int:
             if isinstance(value, int):
                 return value
@@ -4827,7 +4862,67 @@ async def get_run_audio(
                     return float(raw)
             return 0.0
 
+        def _first_metadata_string(*values: Any) -> str | None:
+            for value in values:
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+            return None
+
+        def _artifact_download_url(artifact_id: Any) -> str | None:
+            if artifact_id is None:
+                return None
+            artifact_id_str = str(artifact_id).strip()
+            if not artifact_id_str:
+                return None
+            return f"/api/v1/workflows/artifacts/{artifact_id_str}/download"
+
+        def _artifact_summary(
+            *,
+            art_id: Any,
+            art_type: Any,
+            art_uri: Any,
+            size_bytes: Any,
+            mime_type: Any,
+            art_meta: dict[str, Any],
+            fallback_title: str,
+        ) -> dict[str, Any]:
+            title = _first_metadata_string(
+                art_meta.get("title"),
+                art_meta.get("label"),
+                art_meta.get("name"),
+                fallback_title,
+            )
+            summary: dict[str, Any] = {
+                "artifact_id": art_id,
+                "type": art_type,
+                "uri": art_uri,
+                "download_url": _artifact_download_url(art_id),
+                "size_bytes": size_bytes,
+                "mime_type": mime_type,
+                "metadata": art_meta,
+            }
+            if title:
+                summary["title"] = title
+            speaker_id = _first_metadata_string(
+                art_meta.get("speaker_id"),
+                art_meta.get("speakerId"),
+                art_meta.get("voice_marker"),
+            )
+            if speaker_id:
+                summary["speaker_id"] = speaker_id
+            voice = _first_metadata_string(art_meta.get("voice"), art_meta.get("tts_voice"))
+            if voice:
+                summary["voice"] = voice
+            return summary
+
         audio_candidates: list[dict[str, Any]] = []
+        script_artifact: dict[str, Any] | None = None
+        speaker_artifacts: list[dict[str, Any]] = []
+        fallback_reason = _first_metadata_string(
+            matching_run_metadata.get("fallback_reason"),
+            matching_run_metadata.get("audio_fallback_reason"),
+            matching_run_metadata.get("fallback_error"),
+        )
         for idx, art in enumerate(artifacts or []):
             if isinstance(art, dict):
                 art_meta = _load_metadata(art.get("metadata_json"))
@@ -4853,25 +4948,80 @@ async def get_run_audio(
                     or art_meta.get("background_mixed")
                     or art_meta.get("mixed")
                 )
+                fallback_hint = bool(
+                    art_meta.get("fallback_artifact")
+                    or art_meta.get("single_voice_fallback")
+                    or art_meta.get("fallback")
+                )
+                summary = _artifact_summary(
+                    art_id=art_id,
+                    art_type=art_type,
+                    art_uri=art_uri,
+                    size_bytes=size_bytes,
+                    mime_type=mime_type or "audio/mpeg",
+                    art_meta=art_meta,
+                    fallback_title="Final audio" if final_hint or fallback_hint else "Audio artifact",
+                )
+                is_speaker_artifact = bool(art_meta.get("speaker_artifact") or art_meta.get("speaker_id"))
+                if is_speaker_artifact:
+                    speaker_artifacts.append(
+                        _artifact_summary(
+                            art_id=art_id,
+                            art_type=art_type,
+                            art_uri=art_uri,
+                            size_bytes=size_bytes,
+                            mime_type=mime_type or "audio/mpeg",
+                            art_meta=art_meta,
+                            fallback_title=f"Speaker {len(speaker_artifacts) + 1}",
+                        )
+                    )
+                if fallback_reason is None:
+                    fallback_reason = _first_metadata_string(
+                        art_meta.get("fallback_reason"),
+                        art_meta.get("fallback_error"),
+                    )
+                if is_speaker_artifact and not final_hint and not fallback_hint:
+                    continue
                 audio_candidates.append(
                     {
                         "artifact_id": art_id,
                         "uri": art_uri,
                         "size_bytes": size_bytes,
                         "mime_type": mime_type or "audio/mpeg",
+                        "summary": summary,
                         "_rank": (
-                            1 if final_hint else 0,
+                            1 if final_hint or fallback_hint else 0,
                             _coerce_created_at_rank(created_at),
                             idx,
                             _coerce_artifact_id_rank(art_id),
                         ),
                     }
                 )
+                continue
+
+            if (
+                art_meta.get("script_artifact")
+                or art_meta.get("audio_briefing_script")
+                or art_type in {"audio_script", "briefing_script", "script"}
+            ):
+                if script_artifact is None:
+                    script_artifact = _artifact_summary(
+                        art_id=art_id,
+                        art_type=art_type,
+                        art_uri=art_uri,
+                        size_bytes=size_bytes,
+                        mime_type=mime_type or "text/markdown",
+                        art_meta=art_meta,
+                        fallback_title="Briefing script",
+                    )
 
         audio_artifact = max(audio_candidates, key=lambda candidate: candidate["_rank"]) if audio_candidates else None
 
-        matching_run_status = matching_run.get("status") if isinstance(matching_run, dict) else getattr(matching_run, "status", "pending")
+        matching_run_status = (
+            matching_run.get("status") if isinstance(matching_run, dict) else getattr(matching_run, "status", "pending")
+        )
         if audio_artifact:
+            final_artifact = audio_artifact.get("summary")
             return {
                 "run_id": run_id,
                 "task_id": task_id,
@@ -4881,6 +5031,10 @@ async def get_run_audio(
                 "download_url": f"/api/v1/workflows/artifacts/{audio_artifact['artifact_id']}/download",
                 "size_bytes": audio_artifact["size_bytes"],
                 "mime_type": audio_artifact["mime_type"],
+                "script_artifact": script_artifact,
+                "speaker_artifacts": speaker_artifacts,
+                "final_artifact": final_artifact,
+                "fallback_reason": fallback_reason,
             }
 
         return {
@@ -4889,6 +5043,10 @@ async def get_run_audio(
             "status": matching_run_status,
             "audio_uri": None,
             "download_url": None,
+            "script_artifact": script_artifact,
+            "speaker_artifacts": speaker_artifacts,
+            "final_artifact": None,
+            "fallback_reason": fallback_reason,
         }
 
     except HTTPException:
@@ -4901,6 +5059,10 @@ async def get_run_audio(
             "status": "unknown",
             "audio_uri": None,
             "download_url": None,
+            "script_artifact": None,
+            "speaker_artifacts": [],
+            "final_artifact": None,
+            "fallback_reason": None,
             "error": str(exc),
         }
 
@@ -4931,7 +5093,7 @@ async def export_run_tallies_csv(
         description="Admin-only: export run tallies for another user ID.",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _enforce_runs_admin_if_configured(current_user)
     _, target_db = await _resolve_target_watchlists_context(
@@ -4957,7 +5119,11 @@ async def export_run_tallies_csv(
             except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
                 continue
     filename = f"watchlists_run_{run_id}_tallies_{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.csv"
-    return PlainTextResponse("\n".join(out_lines), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f"attachment; filename={filename}"})
+    return PlainTextResponse(
+        "\n".join(out_lines),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 # --------------------
@@ -4979,12 +5145,16 @@ async def get_scraped_item_smart_counts(
     since: str | None = Query(None, description="ISO date filter (created_at >= since)"),
     until: str | None = Query(None, description="ISO date filter (created_at <= until)"),
     has_alert: bool | None = Query(None, description="Filter counts by whether items have content alerts"),
-    alert_status: WatchlistContentAlertStatus | None = Query(None, description="Filter counts by linked content alert status"),
-    alert_severity: WatchlistContentAlertSeverity | None = Query(None, description="Filter counts by linked content alert severity"),
+    alert_status: WatchlistContentAlertStatus | None = Query(
+        None, description="Filter counts by linked content alert status"
+    ),
+    alert_severity: WatchlistContentAlertSeverity | None = Query(
+        None, description="Filter counts by linked content alert severity"
+    ),
     alert_rule_id: int | None = Query(None, ge=1, description="Filter counts by linked content alert rule ID"),
     queue_run_id: int | None = Query(None, description="Optional queued-count run filter"),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _, target_db = await _resolve_target_watchlists_context(
         current_user=current_user,
@@ -5026,8 +5196,12 @@ async def list_scraped_items(
     queued_for_briefing: bool | None = Query(None),
     sort: ScrapedItemSortMode | None = Query(None, description="Server-side item sort mode"),
     has_alert: bool | None = Query(None, description="Filter items by whether they have content alerts"),
-    alert_status: WatchlistContentAlertStatus | None = Query(None, description="Filter items by linked content alert status"),
-    alert_severity: WatchlistContentAlertSeverity | None = Query(None, description="Filter items by linked content alert severity"),
+    alert_status: WatchlistContentAlertStatus | None = Query(
+        None, description="Filter items by linked content alert status"
+    ),
+    alert_severity: WatchlistContentAlertSeverity | None = Query(
+        None, description="Filter items by linked content alert severity"
+    ),
     alert_rule_id: int | None = Query(None, ge=1, description="Filter items by linked content alert rule ID"),
     include_alert_summary: bool = Query(False, description="Include compact content-alert summary per item"),
     target_user_id: int | None = Query(
@@ -5041,7 +5215,7 @@ async def list_scraped_items(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _, target_db = await _resolve_target_watchlists_context(
         current_user=current_user,
@@ -5087,11 +5261,13 @@ async def list_scraped_items(
     )
 
 
-@router.post("/items/batch-update", response_model=ScrapedItemBatchUpdateResponse, summary="Batch update item triage flags")
+@router.post(
+    "/items/batch-update", response_model=ScrapedItemBatchUpdateResponse, summary="Batch update item triage flags"
+)
 async def batch_update_scraped_items(
     payload: ScrapedItemBatchUpdateRequest = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _ensure_watchlist_exists(db, payload.watchlist_id)
     scope = payload.scope.model_dump(exclude_none=True) if payload.scope is not None else None
@@ -5138,7 +5314,7 @@ async def get_scraped_item(
         description="Admin-only: fetch an item from another user ID.",
     ),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _, target_db = await _resolve_target_watchlists_context(
         current_user=current_user,
@@ -5157,7 +5333,7 @@ async def update_scraped_item(
     item_id: int = Path(..., ge=1),
     payload: ScrapedItemUpdateRequest = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     try:
         before = db.get_item(item_id)
@@ -5179,9 +5355,8 @@ async def update_scraped_item(
         changed_patch["reviewed"] = bool(getattr(row, "reviewed", 0))
     if payload.status is not None and getattr(before, "status", None) != getattr(row, "status", None):
         changed_patch["status"] = getattr(row, "status", None)
-    if (
-        payload.queued_for_briefing is not None
-        and bool(getattr(before, "queued_for_briefing", 0)) != bool(getattr(row, "queued_for_briefing", 0))
+    if payload.queued_for_briefing is not None and bool(getattr(before, "queued_for_briefing", 0)) != bool(
+        getattr(row, "queued_for_briefing", 0)
     ):
         changed_patch["queued_for_briefing"] = bool(getattr(row, "queued_for_briefing", 0))
 
@@ -5195,11 +5370,13 @@ async def update_scraped_item(
     return _row_to_scraped_item(row)
 
 
-@router.get("/{watchlist_id}/item-views", response_model=WatchlistItemSavedViewsList, summary="List saved item review views")
+@router.get(
+    "/{watchlist_id}/item-views", response_model=WatchlistItemSavedViewsList, summary="List saved item review views"
+)
 async def list_item_saved_views(
     watchlist_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _ensure_watchlist_exists(db, watchlist_id)
     rows = db.list_item_saved_views(watchlist_id=watchlist_id)
@@ -5216,7 +5393,7 @@ async def create_item_saved_view(
     payload: WatchlistItemSavedViewCreate,
     watchlist_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _ensure_watchlist_exists(db, watchlist_id)
     try:
@@ -5242,7 +5419,7 @@ async def update_item_saved_view(
     watchlist_id: int = Path(..., ge=1),
     view_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _ensure_watchlist_exists(db, watchlist_id)
     fields = payload.model_dump(exclude_unset=True)
@@ -5268,7 +5445,7 @@ async def delete_item_saved_view(
     watchlist_id: int = Path(..., ge=1),
     view_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _ensure_watchlist_exists(db, watchlist_id)
     deleted = db.delete_item_saved_view(view_id=view_id, watchlist_id=watchlist_id)
@@ -5284,9 +5461,9 @@ async def delete_item_saved_view(
 async def create_output(
     payload: WatchlistOutputCreateRequest,
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
-    collections_db = Depends(get_collections_db_for_user),
-    media_db = Depends(get_media_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
+    collections_db=Depends(get_collections_db_for_user),
+    media_db=Depends(get_media_db_for_user),
 ):
     collections_db.purge_expired_outputs()
     try:
@@ -5316,9 +5493,7 @@ async def create_output(
 
     job_prefs: dict[str, Any] = {}
     try:
-        job_prefs = (
-            json.loads(job.output_prefs_json or "{}") if getattr(job, "output_prefs_json", None) else {}
-        )
+        job_prefs = json.loads(job.output_prefs_json or "{}") if getattr(job, "output_prefs_json", None) else {}
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         job_prefs = {}
     retention_spec = job_prefs.get("retention") or {}
@@ -5535,6 +5710,10 @@ async def create_output(
     if effective_voice_map is None and isinstance(job_prefs.get("voice_map"), dict):
         effective_voice_map = job_prefs.get("voice_map")
 
+    effective_audio_cast = payload.audio_cast.model_dump(exclude_none=True) if payload.audio_cast else None
+    if effective_audio_cast is None and isinstance(job_prefs.get("audio_cast"), dict):
+        effective_audio_cast = job_prefs.get("audio_cast")
+
     version = _next_output_version_for_run(collections_db, payload.run_id)
     job_name = getattr(job, "name", None) or f"Job-{job.id}"
     default_title = f"{job_name}-Output-{version}"
@@ -5644,7 +5823,9 @@ async def create_output(
             if hasattr(itm, "model_dump"):
                 items_as_dicts.append(itm.model_dump())
             else:
-                items_as_dicts.append({"id": itm.id, "title": itm.title, "tags": itm.tags, "source_id": itm.source_id, "url": itm.url})
+                items_as_dicts.append(
+                    {"id": itm.id, "title": itm.title, "tags": itm.tags, "source_id": itm.source_id, "url": itm.url}
+                )
         output_groups = _group_items(
             items_as_dicts,
             group_by=payload.grouping.group_by,
@@ -5752,13 +5933,9 @@ async def create_output(
         if payload.briefing_summary:
             metadata["_enrichment_summary_config"] = payload.briefing_summary.model_dump()
 
-    delivery_override = (
-        payload.deliveries.model_dump(exclude_none=True) if payload.deliveries else {}
-    )
+    delivery_override = payload.deliveries.model_dump(exclude_none=True) if payload.deliveries else {}
     delivery_plan = (
-        _deep_merge_dict(delivery_defaults, delivery_override)
-        if (delivery_defaults or delivery_override)
-        else {}
+        _deep_merge_dict(delivery_defaults, delivery_override) if (delivery_defaults or delivery_override) else {}
     )
     if delivery_plan:
         metadata["delivery_plan"] = delivery_plan
@@ -6061,6 +6238,7 @@ async def create_output(
                     "persona_provider": effective_persona_provider,
                     "persona_model": effective_persona_model,
                     "voice_map": effective_voice_map,
+                    "audio_cast": effective_audio_cast,
                 },
                 db=db,
             )
@@ -6180,8 +6358,8 @@ async def list_outputs(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
-    collections_db = Depends(get_collections_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
+    collections_db=Depends(get_collections_db_for_user),
 ):
     limit = size
     offset = (page - 1) * limit
@@ -6226,7 +6404,7 @@ async def list_outputs(
 async def get_output(
     output_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    collections_db = Depends(get_collections_db_for_user),
+    collections_db=Depends(get_collections_db_for_user),
 ):
     collections_db.purge_expired_outputs()
     try:
@@ -6267,7 +6445,7 @@ async def get_output(
 async def download_output(
     output_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    collections_db = Depends(get_collections_db_for_user),
+    collections_db=Depends(get_collections_db_for_user),
 ):
     collections_db.purge_expired_outputs()
     try:
@@ -6457,18 +6635,22 @@ async def validate_template(
         normalized = _normalize_template_syntax(payload.content)
         env.parse(normalized)
     except TemplateSyntaxError as exc:
-        errors.append({
-            "line": exc.lineno,
-            "column": None,
-            "message": str(exc.message) if hasattr(exc, "message") else str(exc),
-        })
+        errors.append(
+            {
+                "line": exc.lineno,
+                "column": None,
+                "message": str(exc.message) if hasattr(exc, "message") else str(exc),
+            }
+        )
     except Exception as exc:
         logger.warning(f"Template validation unexpected error: {exc}")
-        errors.append({
-            "line": None,
-            "column": None,
-            "message": "Template validation failed due to an internal error",
-        })
+        errors.append(
+            {
+                "line": None,
+                "column": None,
+                "message": "Template validation failed due to an internal error",
+            }
+        )
 
     return TemplateValidationResult(
         valid=len(errors) == 0,
@@ -6686,8 +6868,7 @@ async def compose_template_flow_check(
     )
     if len(diff) > TEMPLATE_COMPOSER_FLOW_MAX_DIFF_CHARS:
         diff = (
-            f"{diff[:TEMPLATE_COMPOSER_FLOW_MAX_DIFF_CHARS].rstrip()}\n"
-            "... [flow-check diff truncated due to size]"
+            f"{diff[:TEMPLATE_COMPOSER_FLOW_MAX_DIFF_CHARS].rstrip()}\n" "... [flow-check diff truncated due to size]"
         )
         issues.append(
             TemplateComposerFlowIssue(
@@ -6834,7 +7015,7 @@ async def list_content_alert_rules(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _ = current_user
     try:
@@ -6872,7 +7053,7 @@ async def create_content_alert_rule(
     watchlist_id: int = Path(..., ge=1),
     payload: WatchlistContentAlertRuleCreate = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _ = current_user
     try:
@@ -6907,7 +7088,7 @@ async def update_content_alert_rule(
     rule_id: int = Path(..., ge=1),
     payload: WatchlistContentAlertRuleUpdate = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _ = current_user
     try:
@@ -6931,7 +7112,7 @@ async def delete_content_alert_rule(
     watchlist_id: int = Path(..., ge=1),
     rule_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _ = current_user
     try:
@@ -6964,7 +7145,7 @@ async def list_content_alerts(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _ = current_user
     try:
@@ -7005,7 +7186,7 @@ async def get_content_alert(
     watchlist_id: int = Path(..., ge=1),
     alert_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _ = current_user
     try:
@@ -7025,7 +7206,7 @@ async def update_content_alert(
     alert_id: int = Path(..., ge=1),
     payload: WatchlistContentAlertUpdate = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _ = current_user
     try:
@@ -7045,7 +7226,7 @@ async def update_content_alert(
 async def get_watchlist(
     watchlist_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _ = current_user
     try:
@@ -7060,7 +7241,7 @@ async def update_watchlist(
     watchlist_id: int = Path(..., ge=1),
     payload: WatchlistUpdateRequest = Body(...),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _ = current_user
     try:
@@ -7076,7 +7257,7 @@ async def update_watchlist(
 async def delete_watchlist(
     watchlist_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _ = current_user
     ok, restore_expires_at = db.delete_watchlist(
@@ -7097,7 +7278,7 @@ async def delete_watchlist(
 async def restore_watchlist(
     watchlist_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_watchlists_db_for_user),
+    db=Depends(get_watchlists_db_for_user),
 ):
     _ = current_user
     try:

@@ -99,6 +99,58 @@ describe("OutputPreviewDrawer audio support", () => {
     expect(audioElement?.getAttribute("src")).toBe("blob:audio-output")
   })
 
+  it("surfaces audio artifact graph and fallback metadata", async () => {
+    render(
+      <OutputPreviewDrawer
+        open
+        onClose={vi.fn()}
+        output={buildOutput({
+          type: "tts_audio",
+          format: "mp3",
+          storage_path: "watchlists/audio-42.mp3",
+          metadata: {
+            audio: {
+              status: "completed",
+              fallback_reason: "Speaker B voice failed; used fallback single voice.",
+              script_artifact: {
+                title: "Briefing script",
+                uri: "watchlists/runs/9/script.md"
+              },
+              speaker_artifacts: [
+                {
+                  speaker_id: "host",
+                  label: "Host",
+                  uri: "watchlists/runs/9/host.mp3"
+                },
+                {
+                  speaker_id: "analyst",
+                  label: "Analyst",
+                  uri: "watchlists/runs/9/analyst.mp3"
+                }
+              ],
+              final_artifact: {
+                title: "Final mix",
+                uri: "watchlists/runs/9/final.mp3"
+              }
+            }
+          }
+        })}
+      />
+    )
+
+    await waitFor(() => {
+      expect(serviceMocks.downloadWatchlistOutputBinary).toHaveBeenCalledWith(42)
+    })
+
+    expect(screen.getByText("Audio artifacts")).toBeInTheDocument()
+    expect(screen.getByText("Completed")).toBeInTheDocument()
+    expect(screen.getByText("Briefing script")).toBeInTheDocument()
+    expect(screen.getByText("Host")).toBeInTheDocument()
+    expect(screen.getByText("Analyst")).toBeInTheDocument()
+    expect(screen.getByText("Final mix")).toBeInTheDocument()
+    expect(screen.getByText(/Speaker B voice failed/)).toBeInTheDocument()
+  })
+
   it("keeps text-preview flow for non-audio outputs", async () => {
     render(
       <OutputPreviewDrawer

@@ -98,10 +98,16 @@
 - Backend modify: `tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py`
   - Accept structured speaker config.
   - Persist script, per-speaker artifacts, final mix, and fallback reason as workflow/watchlist output metadata.
+- Backend modify: `tldw_Server_API/app/core/Workflows/adapters/content/audio_briefing.py`
+  - Use structured speaker config for script markers and persist the generated script artifact.
+- Backend modify: `tldw_Server_API/app/core/Workflows/adapters/audio/multi_voice_tts.py`
+  - Persist per-speaker audio artifacts separately from the final mix.
 - Test: `apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.audio.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/Watchlists/RunsTab/__tests__/RunDetailDrawer.stream-lifecycle.test.tsx`
 - Backend test: `tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py`
 - Backend test: `tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py`
+- Backend test: `tldw_Server_API/tests/Workflows/adapters/test_content_adapters.py`
+- Backend test: `tldw_Server_API/tests/Workflows/adapters/test_audio_adapters.py`
 
 ### Guided Pipeline MVP
 
@@ -604,7 +610,7 @@ git commit -m "feat: make watchlist scheduled outputs explicit"
 - Test: `apps/packages/ui/src/components/Option/Watchlists/RunsTab/__tests__/RunDetailDrawer.stream-lifecycle.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.audio.test.tsx`
 
-- [ ] **Step 1: Write failing UI tests**
+- [x] **Step 1: Write failing UI tests**
 
 Cover:
 
@@ -613,14 +619,14 @@ Cover:
 - Final audio renders a player/download link.
 - Output preview shows fallback reason when metadata has fallback.
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 ```bash
 cd apps/packages/ui
 bunx vitest run src/components/Option/Watchlists/RunsTab/__tests__/RunDetailDrawer.stream-lifecycle.test.tsx src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.audio.test.tsx --maxWorkers=1 --no-file-parallelism
 ```
 
-- [ ] **Step 3: Implement status helpers**
+- [x] **Step 3: Implement status helpers**
 
 Add pure helpers in `outputMetadata.ts` for:
 
@@ -628,7 +634,7 @@ Add pure helpers in `outputMetadata.ts` for:
 - audio requested/pending/final/failed/fallback summary
 - script/per-speaker/final artifact extraction
 
-- [ ] **Step 4: Render states**
+- [x] **Step 4: Render states**
 
 In run/output surfaces, distinguish:
 
@@ -640,13 +646,13 @@ In run/output surfaces, distinguish:
 - fallback single-voice audio
 - status unknown
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run the command from Step 2 again.
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/packages/ui/src/services/watchlists.ts apps/packages/ui/src/components/Option/Watchlists/RunsTab/RunDetailDrawer.tsx apps/packages/ui/src/components/Option/Watchlists/RunsTab/RunsTab.tsx apps/packages/ui/src/components/Option/Watchlists/OutputsTab/OutputPreviewDrawer.tsx apps/packages/ui/src/components/Option/Watchlists/OutputsTab/outputMetadata.ts apps/packages/ui/src/components/Option/Watchlists/RunsTab/__tests__/RunDetailDrawer.stream-lifecycle.test.tsx apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.audio.test.tsx
@@ -661,10 +667,16 @@ git commit -m "feat: surface watchlist audio run status"
 - Modify: `tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/watchlists.py`
 - Modify: `tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py`
+- Modify: `tldw_Server_API/app/core/Workflows/adapters/content/_config.py`
+- Modify: `tldw_Server_API/app/core/Workflows/adapters/content/audio_briefing.py`
+- Modify: `tldw_Server_API/app/core/Workflows/adapters/audio/multi_voice_tts.py`
 - Test: `tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py`
 - Test: `tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py`
+- Test: `tldw_Server_API/tests/Watchlists/test_watchlists_api.py`
+- Test: `tldw_Server_API/tests/Workflows/adapters/test_content_adapters.py`
+- Test: `tldw_Server_API/tests/Workflows/adapters/test_audio_adapters.py`
 
-- [ ] **Step 1: Write failing backend tests**
+- [x] **Step 1: Write failing backend tests**
 
 Add tests for `GET /runs/{run_id}/audio` returning:
 
@@ -673,7 +685,7 @@ Add tests for `GET /runs/{run_id}/audio` returning:
 - final artifact
 - fallback reason when multi-voice fails
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 ```bash
 source .venv/bin/activate
@@ -682,7 +694,7 @@ python -m pytest tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.p
 
 Expected: FAIL because the endpoint currently chooses a final audio candidate and does not expose the full artifact graph.
 
-- [ ] **Step 3: Add structured audio cast schema**
+- [x] **Step 3: Add structured audio cast schema**
 
 Add optional `audio_cast` to output create/job prefs schemas. Preserve `voice_map` compatibility.
 
@@ -699,11 +711,11 @@ class WatchlistAudioCast(BaseModel):
     speakers: list[WatchlistAudioCastSpeaker]
 ```
 
-- [ ] **Step 4: Persist intermediate artifacts**
+- [x] **Step 4: Persist intermediate artifacts**
 
 Extend workflow metadata/artifact naming so script, per-speaker clips, final mix, and fallback reason can be retrieved by run ID. Do not create a new podcast job system.
 
-- [ ] **Step 5: Expand run audio endpoint**
+- [x] **Step 5: Expand run audio endpoint**
 
 Return a stable shape:
 
@@ -720,13 +732,13 @@ Return a stable shape:
 }
 ```
 
-- [ ] **Step 6: Run backend tests**
+- [x] **Step 6: Run backend tests**
 
 Run the command from Step 2 again.
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py tldw_Server_API/app/api/v1/endpoints/watchlists.py tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py

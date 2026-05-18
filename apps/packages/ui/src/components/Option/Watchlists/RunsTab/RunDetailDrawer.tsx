@@ -24,6 +24,7 @@ import {
   fetchWatchlistOutputs,
   fetchWatchlistSources,
   fetchScrapedItems,
+  getWatchlistRunAudio,
   getRunDetails,
   triggerWatchlistRun,
   updateScrapedItem
@@ -33,11 +34,12 @@ import {
   parseWatchlistsRunStreamPayload
 } from "@/services/watchlists-stream"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
-import type { RunDetailResponse, ScrapedItem } from "@/types/watchlists"
+import type { RunDetailResponse, ScrapedItem, WatchlistRunAudioStatus } from "@/types/watchlists"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 import { StatusTag } from "../shared"
 import { mapWatchlistsError } from "../shared/watchlists-error"
 import { classifyRunFailure, getRunFailureHint } from "./run-notifications"
+import { getAudioStatusSummary } from "../OutputsTab/outputMetadata"
 import { useWatchlistsViewport } from "../shared/useWatchlistsViewport"
 import {
   getFocusableActiveElement,
@@ -113,6 +115,9 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   const [sourceNamesById, setSourceNamesById] = useState<Record<number, string>>({})
   const [linkedOutputCount, setLinkedOutputCount] = useState<number | null>(null)
   const [linkedOutputsLoading, setLinkedOutputsLoading] = useState(false)
+  const [audioStatus, setAudioStatus] = useState<WatchlistRunAudioStatus | null>(null)
+  const [audioStatusLoading, setAudioStatusLoading] = useState(false)
+  const [audioStatusError, setAudioStatusError] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const translationRef = useRef(t)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -127,6 +132,18 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   const setOutputsJobFilter = useWatchlistsStore((s) => s.setOutputsJobFilter)
   const setOutputsRunFilter = useWatchlistsStore((s) => s.setOutputsRunFilter)
   const openJobForm = useWatchlistsStore((s) => s.openJobForm)
+
+  const audioTaskId = useMemo(() => {
+    const stats = data?.stats as Record<string, unknown> | null | undefined
+    const value = stats?.audio_briefing_task_id ?? stats?.audio_task_id
+    if (typeof value === "string" && value.trim()) return value.trim()
+    if (typeof value === "number" && Number.isFinite(value)) return String(value)
+    return null
+  }, [data?.stats])
+
+  const audioSummary = useMemo(() => {
+    return getAudioStatusSummary(audioStatus)
+  }, [audioStatus])
 
   const downloadCsv = (content: string, filename: string): void => {
     const blob = new Blob([content], { type: "text/csv;charset=utf-8" })
@@ -312,6 +329,45 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
       active = false
     }
   }, [open, runId])
+
+  useEffect(() => {
+    let active = true
+
+    if (!open || !runId || !audioTaskId) {
+      setAudioStatus(null)
+      setAudioStatusLoading(false)
+      setAudioStatusError(null)
+      return () => {
+        active = false
+      }
+    }
+
+    setAudioStatusLoading(true)
+    setAudioStatusError(null)
+    getWatchlistRunAudio(runId)
+      .then((result) => {
+        if (!active) return
+        setAudioStatus(result)
+      })
+      .catch((err) => {
+        console.warn("Failed to resolve run audio status:", err)
+        if (!active) return
+        setAudioStatus(null)
+        setAudioStatusError(
+          err instanceof Error
+            ? err.message
+            : t("watchlists:runs.detail.audioStatusError", "Failed to load audio status")
+        )
+      })
+      .finally(() => {
+        if (!active) return
+        setAudioStatusLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [audioTaskId, open, runId, t])
 
   useEffect(() => {
     let active = true
@@ -947,6 +1003,68 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
     onClose()
   }
 
+  const renderAudioStatusPanel = () => {
+    if (!audioTaskId) return null
+
+    const hasFinalAudio = Boolean(audioSummary.downloadUrl || audioSummary.finalArtifact)
+    const statusText = audioStatusLoading
+      ? t("watchlists:runs.detail.audioStatusLoading", "Loading")
+      : audioStatusError
+        ? t("watchlists:runs.detail.audioStatusUnavailable", "Unknown")
+        : audioSummary.statusLabel
+
+    return (
+      <div
+        className="rounded-lg border border-border bg-surface p-3 space-y-2"
+        data-testid="watchlists-run-audio-status"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="text-sm font-medium text-text">
+              {t("watchlists:runs.detail.audioStatusTitle", "Audio briefing")}
+            </div>
+            <div className="text-xs text-text-muted">
+              {t("watchlists:runs.detail.audioTask", "Task {{taskId}}", {
+                taskId: audioTaskId
+              })}
+            </div>
+          </div>
+          <Tag color={audioStatusError ? "red" : audioSummary.statusColor}>
+            {statusText}
+          </Tag>
+        </div>
+
+        {audioStatusError ? (
+          <div className="text-xs text-danger">{audioStatusError}</div>
+        ) : audioSummary.fallbackReason ? (
+          <div className="text-xs text-warning">
+            {t("watchlists:runs.detail.audioFallback", "Fallback: {{reason}}", {
+              reason: audioSummary.fallbackReason
+            })}
+          </div>
+        ) : null}
+
+        {hasFinalAudio && (
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="font-medium text-text">
+              {t("watchlists:runs.detail.audioFinalAvailable", "Final audio available")}
+            </span>
+            {audioSummary.downloadUrl && (
+              <a
+                href={audioSummary.downloadUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-primary hover:underline"
+              >
+                {t("watchlists:runs.detail.audioDownloadFinal", "Download final audio")}
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   const tabItems = [
     {
       key: "stats",
@@ -984,6 +1102,8 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
               )}
             />
           )}
+
+          {renderAudioStatusPanel()}
 
           {data && (
             <Descriptions column={2} size="small" bordered>

@@ -26,6 +26,7 @@ import {
   getDeliveryStatusColor,
   getOutputArtifactLabel,
   getOutputFileExtension,
+  getOutputAudioStatusSummary,
   getOutputDeliveryStatuses,
   getOutputMimeType,
   getOutputTemplateName,
@@ -200,6 +201,10 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
     return getOutputDeliveryStatuses(output?.metadata)
   }, [output?.metadata])
 
+  const audioSummary = useMemo(() => {
+    return getOutputAudioStatusSummary(output?.metadata)
+  }, [output?.metadata])
+
   const templateName = useMemo(() => {
     return getOutputTemplateName(output?.metadata)
   }, [output?.metadata])
@@ -231,6 +236,56 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
     window.open(url, "_blank")
     // Clean up after a delay
     setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
+  const renderAudioArtifactGraph = () => {
+    if (!audioSummary.requested) return null
+
+    return (
+      <div className="space-y-2" data-testid="output-preview-audio-artifacts">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="text-sm font-medium text-text">
+            {t("watchlists:outputs.audioArtifactsLabel", "Audio artifacts")}
+          </div>
+          <Tag color={audioSummary.statusColor}>{audioSummary.statusLabel}</Tag>
+        </div>
+        {audioSummary.fallbackReason && (
+          <div className="text-xs text-warning">
+            {t("watchlists:outputs.audioFallback", "Fallback: {{reason}}", {
+              reason: audioSummary.fallbackReason
+            })}
+          </div>
+        )}
+        <div className="grid gap-2 text-xs text-text-muted sm:grid-cols-2">
+          {audioSummary.scriptArtifact && (
+            <div>
+              <span className="font-medium text-text">
+                {audioSummary.scriptArtifact.label}
+              </span>
+              {audioSummary.scriptArtifact.uri ? (
+                <div>{audioSummary.scriptArtifact.uri}</div>
+              ) : null}
+            </div>
+          )}
+          {audioSummary.speakerArtifacts.map((artifact, index) => (
+            <div key={`${artifact.speakerId || artifact.label}-${index}`}>
+              <span className="font-medium text-text">{artifact.label}</span>
+              {artifact.uri ? <div>{artifact.uri}</div> : null}
+            </div>
+          ))}
+          {audioSummary.finalArtifact && (
+            <div>
+              <span className="font-medium text-text">
+                {audioSummary.finalArtifact.label}
+              </span>
+              {audioSummary.finalArtifact.uri ? (
+                <div>{audioSummary.finalArtifact.uri}</div>
+              ) : null}
+            </div>
+          )}
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -327,6 +382,7 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
                   </div>
                 </div>
               )}
+              {renderAudioArtifactGraph()}
               {output?.chatbook_path && (
                 <div className="text-xs text-text-muted">
                   Chatbook: {output.chatbook_path}

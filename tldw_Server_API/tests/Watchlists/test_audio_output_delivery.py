@@ -39,8 +39,11 @@ class TestGetRunAudioEndpoint:
         from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
 
         run = SimpleNamespace(
-            id=1, job_id=1, status="completed",
-            started_at=None, finished_at=None,
+            id=1,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
             stats_json=json.dumps({"items_fetched": 10}),
             error_msg=None,
         )
@@ -60,8 +63,11 @@ class TestGetRunAudioEndpoint:
         from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
 
         run = SimpleNamespace(
-            id=1, job_id=1, status="completed",
-            started_at=None, finished_at=None,
+            id=1,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
             stats_json=json.dumps({"audio_briefing_task_id": "task_abc"}),
             error_msg=None,
         )
@@ -102,8 +108,11 @@ class TestGetRunAudioEndpoint:
         from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
 
         run = SimpleNamespace(
-            id=7, job_id=1, status="completed",
-            started_at=None, finished_at=None,
+            id=7,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
             stats_json=json.dumps({"audio_briefing_task_id": "task_xyz"}),
             error_msg=None,
         )
@@ -163,8 +172,11 @@ class TestGetRunAudioEndpoint:
         from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
 
         run = SimpleNamespace(
-            id=1, job_id=1, status="completed",
-            started_at=None, finished_at=None,
+            id=1,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
             stats_json=json.dumps({"audio_briefing_task_id": "task_fail"}),
             error_msg=None,
         )
@@ -196,8 +208,11 @@ class TestGetRunAudioEndpoint:
         from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
 
         run = SimpleNamespace(
-            id=77, job_id=1, status="completed",
-            started_at=None, finished_at=None,
+            id=77,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
             stats_json=json.dumps({"audio_briefing_task_id": "task_paged_pending"}),
             error_msg=None,
         )
@@ -260,8 +275,11 @@ class TestGetRunAudioEndpoint:
         from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
 
         run = SimpleNamespace(
-            id=42, job_id=1, status="completed",
-            started_at=None, finished_at=None,
+            id=42,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
             stats_json=json.dumps({"audio_briefing_task_id": "task_paged_hit"}),
             error_msg=None,
         )
@@ -402,3 +420,181 @@ class TestGetRunAudioEndpoint:
         assert result["status"] == "completed"
         assert result["artifact_id"] == "art_final"
         assert result["audio_uri"] == "file:///tmp/briefing_mixed.mp3"
+
+    @pytest.mark.asyncio
+    async def test_returns_structured_audio_artifact_graph(self):
+        """Returns script, speaker, final, and fallback details for audio briefings."""
+        from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
+
+        run = SimpleNamespace(
+            id=91,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
+            stats_json=json.dumps({"audio_briefing_task_id": "task_graph"}),
+            error_msg=None,
+        )
+        db = MagicMock()
+        db.get_run.return_value = run
+
+        user = MagicMock()
+        user.role = "admin"
+        user.id = 1
+        user.tenant_id = "default"
+
+        wf_run = SimpleNamespace(
+            run_id="wf_run_91",
+            status="completed",
+            metadata_json=json.dumps(
+                {
+                    "watchlist_run_id": 91,
+                    "fallback_reason": "multi-voice generation failed; single voice fallback used",
+                }
+            ),
+        )
+        script_art = SimpleNamespace(
+            id="art_script",
+            type="audio_script",
+            uri="file:///tmp/briefing-script.md",
+            size_bytes=512,
+            mime_type="text/markdown",
+            metadata_json=json.dumps({"script_artifact": True, "title": "Briefing script"}),
+        )
+        host_art = SimpleNamespace(
+            id="art_host",
+            type="tts_audio",
+            uri="file:///tmp/host.mp3",
+            size_bytes=1024,
+            mime_type="audio/mpeg",
+            metadata_json=json.dumps({"speaker_artifact": True, "speaker_id": "host", "label": "Host"}),
+        )
+        analyst_art = SimpleNamespace(
+            id="art_analyst",
+            type="tts_audio",
+            uri="file:///tmp/analyst.mp3",
+            size_bytes=2048,
+            mime_type="audio/mpeg",
+            metadata_json=json.dumps({"speaker_artifact": True, "speaker_id": "analyst", "label": "Analyst"}),
+        )
+        final_art = SimpleNamespace(
+            id="art_final_graph",
+            type="tts_audio",
+            uri="file:///tmp/final.mp3",
+            size_bytes=4096,
+            mime_type="audio/mpeg",
+            metadata_json=json.dumps(
+                {
+                    "multi_voice": True,
+                    "background_mixed": True,
+                    "final_artifact": True,
+                    "title": "Final mix",
+                }
+            ),
+        )
+
+        mock_wf_db = MagicMock()
+        mock_wf_db.list_runs.return_value = [wf_run]
+        mock_wf_db.list_artifacts.return_value = [
+            script_art,
+            host_art,
+            analyst_art,
+            final_art,
+        ]
+
+        with (
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.resolve_user_id_for_request",
+                return_value=1,
+            ),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.db_path_utils.DatabasePaths.get_user_base_directory",
+                return_value="/tmp/test_user",  # nosec B108
+            ),
+            patch("os.path.exists", return_value=True),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.Workflows_DB.WorkflowsDatabase",
+                return_value=mock_wf_db,
+            ),
+        ):
+            result = await get_run_audio(run_id=91, target_user_id=None, current_user=user, db=db)
+
+        assert result["status"] == "completed"
+        assert result["artifact_id"] == "art_final_graph"
+        assert result["audio_uri"] == "file:///tmp/final.mp3"
+        assert result["download_url"] == "/api/v1/workflows/artifacts/art_final_graph/download"
+        assert result["script_artifact"]["artifact_id"] == "art_script"
+        assert result["script_artifact"]["title"] == "Briefing script"
+        assert [entry["speaker_id"] for entry in result["speaker_artifacts"]] == [
+            "host",
+            "analyst",
+        ]
+        assert result["final_artifact"]["artifact_id"] == "art_final_graph"
+        assert result["final_artifact"]["title"] == "Final mix"
+        assert result["fallback_reason"] == "multi-voice generation failed; single voice fallback used"
+
+    @pytest.mark.asyncio
+    async def test_speaker_artifacts_are_not_final_audio_candidates(self):
+        """Speaker clips should not masquerade as the final podcast artifact."""
+        from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
+
+        run = SimpleNamespace(
+            id=92,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
+            stats_json=json.dumps({"audio_briefing_task_id": "task_speaker_only"}),
+            error_msg=None,
+        )
+        db = MagicMock()
+        db.get_run.return_value = run
+
+        user = MagicMock()
+        user.role = "admin"
+
+        wf_run = SimpleNamespace(
+            id="wf_speaker_only",
+            status="running",
+            metadata_json=json.dumps({"watchlist_run_id": 92}),
+        )
+        speaker_art = SimpleNamespace(
+            id="art_speaker_only",
+            type="tts_audio",
+            uri="file:///tmp/host.mp3",
+            size_bytes=1024,
+            mime_type="audio/mpeg",
+            metadata_json=json.dumps(
+                {
+                    "speaker_artifact": True,
+                    "speaker_id": "HOST",
+                    "voice": "af_bella",
+                }
+            ),
+        )
+
+        mock_wf_db = MagicMock()
+        mock_wf_db.list_runs.return_value = [wf_run]
+        mock_wf_db.list_artifacts.return_value = [speaker_art]
+
+        with (
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.resolve_user_id_for_request",
+                return_value=1,
+            ),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.db_path_utils.DatabasePaths.get_user_base_directory",
+                return_value="/tmp/test_user",  # nosec B108
+            ),
+            patch("os.path.exists", return_value=True),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.Workflows_DB.WorkflowsDatabase",
+                return_value=mock_wf_db,
+            ),
+        ):
+            result = await get_run_audio(run_id=92, target_user_id=None, current_user=user, db=db)
+
+        assert result["audio_uri"] is None
+        assert result["download_url"] is None
+        assert result["final_artifact"] is None
+        assert result["speaker_artifacts"][0]["artifact_id"] == "art_speaker_only"

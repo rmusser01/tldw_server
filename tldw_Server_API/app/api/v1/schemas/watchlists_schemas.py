@@ -883,7 +883,9 @@ class WatchlistOutputEvidenceResponse(BaseModel):
 
 class WatchlistOutputEmailDelivery(BaseModel):
     enabled: bool = True
-    recipients: list[str] | None = Field(default=None, description="Explicit recipient emails; defaults to user email when empty")
+    recipients: list[str] | None = Field(
+        default=None, description="Explicit recipient emails; defaults to user email when empty"
+    )
     subject: str | None = Field(default=None, description="Overrides default subject (defaults to output title)")
     attach_file: bool = Field(default=True, description="Attach rendered content as a file")
     body_format: Literal["auto", "text", "html"] = Field(default="auto", description="Controls email body format")
@@ -904,6 +906,48 @@ class WatchlistOutputDeliveries(BaseModel):
     chatbook: WatchlistOutputChatbookDelivery | None = None
 
 
+class WatchlistAudioCastSpeaker(BaseModel):
+    id: str = Field(..., min_length=1, max_length=64)
+    label: str = Field(..., min_length=1, max_length=128)
+    role: str | None = Field(default=None, max_length=128)
+    voice: str = Field(..., min_length=1, max_length=128)
+    persona: str | None = Field(default=None, max_length=128)
+
+
+class WatchlistAudioCast(BaseModel):
+    speaker_count: int = Field(..., ge=1, le=4)
+    speakers: list[WatchlistAudioCastSpeaker]
+
+
+class WatchlistAudioArtifactSummary(BaseModel):
+    artifact_id: str | int | None = None
+    type: str | None = None
+    uri: str | None = None
+    download_url: str | None = None
+    size_bytes: int | None = None
+    mime_type: str | None = None
+    title: str | None = None
+    speaker_id: str | None = None
+    voice: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WatchlistRunAudioResponse(BaseModel):
+    run_id: int
+    task_id: str | None = None
+    status: str
+    audio_uri: str | None = None
+    download_url: str | None = None
+    artifact_id: str | int | None = None
+    size_bytes: int | None = None
+    mime_type: str | None = None
+    script_artifact: WatchlistAudioArtifactSummary | None = None
+    speaker_artifacts: list[WatchlistAudioArtifactSummary] = Field(default_factory=list)
+    final_artifact: WatchlistAudioArtifactSummary | None = None
+    fallback_reason: str | None = None
+    error: str | None = None
+
+
 class WatchlistOutputCreateRequest(BaseModel):
     run_id: int = Field(..., description="Run identifier the output is based on")
     item_ids: list[int] | None = Field(None, description="Explicit list of scraped item IDs to include")
@@ -916,8 +960,12 @@ class WatchlistOutputCreateRequest(BaseModel):
         description="Report evidence/readiness preset. Defaults to Watchlist domain when available.",
     )
     include_evidence_table: bool = Field(default=True, description="Expose evidence details to report templates")
-    include_excluded_items: bool = Field(default=True, description="Capture excluded same-run items in evidence snapshots")
-    require_reviewed_items: bool = Field(default=False, description="Warn when queued report items have not been reviewed")
+    include_excluded_items: bool = Field(
+        default=True, description="Capture excluded same-run items in evidence snapshots"
+    )
+    require_reviewed_items: bool = Field(
+        default=False, description="Warn when queued report items have not been reviewed"
+    )
     allow_weak_evidence: bool = Field(default=True, description="Allow generation when readiness warnings are present")
     template_name: str | None = Field(None, description="Name of a stored template to render with")
     template_version: int | None = Field(
@@ -987,11 +1035,17 @@ class WatchlistOutputCreateRequest(BaseModel):
         default=None,
         description="Voice marker to Kokoro voice ID mapping, e.g., {'HOST': 'af_bella', 'REPORTER': 'am_adam'}",
     )
+    audio_cast: WatchlistAudioCast | None = Field(
+        default=None,
+        description="Optional structured 1-4 speaker audio cast. voice_map remains supported for legacy callers.",
+    )
     ingest_to_media_db: bool = Field(default=False, description="Ingest outputs into Media DB")
     tts_model: str | None = Field(default=None, description="TTS model id, e.g., 'kokoro', 'tts-1'")
     tts_voice: str | None = Field(default=None, description="TTS voice id, e.g., 'af_heart'")
     tts_speed: float | None = Field(default=None, ge=0.25, le=4.0, description="TTS speed override")
-    retention_seconds: int | None = Field(None, ge=0, description="Optional custom retention in seconds (0 = no expiry)")
+    retention_seconds: int | None = Field(
+        None, ge=0, description="Optional custom retention in seconds (0 = no expiry)"
+    )
     temporary: bool | None = Field(False, description="Whether to use temporary retention defaults")
     deliveries: WatchlistOutputDeliveries | None = Field(
         default=None,

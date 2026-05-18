@@ -1866,9 +1866,7 @@ class TestMultiVoiceTTSAdapter:
         assert result["sections_generated"] == 3
 
     @pytest.mark.asyncio
-    async def test_multi_voice_tts_fallback_on_failure(
-        self, base_context, tmp_path, monkeypatch
-    ):
+    async def test_multi_voice_tts_fallback_on_failure(self, base_context, tmp_path, monkeypatch):
         """Test fallback when primary TTS fails."""
         from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
             run_multi_voice_tts_adapter,
@@ -1905,9 +1903,7 @@ class TestMultiVoiceTTSAdapter:
         assert result["sections_generated"] == 1
 
     @pytest.mark.asyncio
-    async def test_multi_voice_tts_sanitizes_section_warning_logs(
-        self, base_context, tmp_path, monkeypatch
-    ):
+    async def test_multi_voice_tts_sanitizes_section_warning_logs(self, base_context, tmp_path, monkeypatch):
         """Test primary and fallback TTS warning logs hide backend details."""
         from tldw_Server_API.app.core.Workflows.adapters.audio import multi_voice_tts
         from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
@@ -2009,15 +2005,77 @@ class TestMultiVoiceTTSAdapter:
         ):
             result = await run_multi_voice_tts_adapter(config, base_context)
 
-        assert len(artifacts) == 1
-        assert artifacts[0]["type"] == "tts_audio"
-        assert artifacts[0]["metadata"]["multi_voice"] is True
+        final_artifacts = [artifact for artifact in artifacts if artifact["metadata"].get("final_artifact") is True]
+        assert len(final_artifacts) == 1
+        assert final_artifacts[0]["type"] == "tts_audio"
+        assert final_artifacts[0]["metadata"]["multi_voice"] is True
         assert result.get("artifact_id") is not None
 
     @pytest.mark.asyncio
-    async def test_multi_voice_tts_default_voice_fallback(
-        self, base_context, tmp_path, monkeypatch
+    async def test_multi_voice_tts_registers_per_speaker_artifacts(
+        self, sample_voice_assignments, base_context, tmp_path, monkeypatch
     ):
+        """Test each synthesized voice segment is registered before final mix."""
+        from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
+            run_multi_voice_tts_adapter,
+        )
+
+        monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+
+        artifacts: list[dict[str, Any]] = []
+        base_context["add_artifact"] = lambda **kwargs: artifacts.append(kwargs)
+        sections = [
+            {"voice": "HOST", "text": "Welcome to the briefing."},
+            {"voice": "REPORTER", "text": "The story details go here."},
+        ]
+
+        async def mock_synthesize(text, model, voice, fmt, speed, output_path):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(f"audio-{voice}".encode("utf-8"))
+            return output_path.stat().st_size
+
+        async def mock_concat(files, output, fmt="mp3"):
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"concat_data")
+            return True
+
+        config = {
+            "sections": sections,
+            "voice_assignments": sample_voice_assignments,
+            "normalize": False,
+        }
+
+        with (
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
+                side_effect=mock_synthesize,
+            ),
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._generate_silence",
+                return_value=False,
+            ),
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._concat_files",
+                side_effect=mock_concat,
+            ),
+        ):
+            result = await run_multi_voice_tts_adapter(config, base_context)
+
+        speaker_artifacts = [artifact for artifact in artifacts if artifact["metadata"].get("speaker_artifact") is True]
+        assert result["sections_generated"] == 2
+        assert [artifact["metadata"]["speaker_id"] for artifact in speaker_artifacts] == [
+            "HOST",
+            "REPORTER",
+        ]
+        assert [artifact["metadata"]["voice"] for artifact in speaker_artifacts] == [
+            "af_bella",
+            "am_adam",
+        ]
+        assert all(Path(artifact["uri"].removeprefix("file://")).exists() for artifact in speaker_artifacts)
+        assert any(artifact["metadata"].get("final_artifact") is True for artifact in artifacts)
+
+    @pytest.mark.asyncio
+    async def test_multi_voice_tts_default_voice_fallback(self, base_context, tmp_path, monkeypatch):
         """Test unknown voice markers use default_voice."""
         from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
             run_multi_voice_tts_adapter,
@@ -2049,9 +2107,7 @@ class TestMultiVoiceTTSAdapter:
         assert calls[0] == "bm_george"
 
     @pytest.mark.asyncio
-    async def test_multi_voice_tts_cleans_text_before_synthesis(
-        self, base_context, tmp_path, monkeypatch
-    ):
+    async def test_multi_voice_tts_cleans_text_before_synthesis(self, base_context, tmp_path, monkeypatch):
         """Test section text is normalized before synthesis."""
         from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
             run_multi_voice_tts_adapter,
@@ -2091,9 +2147,7 @@ class TestMultiVoiceTTSAdapter:
         assert " and " in observed_texts[0]
 
     @pytest.mark.asyncio
-    async def test_multi_voice_tts_background_mix_applied(
-        self, base_context, tmp_path, monkeypatch
-    ):
+    async def test_multi_voice_tts_background_mix_applied(self, base_context, tmp_path, monkeypatch):
         """Test optional background track mixing produces mixed final artifact."""
         from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
             run_multi_voice_tts_adapter,
@@ -2140,9 +2194,7 @@ class TestMultiVoiceTTSAdapter:
         assert mock_mix.await_count == 1
 
     @pytest.mark.asyncio
-    async def test_multi_voice_tts_background_mix_fallback_to_narration(
-        self, base_context, tmp_path, monkeypatch
-    ):
+    async def test_multi_voice_tts_background_mix_fallback_to_narration(self, base_context, tmp_path, monkeypatch):
         """Test mixing failures return narration-only output without hard failure."""
         from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
             run_multi_voice_tts_adapter,
