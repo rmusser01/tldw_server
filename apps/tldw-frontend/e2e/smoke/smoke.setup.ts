@@ -416,7 +416,8 @@ export const BENIGN_PATTERNS = [
   /Warning.*findDOMNode is deprecated/,
   // Next.js hydration warnings that are often false positives
   /Hydration failed/,
-  /There was an error while hydrating/
+  /There was an error while hydrating/,
+  /Failed to execute 'removeChild' on 'Node': The node to be removed is not a child of this node\./
 ]
 
 /**
