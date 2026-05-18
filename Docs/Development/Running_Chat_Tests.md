@@ -41,6 +41,11 @@ print({'openai_present': bool(k), 'length': len(k), 'masked': (k[:4]+'...'+k[-4:
 - Streaming tests use an async HTTPX client fixture and Server-Sent Events normalization.
 - TestClient’s SSE limitations are worked around where needed; some streaming scenarios may be marked `@pytest.mark.skip` in integration tests.
 
+## Character Chat Real-Backend E2E
+- First-class Character Chat UI work must include a real-backend browser run when the change affects character selection, streaming, persistence, or resume behavior.
+- Runbook: `Docs/Development/Character_Chat_Real_Backend_E2E.md`.
+- The release-signoff path must verify `/api/v1/chats/{chat_id}/complete-v2` with `include_character_context: true`; frontend-only route interception is not sufficient evidence.
+
 ## Tips
 - Single-user mode: ensure `API_BEARER` is not set in the environment; tests expect `X-API-KEY`/`Token` headers per mode.
 - For deterministic limits during CI, you may set `TEST_MODE=true` when applicable.

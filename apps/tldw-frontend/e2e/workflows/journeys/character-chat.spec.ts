@@ -2,8 +2,8 @@
  * Journey: Create Character -> Chat
  *
  * End-to-end workflow that creates a character, navigates to chat,
- * selects the character, and sends a message verifying the system prompt
- * is included in the API call.
+ * selects the character, and sends a message through the real character
+ * chat complete-v2 backend path.
  */
 import { test, expect, skipIfServerUnavailable, skipIfNoModels } from "../../utils/fixtures"
 import { captureAllApiCalls } from "../../utils/api-assertions"
@@ -14,7 +14,7 @@ test.describe("Create Character -> Chat journey", () => {
   const characterName = `E2E-TestBot-${Date.now()}`
   const systemPrompt = "You are E2E-TestBot. Always respond with exactly: BEEP BOOP."
 
-  test("create character, select in chat, verify system prompt in API call", async ({
+  test("create character, select in chat, verify complete-v2 character stream path", async ({
     authedPage: page,
     serverInfo,
   }) => {
@@ -58,7 +58,7 @@ test.describe("Create Character -> Chat journey", () => {
       const chatPage = new ChatPage(page)
       await chatPage.waitForReady()
 
-      // Set up capture to verify the system prompt is in the API call
+      // Set up capture to verify the character chat backend path and payload.
       const capture = captureAllApiCalls(page)
 
       await chatPage.selectCharacter(characterName)
@@ -70,16 +70,30 @@ test.describe("Create Character -> Chat journey", () => {
 
       const calls = await capture.stop()
 
-      // Find the chat completions call
-      const chatCall = calls.find(
-        (c) => c.method === "POST" && c.url.includes("/chat/completions")
-      )
+      const chatCreateCall = calls.find((c) => {
+        const url = new URL(c.url)
+        return c.method === "POST" && url.pathname === "/api/v1/chats/"
+      })
+      const characterCompleteCall = calls.find((c) => {
+        const url = new URL(c.url)
+        return (
+          c.method === "POST" &&
+          /^\/api\/v1\/chats\/[^/]+\/complete-v2$/.test(url.pathname)
+        )
+      })
 
-      // If a chat call was made, verify it went through
-      expect(chatCall).toBeTruthy()
-      expect(chatCall?.status).toBeGreaterThanOrEqual(200)
-      expect(chatCall?.status).toBeLessThan(300)
-      expect(JSON.stringify(chatCall?.requestBody || {})).toContain(systemPrompt)
+      expect(chatCreateCall).toBeTruthy()
+      expect(JSON.stringify(chatCreateCall?.requestBody || {})).toContain("character_id")
+
+      expect(characterCompleteCall).toBeTruthy()
+      expect(characterCompleteCall?.status).toBeGreaterThanOrEqual(200)
+      expect(characterCompleteCall?.status).toBeLessThan(300)
+      expect(characterCompleteCall?.requestBody).toMatchObject(
+        expect.objectContaining({
+          include_character_context: true,
+          stream: true,
+        })
+      )
     })
   })
 })

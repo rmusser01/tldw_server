@@ -47,11 +47,12 @@ describe("TldwApiClient chat request debug snapshot", () => {
 
     const snapshot = getLastChatRequestDebugSnapshot()
     expect(snapshot).toMatchObject({
-      endpoint: "/api/v1/chats/42/complete-v2",
       method: "POST",
       mode: "stream"
     })
+    expect(snapshot?.endpoint).toMatch(/^\/api\/v1\/chats\/42\/complete-v2(?:\?|$)/)
     expect((snapshot?.body as any)?.model).toBe("kimi-k2")
+    expect((snapshot?.body as any)?.include_character_context).toBe(true)
     expect((snapshot?.body as any)?.stream).toBe(true)
   })
 
