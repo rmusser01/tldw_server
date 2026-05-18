@@ -18,6 +18,7 @@ references:
 - https://github.com/rmusser01/tldw_server/pull/1841#discussion_r3259716503
 - https://github.com/rmusser01/tldw_server/pull/1841#discussion_r3259716506
 - TASK-428
+- https://github.com/rmusser01/tldw_server/pull/1841#discussion_r3259736739
 priority: high
 modified_files:
 - apps/tldw-frontend/e2e/workflows/journeys/character-chat.spec.ts
@@ -49,7 +50,7 @@ Address actionable review feedback on PR #1841 for the Character Chat Phase 0 co
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Addressed PR #1841 review feedback by asserting the character chat create request body structurally contains character_id, aligning TASK-428 references to PR #1841, and marking completed TASK-428/TASK-430 acceptance and Definition of Done checklists. Verification: bunx playwright test e2e/workflows/journeys/character-chat.spec.ts --reporter=line --list listed the touched journey successfully; git diff --check passed. Live real-backend Playwright execution was not run because no backend/model provider was started in-session. Bandit was not run because no Python code was touched.
+Addressed PR #1841 review feedback by asserting the character chat create request body structurally contains character_id, asserting the chat-create response status is 2xx before treating the journey as successful, aligning TASK-428 references to PR #1841, and marking completed TASK-428/TASK-430 acceptance and Definition of Done checklists. Verification: bunx playwright test e2e/workflows/journeys/character-chat.spec.ts --reporter=line --list listed the touched journey successfully; git diff --check passed. Live real-backend Playwright execution was not run because no backend/model provider was started in-session. Bandit was not run because no Python code was touched.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

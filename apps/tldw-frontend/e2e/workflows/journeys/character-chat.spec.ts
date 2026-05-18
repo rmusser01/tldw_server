@@ -83,9 +83,13 @@ test.describe("Create Character -> Chat journey", () => {
       })
 
       expect(chatCreateCall).toBeTruthy()
-      expect(chatCreateCall?.requestBody).toMatchObject({
-        character_id: expect.anything(),
-      })
+      expect(chatCreateCall?.status).toBeGreaterThanOrEqual(200)
+      expect(chatCreateCall?.status).toBeLessThan(300)
+      expect(chatCreateCall?.requestBody).toEqual(
+        expect.objectContaining({
+          character_id: expect.anything(),
+        })
+      )
 
       expect(characterCompleteCall).toBeTruthy()
       expect(characterCompleteCall?.status).toBeGreaterThanOrEqual(200)
