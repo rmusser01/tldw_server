@@ -147,6 +147,7 @@ export const SourcesTab: React.FC = () => {
   const sourcesPageSize = useWatchlistsStore((s) => s.sourcesPageSize)
   const tags = useWatchlistsStore((s) => s.tags)
   const groups = useWatchlistsStore((s) => s.groups)
+  const settings = useWatchlistsStore((s) => s.settings)
   const groupsLoading = useWatchlistsStore((s) => s.groupsLoading)
   const selectedGroupId = useWatchlistsStore((s) => s.selectedGroupId)
   const selectedTagName = useWatchlistsStore((s) => s.selectedTagName)
@@ -1109,7 +1110,13 @@ export const SourcesTab: React.FC = () => {
 
   // Handle form submit
   const handleFormSubmit = async (
-    values: { name: string; url: string; source_type: SourceType; tags: string[] }
+    values: {
+      name: string
+      url: string
+      source_type: SourceType
+      tags: string[]
+      settings?: Record<string, unknown> | null
+    }
   ) => {
     try {
       if (sourceFormEditId) {
@@ -1831,6 +1838,7 @@ export const SourcesTab: React.FC = () => {
         onSubmit={handleFormSubmit}
         initialValues={editingSource}
         existingTags={(Array.isArray(tags) ? tags : []).map((t) => t.name)}
+        forumsEnabled={Boolean(settings?.forums_enabled)}
       />
 
       <SourcesBulkImport

@@ -70,7 +70,7 @@ export interface WatchlistSourceCreate {
   source_type: SourceType
   active?: boolean
   tags?: string[]
-  settings?: Record<string, unknown>
+  settings?: Record<string, unknown> | null
   group_ids?: number[]
   watchlist_id?: number
 }
@@ -81,7 +81,7 @@ export interface WatchlistSourceUpdate {
   source_type?: SourceType
   active?: boolean
   tags?: string[]
-  settings?: Record<string, unknown>
+  settings?: Record<string, unknown> | null
   group_ids?: number[]
 }
 

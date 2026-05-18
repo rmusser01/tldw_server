@@ -7,6 +7,12 @@ import type { WatchlistSource, SourceType } from "@/types/watchlists"
 import { buildWatchlistsModalChrome, useWatchlistsViewport } from "../shared"
 import { mapWatchlistsError } from "../shared/watchlists-error"
 import {
+  buildSourceSettingsPayload,
+  SOURCE_SETTINGS_FORM_FIELDS,
+  sourceSettingsAreEqual,
+  sourceSettingsToFormValues
+} from "./source-settings"
+import {
   getFocusableActiveElement,
   restoreFocusToElement
 } from "../shared/focus-management"
@@ -19,9 +25,11 @@ interface SourceFormModalProps {
     url: string
     source_type: SourceType
     tags: string[]
+    settings?: Record<string, unknown> | null
   }) => Promise<void>
   initialValues?: WatchlistSource
   existingTags: string[]
+  forumsEnabled?: boolean
 }
 
 const toText = (value: unknown, fallback = ""): string =>
@@ -87,7 +95,8 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
   onClose,
   onSubmit,
   initialValues,
-  existingTags
+  existingTags,
+  forumsEnabled = false
 }) => {
   const { t } = useTranslation(["watchlists", "common"])
   const [form] = Form.useForm()
@@ -127,13 +136,15 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
           name: initialValues.name,
           url: initialValues.url,
           source_type: initialValues.source_type,
-          tags: initialValues.tags
+          tags: initialValues.tags,
+          ...sourceSettingsToFormValues(initialValues.settings)
         })
       } else {
         form.resetFields()
         form.setFieldsValue({
           source_type: "rss",
-          tags: []
+          tags: [],
+          ...sourceSettingsToFormValues(null)
         })
       }
       setTestResult(null)
@@ -145,8 +156,19 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields()
+      const settingsPayload = buildSourceSettingsPayload(initialValues?.settings, values)
+      const hasInitialSettings =
+        Boolean(initialValues?.settings) &&
+        Object.keys(initialValues?.settings || {}).length > 0
+      const payload = {
+        name: String(values.name || ""),
+        url: String(values.url || ""),
+        source_type: values.source_type as SourceType,
+        tags: Array.isArray(values.tags) ? values.tags : [],
+        ...(settingsPayload || hasInitialSettings ? { settings: settingsPayload || null } : {})
+      }
       setSubmitting(true)
-      await onSubmit(values)
+      await onSubmit(payload)
       form.resetFields()
     } catch (err) {
       // Validation error or submit error - handled by parent
@@ -166,14 +188,20 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
 
   const handleTestSource = async () => {
     try {
-      const values = await form.validateFields(["url", "source_type"])
+      const values = await form.validateFields([
+        "url",
+        "source_type",
+        ...SOURCE_SETTINGS_FORM_FIELDS
+      ])
       const draftUrl = String(values?.url ?? "")
       const draftType = String(values?.source_type ?? "")
+      const settingsPayload = buildSourceSettingsPayload(initialValues?.settings, values)
       const isSavedSourceUnchanged =
         !!testSourceId &&
         !!initialValues &&
         draftUrl === String(initialValues.url) &&
-        draftType === String(initialValues.source_type)
+        draftType === String(initialValues.source_type) &&
+        sourceSettingsAreEqual(initialValues.settings, settingsPayload)
 
       setTestingSource(true)
       setTestError(null)
@@ -184,7 +212,8 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
         : await testWatchlistSourceDraft(
             {
               url: draftUrl,
-              source_type: draftType as SourceType
+              source_type: draftType as SourceType,
+              settings: settingsPayload || null
             },
             { limit: 10 }
           )
@@ -372,10 +401,14 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
         <Form.Item
           name="source_type"
           label={t("watchlists:sources.form.type", "Type")}
-          extra={t(
-            "watchlists:sources.form.forumDisabledHelp",
-            "Forum monitoring is coming soon. Use RSS Feed or Website for now."
-          )}
+          extra={
+            forumsEnabled
+              ? undefined
+              : t(
+                  "watchlists:sources.form.forumDisabledHelp",
+                  "Forum monitoring is coming soon. Use RSS Feed or Website for now."
+                )
+          }
           rules={[
             {
               required: true,
@@ -394,13 +427,152 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
                 value: "site"
               },
               {
-                label: t("watchlists:sources.types.forumComingSoon", "Forum (coming soon)"),
+                label: forumsEnabled
+                  ? t("watchlists:sources.types.forum", "Forum")
+                  : t("watchlists:sources.types.forumComingSoon", "Forum (coming soon)"),
                 value: "forum",
-                disabled: true // Forum support coming later
+                disabled: !forumsEnabled
               }
             ]}
           />
         </Form.Item>
+
+        <details className="mb-4 rounded-md border border-border p-3">
+          <summary className="cursor-pointer text-sm font-medium">
+            {t("watchlists:sources.form.advancedRules", "Advanced fetch and extraction rules")}
+          </summary>
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+            <Form.Item
+              name="source_top_n"
+              label={t("watchlists:sources.form.topN", "Top links limit")}
+              extra={t(
+                "watchlists:sources.form.topNHelp",
+                "For websites without scrape rules, choose how many discovered links to inspect."
+              )}
+            >
+              <Input
+                placeholder={t("watchlists:sources.form.topNPlaceholder", "e.g., 10")}
+              />
+            </Form.Item>
+            <Form.Item
+              name="discover_method"
+              label={t("watchlists:sources.form.discoverMethod", "Discovery method")}
+            >
+              <Select
+                options={[
+                  {
+                    label: t("watchlists:sources.form.discoverAuto", "Auto"),
+                    value: "auto"
+                  },
+                  {
+                    label: t("watchlists:sources.form.discoverFrontpage", "Front page links"),
+                    value: "frontpage"
+                  },
+                  {
+                    label: t("watchlists:sources.form.discoverSearch", "Search provider"),
+                    value: "search"
+                  }
+                ]}
+              />
+            </Form.Item>
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <Form.Item
+              name="scrape_list_url"
+              label={t("watchlists:sources.form.scrapeListUrl", "List page URL")}
+            >
+              <Input
+                placeholder={t(
+                  "watchlists:sources.form.scrapeListUrlPlaceholder",
+                  "Defaults to source URL"
+                )}
+              />
+            </Form.Item>
+            <Form.Item
+              name="scrape_limit"
+              label={t("watchlists:sources.form.scrapeLimit", "Scrape item limit")}
+            >
+              <Input
+                placeholder={t("watchlists:sources.form.scrapeLimitPlaceholder", "e.g., 20")}
+              />
+            </Form.Item>
+            <Form.Item
+              name="scrape_item_selector"
+              label={t("watchlists:sources.form.itemSelector", "Item selector")}
+            >
+              <Input
+                placeholder={t(
+                  "watchlists:sources.form.itemSelectorPlaceholder",
+                  "css:article"
+                )}
+              />
+            </Form.Item>
+            <Form.Item
+              name="scrape_link_selector"
+              label={t("watchlists:sources.form.linkSelector", "Link XPath")}
+            >
+              <Input
+                placeholder={t(
+                  "watchlists:sources.form.linkSelectorPlaceholder",
+                  ".//a/@href"
+                )}
+              />
+            </Form.Item>
+            <Form.Item
+              name="scrape_title_selector"
+              label={t("watchlists:sources.form.titleSelector", "Title selector")}
+            >
+              <Input
+                placeholder={t("watchlists:sources.form.titleSelectorPlaceholder", "css:h2")}
+              />
+            </Form.Item>
+            <Form.Item
+              name="scrape_summary_selector"
+              label={t("watchlists:sources.form.summarySelector", "Summary selector")}
+            >
+              <Input
+                placeholder={t(
+                  "watchlists:sources.form.summarySelectorPlaceholder",
+                  "css:.summary"
+                )}
+              />
+            </Form.Item>
+            <Form.Item
+              name="scrape_content_selector"
+              label={t("watchlists:sources.form.contentSelector", "Content selector")}
+            >
+              <Input
+                placeholder={t(
+                  "watchlists:sources.form.contentSelectorPlaceholder",
+                  "css:.article-body"
+                )}
+              />
+            </Form.Item>
+            <Form.Item
+              name="scrape_date_selector"
+              label={t("watchlists:sources.form.dateSelector", "Published date selector")}
+            >
+              <Input
+                placeholder={t("watchlists:sources.form.dateSelectorPlaceholder", "css:time")}
+              />
+            </Form.Item>
+            <Form.Item
+              name="scrape_guid_selector"
+              label={t("watchlists:sources.form.guidSelector", "Dedupe identity XPath")}
+              extra={t(
+                "watchlists:sources.form.guidSelectorHelp",
+                "Optional stable per-item identity when URLs alone are not reliable."
+              )}
+            >
+              <Input
+                placeholder={t(
+                  "watchlists:sources.form.guidSelectorPlaceholder",
+                  ".//@data-id"
+                )}
+              />
+            </Form.Item>
+          </div>
+        </details>
 
         <Form.Item
           name="tags"
