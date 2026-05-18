@@ -1953,7 +1953,13 @@ export const PlaygroundForm = ({
     setSelectedQuickPrompt(null);
     setSelectedSystemPrompt("");
     setSystemPrompt("");
-  }, [setSelectedQuickPrompt, setSelectedSystemPrompt, setSystemPrompt]);
+    updateChatModelSetting("systemPromptTemplateId", undefined);
+  }, [
+    setSelectedQuickPrompt,
+    setSelectedSystemPrompt,
+    setSystemPrompt,
+    updateChatModelSetting,
+  ]);
   const clearBehaviorTemplateIdentity = React.useCallback(() => {
     updateChatModelSetting("systemPromptTemplateId", undefined);
   }, [updateChatModelSetting]);
@@ -1973,7 +1979,8 @@ export const PlaygroundForm = ({
   );
   const clearRolePlayIdentity = React.useCallback(() => {
     void setSelectedCharacter(null);
-  }, [setSelectedCharacter]);
+    void setSelectedAssistant(null);
+  }, [setSelectedAssistant, setSelectedCharacter]);
   const resetRolePlayGenerationStyle = React.useCallback(() => {
     const preset = getPresetByKey("balanced");
     if (!preset) return;

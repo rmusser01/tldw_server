@@ -1,7 +1,5 @@
 // @vitest-environment jsdom
-import fs from "node:fs"
-import path from "node:path"
-import { renderHook } from "@testing-library/react"
+import { act, renderHook } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 import { useContextWindow, type UseContextWindowDeps } from "../hooks/useContextWindow"
@@ -34,19 +32,7 @@ function buildDeps(overrides: Partial<UseContextWindowDeps> = {}): UseContextWin
 }
 
 describe("useContextWindow model recommendation cleanup", () => {
-  it("guards recommendation cleanup before dispatching dismissal state", () => {
-    const source = fs.readFileSync(
-      path.resolve(
-        __dirname,
-        "../hooks/useContextWindow.ts"
-      ),
-      "utf8"
-    )
-
-    expect(source).toContain("if (dismissedRecommendationIds.length === 0) return")
-  })
-
-  it("does not dispatch cleanup state when unstable recommendation inputs have no dismissed recommendations", () => {
+  it("does not dispatch cleanup state when recommendation inputs are unstable", () => {
     expect(() => {
       renderHook(() =>
         useContextWindow(
@@ -56,6 +42,26 @@ describe("useContextWindow model recommendation cleanup", () => {
           })
         )
       )
-    }).not.toThrow(/Maximum update depth exceeded/)
+    }).not.toThrow()
+  })
+
+  it("cleans stale dismissedRecommendationIds without throwing", () => {
+    expect(() => {
+      const { result, rerender } = renderHook(
+        (deps: UseContextWindowDeps) => useContextWindow(deps),
+        {
+          initialProps: buildDeps({
+            deferredComposerInput: "Return valid JSON.",
+            jsonMode: false
+          })
+        }
+      )
+
+      act(() => {
+        result.current.dismissModelRecommendation("enable-json-mode")
+      })
+
+      rerender(buildDeps({ deferredComposerInput: "", jsonMode: true }))
+    }).not.toThrow()
   })
 })

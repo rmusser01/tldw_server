@@ -1,10 +1,10 @@
-import fs from "node:fs"
-import path from "node:path"
 import { fireEvent, render, screen } from "@testing-library/react"
 import React from "react"
 import { describe, expect, it, vi } from "vitest"
 
 import { ComposerToolbar } from "../ComposerToolbar"
+
+const assistantSelectMock = vi.hoisted(() => vi.fn())
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -33,7 +33,12 @@ vi.mock("@/components/Common/PromptSelect", () => ({
 }))
 
 vi.mock("@/components/Common/AssistantSelect", () => ({
-  AssistantSelect: () => <div data-testid="character-select" />
+  AssistantSelect: (props: { variant?: string }) => {
+    assistantSelectMock(props)
+    return (
+      <div data-testid="character-select" data-variant={props.variant ?? ""} />
+    )
+  }
 }))
 
 vi.mock("@/components/Layouts/ConnectionStatus", () => ({
@@ -131,13 +136,15 @@ const createProps = (
 
 describe("ComposerToolbar web search", () => {
   it("owns the dropdown assistant selector used by chat starter events", () => {
-    const source = fs.readFileSync(
-      path.resolve(__dirname, "../ComposerToolbar.tsx"),
-      "utf8"
-    )
+    render(<ComposerToolbar {...createProps()} />)
 
-    expect(source).toContain("<AssistantSelect")
-    expect(source).toContain('variant="dropdown"')
+    expect(screen.getByTestId("character-select")).toHaveAttribute(
+      "data-variant",
+      "dropdown"
+    )
+    expect(assistantSelectMock).toHaveBeenCalledWith(
+      expect.objectContaining({ variant: "dropdown" })
+    )
   })
 
   it("hides the options panel when rendered collapsed for external send placement", () => {
@@ -382,8 +389,12 @@ describe("ComposerToolbar web search", () => {
 
     const contextStrip = screen.getByTestId("composer-context-strip")
     const contextButtons = contextStrip.querySelectorAll("button")
-    const savedButton = screen.getByTestId("composer-casual-persistence-chip")
-    const advancedButton = screen.getByTestId("composer-casual-advanced-chip")
+    const savedButton = screen.getByTestId(
+      "composer-casual-persistence-chip"
+    ) as HTMLButtonElement
+    const advancedButton = screen.getByTestId(
+      "composer-casual-advanced-chip"
+    ) as HTMLButtonElement
 
     const savedIndex = Array.from(contextButtons).indexOf(savedButton)
     const advancedIndex = Array.from(contextButtons).indexOf(advancedButton)

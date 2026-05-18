@@ -123,6 +123,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
   const [clearBehavior, setClearBehavior] = React.useState(false)
   const [resetGenerationStyle, setResetGenerationStyle] = React.useState(false)
   const [templatesOpen, setTemplatesOpen] = React.useState(false)
+  const [sceneLoadError, setSceneLoadError] = React.useState<string | null>(null)
   const [stagedBehaviorTemplate, setStagedBehaviorTemplate] =
     React.useState<RolePlaySetupApplyPayload["behaviorTemplate"]>(null)
   const [stagedGenerationKey, setStagedGenerationKey] =
@@ -144,6 +145,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     setStagedBehaviorTemplate(null)
     setStagedGenerationKey(null)
     setTemplatesOpen(false)
+    setSceneLoadError(null)
 
     const load = async () => {
       try {
@@ -157,6 +159,16 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
         setSettings(actor)
         const preview = summarizeRolePlayScene(actor)
         setPreviewAndTokens(preview.prompt, preview.tokenCount)
+      } catch (error) {
+        console.error("Failed to load role-play scene settings", error)
+        if (!cancelled) {
+          setSceneLoadError(
+            t(
+              "playground:composer.sceneLoadError",
+              "Scene settings could not be loaded. Existing chat setup was left unchanged."
+            )
+          )
+        }
       } finally {
         if (!cancelled) {
           setLoading(false)
@@ -440,7 +452,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
   )
 
   const draft = getDraft(sceneDraft)
-  const visibleAspects = draft.aspects.slice(0, 4)
+  const visibleAspects = (draft.aspects ?? []).slice(0, 4)
   const activeGenerationKey =
     stagedGenerationKey ??
     (isPresetKey(beforeState.generationStyle?.key)
@@ -456,6 +468,11 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
       title={t("playground:composer.rolePlaySetup", "Role-play setup")}>
       <div className="space-y-4" data-testid="role-play-setup-drawer">
         {loading && !sceneDraft ? <Skeleton active /> : null}
+        {sceneLoadError ? (
+          <p role="alert" className="rounded-md border border-warn/40 bg-warn/10 p-2 text-xs text-warn">
+            {sceneLoadError}
+          </p>
+        ) : null}
 
         <RolePlaySetupPreview before={beforeState} after={afterState} />
 

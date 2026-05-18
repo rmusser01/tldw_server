@@ -169,7 +169,7 @@ vi.mock("@tanstack/react-query", () => ({
 }))
 
 vi.mock("antd", () => {
-  const React = require("react")
+  const React = require("react") as typeof import("react")
 
   const InputComponent = React.forwardRef<HTMLInputElement, any>(
     (
@@ -198,7 +198,7 @@ vi.mock("antd", () => {
       />
     )
   )
-  InputComponent.TextArea = ({
+  ;(InputComponent as any).TextArea = ({
     value,
     onChange,
     placeholder,

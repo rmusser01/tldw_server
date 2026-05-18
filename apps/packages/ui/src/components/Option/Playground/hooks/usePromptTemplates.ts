@@ -338,7 +338,9 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
             name: rolePlayIdentity.name,
           }),
         );
+        void setSelectedCharacter(null);
       } else if (rolePlayIdentity?.kind === "character") {
+        void setSelectedAssistant(null);
         void setSelectedCharacter(
           template.character ||
             ({
@@ -347,6 +349,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
             } as Character),
         );
       } else {
+        void setSelectedAssistant(null);
         void setSelectedCharacter(template.character || null);
       }
       setRagPinnedResults(template.ragPinnedResults || []);

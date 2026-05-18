@@ -421,5 +421,8 @@ describe("PromptSelect system prompt modal", () => {
     )
 
     expect(props.setSystemPrompt).toHaveBeenCalledWith("")
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "selectAPrompt" })).toHaveFocus()
+    })
   })
 })

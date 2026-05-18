@@ -56,8 +56,8 @@ export const PromptSelect: React.FC<Props> = ({
   const returnFocusSelectorRef = useRef<string | null>(null)
 
   const restorePromptSelectFocus = React.useCallback(() => {
-    const returnFocusSelector = returnFocusSelectorRef.current
-    if (!returnFocusSelector) return
+    const returnFocusSelector =
+      returnFocusSelectorRef.current ?? "[data-testid='chat-prompt-select']"
     returnFocusSelectorRef.current = null
 
     scheduleFocusFirstVisibleElement(returnFocusSelector)
@@ -167,6 +167,7 @@ export const PromptSelect: React.FC<Props> = ({
             onClick: () => {
               setSystemPrompt("")
               setDropdownOpen(false)
+              restorePromptSelectFocus()
             }
           }
         ]
@@ -189,6 +190,7 @@ export const PromptSelect: React.FC<Props> = ({
         ...(currentSystemPromptRecoveryItems.length > 0
           ? [
               {
+                key: "__current_system_prompt_divider__",
                 type: "divider" as const
               },
               ...currentSystemPromptRecoveryItems
@@ -266,6 +268,7 @@ export const PromptSelect: React.FC<Props> = ({
 
     if (items.length > 0) {
       items.push({
+        key: "__prompt_actions_divider__",
         type: "divider"
       })
     }

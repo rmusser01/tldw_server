@@ -388,9 +388,14 @@ export const SystemPromptTemplatesModal: React.FC<Props> = ({
   }, [activeCategory, searchQuery]);
 
   const handleCopy = async (template: PromptTemplate) => {
-    await navigator.clipboard.writeText(template.content);
-    setCopiedId(template.id);
-    setTimeout(() => setCopiedId(null), 2000);
+    try {
+      await navigator.clipboard.writeText(template.content);
+      setCopiedId(template.id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch (error) {
+      console.error("Failed to copy prompt template", error);
+      setCopiedId(null);
+    }
   };
 
   const handleSelect = (template: PromptTemplate) => {

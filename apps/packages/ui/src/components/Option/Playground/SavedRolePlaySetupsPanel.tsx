@@ -122,21 +122,33 @@ export const SavedRolePlaySetupsPanel: React.FC<SavedRolePlaySetupsPanelProps> =
                   <div className="flex flex-wrap gap-1">
                     <Button
                       size="small"
-                      aria-label={`Preview ${setup.name}`}
+                      aria-label={t(
+                        "playground:composer.previewRolePlaySetup",
+                        "Preview {{name}}",
+                        { name: setup.name }
+                      )}
                       onClick={() => onPreviewSetup(setup.id)}>
                       {t("common:preview", "Preview")}
                     </Button>
                     <Button
                       size="small"
                       type="primary"
-                      aria-label={`Apply ${setup.name}`}
+                      aria-label={t(
+                        "playground:composer.applyRolePlaySetup",
+                        "Apply {{name}}",
+                        { name: setup.name }
+                      )}
                       onClick={() => void onApplySetup(setup)}>
                       {t("common:apply", "Apply")}
                     </Button>
                     <Button
                       size="small"
                       danger
-                      aria-label={`Delete ${setup.name}`}
+                      aria-label={t(
+                        "playground:composer.deleteRolePlaySetup",
+                        "Delete {{name}}",
+                        { name: setup.name }
+                      )}
                       onClick={() => onDeleteSetup(setup.id)}>
                       {t("common:delete", "Delete")}
                     </Button>
@@ -144,7 +156,11 @@ export const SavedRolePlaySetupsPanel: React.FC<SavedRolePlaySetupsPanelProps> =
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Input
-                    aria-label={`Rename field for ${setup.name}`}
+                    aria-label={t(
+                      "playground:composer.renameRolePlaySetupField",
+                      "Rename field for {{name}}",
+                      { name: setup.name }
+                    )}
                     value={renameDraft}
                     onChange={(event) =>
                       updateRenameDraft(setup.id, event.target.value)
@@ -153,7 +169,11 @@ export const SavedRolePlaySetupsPanel: React.FC<SavedRolePlaySetupsPanelProps> =
                   />
                   <Button
                     size="small"
-                    aria-label={`Rename ${setup.name}`}
+                    aria-label={t(
+                      "playground:composer.renameRolePlaySetup",
+                      "Rename {{name}}",
+                      { name: setup.name }
+                    )}
                     onClick={() => onRenameSetup(setup.id, renameDraft)}>
                     {t("common:rename", "Rename")}
                   </Button>

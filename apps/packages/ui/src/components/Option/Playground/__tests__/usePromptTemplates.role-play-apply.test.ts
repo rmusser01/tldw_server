@@ -86,6 +86,7 @@ describe("usePromptTemplates role-play setup apply", () => {
         name: "Mira"
       })
     )
+    expect(deps.setSelectedAssistant).toHaveBeenCalledWith(null)
   })
 
   it("restores persona identity through selected assistant state", () => {
@@ -127,6 +128,6 @@ describe("usePromptTemplates role-play setup apply", () => {
         name: "Patient Guide"
       })
     )
-    expect(setSelectedCharacter).not.toHaveBeenCalled()
+    expect(setSelectedCharacter).toHaveBeenCalledWith(null)
   })
 })

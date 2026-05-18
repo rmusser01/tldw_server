@@ -27,6 +27,11 @@ Resolve current actionable review feedback on PR #1831 for the main /chat role-p
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 Valid PR #1831 review comments are verified against the rebased branch and either fixed or documented as already addressed.
+- [x] #2 Role-play setup apply/clear paths do not leave stale persona, character, behavior template, scene, or generation state.
+- [x] #3 New or changed role-play controls use localized user-facing labels and avoid brittle source-string-only tests where behavior tests are feasible.
+- [x] #4 Focus, async error handling, clipboard failure handling, and malformed scene draft recovery paths are covered by implementation or focused tests.
+- [x] #5 Focused role-play and review-fix tests are run, with any unrelated baseline failures documented.
 <!-- AC:END -->
 
 ## Implementation Notes

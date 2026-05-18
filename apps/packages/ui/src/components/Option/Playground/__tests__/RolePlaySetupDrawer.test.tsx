@@ -20,7 +20,10 @@ vi.mock("@/services/actor-settings", () => ({
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string) => fallback || key
+    t: (key: string, fallback?: string, values?: Record<string, unknown>) =>
+      (fallback || key).replace(/\{\{(\w+)\}\}/g, (_match, token) =>
+        values?.[token] == null ? "" : String(values[token])
+      )
   })
 }))
 
@@ -284,6 +287,41 @@ describe("RolePlaySetupDrawer", () => {
     expect(screen.getAllByText("Creative").length).toBeGreaterThan(0)
     expect(screen.getByText(/1 detail/)).toBeInTheDocument()
     expect(screen.getByText(/2 pinned/)).toBeInTheDocument()
+  })
+
+  it("does not crash when stored actor settings omit aspects", async () => {
+    actorSettingsMocks.getActorSettingsForChatWithCharacterFallback.mockResolvedValueOnce(
+      {
+        ...activeScene(),
+        aspects: undefined
+      } as unknown as ActorSettings
+    )
+
+    renderDrawer()
+
+    expect(
+      await screen.findByRole("dialog", { name: "Role-play setup" })
+    ).toBeInTheDocument()
+    expect(await screen.findByLabelText("Scene notes")).toHaveValue(
+      "The room smells like ozone."
+    )
+  })
+
+  it("surfaces scene load failures without applying stale scene state", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined)
+    actorSettingsMocks.getActorSettingsForChatWithCharacterFallback.mockRejectedValueOnce(
+      new Error("load failed")
+    )
+
+    renderDrawer()
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Scene settings could not be loaded."
+    )
+    expect(actorSettingsMocks.saveActorSettingsForChat).not.toHaveBeenCalled()
+    consoleError.mockRestore()
   })
 
   it("cancel closes without applying or saving", async () => {
