@@ -363,6 +363,9 @@ describe("SpeechPlaygroundPage", () => {
     render(<SpeechPlaygroundPage />)
 
     expect(screen.getByTestId("speech-page-shell")).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Speech Playground" })
+    ).toBeInTheDocument()
   })
 
   it("passes the resolved provider to the tldw strip when the stored provider is empty", (): void => {

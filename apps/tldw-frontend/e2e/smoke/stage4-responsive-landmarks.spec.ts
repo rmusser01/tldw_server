@@ -23,6 +23,9 @@ const RESPONSIVE_ROUTE_MATRIX: ResponsiveRouteMatrixEntry[] = [
   { path: '/chat-workspace', heading: /chat workspace/i },
 ];
 
+// Allows minor sub-pixel and scrollbar variance while still catching real page overflow.
+const OVERFLOW_TOLERANCE_PX = 4;
+
 type OverflowOffender = {
   testId: string | null;
   tag: string;
@@ -118,32 +121,38 @@ async function expectOneRouteHeading(
 }
 
 async function expectNoPageHorizontalOverflow(page: Page, routePath: string): Promise<void> {
-  const overflowState = await page.evaluate(() => {
+  const overflowState = await page.evaluate((overflowTolerancePx) => {
     const root = document.documentElement;
-    const offenders = Array.from(document.querySelectorAll<HTMLElement>('body *'))
-      .map((element) => {
-        const rect = element.getBoundingClientRect();
-        return {
-          testId: element.getAttribute('data-testid'),
-          tag: element.tagName.toLowerCase(),
-          className: String(element.className || ''),
-          scrollWidth: element.scrollWidth,
-          clientWidth: element.clientWidth,
-          rectWidth: rect.width,
-        };
-      })
-      .filter(
-        (entry) =>
-          entry.scrollWidth > window.innerWidth + 4 || entry.rectWidth > window.innerWidth + 4
-      )
-      .slice(0, 10);
+    const rootScrollWidth = root.scrollWidth;
+    const viewportWidth = window.innerWidth;
+    const offenders =
+      rootScrollWidth > viewportWidth + overflowTolerancePx
+        ? Array.from(document.querySelectorAll<HTMLElement>('body *'))
+            .map((element) => {
+              const rect = element.getBoundingClientRect();
+              return {
+                testId: element.getAttribute('data-testid'),
+                tag: element.tagName.toLowerCase(),
+                className: String(element.className || ''),
+                scrollWidth: element.scrollWidth,
+                clientWidth: element.clientWidth,
+                rectWidth: rect.width,
+              };
+            })
+            .filter(
+              (entry) =>
+                entry.scrollWidth > viewportWidth + overflowTolerancePx ||
+                entry.rectWidth > viewportWidth + overflowTolerancePx
+            )
+            .slice(0, 10)
+        : [];
 
     return {
-      rootScrollWidth: root.scrollWidth,
-      viewportWidth: window.innerWidth,
+      rootScrollWidth,
+      viewportWidth,
       offenders,
     };
-  });
+  }, OVERFLOW_TOLERANCE_PX);
 
   expect(
     overflowState.rootScrollWidth,
@@ -152,7 +161,7 @@ async function expectNoPageHorizontalOverflow(page: Page, routePath: string): Pr
       null,
       2
     )}`
-  ).toBeLessThanOrEqual(overflowState.viewportWidth + 4);
+  ).toBeLessThanOrEqual(overflowState.viewportWidth + OVERFLOW_TOLERANCE_PX);
 }
 
 async function expectChatComposerInsideViewport(page: Page): Promise<void> {
