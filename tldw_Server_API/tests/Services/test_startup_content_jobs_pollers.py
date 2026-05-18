@@ -46,6 +46,11 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
         calls.append("reading-digest")
         return ("reading-stop", "reading-task")
 
+    async def _record_llamacpp_acquisition(**kwargs):
+        del kwargs
+        calls.append("llamacpp-acquisition")
+        return ("llamacpp-stop", "llamacpp-task")
+
     async def _record_vn_asset(**kwargs: object) -> tuple[str, str, str, str]:
         """Record that the VN asset worker starter ran."""
 
@@ -63,6 +68,11 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
     monkeypatch.setattr(startup_pollers, "_start_presentation_render_jobs_worker", _record_presentation)
     monkeypatch.setattr(startup_pollers, "_start_media_ingest_jobs_workers", _record_media_ingest)
     monkeypatch.setattr(startup_pollers, "_start_reading_digest_jobs_worker", _record_reading_digest)
+    monkeypatch.setattr(
+        startup_pollers,
+        "_start_llamacpp_acquisition_jobs_worker",
+        _record_llamacpp_acquisition,
+    )
     monkeypatch.setattr(startup_pollers, "_start_vn_asset_jobs_workers", _record_vn_asset)
     monkeypatch.setattr(startup_pollers, "_start_companion_reflection_jobs_worker", _record_companion)
 
@@ -79,6 +89,7 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
         "presentation",
         "media-ingest",
         "reading-digest",
+        "llamacpp-acquisition",
         "vn-asset",
         "companion",
     ]
@@ -94,6 +105,8 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
     assert handles.media_ingest_heavy_jobs_task == "media-heavy-task"
     assert handles.reading_digest_jobs_stop_event == "reading-stop"
     assert handles.reading_digest_jobs_task == "reading-task"
+    assert handles.llamacpp_acquisition_jobs_stop_event == "llamacpp-stop"
+    assert handles.llamacpp_acquisition_jobs_task == "llamacpp-task"
     assert handles.vn_asset_jobs_stop_event == "vn-asset-stop"
     assert handles.vn_asset_jobs_task == "vn-asset-task"
     assert handles.vn_asset_generation_jobs_stop_event == "vn-generation-stop"
@@ -148,6 +161,11 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
     )
     monkeypatch.setattr(
         startup_pollers,
+        "_start_llamacpp_acquisition_jobs_worker",
+        _record_worker("llamacpp-acquisition", ("llamacpp-stop", "llamacpp-task")),
+    )
+    monkeypatch.setattr(
+        startup_pollers,
         "_start_vn_asset_jobs_workers",
         _record_worker("vn-asset", ("vn-asset-stop", "vn-asset-task", "vn-generation-stop", "vn-generation-task")),
     )
@@ -174,6 +192,7 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
         "presentation": worker_inventory,
         "media-ingest": worker_inventory,
         "reading-digest": worker_inventory,
+        "llamacpp-acquisition": worker_inventory,
         "vn-asset": worker_inventory,
         "companion": worker_inventory,
     }
@@ -215,6 +234,13 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
             "reading",
             "reading_digest_jobs_task",
             "_run_reading_digest_jobs_worker_service",
+        ),
+        (
+            "_start_llamacpp_acquisition_jobs_worker",
+            "LLAMACPP_ACQUISITION_JOBS_WORKER_ENABLED",
+            "llamacpp-acquisition",
+            "llamacpp_acquisition_jobs_task",
+            "_run_llamacpp_acquisition_jobs_worker_service",
         ),
         (
             "_start_companion_reflection_jobs_worker",
@@ -469,6 +495,113 @@ async def test_start_audio_jobs_worker_registers_owned_poller_when_enabled(
             "stop_event": "audio-stop",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_start_llamacpp_acquisition_jobs_worker_registers_owned_poller_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    captured_stop_events: list[object] = []
+    created_coroutines: list[object] = []
+    registrations: list[dict[str, object]] = []
+
+    monkeypatch.setattr(startup_pollers, "_make_event", lambda: "llamacpp-stop")
+    monkeypatch.setattr(
+        startup_pollers,
+        "_create_task",
+        lambda coro: created_coroutines.append(coro) or "llamacpp-task",
+    )
+    monkeypatch.setattr(
+        startup_pollers,
+        "_run_llamacpp_acquisition_jobs_worker_service",
+        lambda stop_event: captured_stop_events.append(stop_event) or "llamacpp-coro",
+    )
+
+    def _register_owned_job_poller(app, owned_job_pollers, *, name, task, stop_event):
+        registrations.append(
+            {
+                "app": app,
+                "owned_job_pollers": owned_job_pollers,
+                "name": name,
+                "task": task,
+                "stop_event": stop_event,
+            }
+        )
+
+    owned_job_pollers: list[object] = []
+    stop_event, task = await startup_pollers._start_llamacpp_acquisition_jobs_worker(
+        app="app",
+        owned_job_pollers=owned_job_pollers,
+        register_owned_job_poller=_register_owned_job_poller,
+        should_start_worker=lambda flag, route, **kwargs: (flag, route, kwargs) == (
+            "LLAMACPP_ACQUISITION_JOBS_WORKER_ENABLED",
+            "llamacpp-acquisition",
+            {},
+        ),
+    )
+
+    assert stop_event == "llamacpp-stop"
+    assert task == "llamacpp-task"
+    assert captured_stop_events == ["llamacpp-stop"]
+    assert created_coroutines == ["llamacpp-coro"]
+    assert registrations == [
+        {
+            "app": "app",
+            "owned_job_pollers": owned_job_pollers,
+            "name": "llamacpp_acquisition_jobs_task",
+            "task": "llamacpp-task",
+            "stop_event": "llamacpp-stop",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_start_llamacpp_acquisition_jobs_worker_cancels_task_when_registration_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    created_coroutines: list[object] = []
+
+    class _FakeTask:
+        def __init__(self) -> None:
+            self.cancelled = False
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    task = _FakeTask()
+    monkeypatch.setattr(startup_pollers, "_make_event", lambda: "llamacpp-stop")
+    monkeypatch.setattr(
+        startup_pollers,
+        "_create_task",
+        lambda coro: created_coroutines.append(coro) or task,
+    )
+    monkeypatch.setattr(
+        startup_pollers,
+        "_run_llamacpp_acquisition_jobs_worker_service",
+        lambda stop_event: f"llamacpp-coro:{stop_event}",
+    )
+
+    def _register_owned_job_poller(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise RuntimeError("registration failed")
+
+    stop_event, returned_task = await startup_pollers._start_llamacpp_acquisition_jobs_worker(
+        app="app",
+        owned_job_pollers=[],
+        register_owned_job_poller=_register_owned_job_poller,
+        should_start_worker=lambda flag, route, **kwargs: (flag, route, kwargs) == (
+            "LLAMACPP_ACQUISITION_JOBS_WORKER_ENABLED",
+            "llamacpp-acquisition",
+            {},
+        ),
+    )
+
+    assert stop_event is None
+    assert returned_task is None
+    assert created_coroutines == ["llamacpp-coro:llamacpp-stop"]
+    assert task.cancelled is True
 
 
 @pytest.mark.asyncio

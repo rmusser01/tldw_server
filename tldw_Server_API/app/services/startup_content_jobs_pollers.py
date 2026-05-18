@@ -37,6 +37,8 @@ class ContentJobsPollerHandles:
     media_ingest_heavy_jobs_task: Any | None = None
     reading_digest_jobs_stop_event: Any | None = None
     reading_digest_jobs_task: Any | None = None
+    llamacpp_acquisition_jobs_stop_event: Any | None = None
+    llamacpp_acquisition_jobs_task: Any | None = None
     vn_asset_jobs_stop_event: Any | None = None
     vn_asset_jobs_task: Any | None = None
     vn_asset_generation_jobs_stop_event: Any | None = None
@@ -97,6 +99,15 @@ async def start_content_jobs_pollers(
         should_start_worker=should_start_worker,
         worker_inventory=worker_inventory,
     )
+    llamacpp_acquisition_jobs_stop_event, llamacpp_acquisition_jobs_task = (
+        await _start_llamacpp_acquisition_jobs_worker(
+            app=app,
+            owned_job_pollers=owned_job_pollers,
+            register_owned_job_poller=register_owned_job_poller,
+            should_start_worker=should_start_worker,
+            worker_inventory=worker_inventory,
+        )
+    )
     (
         vn_asset_jobs_stop_event,
         vn_asset_jobs_task,
@@ -131,6 +142,8 @@ async def start_content_jobs_pollers(
         media_ingest_heavy_jobs_task=media_ingest_heavy_jobs_task,
         reading_digest_jobs_stop_event=reading_digest_jobs_stop_event,
         reading_digest_jobs_task=reading_digest_jobs_task,
+        llamacpp_acquisition_jobs_stop_event=llamacpp_acquisition_jobs_stop_event,
+        llamacpp_acquisition_jobs_task=llamacpp_acquisition_jobs_task,
         vn_asset_jobs_stop_event=vn_asset_jobs_stop_event,
         vn_asset_jobs_task=vn_asset_jobs_task,
         vn_asset_generation_jobs_stop_event=vn_asset_generation_jobs_stop_event,
@@ -434,6 +447,55 @@ async def _start_reading_digest_jobs_worker(
         return None, None
 
 
+async def _start_llamacpp_acquisition_jobs_worker(
+    *,
+    app: Any,
+    owned_job_pollers: list[Any],
+    register_owned_job_poller: Callable[..., None],
+    should_start_worker: Callable[..., bool],
+    worker_inventory: WorkerRegistry | None = None,
+) -> tuple[Any | None, Any | None]:
+    """Start the llama.cpp acquisition jobs poller and return its shutdown handles."""
+
+    task = None
+    try:
+        enabled = should_start_worker(
+            "LLAMACPP_ACQUISITION_JOBS_WORKER_ENABLED",
+            "llamacpp-acquisition",
+        )
+        if not enabled:
+            logger.info(
+                "llama.cpp Acquisition Jobs worker disabled by flag "
+                "(LLAMACPP_ACQUISITION_JOBS_WORKER_ENABLED)"
+            )
+            return None, None
+
+        if worker_inventory is not None:
+            stop_event, task = await _register_jobs_worker_with_inventory(
+                worker_inventory,
+                name="llamacpp_acquisition_jobs_task",
+                coroutine_factory=_run_llamacpp_acquisition_jobs_worker_service,
+            )
+            logger.info("llama.cpp Acquisition Jobs worker started with explicit stop_event signal")
+            return stop_event, task
+
+        stop_event = _make_event()
+        task = _create_task(_run_llamacpp_acquisition_jobs_worker_service(stop_event))
+        logger.info("llama.cpp Acquisition Jobs worker started with explicit stop_event signal")
+        register_owned_job_poller(
+            app,
+            owned_job_pollers,
+            name="llamacpp_acquisition_jobs_task",
+            task=task,
+            stop_event=stop_event,
+        )
+        return stop_event, task
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        _safe_cancel_task(task)
+        logger.warning(f"Failed to start llama.cpp Acquisition Jobs worker: {exc}")
+        return None, None
+
+
 async def _start_vn_asset_jobs_workers(
     *,
     app: Any,
@@ -622,6 +684,14 @@ def _run_reading_digest_jobs_worker_service(stop_event: Any) -> Any:
     )
 
     return _run_reading_digest_jobs_worker(stop_event)
+
+
+def _run_llamacpp_acquisition_jobs_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.llamacpp_acquisition_jobs_worker import (
+        run_llamacpp_acquisition_jobs_worker as _run_llamacpp_acquisition_jobs_worker,
+    )
+
+    return _run_llamacpp_acquisition_jobs_worker(stop_event)
 
 
 def _run_vn_asset_jobs_worker_service(stop_event: Any) -> Any:

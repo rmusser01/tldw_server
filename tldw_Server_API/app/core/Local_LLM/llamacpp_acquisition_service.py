@@ -2,25 +2,29 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import inspect
 import ipaddress
 import os
 import re
 import socket
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import SplitResult, parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 
+import httpx
+
 from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
     LlamaCppAsset,
     LlamaCppAssetDownloadRequest,
 )
+from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.Local_LLM import handler_utils, llamacpp_inventory_service
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
 from tldw_Server_API.app.core.Setup import setup_manager
-from tldw_Server_API.app.core.config import load_comprehensive_config
-
 
 _DOWNLOAD_SCHEMES = {"http", "https"}
 _FILENAME_DELIMITERS = {",", os.pathsep}
@@ -41,6 +45,20 @@ _SECRET_QUERY_KEYS = {
     "x-amz-signature",
 }
 _SAFE_JOB_ID_RE = re.compile(r"[^a-zA-Z0-9_.-]+")
+_DEFAULT_DOWNLOAD_TIMEOUT_SECONDS = 60.0
+_DEFAULT_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024 * 1024
+
+ProgressCallback = Callable[[dict[str, Any]], Awaitable[None] | None]
+CancelCheck = Callable[[], bool]
+DownloadStreamFactory = Callable[..., Any]
+
+
+class LlamaCppDownloadCancelled(Exception):
+    """Raised when a llama.cpp acquisition download observes cancellation."""
+
+
+class LlamaCppDownloadError(ServerError):
+    """Retryable download transport failure for llama.cpp acquisition jobs."""
 
 
 @dataclass(frozen=True)
@@ -61,7 +79,7 @@ def validate_download_request(
     payload: LlamaCppAssetDownloadRequest,
     saved_config: dict[str, Any] | None = None,
 ) -> LlamaCppValidatedDownload:
-    """Validate a remote asset download request without performing network I/O."""
+    """Validate a remote asset download request before queueing a download job."""
     config = saved_config if saved_config is not None else _read_saved_config()
     warnings: list[str] = []
     source_url = _validate_source_url(payload.url, config, warnings)
@@ -77,6 +95,36 @@ def validate_download_request(
         expected_size_bytes=payload.expected_size_bytes,
         overwrite=payload.overwrite,
         register_asset=payload.register_asset,
+        warnings=warnings,
+    )
+
+
+def validate_download_payload(
+    payload: dict[str, Any],
+    saved_config: dict[str, Any] | None = None,
+) -> LlamaCppValidatedDownload:
+    """Validate a stored acquisition job payload before the worker downloads it."""
+    if not isinstance(payload, dict):
+        raise ServerError("Invalid llama.cpp acquisition job payload.")
+    config = saved_config if saved_config is not None else _read_saved_config()
+    warnings = _string_list(payload.get("warnings"))
+    source_url = _validate_payload_source_url(str(payload.get("source_url") or ""), config)
+    destination_raw = str(payload.get("destination_path") or "").strip()
+    if not destination_raw:
+        raise ServerError("Download destination path is required.")
+    destination_path = Path(destination_raw).expanduser().resolve()
+    _validate_download_destination_path(destination_path, config)
+    expected_size_bytes = _positive_int_or_none(payload.get("expected_size_bytes"))
+    return LlamaCppValidatedDownload(
+        source_url=source_url,
+        source_label=_sanitize_freeform_label(
+            str(payload.get("source_label") or redacted_source_label(source_url))
+        ),
+        destination_path=destination_path,
+        expected_sha256=_normalize_sha256(_optional_str(payload.get("expected_sha256"))),
+        expected_size_bytes=expected_size_bytes,
+        overwrite=bool(payload.get("overwrite")),
+        register_asset=bool(payload.get("register_asset", True)),
         warnings=warnings,
     )
 
@@ -154,6 +202,78 @@ def register_completed_download(path: Path) -> LlamaCppAsset:
     return LlamaCppAsset.model_validate(llamacpp_inventory_service.register_asset_path(path))
 
 
+async def download_to_partial(
+    validated: LlamaCppValidatedDownload,
+    partial_path: Path,
+    *,
+    progress_callback: ProgressCallback | None = None,
+    cancel_check: CancelCheck | None = None,
+    timeout_seconds: float | None = None,
+    max_bytes: int | None = None,
+    stream_factory: DownloadStreamFactory | None = None,
+) -> int:
+    """Stream a remote asset into a partial file with progress and size bounds."""
+    partial_path.parent.mkdir(parents=True, exist_ok=True)
+    cleanup_partial_if_needed(partial_path)
+    timeout = _coerce_positive_float(timeout_seconds, _download_timeout_seconds())
+    byte_limit = _download_byte_limit(validated.expected_size_bytes, max_bytes=max_bytes)
+    bytes_written = 0
+    total_bytes: int | None = None
+
+    try:
+        stream = await _open_download_stream(
+            validated.source_url,
+            timeout_seconds=timeout,
+            stream_factory=stream_factory,
+        )
+        async with stream:
+            total_bytes = _stream_total_bytes(stream) or validated.expected_size_bytes
+            with partial_path.open("wb") as handle:
+                async for chunk in stream.aiter_bytes():
+                    if _cancel_requested(cancel_check):
+                        raise LlamaCppDownloadCancelled()
+                    if not chunk:
+                        continue
+                    bytes_written += len(chunk)
+                    if byte_limit is not None and bytes_written > byte_limit:
+                        raise ServerError("Downloaded file exceeded the configured maximum size.")
+                    await asyncio.to_thread(handle.write, chunk)
+                    await _emit_progress(
+                        progress_callback,
+                        bytes_downloaded=bytes_written,
+                        total_bytes=total_bytes,
+                    )
+        if _cancel_requested(cancel_check):
+            raise LlamaCppDownloadCancelled()
+        return bytes_written
+    except LlamaCppDownloadCancelled:
+        raise
+    except ServerError:
+        raise
+    except (httpx.HTTPError, OSError, TimeoutError) as exc:
+        raise LlamaCppDownloadError("Download failed while reading remote asset.") from exc
+
+
+def promote_partial_download(partial_path: Path, final_path: Path, *, overwrite: bool = False) -> Path:
+    """Atomically move a validated partial file into its final destination path."""
+    if not partial_path.exists():
+        raise ServerError("Partial download file does not exist.")
+    if final_path.exists() and not overwrite:
+        raise ServerError("Destination file already exists; set overwrite=true to replace it.")
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    partial_path.replace(final_path)
+    return final_path
+
+
+def cleanup_partial_if_needed(partial_path: Path) -> None:
+    """Remove a leftover partial download file if it exists."""
+    try:
+        if partial_path.exists():
+            partial_path.unlink()
+    except OSError:
+        return
+
+
 def _read_saved_config() -> dict[str, Any]:
     parser = load_comprehensive_config()
     section = parser["LlamaCpp"] if parser and parser.has_section("LlamaCpp") else None
@@ -199,6 +319,36 @@ def _validate_source_url(url: str, saved_config: dict[str, Any], warnings: list[
     if _is_local_hostname(host) and not allow_private:
         raise ServerError("Download URL host resolves to a local or private network address.")
     _validate_host_addresses(host, allow_private=allow_private, warnings=warnings)
+    return _normalized_source_url(parsed, port=port)
+
+
+def _validate_payload_source_url(url: str, saved_config: dict[str, Any]) -> str:
+    """Validate a queued download URL without DNS lookups and return its sanitized form."""
+
+    raw_url = str(url or "").strip()
+    if not raw_url:
+        raise ServerError("Download URL is required.")
+    try:
+        parsed = urlsplit(raw_url)
+        port = parsed.port
+    except ValueError as exc:
+        raise ServerError("Download URL is invalid.") from exc
+    scheme = parsed.scheme.lower()
+    if scheme not in _DOWNLOAD_SCHEMES:
+        raise ServerError("Download URL scheme must be http or https.")
+    if not parsed.hostname:
+        raise ServerError("Download URL host is required.")
+    if parsed.username is not None or parsed.password is not None:
+        raise ServerError("Download URL credentials are not supported.")
+    if any(_is_secret_query_key(key) for key, _val in parse_qsl(parsed.query, keep_blank_values=True)):
+        raise ServerError("Download URL contains unsupported sensitive query parameters.")
+    allow_private = bool(_config_bool(saved_config.get("allow_private_downloads")))
+    host = parsed.hostname.strip().lower()
+    if _is_local_hostname(host) and not allow_private:
+        raise ServerError("Download URL host resolves to a local or private network address.")
+    literal = _ip_address_or_none(host)
+    if literal is not None:
+        _reject_private_address(literal, allow_private=allow_private)
     return _normalized_source_url(parsed, port=port)
 
 
@@ -314,6 +464,21 @@ def _validate_destination_dir(destination_dir: Path, saved_config: dict[str, Any
         raise ServerError("Download destination directory is outside allowed llama.cpp paths.")
 
 
+def _validate_download_destination_path(destination: Path, saved_config: dict[str, Any]) -> None:
+    if not destination.name:
+        raise ServerError("Download destination path is required.")
+    if not destination.name.lower().endswith(".gguf"):
+        raise ServerError("Download destination filename must end with .gguf.")
+    _validate_path_value(destination, "Download destination")
+    if not destination.parent.exists():
+        raise ServerError("Download destination directory does not exist.")
+    if not destination.parent.is_dir():
+        raise ServerError("Download destination parent is not a directory.")
+    allowed_bases = _allowed_bases(saved_config)
+    if not allowed_bases or not handler_utils.is_path_allowed(destination, allowed_bases):
+        raise ServerError("Download destination is outside allowed llama.cpp paths.")
+
+
 def _validate_path_value(path: Path, label: str) -> None:
     text = str(path)
     try:
@@ -339,6 +504,31 @@ def _normalize_sha256(value: str | None) -> str | None:
     if len(normalized) != 64 or any(char not in "0123456789abcdef" for char in normalized):
         raise ServerError("expected_sha256 must be a 64-character hexadecimal sha256 digest.")
     return normalized
+
+
+def _positive_int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise ServerError("expected_size_bytes must be a positive integer.") from None
+    if parsed <= 0:
+        raise ServerError("expected_size_bytes must be a positive integer.")
+    return parsed
+
+
+def _optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value]
 
 
 def _sha256_file(path: Path) -> str:
@@ -385,3 +575,136 @@ def _config_bool(value: Any) -> bool:
     if value is None:
         return False
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _download_timeout_seconds() -> float:
+    return _coerce_positive_float(
+        os.getenv("LLAMACPP_ACQUISITION_DOWNLOAD_TIMEOUT_SECONDS"),
+        _DEFAULT_DOWNLOAD_TIMEOUT_SECONDS,
+    )
+
+
+def _download_byte_limit(expected_size_bytes: int | None, *, max_bytes: int | None = None) -> int | None:
+    configured = max_bytes
+    if configured is None:
+        configured = _positive_int_env("LLAMACPP_ACQUISITION_MAX_DOWNLOAD_BYTES")
+    if configured is None:
+        configured = _DEFAULT_MAX_DOWNLOAD_BYTES
+    if expected_size_bytes is not None:
+        return min(int(configured), int(expected_size_bytes))
+    return int(configured) if configured else None
+
+
+def _positive_int_env(name: str) -> int | None:
+    value = os.getenv(name)
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _coerce_positive_float(value: Any, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    return parsed if parsed > 0 else float(default)
+
+
+async def _open_download_stream(
+    url: str,
+    *,
+    timeout_seconds: float,
+    stream_factory: DownloadStreamFactory | None,
+) -> Any:
+    if stream_factory is not None:
+        stream = stream_factory(url, timeout_seconds=timeout_seconds)
+        if inspect.isawaitable(stream):
+            stream = await stream
+        return stream
+    return _HttpxDownloadStream(url, timeout_seconds=timeout_seconds)
+
+
+class _HttpxDownloadStream:
+    def __init__(self, url: str, *, timeout_seconds: float) -> None:
+        self._url = url
+        self._timeout_seconds = timeout_seconds
+        self._client: httpx.AsyncClient | None = None
+        self._response_cm: Any | None = None
+        self._response: httpx.Response | None = None
+        self.total_bytes: int | None = None
+
+    async def __aenter__(self) -> _HttpxDownloadStream:
+        self._client = httpx.AsyncClient(timeout=self._timeout_seconds, follow_redirects=True)
+        self._response_cm = self._client.stream("GET", self._url)
+        self._response = await self._response_cm.__aenter__()
+        self._response.raise_for_status()
+        self.total_bytes = _content_length(self._response.headers.get("content-length"))
+        return self
+
+    async def __aexit__(self, exc_type: object, exc: object, tb: object) -> bool:
+        if self._response_cm is not None:
+            await self._response_cm.__aexit__(exc_type, exc, tb)
+        if self._client is not None:
+            await self._client.aclose()
+        return False
+
+    async def aiter_bytes(self) -> AsyncIterator[bytes]:
+        if self._response is None:
+            raise LlamaCppDownloadError("Download stream was not opened.")
+        async for chunk in self._response.aiter_bytes():
+            yield chunk
+
+
+def _content_length(value: str | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _stream_total_bytes(stream: Any) -> int | None:
+    value = getattr(stream, "total_bytes", None)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _cancel_requested(cancel_check: CancelCheck | None) -> bool:
+    if cancel_check is None:
+        return False
+    try:
+        return bool(cancel_check())
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        return False
+
+
+async def _emit_progress(
+    progress_callback: ProgressCallback | None,
+    *,
+    bytes_downloaded: int,
+    total_bytes: int | None,
+) -> None:
+    if progress_callback is None:
+        return
+    progress_percent = None
+    if total_bytes:
+        progress_percent = min(95.0, max(0.0, (bytes_downloaded / total_bytes) * 95.0))
+    result = progress_callback(
+        {
+            "bytes_downloaded": bytes_downloaded,
+            "total_bytes": total_bytes,
+            "progress_percent": progress_percent,
+            "progress_message": "downloading",
+        }
+    )
+    if inspect.isawaitable(result):
+        await result
