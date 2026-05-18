@@ -701,16 +701,16 @@ test.describe('Smoke Tests - Wayfinding', () => {
       .evaluateAll((elements) => elements.map((element) => element.getAttribute('data-testid')));
 
     expect(controlOrder).toEqual([
-      'not-found-go-chat',
+      'not-found-open-home',
       'not-found-open-research',
       'not-found-open-media',
       'not-found-open-settings',
       'not-found-go-back',
     ]);
 
-    const goChatButton = page.getByTestId('not-found-go-chat');
-    await goChatButton.focus();
-    await expect(goChatButton).toBeFocused();
+    const openHomeButton = page.getByTestId('not-found-open-home');
+    await openHomeButton.focus();
+    await expect(openHomeButton).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(page.getByTestId('not-found-open-research')).toBeFocused();
 

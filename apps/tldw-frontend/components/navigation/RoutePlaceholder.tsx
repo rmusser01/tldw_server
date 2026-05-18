@@ -15,7 +15,7 @@ export const RoutePlaceholder: React.FC<RoutePlaceholderProps> = ({
   description,
   plannedPath,
   primaryCtaHref = '/',
-  primaryCtaLabel = 'Go to Chat',
+  primaryCtaLabel = 'Open Home',
 }) => {
   const router = useRouter();
   const routeLabel = String(router.asPath || '/');

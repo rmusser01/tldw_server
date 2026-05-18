@@ -3,6 +3,8 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RoutePlaceholder } from '@web/components/navigation/RoutePlaceholder';
+import ConfigRedirectPage from '@web/pages/config';
+import ProfileRedirectPage from '@web/pages/profile';
 
 const mockBack = vi.fn();
 const mockRouter = {
@@ -84,6 +86,7 @@ describe('RoutePlaceholder recovery', () => {
     );
 
     expect(screen.getByTestId('route-placeholder-primary')).toHaveAttribute('href', '/');
+    expect(screen.getByTestId('route-placeholder-primary')).toHaveTextContent('Open Home');
     expect(screen.queryByText('Planned route:')).not.toBeInTheDocument();
 
     await user.click(screen.getByTestId('route-placeholder-go-back'));
@@ -134,6 +137,30 @@ describe('RoutePlaceholder recovery', () => {
       'href',
       '/settings/tldw'
     );
+    expect(screen.queryByTestId('route-placeholder-open-settings')).not.toBeInTheDocument();
+  });
+
+  it('profile page names its route context and opens settings as the primary recovery path', () => {
+    mockRouter.asPath = '/profile';
+
+    render(<ProfileRedirectPage />);
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Profile Page Is Coming Soon' })).toBeVisible();
+    expect(screen.getAllByText('/profile')).toHaveLength(2);
+    expect(screen.getByTestId('route-placeholder-primary')).toHaveAttribute('href', '/settings');
+    expect(screen.getByTestId('route-placeholder-primary')).toHaveTextContent('Open Settings');
+    expect(screen.queryByTestId('route-placeholder-open-settings')).not.toBeInTheDocument();
+  });
+
+  it('config page names its route context and opens settings as the primary recovery path', () => {
+    mockRouter.asPath = '/config';
+
+    render(<ConfigRedirectPage />);
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Configuration Center Is Coming Soon' })).toBeVisible();
+    expect(screen.getAllByText('/config')).toHaveLength(2);
+    expect(screen.getByTestId('route-placeholder-primary')).toHaveAttribute('href', '/settings');
+    expect(screen.getByTestId('route-placeholder-primary')).toHaveTextContent('Open Settings');
     expect(screen.queryByTestId('route-placeholder-open-settings')).not.toBeInTheDocument();
   });
 });

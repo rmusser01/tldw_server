@@ -4,7 +4,7 @@ title: Implement WebUI setup and connection flow
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-05-18 04:06'
+updated_date: '2026-05-18 04:09'
 labels:
   - ux
   - webui
@@ -37,7 +37,7 @@ Implement the Task 3 WebUI/extension UX remediation slice for first-run setup, h
 - [x] #3 /setup renders as a setup-only shell with one semantic setup heading and no chat/sidebar chrome.
 - [x] #4 Self-host /login and hosted /login behavior are explicit and covered by tests.
 - [x] #5 Hosted-only OSS placeholders for signup/account/billing/auth recovery routes expose route context and appropriate primary actions instead of defaulting to chat.
-- [ ] #6 /profile, /config, /privileges, and /404 recovery labels/actions are explicit and covered by tests.
+- [x] #6 /profile, /config, /privileges, and /404 recovery labels/actions are explicit and covered by tests.
 - [ ] #7 Browser or Playwright QA evidence is recorded for setup/recovery routes, with environment gaps documented.
 - [ ] #8 No backend auth API changes, broad shell redesign, or route renaming are included.
 - [ ] #9 Focused unit/E2E checks and git diff --check are recorded.
@@ -59,6 +59,8 @@ Task 3 /setup shell: added setup-only shell assertions to OnboardingConnectForm.
 Task 4 login and hosted-only placeholders: added unit coverage for self-host /login redirect/recovery, hosted /login auth form, hosted-only account/billing/signup/auth placeholder pages in self-host and hosted deployment modes, and RoutePlaceholder settings-child CTA suppression. Patched self-host /login to render RouteRedirect to /settings/tldw with preserved query/hash instead of a blank interim page. Added HostedOnlyRoutePlaceholder so OSS hosted-only pages use /settings/tldw + Open Local Auth Settings in self-host mode and /login + Open Login in hosted mode, with plannedPath route context on every owned placeholder. Expanded hosted-placeholder-routes e2e coverage to include magic-link and verify-email and to assert deployment-specific primary CTAs. Verification: bunx vitest run __tests__/navigation/login-page.test.tsx __tests__/navigation/hosted-placeholder-pages.test.tsx __tests__/navigation/route-placeholder-component.test.tsx passed 3 files / 23 tests.
 
 Task 4 additional focused verification: bunx vitest run __tests__/navigation/login-page.test.tsx __tests__/navigation/hosted-placeholder-pages.test.tsx __tests__/navigation/route-placeholder-component.test.tsx __tests__/navigation/route-redirect-component.test.tsx passed 4 files / 28 tests; git diff --check passed for the slice.
+
+Task 5 profile/config/privileges/404 recovery: added page-level coverage for /profile and /config settings recovery, privileges redirect source/destination context, and 404 keyboard/action recovery. Patched /privileges to use route-specific redirect title/description, changed 404 and shared redirect/root fallback labels from chat-specific language to Open Home, and mirrored the 404 home label in the extension route shell. Verification: bunx vitest run __tests__/navigation/login-page.test.tsx __tests__/navigation/hosted-placeholder-pages.test.tsx __tests__/navigation/route-placeholder-component.test.tsx __tests__/navigation/route-redirect-component.test.tsx __tests__/navigation/not-found-page.test.tsx passed 5 files / 34 tests; rg found no remaining WebUI Go to Chat/not-found-go-chat/route-redirect-go-chat recovery strings; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
