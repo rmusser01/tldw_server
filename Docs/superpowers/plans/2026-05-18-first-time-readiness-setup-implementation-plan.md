@@ -168,7 +168,7 @@ git commit -m "feat: add setup readiness profile models"
 - Modify: `tldw_Server_API/app/api/v1/schemas/setup_schemas.py`
 - Test: `tldw_Server_API/tests/Setup/test_setup_readiness_preview.py`
 
-- [ ] **Step 1: Write failing tests for preview safety**
+- [x] **Step 1: Write failing tests for preview safety**
 
 ```python
 from tldw_Server_API.app.core.Setup.readiness_service import preview_readiness_selection
@@ -201,7 +201,7 @@ def test_preview_returns_config_updates_and_install_plan_without_writing(monkeyp
     assert "Qwen/Qwen3-Embedding-0.6B" in preview["install_plan"]["embeddings"]["huggingface"]
 ```
 
-- [ ] **Step 2: Write failing tests for secret and trusted-model rules**
+- [x] **Step 2: Write failing tests for secret and trusted-model rules**
 
 ```python
 def test_preview_never_echoes_hosted_provider_secret():
@@ -238,13 +238,13 @@ def test_trusted_custom_hf_requires_acknowledgement():
     assert preview["lanes"]["embeddings_rag"]["status"] == "blocked"
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_setup_readiness_preview.py -q`
 
 Expected: FAIL with missing service/schema.
 
-- [ ] **Step 4: Implement preview service**
+- [x] **Step 4: Implement preview service**
 
 Implementation responsibilities:
 
@@ -256,13 +256,13 @@ Implementation responsibilities:
 - Mark `restart_required` overlay whenever config updates are non-empty.
 - Include skip consequences for skipped chat or embeddings.
 
-- [ ] **Step 5: Run tests to verify pass**
+- [x] **Step 5: Run tests to verify pass**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_setup_readiness_preview.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Setup/readiness_service.py \

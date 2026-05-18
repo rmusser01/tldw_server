@@ -22,6 +22,35 @@ class ConfigUpdates(BaseModel):
     )
 
 
+class SetupReadinessPreviewRequest(BaseModel):
+    profile_id: str | None = Field(
+        None,
+        description="Curated readiness profile identifier or advanced custom selection.",
+    )
+    lanes: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Lane-specific chat, embeddings/RAG, and speech setup selections.",
+    )
+
+
+class SetupReadinessSecretField(BaseModel):
+    section: str
+    key: str
+    provider: str | None = None
+    state: str
+
+
+class SetupReadinessPreviewResponse(BaseModel):
+    profile_id: str | None = None
+    lane_ids: list[str] = Field(default_factory=list)
+    lanes: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    overlays: list[str] = Field(default_factory=list)
+    config_updates: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    secret_fields: list[SetupReadinessSecretField] = Field(default_factory=list)
+    install_plan: dict[str, Any] = Field(default_factory=dict)
+    operation_required: bool
+
+
 class SetupCompleteRequest(BaseModel):
     disable_first_time_setup: bool | None = Field(
         False,
