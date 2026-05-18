@@ -5,8 +5,23 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { getDesignSystemState } from "@/design-system"
 
+const setupRouteMocks = vi.hoisted(() => ({
+  optionLayout: vi.fn()
+}))
+
 vi.mock("~/components/Layouts/Layout", () => ({
-  default: ({ children }: { children: React.ReactNode }) => <main>{children}</main>
+  default: ({
+    children,
+    hideHeader,
+    hideSidebar
+  }: {
+    children: React.ReactNode
+    hideHeader?: boolean
+    hideSidebar?: boolean
+  }) => {
+    setupRouteMocks.optionLayout({ hideHeader, hideSidebar })
+    return <main data-testid="setup-route-layout">{children}</main>
+  }
 }))
 
 vi.mock("@/components/Option/Onboarding/OnboardingWizard", () => ({
@@ -404,9 +419,10 @@ describe("setup onboarding design-system state wiring", () => {
   afterEach(() => {
     vi.resetModules()
     vi.clearAllMocks()
+    setupRouteMocks.optionLayout.mockClear()
   })
 
-  it("frames setup with the canonical setup-required label and primary action", async () => {
+  it("frames setup in a setup-only shell with one page heading and primary action", async () => {
     const { default: OptionSetup } = await import("@/routes/option-setup")
 
     render(
@@ -415,6 +431,12 @@ describe("setup onboarding design-system state wiring", () => {
       </MemoryRouter>
     )
 
+    expect(setupRouteMocks.optionLayout).toHaveBeenCalledWith({
+      hideHeader: true,
+      hideSidebar: true
+    })
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1)
+    expect(screen.getByRole("heading", { level: 1, name: "Setup Wizard" })).toBeInTheDocument()
     expect(
       screen.getByText(getDesignSystemState("setup_required").label)
     ).toBeInTheDocument()
@@ -426,6 +448,8 @@ describe("setup onboarding design-system state wiring", () => {
     const serverUrlInput = screen.getByTestId("onboarding-server-url")
     fireEvent.click(screen.getByRole("button", { name: "Start setup" }))
     expect(serverUrlInput).toHaveFocus()
+    expect(screen.queryByTestId("chat-header-theme-toggle")).not.toBeInTheDocument()
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument()
   })
 
   it("announces retrying only while the connection test is busy", async () => {

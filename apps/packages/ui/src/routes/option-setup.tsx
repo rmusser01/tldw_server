@@ -13,9 +13,12 @@ const OptionSetup = () => {
 
   return (
     <OptionLayout hideHeader hideSidebar>
+      <div className="mx-auto mb-4 w-full max-w-3xl">
+        <h1 className="text-lg font-semibold text-text">Setup Wizard</h1>
+      </div>
       <SetupRequiredPanel
         className="mx-auto mb-4 w-full max-w-3xl"
-        title="Setup Wizard"
+        title="Connect your server"
         message="Guided connection setup for production use."
         primaryAction={{
           label: "Start setup",
