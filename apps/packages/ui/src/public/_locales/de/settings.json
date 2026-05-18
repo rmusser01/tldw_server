@@ -3367,5 +3367,29 @@
   },
   "generalSettings_settings_chatRichTextStyles_quoteBackgroundColor": {
     "message": "Hintergrundfarbe für Zitate"
+  },
+  "navigation_connect": {
+    "message": "Verbindung"
+  },
+  "navigation_aiModels": {
+    "message": "KI & Modelle"
+  },
+  "navigation_experience": {
+    "message": "Erlebnis"
+  },
+  "navigation_knowledgeWorkspace": {
+    "message": "Wissen & Arbeitsbereich"
+  },
+  "navigation_safetyAdmin": {
+    "message": "Sicherheit & Verwaltung"
+  },
+  "providerKeys_navTitle": {
+    "message": "Anbieter-Schlüssel"
+  },
+  "navigation_dataManagement": {
+    "message": "Datenverwaltung"
+  },
+  "dataManagement_navTitle": {
+    "message": "Datenverwaltung"
   }
 }

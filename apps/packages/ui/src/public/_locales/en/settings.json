@@ -5761,5 +5761,98 @@
   },
   "generalSettings_settings_chatRichTextStyles_quoteBackgroundColor": {
     "message": "Quote background color"
+  },
+  "navigation_connect": {
+    "message": "Connect"
+  },
+  "navigation_aiModels": {
+    "message": "AI & Models"
+  },
+  "navigation_experience": {
+    "message": "Experience"
+  },
+  "navigation_knowledgeWorkspace": {
+    "message": "Knowledge & Workspace"
+  },
+  "navigation_safetyAdmin": {
+    "message": "Safety & Admin"
+  },
+  "audioSourcePicker_defaultMic": {
+    "message": "Default microphone"
+  },
+  "audioSourcePicker_selectLabel": {
+    "message": "Audio input source"
+  },
+  "audioSourcePicker_sourceFallbackActive": {
+    "message": "Source fallback active"
+  },
+  "audioSourcePicker_unavailable": {
+    "message": "Unavailable"
+  },
+  "familyGuardrailsWizardNav": {
+    "message": "Family Guardrails Wizard"
+  },
+  "providerKeys_navTitle": {
+    "message": "Provider Keys"
+  },
+  "familyWizard_title": {
+    "message": "Family Guardrails Wizard"
+  },
+  "familyWizard_subtitle": {
+    "message": "Template-first setup for guardians, dependents, and moderation acceptance tracking."
+  },
+  "familyWizard_steps_householdBasics": {
+    "message": "Household Basics"
+  },
+  "familyWizard_steps_addGuardians": {
+    "message": "Add Guardians"
+  },
+  "familyWizard_steps_addDependents": {
+    "message": "Add Dependents (Accounts)"
+  },
+  "familyWizard_steps_relationshipMapping": {
+    "message": "Relationship Mapping"
+  },
+  "familyWizard_steps_templates": {
+    "message": "Templates + Customization"
+  },
+  "familyWizard_steps_alertPreferences": {
+    "message": "Alert Preferences"
+  },
+  "familyWizard_steps_acceptanceTracker": {
+    "message": "Invite + Acceptance Tracker"
+  },
+  "familyWizard_steps_reviewActivate": {
+    "message": "Review + Activate"
+  },
+  "generalSettings_stt_sourcePreferences_title": {
+    "message": "Audio input source preferences"
+  },
+  "generalSettings_stt_sourcePreferences_description": {
+    "message": "Choose which microphone each speech surface should prefer by default."
+  },
+  "generalSettings_stt_sourcePreferences_dictation": {
+    "message": "Dictation"
+  },
+  "generalSettings_stt_sourcePreferences_liveVoice": {
+    "message": "Live voice"
+  },
+  "generalSettings_stt_sourcePreferences_speechPlayground": {
+    "message": "Speech Playground"
+  },
+  "generalSettings_stt_noModelsAlert": {
+    "message": "No STT models available on your server. Configure a transcription engine to enable speech-to-text."
+  },
+  "navigation_dataManagement": {
+    "message": "Data Management"
+  },
+  "dataManagement_navTitle": {
+    "message": "Data Management"
+  },
+  "dataManagement_title": {
+    "message": "Data Management"
+  },
+  "dataManagement_description": {
+    "message": "Export, import, sync, or reset local extension and WebUI data."
   }
 }

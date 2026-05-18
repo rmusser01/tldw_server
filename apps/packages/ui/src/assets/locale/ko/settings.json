@@ -3,7 +3,13 @@
     "serverAndAuth": "서버 및 인증",
     "knowledgeTools": "지식 도구",
     "workspace": "작업 공간",
-    "about": "정보"
+    "about": "정보",
+    "connect": "연결",
+    "aiModels": "AI 및 모델",
+    "experience": "경험",
+    "knowledgeWorkspace": "지식 및 작업 공간",
+    "safetyAdmin": "안전 및 관리",
+    "dataManagement": "데이터 관리"
   },
   "healthNav": "상태",
   "worldBooksNav": "월드북",
@@ -1662,5 +1668,11 @@
     "subtitle": "빠른 가져오기의 기본값, 프리셋, 동작을 설정합니다."
   },
   "acpPlaygroundNav": "ACP 플레이그라운드",
-  "skillsNav": "스킬"
+  "skillsNav": "스킬",
+  "providerKeys": {
+    "navTitle": "제공자 키"
+  },
+  "dataManagement": {
+    "navTitle": "데이터 관리"
+  }
 }

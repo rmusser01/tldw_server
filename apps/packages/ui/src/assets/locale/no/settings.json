@@ -3,7 +3,13 @@
     "serverAndAuth": "Server og Auth",
     "knowledgeTools": "Kunnskapsverktøy",
     "workspace": "Arbeidsområde",
-    "about": "Om"
+    "about": "Om",
+    "connect": "Tilkobling",
+    "aiModels": "KI og modeller",
+    "experience": "Opplevelse",
+    "knowledgeWorkspace": "Kunnskap og arbeidsområde",
+    "safetyAdmin": "Sikkerhet og administrasjon",
+    "dataManagement": "Dataadministrasjon"
   },
   "healthNav": "Helse",
   "worldBooksNav": "Verdensbøker",
@@ -1660,5 +1666,11 @@
     "subtitle": "Konfigurer standardverdier, forhåndsinnstillinger og oppførsel for hurtig import."
   },
   "acpPlaygroundNav": "ACP-lekeplass",
-  "skillsNav": "Ferdigheter"
+  "skillsNav": "Ferdigheter",
+  "providerKeys": {
+    "navTitle": "Leverandørnøkler"
+  },
+  "dataManagement": {
+    "navTitle": "Dataadministrasjon"
+  }
 }

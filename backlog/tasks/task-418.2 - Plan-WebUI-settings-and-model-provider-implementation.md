@@ -4,7 +4,7 @@ title: Plan WebUI settings and model provider implementation
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-17 18:46'
+updated_date: '2026-05-18 18:03'
 labels:
   - ux
   - design
@@ -52,14 +52,14 @@ Documentation-only child implementation plan for the approved WebUI/extension UX
 - The plan preserves ProviderKeysSettings, ModelsBody, AvailableModelsList, ModelSettings, SettingsLayout, and the existing route registry patterns.
 - Verification run for this planning artifact: placeholder-language scan exited 1 with no output; ASCII/trailing-whitespace scan exited 1 with no output; git diff check exited 0; Node coverage check confirmed required route, finding, file, and test tokens are present.
 - Bandit was not run because this task changed only Markdown planning and Backlog task files.
+
+Implementation follow-through recorded 2026-05-18: child task TASK-418.14 completed the settings/model-provider implementation slice from this plan in branch codex/webui-settings-models. Scope included task-led settings grouping, Provider Keys label repair, Data Management separation, configured-first /settings/model orientation, prompt route-intent browser guards, focused Vitest settings/model tests, settings Playwright workflow tests, and WP4 responsive landmark verification. Full apps/packages/ui TypeScript remains blocked by pre-existing repo-wide baseline debt outside this slice.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Completed the documentation-only child implementation plan for WP5 settings and model/provider remediation. The plan defines route scope, settings grouping, provider-key label repair, configured-first model UX, destructive-action separation, tests, and browser QA gates without changing product code.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
