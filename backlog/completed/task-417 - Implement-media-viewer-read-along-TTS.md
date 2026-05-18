@@ -1,7 +1,7 @@
 ---
 id: TASK-417
 title: Implement media viewer read-along TTS
-status: In Progress
+status: Done
 labels:
 - implementation
 - webui
@@ -12,12 +12,16 @@ references:
 - Docs/superpowers/specs/2026-05-17-media-viewer-read-along-tts-design.md
 - Docs/superpowers/plans/2026-05-17-media-viewer-read-along-tts-implementation-plan.md
 modified_files:
-- apps/packages/ui/src/services/elevenlabs.ts
-- apps/packages/ui/src/services/__tests__/elevenlabs.test.ts
 - apps/packages/ui/src/services/tts-provider.ts
 - apps/packages/ui/src/services/__tests__/tts-provider.read-along.test.ts
+- apps/packages/ui/src/components/Media/read-along/media-read-along-segments.ts
+- apps/packages/ui/src/components/Media/read-along/__tests__/media-read-along-segments.test.ts
+- apps/packages/ui/src/components/Media/read-along/media-read-along-cache-key.ts
+- apps/packages/ui/src/components/Media/read-along/__tests__/media-read-along-cache-key.test.ts
 - apps/packages/ui/src/components/Media/read-along/media-read-along-cache.ts
 - apps/packages/ui/src/components/Media/read-along/__tests__/media-read-along-cache.test.ts
+- apps/packages/ui/src/components/Media/read-along/useContentSelectionActions.ts
+- apps/packages/ui/src/components/Media/read-along/__tests__/useContentSelectionActions.test.tsx
 - apps/packages/ui/src/components/Media/read-along/useMediaReadAlongSession.ts
 - apps/packages/ui/src/components/Media/read-along/__tests__/useMediaReadAlongSession.test.tsx
 - apps/packages/ui/src/components/Media/read-along/MediaReadAlongPopover.tsx
@@ -25,6 +29,7 @@ modified_files:
 - apps/packages/ui/src/components/Media/ContentViewer.tsx
 - apps/packages/ui/src/components/Media/hooks/useTranscriptDisplay.tsx
 - apps/packages/ui/src/components/Media/__tests__/ContentViewer.read-along.test.tsx
+- apps/packages/ui/src/components/Media/__tests__/ContentViewer.stage14.annotations.test.tsx
 - apps/packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx
 - apps/packages/ui/src/routes/__tests__/option-media-route-guards.test.tsx
 - apps/tldw-frontend/__tests__/extension/entry-shell-performance.test.ts
@@ -150,7 +155,7 @@ Task 6 review findings fixed:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented shared WebUI/extension media-viewer read-along TTS. The feature adds selectable read-along scopes, explicit annotation mediation, TTS-provider reuse including browser SpeechSynthesis, generated-audio caching, cancellation/race hardening, active segment rendering, route parity coverage, accessibility coverage, and browser-discovered selection/viewport hardening. Final verification recorded: focused read-along Vitest suite passed (12 files, 104 tests), route parity/connection suite passed (2 files, 6 tests), browser render smoke passed, and git diff --check passed. OpenAPI passed earlier in Task 8; design-system verification remains blocked by unrelated baseline findings outside the touched read-along files; Bandit skipped because no Python files were touched.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
