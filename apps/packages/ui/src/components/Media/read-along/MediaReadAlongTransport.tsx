@@ -39,10 +39,9 @@ const clamp = (value: number, min: number, max: number): number =>
   Math.max(min, Math.min(value, max))
 
 const getViewportRect = (viewportRect?: DOMRect | null): DOMRect => {
-  if (viewportRect) return viewportRect
   const width = typeof window !== 'undefined' ? window.innerWidth : 1024
   const height = typeof window !== 'undefined' ? window.innerHeight : 768
-  return {
+  const windowViewport = {
     x: 0,
     y: 0,
     left: 0,
@@ -51,6 +50,27 @@ const getViewportRect = (viewportRect?: DOMRect | null): DOMRect => {
     height,
     right: width,
     bottom: height,
+    toJSON: () => ({})
+  } as DOMRect
+  if (!viewportRect) return windowViewport
+
+  const left = Math.max(windowViewport.left, viewportRect.left)
+  const top = Math.max(windowViewport.top, viewportRect.top)
+  const right = Math.min(windowViewport.right, viewportRect.right)
+  const bottom = Math.min(windowViewport.bottom, viewportRect.bottom)
+  if (right - left <= EDGE_MARGIN_PX * 2 || bottom - top <= EDGE_MARGIN_PX * 2) {
+    return windowViewport
+  }
+
+  return {
+    x: left,
+    y: top,
+    left,
+    top,
+    width: right - left,
+    height: bottom - top,
+    right,
+    bottom,
     toJSON: () => ({})
   } as DOMRect
 }

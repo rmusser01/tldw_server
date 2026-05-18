@@ -1,5 +1,5 @@
 import React from 'react'
-import { act, renderHook } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useContentSelectionActions } from '../useContentSelectionActions'
@@ -147,7 +147,34 @@ describe('useContentSelectionActions', () => {
     expect(result.current.selectionActionState?.endSegmentId).toBeUndefined()
   })
 
-  it('clears open selection actions when the document selection is cleared', () => {
+  it('opens selection actions from document selectionchange before explicit mouseup', async () => {
+    const contentBody = document.createElement('div')
+    contentBody.textContent = 'Selectionchange selected text'
+    document.body.append(contentBody)
+    setSelectionRange(contentBody.firstChild as Text, 0, contentBody.firstChild as Text, 15)
+
+    const ref = { current: contentBody } as React.RefObject<HTMLDivElement | null>
+    const { result } = renderHook(() =>
+      useContentSelectionActions({
+        contentBodyRef: ref,
+        contentIdentityKey: 'media:777:plain:a',
+        onApplyAnnotationSelection: vi.fn()
+      })
+    )
+
+    act(() => {
+      document.dispatchEvent(new Event('selectionchange'))
+    })
+
+    await waitFor(() => {
+      expect(result.current.selectionActionState).toMatchObject({
+        selectedText: 'Selectionchange',
+        mappingConfidence: 'text-only'
+      })
+    })
+  })
+
+  it('clears open selection actions when the document selection is cleared', async () => {
     const onApplyAnnotationSelection = vi.fn()
     const contentBody = document.createElement('div')
     contentBody.textContent = 'Clearable selected text'
@@ -173,7 +200,9 @@ describe('useContentSelectionActions', () => {
       document.dispatchEvent(new Event('selectionchange'))
     })
 
-    expect(result.current.selectionActionState).toBeNull()
+    await waitFor(() => {
+      expect(result.current.selectionActionState).toBeNull()
+    })
 
     act(() => {
       result.current.applyAnnotationSelection()

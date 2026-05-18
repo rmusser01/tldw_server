@@ -1320,7 +1320,7 @@ export function ContentViewer({
                 ) : null}
                 <div
                   ref={contentBodyRef}
-                  className={`text-sm text-text leading-relaxed ${
+                  className={`select-text text-sm text-text leading-relaxed ${
                     !modals.contentExpanded && shouldShowExpandToggle ? 'max-h-64 overflow-hidden relative' : ''
                   }`}
                   tabIndex={0}

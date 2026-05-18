@@ -609,6 +609,48 @@ describe('ContentViewer read-along integration', () => {
     )
   })
 
+  it('falls back to the visible window when the provided viewport is offscreen', () => {
+    render(
+      <>
+        <MediaReadAlongPopover
+          anchorRect={makeRect({ left: 1280, top: 40, width: 40, height: 18 })}
+          viewportRect={makeRect({ left: 1200, top: 20, width: 320, height: 300 })}
+          onReadScope={vi.fn()}
+          onAnnotate={vi.fn()}
+          t={t}
+        />
+        <MediaReadAlongTransport
+          state={{
+            status: 'playing',
+            scope: 'selection',
+            activeSegmentId: 'segment-1',
+            activeIndex: 0,
+            totalSegments: 3,
+            error: null,
+            cacheDisabled: false
+          }}
+          anchorRect={makeRect({ left: 1280, top: 100, width: 40, height: 20 })}
+          viewportRect={makeRect({ left: 1200, top: 20, width: 320, height: 300 })}
+          onToggle={vi.fn()}
+          onStop={vi.fn()}
+          onRetry={vi.fn()}
+          onSkip={vi.fn()}
+          t={t}
+        />
+      </>
+    )
+
+    const popoverLeft = Number(
+      screen.getByTestId('media-selection-actions-popover').style.left.replace('px', '')
+    )
+    const transportLeft = Number(
+      screen.getByTestId('media-read-along-transport').style.left.replace('px', '')
+    )
+
+    expect(popoverLeft).toBeLessThan(1000)
+    expect(transportLeft).toBeLessThan(1000)
+  })
+
   it('starts reading a selection and keeps the inline transport visible after selection clears', async () => {
     renderViewer()
 

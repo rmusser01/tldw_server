@@ -79,9 +79,11 @@ export const useContentSelectionActions = ({
   ])
 
   useEffect(() => {
-    if (!selectionActionState || typeof document === 'undefined') return
+    if (typeof document === 'undefined' || typeof window === 'undefined') return
 
-    const handleSelectionChange = () => {
+    let selectionChangeTimer: number | null = null
+    const updateSelectionFromDocument = () => {
+      selectionChangeTimer = null
       const selection = getContentSelectionFromDom(contentBodyRef.current)
       if (!selection) {
         clearSelectionActions()
@@ -89,12 +91,21 @@ export const useContentSelectionActions = ({
       }
       setSelectionActionState(toActionState(selection, contentIdentityKey))
     }
+    const handleSelectionChange = () => {
+      if (selectionChangeTimer != null) {
+        window.clearTimeout(selectionChangeTimer)
+      }
+      selectionChangeTimer = window.setTimeout(updateSelectionFromDocument, 0)
+    }
 
     document.addEventListener('selectionchange', handleSelectionChange)
     return () => {
+      if (selectionChangeTimer != null) {
+        window.clearTimeout(selectionChangeTimer)
+      }
       document.removeEventListener('selectionchange', handleSelectionChange)
     }
-  }, [clearSelectionActions, contentBodyRef, contentIdentityKey, selectionActionState])
+  }, [clearSelectionActions, contentBodyRef, contentIdentityKey])
 
   useEffect(() => {
     if (
