@@ -4,7 +4,7 @@ title: Implement WebUI setup and connection flow
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-05-18 03:55'
+updated_date: '2026-05-18 03:57'
 labels:
   - ux
   - webui
@@ -33,7 +33,7 @@ Implement the Task 3 WebUI/extension UX remediation slice for first-run setup, h
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Connection UX state matrix is locked with focused tests or documented as already covered.
-- [ ] #2 / route behavior is explicit for hosted, first-run incomplete, character-chat intent, first-run complete, and degraded states.
+- [x] #2 / route behavior is explicit for hosted, first-run incomplete, character-chat intent, first-run complete, and degraded states.
 - [ ] #3 /setup renders as a setup-only shell with one semantic setup heading and no chat/sidebar chrome.
 - [ ] #4 Self-host /login and hosted /login behavior are explicit and covered by tests.
 - [ ] #5 Hosted-only OSS placeholders for signup/account/billing/auth recovery routes expose route context and appropriate primary actions instead of defaulting to chat.
@@ -51,14 +51,16 @@ Implement the Task 3 WebUI/extension UX remediation slice for first-run setup, h
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Task 1 connection state matrix: baseline focused tests passed after installing UI dependencies in the clean worktree. Added pure deriveConnectionUxState matrix coverage in src/types/__tests__/connection.test.ts while preserving existing store-side onboarding action coverage in src/store/__tests__/connection.test.ts. Verification: bunx vitest run src/types/__tests__/connection.test.ts src/store/__tests__/connection.test.ts passed 2 files / 27 tests.
+
+Task 2 / resolver behavior: added src/routes/__tests__/option-index.setup-flow.test.tsx to lock hosted home, first-run onboarding, character-chat return intent, completed-first-run companion home, automatic beginOnboarding for unconfigured first-run users, and checkOnce refresh for completed users. Existing option-index implementation satisfied the matrix, so no product route code changed. Verification: bunx vitest run src/routes/__tests__/option-index.setup-flow.test.tsx src/routes/__tests__/core-route-identity.test.tsx passed 2 files / 13 tests.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
