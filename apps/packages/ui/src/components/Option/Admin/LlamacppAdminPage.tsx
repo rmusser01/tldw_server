@@ -124,6 +124,7 @@ export const LlamacppAdminPage: React.FC = () => {
   const initialLoadRef = React.useRef(false)
   const presetFileInputRef = React.useRef<HTMLInputElement | null>(null)
   const refreshedDownloadJobIdsRef = React.useRef<Set<string>>(new Set())
+  const downloadsInitializedRef = React.useRef(false)
 
   const [config, setConfig] = React.useState<LlamacppConfigResponse | null>(null)
   const [status, setStatus] = React.useState<LlamacppStatus | null>(null)
@@ -232,17 +233,19 @@ export const LlamacppAdminPage: React.FC = () => {
     }
   }, [markAdminGuardFromError])
 
-  const loadAssets = React.useCallback(async () => {
+  const loadAssets = React.useCallback(async (): Promise<boolean> => {
     try {
       setLoadingAssets(true)
       setAssetError(null)
       const data = await tldwClient.getLlamacppAssets()
       setAssets(data)
+      return true
     } catch (error: unknown) {
       setAssets(null)
       setAssetError(
         sanitizeAdminErrorMessage(error, "Failed to load Llama.cpp assets.")
       )
+      return false
     } finally {
       setLoadingAssets(false)
     }
@@ -265,6 +268,7 @@ export const LlamacppAdminPage: React.FC = () => {
   const loadAssetDownloads = React.useCallback(async () => {
     try {
       setLoadingAssetDownloads(true)
+      setAssetError(null)
       const data = await tldwClient.listLlamacppAssetDownloads()
       setAssetDownloads(data)
       const completedJobs = (data.jobs || []).filter((job) =>
@@ -274,12 +278,22 @@ export const LlamacppAdminPage: React.FC = () => {
         (job) => !refreshedDownloadJobIdsRef.current.has(job.job_id)
       )
       if (newlyCompleted.length > 0) {
-        newlyCompleted.forEach((job) => {
-          refreshedDownloadJobIdsRef.current.add(job.job_id)
-        })
-        await loadAssets()
+        if (downloadsInitializedRef.current) {
+          const refreshed = await loadAssets()
+          if (refreshed) {
+            newlyCompleted.forEach((job) => {
+              refreshedDownloadJobIdsRef.current.add(job.job_id)
+            })
+          }
+        } else {
+          newlyCompleted.forEach((job) => {
+            refreshedDownloadJobIdsRef.current.add(job.job_id)
+          })
+        }
       }
+      downloadsInitializedRef.current = true
     } catch (error: unknown) {
+      downloadsInitializedRef.current = true
       setAssetError(
         sanitizeAdminErrorMessage(error, "Failed to load Llama.cpp asset downloads.")
       )
@@ -844,6 +858,7 @@ export const LlamacppAdminPage: React.FC = () => {
               error={assetError}
               onRegisterPath={handleRegisterAssetPath}
               onPreviewImportFolder={handlePreviewAssetFolder}
+              onClearImportPreview={() => setAssetImportPreview(null)}
               onImportFolder={handleImportAssetFolder}
               onStartDownload={handleStartAssetDownload}
               onCancelDownload={handleCancelAssetDownload}

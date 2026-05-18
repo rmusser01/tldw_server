@@ -15,6 +15,12 @@ references:
 - https://github.com/rmusser01/tldw_server/pull/1836
 documentation:
 - Docs/superpowers/plans/2026-05-16-llamacpp-model-acquisition-import-workflows-plan.md
+- 'PR #1836 review thread sweep: verifying and fixing current review findings for
+  acquisition workflow UI.'
+- 'PR #1836 review fix verification: focused Vitest passed 33 tests; git diff --check
+  passed; broad bunx tsc remains blocked by pre-existing repo-wide TypeScript baseline
+  outside this touched slice; Bandit not run because review fix touches only TypeScript/TSX
+  and Backlog metadata.'
 parent_task_id: TASK-416
 priority: high
 modified_files:
@@ -57,7 +63,7 @@ Added llama.cpp acquisition API client types and methods, converted Admin asset 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the llama.cpp acquisition workflow UI for Admin assets: local folder preview/confirm import, remote download queue/status/cancel, API client routing, focused regression coverage, and PR https://github.com/rmusser01/tldw_server/pull/1836.
+Implemented the llama.cpp acquisition workflow UI and addressed PR #1836 review feedback: preview confirmations now require the current previewed folder, stale previews are cleared on input changes, completed download refreshes avoid redundant initial scans and retry after failed asset refreshes, download-list errors clear after successful reloads, and duplicate warning strings render with unique keys.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

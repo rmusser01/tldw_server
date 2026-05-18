@@ -437,6 +437,21 @@ const mockRuntimes = {
   ]
 }
 
+const completedDownloadJob = {
+  job_id: "99",
+  status: "completed",
+  operation: "download",
+  queue: "acquisition",
+  source_label: "Done model",
+  destination_path: "/srv/models/done.gguf",
+  asset_id: "gguf:done",
+  progress: {
+    progress_percent: 100
+  },
+  warnings: [],
+  error_message: null
+}
+
 describe("LlamacppAdminPage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -895,24 +910,9 @@ describe("LlamacppAdminPage", () => {
     expect(apiMock.useLlamacppInChat).not.toHaveBeenCalled()
   })
 
-  it("refreshes assets when a download completes without profile side effects", async () => {
+  it("does not duplicate asset scans for completed downloads during initial load", async () => {
     apiMock.listLlamacppAssetDownloads.mockResolvedValueOnce({
-      jobs: [
-        {
-          job_id: "99",
-          status: "completed",
-          operation: "download",
-          queue: "acquisition",
-          source_label: "Done model",
-          destination_path: "/srv/models/done.gguf",
-          asset_id: "gguf:done",
-          progress: {
-            progress_percent: 100
-          },
-          warnings: [],
-          error_message: null
-        }
-      ]
+      jobs: [completedDownloadJob]
     })
 
     render(<LlamacppAdminPage />)
@@ -920,11 +920,100 @@ describe("LlamacppAdminPage", () => {
     expect(await screen.findByText("Done model")).toBeTruthy()
 
     await waitFor(() => {
-      expect(apiMock.getLlamacppAssets).toHaveBeenCalledTimes(2)
+      expect(apiMock.getLlamacppAssets).toHaveBeenCalledTimes(1)
     })
     expect(apiMock.createLlamacppProfile).not.toHaveBeenCalled()
     expect(apiMock.startLlamacppProfile).not.toHaveBeenCalled()
     expect(apiMock.useLlamacppInChat).not.toHaveBeenCalled()
+  })
+
+  it("refreshes assets when a download completes after initial load without profile side effects", async () => {
+    render(<LlamacppAdminPage />)
+
+    expect(await screen.findByText("Assets")).toBeTruthy()
+
+    await waitFor(() => {
+      expect(apiMock.listLlamacppAssetDownloads).toHaveBeenCalledTimes(1)
+    })
+
+    apiMock.getLlamacppAssets.mockClear()
+    apiMock.listLlamacppAssetDownloads.mockResolvedValueOnce({
+      jobs: [completedDownloadJob]
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: /Refresh downloads/ }))
+
+    await waitFor(() => {
+      expect(apiMock.getLlamacppAssets).toHaveBeenCalledTimes(1)
+    })
+    expect(apiMock.createLlamacppProfile).not.toHaveBeenCalled()
+    expect(apiMock.startLlamacppProfile).not.toHaveBeenCalled()
+    expect(apiMock.useLlamacppInChat).not.toHaveBeenCalled()
+  })
+
+  it("retries asset refresh for completed downloads after a failed refresh", async () => {
+    render(<LlamacppAdminPage />)
+
+    expect(await screen.findByText("Assets")).toBeTruthy()
+
+    await waitFor(() => {
+      expect(apiMock.listLlamacppAssetDownloads).toHaveBeenCalledTimes(1)
+    })
+
+    apiMock.getLlamacppAssets.mockClear()
+    apiMock.getLlamacppAssets
+      .mockRejectedValueOnce(new Error("asset refresh failed"))
+      .mockResolvedValue(mockAssets)
+    apiMock.listLlamacppAssetDownloads.mockResolvedValueOnce({
+      jobs: [completedDownloadJob]
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: /Refresh downloads/ }))
+
+    expect(await screen.findByText("asset refresh failed")).toBeTruthy()
+    expect(apiMock.getLlamacppAssets).toHaveBeenCalledTimes(1)
+
+    apiMock.listLlamacppAssetDownloads.mockResolvedValueOnce({
+      jobs: [completedDownloadJob]
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: /Refresh downloads/ }))
+
+    await waitFor(() => {
+      expect(apiMock.getLlamacppAssets).toHaveBeenCalledTimes(2)
+    })
+    await waitFor(() => {
+      expect(screen.queryByText("asset refresh failed")).toBeNull()
+    })
+  })
+
+  it("clears a stale download-list error after a successful downloads refresh", async () => {
+    render(<LlamacppAdminPage />)
+
+    expect(await screen.findByText("Assets")).toBeTruthy()
+
+    await waitFor(() => {
+      expect(apiMock.listLlamacppAssetDownloads).toHaveBeenCalledTimes(1)
+    })
+
+    apiMock.listLlamacppAssetDownloads.mockRejectedValueOnce(
+      new Error("download list failed")
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Refresh downloads/ }))
+
+    expect(await screen.findByText("download list failed")).toBeTruthy()
+
+    apiMock.listLlamacppAssetDownloads.mockResolvedValueOnce({ jobs: [] })
+
+    fireEvent.click(screen.getByRole("button", { name: /Refresh downloads/ }))
+
+    await waitFor(() => {
+      expect(apiMock.listLlamacppAssetDownloads).toHaveBeenCalledTimes(3)
+    })
+    await waitFor(() => {
+      expect(screen.queryByText("download list failed")).toBeNull()
+    })
   })
 
   it("shows asset load failure without hiding legacy inventory", async () => {

@@ -33,6 +33,7 @@ interface LlamacppAssetsPanelProps {
   onRegisterPath: (path: string) => boolean | Promise<boolean>
   onImportFolder: (path: string) => boolean | Promise<boolean>
   onPreviewImportFolder?: (path: string) => boolean | Promise<boolean>
+  onClearImportPreview?: () => void
   onStartDownload?: (payload: LlamacppAssetDownloadRequest) => boolean | Promise<boolean>
   onCancelDownload?: (jobId: string) => boolean | Promise<boolean>
   onReloadDownloads?: () => void
@@ -150,6 +151,7 @@ export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
   onRegisterPath,
   onImportFolder,
   onPreviewImportFolder,
+  onClearImportPreview,
   onStartDownload,
   onCancelDownload,
   onReloadDownloads,
@@ -166,6 +168,13 @@ export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
   const downloadJobs = downloads?.jobs || []
   const showDownloadWorkflow = Boolean(onStartDownload) || downloadJobs.length > 0
   const importUsesPreview = Boolean(onPreviewImportFolder)
+  const trimmedFolderPath = folderPath.trim()
+  const previewMatchesCurrentFolder =
+    importUsesPreview &&
+    Boolean(importPreview) &&
+    Boolean(previewedFolderPath) &&
+    trimmedFolderPath === previewedFolderPath &&
+    importPreview?.folder.path === previewedFolderPath
 
   const handleRegisterPath = async () => {
     const trimmed = assetPath.trim()
@@ -187,7 +196,7 @@ export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
 
   const handleImportFolder = async () => {
     const trimmed = importUsesPreview
-      ? previewedFolderPath || folderPath.trim()
+      ? previewedFolderPath
       : folderPath.trim()
     if (!trimmed) return
     const imported = await onImportFolder(trimmed)
@@ -257,7 +266,10 @@ export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
             value={folderPath}
             onChange={(event) => {
               setFolderPath(event.target.value)
-              setPreviewedFolderPath("")
+              if (importUsesPreview) {
+                setPreviewedFolderPath("")
+                onClearImportPreview?.()
+              }
             }}
             placeholder="/absolute/path/to/model-folder"
             disabled={importingFolder || previewingFolder}
@@ -281,7 +293,7 @@ export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
           )}
         </Space.Compact>
 
-        {importUsesPreview && importPreview && (
+        {previewMatchesCurrentFolder && importPreview && (
           <section aria-label="Import preview">
             <Space orientation="vertical" size="small" className="w-full">
               <Space wrap size="small">
@@ -296,9 +308,9 @@ export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
                 ))}
                 {importPreview.scan_limited && <Tag color="orange">scan limited</Tag>}
               </Space>
-              {importPreview.warnings.map((warning) => (
+              {importPreview.warnings.map((warning, index) => (
                 <DesignSystemAlert
-                  key={warning}
+                  key={`import-preview-warning-${index}`}
                   variant="warning"
                   {...passiveAlertProps}
                   title={warning}
@@ -308,7 +320,7 @@ export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
                 size="small"
                 onClick={handleImportFolder}
                 loading={importingFolder}
-                disabled={!previewedFolderPath && !folderPath.trim()}
+                disabled={!previewedFolderPath || trimmedFolderPath !== previewedFolderPath}
               >
                 Confirm import
               </Button>
@@ -410,9 +422,9 @@ export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
                               title={job.error_message}
                             />
                           )}
-                          {job.warnings.map((warning) => (
+                          {job.warnings.map((warning, index) => (
                             <DesignSystemAlert
-                              key={warning}
+                              key={`${job.job_id}-warning-${index}`}
                               variant="warning"
                               {...passiveAlertProps}
                               title={warning}
@@ -428,9 +440,9 @@ export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
           </section>
         )}
 
-        {assets?.warnings.map((warning) => (
+        {assets?.warnings.map((warning, index) => (
           <DesignSystemAlert
-            key={warning}
+            key={`assets-warning-${index}`}
             variant="warning"
             {...passiveAlertProps}
             title={warning}
@@ -478,8 +490,8 @@ export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
                           <CandidateLabels asset={asset} />
                           {asset.warnings.length > 0 && (
                             <Space wrap size="small">
-                              {asset.warnings.map((warning) => (
-                                <Tag key={warning} color="orange">
+                              {asset.warnings.map((warning, index) => (
+                                <Tag key={`${asset.asset_id}-warning-${index}`} color="orange">
                                   {warning}
                                 </Tag>
                               ))}

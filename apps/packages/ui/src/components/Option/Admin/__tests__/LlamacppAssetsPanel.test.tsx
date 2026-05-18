@@ -255,6 +255,88 @@ describe("LlamacppAssetsPanel", () => {
     })
   })
 
+  it("clears stale import previews when the folder path changes", async () => {
+    const onClearImportPreview = vi.fn()
+    const onPreviewImportFolder = vi.fn().mockResolvedValue(true)
+    const onImportFolder = vi.fn().mockResolvedValue(true)
+
+    render(
+      <LlamacppAssetsPanel
+        assets={{ assets: [], warnings: [], scan_limited: false }}
+        loading={false}
+        registeringPath={false}
+        importingFolder={false}
+        previewingFolder={false}
+        importPreview={mockImportPreview}
+        error={null}
+        onRegisterPath={vi.fn()}
+        onPreviewImportFolder={onPreviewImportFolder}
+        onClearImportPreview={onClearImportPreview}
+        onImportFolder={onImportFolder}
+        onReload={vi.fn()}
+      />
+    )
+
+    fireEvent.change(screen.getByLabelText("Import local asset folder"), {
+      target: { value: "/external/other-models" }
+    })
+
+    expect(onClearImportPreview).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText("Import preview")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Confirm import" })).toBeNull()
+    expect(onImportFolder).not.toHaveBeenCalled()
+  })
+
+  it("renders duplicate warning strings without React key collisions", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    try {
+      render(
+        <LlamacppAssetsPanel
+          assets={{
+            ...mockAssets,
+            warnings: ["Repeated warning.", "Repeated warning."],
+            assets: [
+              {
+                ...mockAssets.assets[0]!,
+                warnings: ["Repeated asset warning.", "Repeated asset warning."]
+              }
+            ]
+          }}
+          loading={false}
+          registeringPath={false}
+          importingFolder={false}
+          previewingFolder={false}
+          importPreview={{
+            ...mockImportPreview,
+            warnings: ["Repeated preview warning.", "Repeated preview warning."]
+          }}
+          downloads={{
+            jobs: [
+              {
+                ...mockDownloads.jobs[0]!,
+                warnings: ["Repeated job warning.", "Repeated job warning."]
+              }
+            ]
+          }}
+          error={null}
+          onRegisterPath={vi.fn()}
+          onPreviewImportFolder={vi.fn()}
+          onImportFolder={vi.fn()}
+          onStartDownload={vi.fn()}
+          onReload={vi.fn()}
+        />
+      )
+
+      const duplicateKeyWarnings = consoleError.mock.calls.filter((call) =>
+        String(call[0]).includes("Encountered two children with the same key")
+      )
+      expect(duplicateKeyWarnings).toHaveLength(0)
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
   it("queues downloads and renders cancellable acquisition status", async () => {
     const onStartDownload =
       vi.fn<(payload: LlamacppAssetDownloadRequest) => Promise<boolean>>()
