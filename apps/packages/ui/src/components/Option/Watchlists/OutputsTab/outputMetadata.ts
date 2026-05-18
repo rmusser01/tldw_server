@@ -5,7 +5,8 @@ import type {
   WatchlistReportReadiness,
   WatchlistReportReadinessState,
   WatchlistReportReadinessWarning,
-  WatchlistReportReadinessWarningSeverity
+  WatchlistReportReadinessWarningSeverity,
+  WatchlistRunAudioStatus
 } from "@/types/watchlists"
 
 export interface DeliveryStatusSummary {
@@ -17,6 +18,28 @@ export interface DeliveryStatusSummary {
 export interface DeliveryDisclosureSummary {
   visible: DeliveryStatusSummary[]
   hidden: DeliveryStatusSummary[]
+}
+
+export interface AudioArtifactSummary {
+  label: string
+  uri?: string
+  displayName?: string
+  downloadUrl?: string
+  mimeType?: string
+  speakerId?: string
+}
+
+export interface AudioStatusSummary {
+  requested: boolean
+  status: string
+  statusLabel: string
+  statusColor: string
+  fallbackReason?: string
+  error?: string
+  downloadUrl?: string
+  scriptArtifact?: AudioArtifactSummary
+  speakerArtifacts: AudioArtifactSummary[]
+  finalArtifact?: AudioArtifactSummary
 }
 
 const AUDIO_OUTPUT_FORMATS = new Set(["mp3", "wav", "ogg", "m4a", "aac", "flac", "opus"])
@@ -56,6 +79,26 @@ const asNonEmptyString = (value: unknown): string | undefined => {
   if (typeof value !== "string") return undefined
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : undefined
+}
+
+const asSafeDownloadUrl = (value: unknown): string | undefined => {
+  const url = asNonEmptyString(value)
+  if (!url) return undefined
+  const lower = url.toLowerCase()
+  if (url.startsWith("/api/") || lower.startsWith("https://") || lower.startsWith("http://")) {
+    return url
+  }
+  return undefined
+}
+
+const getArtifactLocationDisplayName = (value: unknown): string | undefined => {
+  const location = asNonEmptyString(value)
+  if (!location) return undefined
+  const withoutFragment = location.split("#", 1)[0]
+  const withoutQuery = withoutFragment.split("?", 1)[0]
+  const withoutScheme = withoutQuery.replace(/^file:\/+/i, "")
+  const segments = withoutScheme.split(/[\\/]+/).filter(Boolean)
+  return segments.length > 0 ? segments[segments.length - 1] : undefined
 }
 
 const asPositiveInteger = (value: unknown): number | undefined => {
@@ -352,6 +395,156 @@ export const getDeliveryStatusLabel = (status: string): string => {
   if (normalized === "failed") return "Failed"
   if (normalized === "error") return "Error"
   return status
+}
+
+export const getAudioStatusColor = (status: string): string => {
+  const normalized = status.trim().toLowerCase()
+  if (normalized === "completed" || normalized === "ready") return "green"
+  if (normalized === "fallback" || normalized === "partial") return "gold"
+  if (
+    normalized === "queued" ||
+    normalized === "pending" ||
+    normalized === "running" ||
+    normalized === "in_progress"
+  ) {
+    return "blue"
+  }
+  if (normalized === "failed" || normalized === "error") return "red"
+  return "default"
+}
+
+export const getAudioStatusLabel = (status: string): string => {
+  const normalized = status.trim().toLowerCase()
+  if (normalized === "completed") return "Completed"
+  if (normalized === "ready") return "Ready"
+  if (normalized === "fallback") return "Fallback"
+  if (normalized === "partial") return "Partial"
+  if (normalized === "queued") return "Queued"
+  if (normalized === "pending") return "Pending"
+  if (normalized === "running") return "Running"
+  if (normalized === "in_progress") return "In progress"
+  if (normalized === "failed") return "Failed"
+  if (normalized === "error") return "Error"
+  if (normalized === "unknown") return "Unknown"
+  return status
+}
+
+const normalizeAudioArtifact = (
+  value: unknown,
+  fallbackLabel: string
+): AudioArtifactSummary | undefined => {
+  if (typeof value === "string") {
+    const rawLocation = asNonEmptyString(value)
+    if (!rawLocation) return undefined
+    const safeUri = asSafeDownloadUrl(rawLocation)
+    return {
+      label: fallbackLabel,
+      uri: safeUri,
+      displayName: getArtifactLocationDisplayName(rawLocation),
+      downloadUrl: safeUri
+    }
+  }
+
+  if (!isRecord(value)) return undefined
+
+  const label =
+    asNonEmptyString(value.title) ||
+    asNonEmptyString(value.label) ||
+    asNonEmptyString(value.name) ||
+    fallbackLabel
+  const uri =
+    asNonEmptyString(value.uri) ||
+    asNonEmptyString(value.audio_uri) ||
+    asNonEmptyString(value.storage_path) ||
+    asNonEmptyString(value.path)
+  const downloadUrl =
+    asSafeDownloadUrl(value.download_url) ||
+    asSafeDownloadUrl(value.downloadUrl) ||
+    asSafeDownloadUrl(uri)
+  const mimeType =
+    asNonEmptyString(value.mime_type) ||
+    asNonEmptyString(value.mimeType)
+  const speakerId =
+    asNonEmptyString(value.speaker_id) ||
+    asNonEmptyString(value.speakerId) ||
+    asNonEmptyString(value.id)
+
+  if (!uri && !downloadUrl && label === fallbackLabel) return undefined
+
+  return {
+    label,
+    uri: asSafeDownloadUrl(uri),
+    displayName: getArtifactLocationDisplayName(uri),
+    downloadUrl,
+    mimeType,
+    speakerId
+  }
+}
+
+const getAudioMetadataRecord = (metadata: unknown): Record<string, unknown> | null => {
+  const record = getMetadataRecord(metadata)
+  if (!record) return null
+  const nestedAudio = getMetadataRecord(record.audio)
+  if (nestedAudio) return nestedAudio
+  const nestedBriefing = getMetadataRecord(record.audio_briefing)
+  if (nestedBriefing) return nestedBriefing
+  return record
+}
+
+export const getAudioStatusSummary = (
+  value: WatchlistRunAudioStatus | unknown
+): AudioStatusSummary => {
+  const record = getMetadataRecord(value)
+  const status = asNonEmptyString(record?.status) || "unknown"
+  const scriptArtifact = normalizeAudioArtifact(
+    record?.script_artifact,
+    "Script"
+  )
+  const finalArtifact = normalizeAudioArtifact(
+    record?.final_artifact ?? record?.final_audio,
+    "Final audio"
+  )
+  const speakerArtifacts = Array.isArray(record?.speaker_artifacts)
+    ? record.speaker_artifacts
+        .map((entry, index) => normalizeAudioArtifact(entry, `Speaker ${index + 1}`))
+        .filter((entry): entry is AudioArtifactSummary => entry !== undefined)
+    : []
+  const downloadUrl =
+    asSafeDownloadUrl(record?.download_url) ||
+    finalArtifact?.downloadUrl ||
+    asSafeDownloadUrl(record?.audio_uri)
+  const fallbackReason =
+    asNonEmptyString(record?.fallback_reason) ||
+    asNonEmptyString(record?.fallbackReason)
+  const error = asNonEmptyString(record?.error)
+  const requested =
+    record !== null &&
+    (
+      status !== "unknown" ||
+      Boolean(downloadUrl) ||
+      Boolean(scriptArtifact) ||
+      Boolean(finalArtifact) ||
+      speakerArtifacts.length > 0 ||
+      Boolean(fallbackReason) ||
+      Boolean(error)
+    )
+
+  return {
+    requested,
+    status,
+    statusLabel: getAudioStatusLabel(status),
+    statusColor: getAudioStatusColor(status),
+    fallbackReason,
+    error,
+    downloadUrl,
+    scriptArtifact,
+    speakerArtifacts,
+    finalArtifact
+  }
+}
+
+export const getOutputAudioStatusSummary = (metadata: unknown): AudioStatusSummary => {
+  return getAudioStatusSummary(getAudioMetadataRecord(metadata))
 }
 
 interface BuildRegenerateOptions {

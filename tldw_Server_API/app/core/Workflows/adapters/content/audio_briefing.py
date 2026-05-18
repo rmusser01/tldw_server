@@ -7,12 +7,17 @@ with section markers and voice assignments for downstream multi-voice TTS.
 from __future__ import annotations
 
 import re
+import uuid
+import json
 from typing import Any
 
 from loguru import logger
 
 from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
-from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content
+from tldw_Server_API.app.core.Workflows.adapters._common import (
+    extract_openai_content,
+    resolve_artifacts_dir,
+)
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
 from tldw_Server_API.app.core.Workflows.adapters.content._config import AudioBriefingComposeConfig
 
@@ -33,7 +38,7 @@ _DEFAULT_VOICE_MAP: dict[str, str] = {
     "ANALYST": "bf_emma",
 }
 
-_VOICE_MARKER_RE = re.compile(r'^\[([A-Z_]+)\]:\s*', re.MULTILINE)
+_VOICE_MARKER_RE = re.compile(r"^\[([A-Z0-9_]+)\]:\s*", re.MULTILINE)
 _REASONING_BLOCK_RE = re.compile(
     r"<(?:think|thinking|reasoning)>[\s\S]*?</(?:think|thinking|reasoning)>\s*",
     flags=re.IGNORECASE,
@@ -72,9 +77,7 @@ def _normalize_item(item: Any) -> dict[str, str]:
         url = str(item.get("url") or item.get("source_url") or "").strip()
         return {"title": title, "summary": summary, "url": url}
     title = str(getattr(item, "title", "") or "").strip()
-    summary = str(
-        getattr(item, "summary", "") or getattr(item, "snippet", "") or ""
-    ).strip()
+    summary = str(getattr(item, "summary", "") or getattr(item, "snippet", "") or "").strip()
     url = str(getattr(item, "url", "") or getattr(item, "source_url", "") or "").strip()
     return {"title": title, "summary": summary, "url": url}
 
@@ -150,11 +153,78 @@ async def _persona_pre_summarize_items(
     return rewritten_items
 
 
-def _build_system_prompt(target_words: int, multi_voice: bool, output_language: str) -> str:
+def _normalize_voice_marker(value: Any) -> str:
+    """Normalize an audio-cast speaker id/label into a script marker."""
+    marker = "".join(char.upper() if char.isalnum() else "_" for char in str(value or "").strip()).strip("_")
+    return marker or "HOST"
+
+
+def _coerce_audio_cast_speakers(value: Any) -> list[dict[str, str]]:
+    """Coerce a structured audio_cast object into prompt-ready speaker records."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(value, dict):
+        return []
+    speakers = value.get("speakers")
+    if not isinstance(speakers, list):
+        return []
+
+    normalized: list[dict[str, str]] = []
+    for speaker in speakers[:4]:
+        if not isinstance(speaker, dict):
+            continue
+        raw_marker = speaker.get("id") or speaker.get("label")
+        marker = _normalize_voice_marker(raw_marker)
+        label = str(speaker.get("label") or marker.replace("_", " ").title()).strip()
+        role = str(speaker.get("role") or "").strip()
+        voice = str(speaker.get("voice") or "").strip()
+        persona = str(speaker.get("persona") or "").strip()
+        normalized.append(
+            {
+                "marker": marker,
+                "label": label,
+                "role": role,
+                "voice": voice,
+                "persona": persona,
+            }
+        )
+    return normalized
+
+
+def _voice_map_from_audio_cast(speakers: list[dict[str, str]]) -> dict[str, str]:
+    return {
+        speaker["marker"]: speaker["voice"] for speaker in speakers if speaker.get("marker") and speaker.get("voice")
+    }
+
+
+def _build_system_prompt(
+    target_words: int,
+    multi_voice: bool,
+    output_language: str,
+    audio_cast_speakers: list[dict[str, str]] | None = None,
+) -> str:
     """Build the system prompt for LLM script composition."""
     voice_instructions = ""
     if multi_voice:
-        voice_instructions = """
+        if audio_cast_speakers:
+            speaker_lines = []
+            for speaker in audio_cast_speakers:
+                descriptor = speaker["label"]
+                if speaker.get("role"):
+                    descriptor = f"{descriptor}, {speaker['role']}"
+                if speaker.get("persona"):
+                    descriptor = f"{descriptor}, persona: {speaker['persona']}"
+                speaker_lines.append(f"- [{speaker['marker']}]: {descriptor}")
+            voice_instructions = (
+                "\nUse only these voice markers to indicate speaker changes:\n"
+                + "\n".join(speaker_lines)
+                + "\n\nEvery line of spoken text MUST start with one of these exact voice markers."
+            )
+        else:
+            voice_instructions = """
 Use voice markers to indicate speaker changes:
 - [HOST]: for transitions, greetings, and wrap-ups
 - [REPORTER]: for article details and reporting
@@ -223,6 +293,55 @@ def _resolve_voice_assignments(
     return assignments
 
 
+def _register_script_artifact(
+    *,
+    context: dict[str, Any],
+    script: str,
+    sections: list[dict[str, str]],
+    voice_assignments: dict[str, str],
+    output_language: str,
+    word_count: int,
+    estimated_minutes: float,
+) -> dict[str, str] | None:
+    """Persist the generated briefing script as a workflow artifact."""
+    add_artifact = context.get("add_artifact")
+    if not callable(add_artifact):
+        return None
+
+    try:
+        import time as _time
+
+        step_run_id = str(context.get("step_run_id") or f"audio_script_{int(_time.time() * 1000)}")
+        art_dir = resolve_artifacts_dir(step_run_id)
+        art_dir.mkdir(parents=True, exist_ok=True)
+        script_path = art_dir / "briefing_script.md"
+        script_path.write_text(script, encoding="utf-8")
+        artifact_id = f"audio_script_{uuid.uuid4()}"
+        add_artifact(
+            type="audio_script",
+            uri=f"file://{script_path}",
+            size_bytes=script_path.stat().st_size,
+            mime_type="text/markdown",
+            metadata={
+                "script_artifact": True,
+                "title": "Briefing script",
+                "sections_count": len(sections),
+                "voice_assignments": voice_assignments,
+                "output_language": output_language,
+                "word_count": word_count,
+                "estimated_minutes": estimated_minutes,
+            },
+            artifact_id=artifact_id,
+        )
+        return {
+            "artifact_id": artifact_id,
+            "uri": f"file://{script_path}",
+        }
+    except _BRIEFING_NONCRITICAL_EXCEPTIONS:
+        logger.warning("Audio briefing script artifact registration failed", exc_info=True)
+        return None
+
+
 @registry.register(
     "audio_briefing_compose",
     category="content",
@@ -231,9 +350,7 @@ def _resolve_voice_assignments(
     config_model=AudioBriefingComposeConfig,
     tags=["content", "audio", "briefing"],
 )
-async def run_audio_briefing_compose_adapter(
-    config: dict[str, Any], context: dict[str, Any]
-) -> dict[str, Any]:
+async def run_audio_briefing_compose_adapter(config: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """Compose a multi-voice audio briefing script from article summaries.
 
     Config:
@@ -292,12 +409,21 @@ async def run_audio_briefing_compose_adapter(
     multi_voice = config.get("multi_voice", True)
     target_minutes = config.get("target_audio_minutes", 10)
     target_words = target_minutes * 150
+    audio_cast_cfg = config.get("audio_cast")
+    if isinstance(audio_cast_cfg, str):
+        audio_cast_cfg = apply_template_to_string(audio_cast_cfg, context) or audio_cast_cfg
+    audio_cast_speakers = _coerce_audio_cast_speakers(audio_cast_cfg)
     voice_map_cfg = config.get("voice_map")
     if isinstance(voice_map_cfg, str):
         voice_map_cfg = apply_template_to_string(voice_map_cfg, context) or voice_map_cfg
+    cast_voice_map = _voice_map_from_audio_cast(audio_cast_speakers)
+    if isinstance(voice_map_cfg, dict):
+        voice_map_cfg = {**cast_voice_map, **voice_map_cfg}
+    elif cast_voice_map:
+        voice_map_cfg = cast_voice_map
 
     system_prompt = config.get("system_prompt_override") or _build_system_prompt(
-        target_words, multi_voice, output_language
+        target_words, multi_voice, output_language, audio_cast_speakers
     )
 
     # Build items text for LLM
@@ -354,8 +480,17 @@ Write the complete script now."""
 
         word_count = len(full_script.split())
         estimated_minutes = round(word_count / 150, 1)
+        script_artifact = _register_script_artifact(
+            context=context,
+            script=full_script,
+            sections=sections,
+            voice_assignments=voice_assignments,
+            output_language=output_language,
+            word_count=word_count,
+            estimated_minutes=estimated_minutes,
+        )
 
-        return {
+        result: dict[str, Any] = {
             "text": full_script,
             "script": full_script,
             "sections": sections,
@@ -363,6 +498,10 @@ Write the complete script now."""
             "estimated_minutes": estimated_minutes,
             "voice_assignments": voice_assignments,
         }
+        if script_artifact:
+            result["script_artifact_id"] = script_artifact["artifact_id"]
+            result["script_artifact_uri"] = script_artifact["uri"]
+        return result
 
     except _BRIEFING_NONCRITICAL_EXCEPTIONS:
         logger.exception("Audio briefing compose error")

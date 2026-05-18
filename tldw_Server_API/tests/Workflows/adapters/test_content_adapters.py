@@ -19,6 +19,7 @@ This module tests all 15 content adapters:
 """
 
 import json
+from pathlib import Path
 from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -526,12 +527,15 @@ class TestImageGenAdapter:
 
         from tldw_Server_API.app.core.Workflows.adapters.content import run_image_gen_adapter
 
-        with patch(
-            "tldw_Server_API.app.core.Workflows.adapters.content.image.is_test_mode",
-            return_value=False,
-        ), patch(
-            "tldw_Server_API.app.core.Image_Generation.adapter_registry.get_registry",
-            side_effect=RuntimeError("image backend exploded at /private/image-cache"),
+        with (
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.content.image.is_test_mode",
+                return_value=False,
+            ),
+            patch(
+                "tldw_Server_API.app.core.Image_Generation.adapter_registry.get_registry",
+                side_effect=RuntimeError("image backend exploded at /private/image-cache"),
+            ),
         ):
             result = await run_image_gen_adapter({"prompt": "A clean test image"}, base_context)
 
@@ -752,10 +756,12 @@ class TestFlashcardGenerateAdapter:
         """Test flashcard generation with valid text."""
         from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
 
-        mock_flashcards = json.dumps([
-            {"front": "What is AI?", "back": "Artificial Intelligence", "tags": ["ai"]},
-            {"front": "What is ML?", "back": "Machine Learning", "tags": ["ml"]},
-        ])
+        mock_flashcards = json.dumps(
+            [
+                {"front": "What is AI?", "back": "Artificial Intelligence", "tags": ["ai"]},
+                {"front": "What is ML?", "back": "Machine Learning", "tags": ["ml"]},
+            ]
+        )
         mock_response = mock_chat_response(mock_flashcards)
 
         with patch(
@@ -827,16 +833,18 @@ class TestQuizGenerateAdapter:
         """Test quiz generation with valid text."""
         from tldw_Server_API.app.core.Workflows.adapters.content import run_quiz_generate_adapter
 
-        mock_questions = json.dumps([
-            {
-                "question_type": "multiple_choice",
-                "question_text": "What is AI?",
-                "options": ["Option A", "Option B", "Option C", "Option D"],
-                "correct_answer": 0,
-                "explanation": "AI stands for Artificial Intelligence",
-                "points": 1,
-            }
-        ])
+        mock_questions = json.dumps(
+            [
+                {
+                    "question_type": "multiple_choice",
+                    "question_text": "What is AI?",
+                    "options": ["Option A", "Option B", "Option C", "Option D"],
+                    "correct_answer": 0,
+                    "explanation": "AI stands for Artificial Intelligence",
+                    "points": 1,
+                }
+            ]
+        )
         mock_response = mock_chat_response(mock_questions)
 
         with patch(
@@ -907,14 +915,18 @@ class TestOutlineGenerateAdapter:
         """Test outline generation with valid text."""
         from tldw_Server_API.app.core.Workflows.adapters.content import run_outline_generate_adapter
 
-        mock_outline = json.dumps({
-            "sections": [
-                {"title": "Introduction", "level": 1, "subsections": []},
-                {"title": "Main Content", "level": 1, "subsections": [
-                    {"title": "Part A", "level": 2, "subsections": []}
-                ]},
-            ]
-        })
+        mock_outline = json.dumps(
+            {
+                "sections": [
+                    {"title": "Introduction", "level": 1, "subsections": []},
+                    {
+                        "title": "Main Content",
+                        "level": 1,
+                        "subsections": [{"title": "Part A", "level": 2, "subsections": []}],
+                    },
+                ]
+            }
+        )
         mock_response = mock_chat_response(mock_outline)
 
         with patch(
@@ -963,10 +975,12 @@ class TestGlossaryExtractAdapter:
         """Test glossary extraction with valid text."""
         from tldw_Server_API.app.core.Workflows.adapters.content import run_glossary_extract_adapter
 
-        mock_glossary = json.dumps([
-            {"term": "AI", "definition": "Artificial Intelligence"},
-            {"term": "ML", "definition": "Machine Learning"},
-        ])
+        mock_glossary = json.dumps(
+            [
+                {"term": "AI", "definition": "Artificial Intelligence"},
+                {"term": "ML", "definition": "Machine Learning"},
+            ]
+        )
         mock_response = mock_chat_response(mock_glossary)
 
         with patch(
@@ -1017,13 +1031,15 @@ class TestMindmapGenerateAdapter:
         """Test mindmap generation with valid text."""
         from tldw_Server_API.app.core.Workflows.adapters.content import run_mindmap_generate_adapter
 
-        mock_mindmap = json.dumps({
-            "central": "Artificial Intelligence",
-            "branches": [
-                {"topic": "Machine Learning", "children": []},
-                {"topic": "Deep Learning", "children": []},
-            ]
-        })
+        mock_mindmap = json.dumps(
+            {
+                "central": "Artificial Intelligence",
+                "branches": [
+                    {"topic": "Machine Learning", "children": []},
+                    {"topic": "Deep Learning", "children": []},
+                ],
+            }
+        )
         mock_response = mock_chat_response(mock_mindmap)
 
         with patch(
@@ -1220,10 +1236,17 @@ class TestSlidesGenerateAdapter:
         """Test slides generation with valid content."""
         from tldw_Server_API.app.core.Workflows.adapters.content import run_slides_generate_adapter
 
-        mock_slides = json.dumps([
-            {"slide_number": 1, "title": "Title Slide", "bullets": [], "speaker_notes": "Welcome"},
-            {"slide_number": 2, "title": "Overview", "bullets": ["Point 1", "Point 2"], "speaker_notes": "Overview notes"},
-        ])
+        mock_slides = json.dumps(
+            [
+                {"slide_number": 1, "title": "Title Slide", "bullets": [], "speaker_notes": "Welcome"},
+                {
+                    "slide_number": 2,
+                    "title": "Overview",
+                    "bullets": ["Point 1", "Point 2"],
+                    "speaker_notes": "Overview notes",
+                },
+            ]
+        )
         mock_response = mock_chat_response(mock_slides)
 
         with patch(
@@ -1511,12 +1534,36 @@ class TestContentAdaptersErrorHandling:
     @pytest.mark.parametrize(
         ("adapter_name", "config", "expected"),
         [
-            ("run_outline_generate_adapter", {"text": "Sample content"}, {"error": "outline_generate_error", "outline": {}, "outline_text": ""}),
-            ("run_glossary_extract_adapter", {"text": "Sample content"}, {"error": "glossary_extract_error", "glossary": [], "count": 0}),
-            ("run_mindmap_generate_adapter", {"text": "Sample content"}, {"error": "mindmap_generate_error", "mindmap": {}, "mermaid": ""}),
-            ("run_slides_generate_adapter", {"content": "Sample content"}, {"slides": [], "error": "slides_generate_error"}),
-            ("run_report_generate_adapter", {"content": "Sample content"}, {"report": "", "error": "report_generate_error"}),
-            ("run_newsletter_generate_adapter", {"content": "Sample content"}, {"newsletter": "", "error": "newsletter_generate_error"}),
+            (
+                "run_outline_generate_adapter",
+                {"text": "Sample content"},
+                {"error": "outline_generate_error", "outline": {}, "outline_text": ""},
+            ),
+            (
+                "run_glossary_extract_adapter",
+                {"text": "Sample content"},
+                {"error": "glossary_extract_error", "glossary": [], "count": 0},
+            ),
+            (
+                "run_mindmap_generate_adapter",
+                {"text": "Sample content"},
+                {"error": "mindmap_generate_error", "mindmap": {}, "mermaid": ""},
+            ),
+            (
+                "run_slides_generate_adapter",
+                {"content": "Sample content"},
+                {"slides": [], "error": "slides_generate_error"},
+            ),
+            (
+                "run_report_generate_adapter",
+                {"content": "Sample content"},
+                {"report": "", "error": "report_generate_error"},
+            ),
+            (
+                "run_newsletter_generate_adapter",
+                {"content": "Sample content"},
+                {"newsletter": "", "error": "newsletter_generate_error"},
+            ),
             (
                 "run_diagram_generate_adapter",
                 {"content": "Sample content", "provider": "mock", "model": "mock-model"},
@@ -1814,9 +1861,21 @@ class TestAudioBriefingComposeAdapter:
     @pytest.fixture
     def sample_items(self):
         return [
-            {"title": "AI Breakthrough", "summary": "New AI model achieves record performance", "url": "https://example.com/ai"},
-            {"title": "Climate Report", "summary": "Global temperatures continue to rise", "url": "https://example.com/climate"},
-            {"title": "Tech Merger", "summary": "Two major tech companies announce merger", "url": "https://example.com/tech"},
+            {
+                "title": "AI Breakthrough",
+                "summary": "New AI model achieves record performance",
+                "url": "https://example.com/ai",
+            },
+            {
+                "title": "Climate Report",
+                "summary": "Global temperatures continue to rise",
+                "url": "https://example.com/climate",
+            },
+            {
+                "title": "Tech Merger",
+                "summary": "Two major tech companies announce merger",
+                "url": "https://example.com/tech",
+            },
         ]
 
     @pytest.fixture
@@ -1935,6 +1994,93 @@ class TestAudioBriefingComposeAdapter:
 
         assert result["voice_assignments"]["HOST"] == "am_michael"
         assert result["voice_assignments"]["REPORTER"] == "bf_isabella"
+
+    @pytest.mark.asyncio
+    async def test_compose_registers_script_artifact(
+        self, sample_items, mock_llm_response_multi_voice, base_context, tmp_path, monkeypatch
+    ):
+        """Test composed briefing script is persisted as a workflow artifact."""
+        from tldw_Server_API.app.core.Workflows.adapters.content.audio_briefing import (
+            run_audio_briefing_compose_adapter,
+        )
+
+        monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+        artifacts: list[dict[str, Any]] = []
+        base_context["add_artifact"] = lambda **kwargs: artifacts.append(kwargs)
+
+        config = {
+            "items": sample_items,
+            "target_audio_minutes": 5,
+            "multi_voice": True,
+        }
+
+        with patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            return_value=mock_llm_response_multi_voice,
+        ):
+            result = await run_audio_briefing_compose_adapter(config, base_context)
+
+        script_artifacts = [artifact for artifact in artifacts if artifact["type"] == "audio_script"]
+        assert len(script_artifacts) == 1
+        artifact = script_artifacts[0]
+        assert artifact["mime_type"] == "text/markdown"
+        assert artifact["metadata"]["script_artifact"] is True
+        assert artifact["metadata"]["voice_assignments"]["HOST"] == "af_bella"
+        assert artifact["metadata"]["sections_count"] == len(result["sections"])
+        script_path = artifact["uri"].removeprefix("file://")
+        assert "Good morning, here is your daily briefing" in Path(script_path).read_text(encoding="utf-8")
+
+    @pytest.mark.asyncio
+    async def test_compose_audio_cast_controls_markers_and_voice_assignments(self, sample_items, base_context):
+        """Test structured speaker config drives prompt markers and voices."""
+        from tldw_Server_API.app.core.Workflows.adapters.content.audio_briefing import (
+            run_audio_briefing_compose_adapter,
+        )
+
+        mock_response = {
+            "choices": [
+                {"message": {"content": ("[SPEAKER1]: Welcome to the briefing.\n" "[ANALYST]: Here is the analysis.")}}
+            ]
+        }
+        audio_cast = {
+            "speaker_count": 2,
+            "speakers": [
+                {
+                    "id": "speaker1",
+                    "label": "Speaker 1",
+                    "role": "anchor",
+                    "voice": "af_bella",
+                },
+                {
+                    "id": "analyst",
+                    "label": "Analyst",
+                    "role": "expert commentary",
+                    "voice": "am_adam",
+                },
+            ],
+        }
+        config = {
+            "items": sample_items,
+            "multi_voice": True,
+            "audio_cast": audio_cast,
+        }
+
+        with patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ) as mock_llm:
+            result = await run_audio_briefing_compose_adapter(config, base_context)
+
+        system_prompt = mock_llm.call_args.kwargs["system_message"]
+        assert "[SPEAKER1]" in system_prompt
+        assert "[ANALYST]" in system_prompt
+        assert "expert commentary" in system_prompt
+        assert "REPORTER" not in system_prompt
+        assert result["sections"][0]["voice"] == "SPEAKER1"
+        assert result["voice_assignments"]["SPEAKER1"] == "af_bella"
+        assert result["voice_assignments"]["ANALYST"] == "am_adam"
 
     @pytest.mark.asyncio
     async def test_compose_empty_items_error(self, base_context):
@@ -2076,22 +2222,21 @@ class TestAudioBriefingComposeAdapter:
             "model": "gpt-4o-mini",
         }
 
-        with patch(
-            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
-            new_callable=AsyncMock,
-            side_effect=[
-                RuntimeError("persona backend exploded at /private/audio-cache"),
-                mock_llm_response_multi_voice,
-            ],
-        ), patch(
-            "tldw_Server_API.app.core.Workflows.adapters.content.audio_briefing.logger.warning"
-        ) as mock_warning:
+        with (
+            patch(
+                "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+                new_callable=AsyncMock,
+                side_effect=[
+                    RuntimeError("persona backend exploded at /private/audio-cache"),
+                    mock_llm_response_multi_voice,
+                ],
+            ),
+            patch("tldw_Server_API.app.core.Workflows.adapters.content.audio_briefing.logger.warning") as mock_warning,
+        ):
             result = await run_audio_briefing_compose_adapter(config, base_context)
 
         assert result.get("error") is None
-        mock_warning.assert_called_once_with(
-            "Persona pre-summarization failed", exc_info=True
-        )
+        mock_warning.assert_called_once_with("Persona pre-summarization failed", exc_info=True)
 
     @pytest.mark.asyncio
     async def test_compose_strips_reasoning_blocks(self, sample_items, base_context):

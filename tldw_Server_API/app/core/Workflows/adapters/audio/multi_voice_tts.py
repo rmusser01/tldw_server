@@ -46,10 +46,15 @@ async def _generate_silence(duration_seconds: float, output_path: Path, fmt: str
         return False
 
     cmd = [
-        ffmpeg_path, "-y", "-nostdin",
-        "-f", "lavfi",
-        "-i", "anullsrc=r=24000:cl=mono",
-        "-t", str(duration_seconds),
+        ffmpeg_path,
+        "-y",
+        "-nostdin",
+        "-f",
+        "lavfi",
+        "-i",
+        "anullsrc=r=24000:cl=mono",
+        "-t",
+        str(duration_seconds),
         str(output_path),
     ]
     try:
@@ -119,9 +124,15 @@ async def _concat_files(file_paths: list[Path], output_path: Path, fmt: str = "m
             f.write(f"file '{p}'\n")
 
     cmd = [
-        ffmpeg_path, "-y", "-nostdin",
-        "-f", "concat", "-safe", "0",
-        "-i", concat_file,
+        ffmpeg_path,
+        "-y",
+        "-nostdin",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        concat_file,
         *codec_args,
         str(output_path),
     ]
@@ -147,18 +158,20 @@ async def _concat_files(file_paths: list[Path], output_path: Path, fmt: str = "m
             Path(concat_file).unlink()
 
 
-async def _normalize_audio(
-    input_path: Path, output_path: Path, target_lufs: float = -16.0
-) -> bool:
+async def _normalize_audio(input_path: Path, output_path: Path, target_lufs: float = -16.0) -> bool:
     """Run EBU R128 loudness normalization via ffmpeg."""
     ffmpeg_path = shutil.which("ffmpeg")
     if not ffmpeg_path:
         return False
 
     cmd = [
-        ffmpeg_path, "-y", "-nostdin",
-        "-i", str(input_path),
-        "-af", f"loudnorm=I={target_lufs}:TP=-1.5:LRA=11",
+        ffmpeg_path,
+        "-y",
+        "-nostdin",
+        "-i",
+        str(input_path),
+        "-af",
+        f"loudnorm=I={target_lufs}:TP=-1.5:LRA=11",
         str(output_path),
     ]
     try:
@@ -188,6 +201,57 @@ def _codec_args_for_format(fmt: str) -> list[str]:
         "aac": ["-c:a", "aac", "-b:a", "128k"],
     }
     return codec_map.get(fmt, ["-c:a", "libmp3lame", "-q:a", "2"])
+
+
+def _speaker_artifact_filename(speaker_id: str, ext: str) -> str:
+    """Return a filesystem-safe filename for a generated speaker artifact."""
+    safe_id = "".join(char.lower() if char.isalnum() else "_" for char in speaker_id).strip("_")
+    return f"speaker_{safe_id or 'unknown'}.{ext}"
+
+
+def _group_speaker_segments(speaker_segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group synthesized section segments by speaker while preserving first-seen order."""
+    groups_by_id: dict[str, dict[str, Any]] = {}
+    ordered_groups: list[dict[str, Any]] = []
+
+    for segment in speaker_segments:
+        speaker_id = str(segment.get("speaker_id") or "").strip()
+        if not speaker_id:
+            continue
+
+        group = groups_by_id.get(speaker_id)
+        if group is None:
+            group = {
+                "speaker_id": speaker_id,
+                "label": segment.get("label") or speaker_id.replace("_", " ").title(),
+                "voice": segment.get("voice"),
+                "model": segment.get("model"),
+                "fallback": False,
+                "fallback_reason": None,
+                "segments": [],
+            }
+            groups_by_id[speaker_id] = group
+            ordered_groups.append(group)
+
+        group["fallback"] = bool(group["fallback"] or segment.get("fallback"))
+        if segment.get("fallback_reason") and not group.get("fallback_reason"):
+            group["fallback_reason"] = segment.get("fallback_reason")
+        group["segments"].append(segment)
+
+    return ordered_groups
+
+
+def _speaker_section_metadata(segment: dict[str, Any]) -> dict[str, Any]:
+    """Return per-section metadata embedded in one per-speaker artifact record."""
+    section_metadata = {
+        "section_index": segment["section_index"],
+        "voice": segment["voice"],
+        "model": segment["model"],
+        "fallback": bool(segment["fallback"]),
+    }
+    if segment.get("fallback_reason"):
+        section_metadata["fallback_reason"] = segment.get("fallback_reason")
+    return section_metadata
 
 
 async def _probe_duration_seconds(path: Path) -> float | None:
@@ -274,8 +338,7 @@ async def _mix_background_track(
         bg_filters.append(f"atrim=0:{speech_duration:.3f}")
     bg_filters.append("asetpts=N/SR/TB")
     filter_complex = (
-        f"[1:a]{','.join(bg_filters)}[bg];"
-        "[0:a][bg]amix=inputs=2:duration=first:dropout_transition=2[mix]"
+        f"[1:a]{','.join(bg_filters)}[bg];" "[0:a][bg]amix=inputs=2:duration=first:dropout_transition=2[mix]"
     )
 
     cmd = [
@@ -321,9 +384,7 @@ async def _mix_background_track(
     config_model=MultiVoiceTTSConfig,
     tags=["audio", "speech", "multi-voice"],
 )
-async def run_multi_voice_tts_adapter(
-    config: dict[str, Any], context: dict[str, Any]
-) -> dict[str, Any]:
+async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """Multi-voice TTS: synthesize per-section, concatenate, normalize.
 
     Config:
@@ -403,6 +464,7 @@ async def run_multi_voice_tts_adapter(
 
     # Generate per-section audio files
     segment_files: list[Path] = []
+    speaker_segments: list[dict[str, Any]] = []
     sections_generated = 0
 
     for idx, section in enumerate(sections):
@@ -430,16 +492,37 @@ async def run_multi_voice_tts_adapter(
         try:
             await _synthesize_section(clean_text, default_model, kokoro_voice, fmt, speed, section_path)
             segment_files.append(section_path)
+            speaker_segments.append(
+                {
+                    "path": section_path,
+                    "section_index": idx,
+                    "speaker_id": str(voice_marker),
+                    "label": str(voice_marker).replace("_", " ").title(),
+                    "voice": str(kokoro_voice),
+                    "model": default_model,
+                    "fallback": False,
+                }
+            )
             sections_generated += 1
         except _MULTI_TTS_NONCRITICAL_EXCEPTIONS:
             logger.warning(f"Section {idx} TTS failed with {default_model}/{kokoro_voice}")
             # Fallback attempt
             if fallback_provider:
                 try:
-                    await _synthesize_section(
-                        clean_text, "tts-1", fallback_voice, fmt, speed, section_path
-                    )
+                    await _synthesize_section(clean_text, "tts-1", fallback_voice, fmt, speed, section_path)
                     segment_files.append(section_path)
+                    speaker_segments.append(
+                        {
+                            "path": section_path,
+                            "section_index": idx,
+                            "speaker_id": str(voice_marker),
+                            "label": str(voice_marker).replace("_", " ").title(),
+                            "voice": fallback_voice,
+                            "model": "tts-1",
+                            "fallback": True,
+                            "fallback_reason": "primary_tts_failed",
+                        }
+                    )
                     sections_generated += 1
                 except _MULTI_TTS_NONCRITICAL_EXCEPTIONS:
                     logger.warning(f"Section {idx} fallback TTS also failed")
@@ -457,13 +540,21 @@ async def run_multi_voice_tts_adapter(
     concat_path = out_dir / f"briefing_raw.{ext}"
     if len(segment_files) == 1:
         # Single file, just rename
-        segment_files[0].rename(concat_path)
+        source_path = segment_files[0]
+        source_path.rename(concat_path)
+        for segment in speaker_segments:
+            if segment.get("path") == source_path:
+                segment["path"] = concat_path
     else:
         concat_ok = await _concat_files(segment_files, concat_path, fmt)
         if not concat_ok:
             # Fallback: use the first file
             if segment_files[0].exists():
-                segment_files[0].rename(concat_path)
+                source_path = segment_files[0]
+                source_path.rename(concat_path)
+                for segment in speaker_segments:
+                    if segment.get("path") == source_path:
+                        segment["path"] = concat_path
             else:
                 return {"error": "concat_failed"}
 
@@ -500,11 +591,58 @@ async def run_multi_voice_tts_adapter(
 
     size_bytes = final_path.stat().st_size if final_path.exists() else 0
 
-    # Register artifact
+    # Register artifacts
     audio_artifact_id = None
     try:
         if callable(context.get("add_artifact")):
             import mimetypes
+
+            for speaker_group in _group_speaker_segments(speaker_segments):
+                valid_segments = [
+                    segment
+                    for segment in speaker_group["segments"]
+                    if isinstance(segment.get("path"), Path) and segment["path"].exists()
+                ]
+                if not valid_segments:
+                    continue
+
+                if len(valid_segments) == 1:
+                    speaker_path = valid_segments[0]["path"]
+                else:
+                    speaker_path = out_dir / _speaker_artifact_filename(str(speaker_group["speaker_id"]), ext)
+                    speaker_concat_ok = await _concat_files(
+                        [segment["path"] for segment in valid_segments],
+                        speaker_path,
+                        fmt,
+                    )
+                    if not speaker_concat_ok or not speaker_path.exists():
+                        logger.warning(
+                            f"multi_voice_tts: failed to aggregate speaker artifact for {speaker_group['speaker_id']}"
+                        )
+                        continue
+
+                speaker_sections = [_speaker_section_metadata(segment) for segment in valid_segments]
+                speaker_mime, _ = mimetypes.guess_type(str(speaker_path))
+                context["add_artifact"](
+                    type="tts_audio",
+                    uri=f"file://{speaker_path}",
+                    size_bytes=speaker_path.stat().st_size,
+                    mime_type=speaker_mime or "application/octet-stream",
+                    metadata={
+                        "speaker_artifact": True,
+                        "speaker_id": speaker_group["speaker_id"],
+                        "label": speaker_group["label"],
+                        "voice": speaker_group["voice"],
+                        "model": speaker_group["model"],
+                        "sections_count": len(speaker_sections),
+                        "sections": speaker_sections,
+                        "format": ext,
+                        "multi_voice": True,
+                        "fallback_artifact": speaker_group["fallback"],
+                        "fallback_reason": speaker_group.get("fallback_reason"),
+                    },
+                    artifact_id=f"mvtts_speaker_{uuid.uuid4()}",
+                )
 
             mime, _ = mimetypes.guess_type(str(final_path))
             audio_artifact_id = f"mvtts_{uuid.uuid4()}"
