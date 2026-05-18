@@ -347,6 +347,80 @@ class TestGetRunAudioEndpoint:
         assert second_call["offset"] == 50
 
     @pytest.mark.asyncio
+    async def test_paginated_scan_finds_matching_run_after_twenty_full_pages(self):
+        """Does not mark old audio runs pending just because they are beyond 1,000 rows."""
+        from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
+
+        run = SimpleNamespace(
+            id=43,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
+            stats_json=json.dumps({"audio_briefing_task_id": "task_deep_hit"}),
+            error_msg=None,
+        )
+        db = MagicMock()
+        db.get_run.return_value = run
+
+        user = MagicMock()
+        user.role = "admin"
+        user.id = 1
+        user.tenant_id = "default"
+
+        non_matching_pages = [
+            [
+                SimpleNamespace(
+                    run_id=f"wf_old_{page_idx}_{row_idx}",
+                    status="completed",
+                    metadata_json=json.dumps({"watchlist_run_id": 123456}),
+                )
+                for row_idx in range(50)
+            ]
+            for page_idx in range(20)
+        ]
+        matching_run = SimpleNamespace(
+            run_id="wf_target_43",
+            status="completed",
+            metadata_json=json.dumps({"watchlist_run_id": 43}),
+        )
+        audio_art = SimpleNamespace(
+            id="art_audio_deep_paged",
+            type="tts_audio",
+            uri="file:///tmp/deep-paged-briefing.mp3",
+            size_bytes=999,
+            mime_type="audio/mpeg",
+            metadata_json=json.dumps({"multi_voice": True}),
+        )
+
+        mock_wf_db = MagicMock()
+        mock_wf_db.list_runs.side_effect = [*non_matching_pages, [matching_run]]
+        mock_wf_db.list_artifacts.return_value = [audio_art]
+
+        with (
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.resolve_user_id_for_request",
+                return_value=1,
+            ),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.db_path_utils.DatabasePaths.get_user_base_directory",
+                return_value="/tmp/test_user",  # nosec B108
+            ),
+            patch("os.path.exists", return_value=True),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.Workflows_DB.WorkflowsDatabase",
+                return_value=mock_wf_db,
+            ),
+        ):
+            result = await get_run_audio(run_id=43, target_user_id=None, current_user=user, db=db)
+
+        assert result["status"] == "completed"
+        assert result["task_id"] == "task_deep_hit"
+        assert result["artifact_id"] == "art_audio_deep_paged"
+        assert mock_wf_db.list_runs.call_count == 21
+        assert mock_wf_db.list_runs.call_args_list[-1].kwargs["offset"] == 1000
+
+    @pytest.mark.asyncio
     async def test_prefers_final_or_mixed_artifact_when_multiple_candidates(self):
         """Returns final-tagged/mixed artifact over earlier intermediate artifacts."""
         from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio

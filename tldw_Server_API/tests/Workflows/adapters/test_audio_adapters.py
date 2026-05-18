@@ -2015,7 +2015,7 @@ class TestMultiVoiceTTSAdapter:
     async def test_multi_voice_tts_registers_per_speaker_artifacts(
         self, sample_voice_assignments, base_context, tmp_path, monkeypatch
     ):
-        """Test each synthesized voice segment is registered before final mix."""
+        """Test each speaker is registered once before final mix."""
         from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
             run_multi_voice_tts_adapter,
         )
@@ -2027,6 +2027,7 @@ class TestMultiVoiceTTSAdapter:
         sections = [
             {"voice": "HOST", "text": "Welcome to the briefing."},
             {"voice": "REPORTER", "text": "The story details go here."},
+            {"voice": "HOST", "text": "That wraps up the briefing."},
         ]
 
         async def mock_synthesize(text, model, voice, fmt, speed, output_path):
@@ -2062,7 +2063,8 @@ class TestMultiVoiceTTSAdapter:
             result = await run_multi_voice_tts_adapter(config, base_context)
 
         speaker_artifacts = [artifact for artifact in artifacts if artifact["metadata"].get("speaker_artifact") is True]
-        assert result["sections_generated"] == 2
+        assert result["sections_generated"] == 3
+        assert len(speaker_artifacts) == 2
         assert [artifact["metadata"]["speaker_id"] for artifact in speaker_artifacts] == [
             "HOST",
             "REPORTER",
@@ -2071,6 +2073,12 @@ class TestMultiVoiceTTSAdapter:
             "af_bella",
             "am_adam",
         ]
+        assert speaker_artifacts[0]["metadata"]["sections_count"] == 2
+        assert speaker_artifacts[0]["metadata"]["sections"] == [
+            {"section_index": 0, "voice": "af_bella", "model": "kokoro", "fallback": False},
+            {"section_index": 2, "voice": "af_bella", "model": "kokoro", "fallback": False},
+        ]
+        assert speaker_artifacts[1]["metadata"]["sections_count"] == 1
         assert all(Path(artifact["uri"].removeprefix("file://")).exists() for artifact in speaker_artifacts)
         assert any(artifact["metadata"].get("final_artifact") is True for artifact in artifacts)
 

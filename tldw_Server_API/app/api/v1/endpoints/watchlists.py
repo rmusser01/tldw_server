@@ -4745,7 +4745,6 @@ async def get_run_audio(
         tenant_id = str(getattr(current_user, "tenant_id", "default"))
         wf_user_id = str(resolved_user_id)
         scan_page_size = 50
-        scan_max_pages = 20
         matching_run = None
         matching_run_metadata: dict[str, Any] = {}
 
@@ -4765,8 +4764,9 @@ async def get_run_audio(
                 return _load_metadata(run_obj.get("metadata_json"))
             return _load_metadata(getattr(run_obj, "metadata_json", None))
 
-        # Paginated scan to avoid false negatives when target run is beyond first page.
-        for page_idx in range(scan_max_pages):
+        # Paginated scan to avoid false negatives when target run is beyond earlier pages.
+        page_idx = 0
+        while True:
             offset = page_idx * scan_page_size
             runs: list[Any] = []
             try:
@@ -4794,6 +4794,7 @@ async def get_run_audio(
                 break
             if len(runs) < scan_page_size:
                 break
+            page_idx += 1
 
         if not matching_run:
             return {

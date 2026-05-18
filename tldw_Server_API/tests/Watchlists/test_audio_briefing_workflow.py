@@ -191,6 +191,37 @@ class TestBuildWorkflowInputs:
             "ANALYST": "am_adam",
         }
 
+    def test_audio_cast_requires_matching_speaker_count(self):
+        from pydantic import ValidationError
+
+        from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import WatchlistAudioCast
+
+        with pytest.raises(ValidationError, match="speaker_count_must_match_speakers_length"):
+            WatchlistAudioCast(
+                speaker_count=2,
+                speakers=[
+                    {
+                        "id": "host",
+                        "label": "Host",
+                        "voice": "af_bella",
+                    }
+                ],
+            )
+
+    def test_audio_cast_requires_unique_speaker_ids(self):
+        from pydantic import ValidationError
+
+        from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import WatchlistAudioCast
+
+        with pytest.raises(ValidationError, match="speaker_ids_must_be_unique"):
+            WatchlistAudioCast(
+                speaker_count=2,
+                speakers=[
+                    {"id": "host", "label": "Host", "voice": "af_bella"},
+                    {"id": "host", "label": "Second host", "voice": "am_adam"},
+                ],
+            )
+
 
 class TestTriggerAudioBriefing:
     """Tests for trigger_audio_briefing."""

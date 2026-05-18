@@ -920,7 +920,19 @@ class WatchlistAudioCast(BaseModel):
     """Defines the structured one-to-four speaker cast for an audio output."""
 
     speaker_count: int = Field(..., ge=1, le=4)
-    speakers: list[WatchlistAudioCastSpeaker]
+    speakers: list[WatchlistAudioCastSpeaker] = Field(..., min_length=1, max_length=4)
+
+    @model_validator(mode="after")
+    def _validate_speaker_config(self):
+        """Ensure speaker_count and speaker definitions describe the same cast."""
+        if len(self.speakers) != self.speaker_count:
+            raise ValueError("speaker_count_must_match_speakers_length")
+
+        speaker_ids = [speaker.id.strip().casefold() for speaker in self.speakers]
+        if len(set(speaker_ids)) != len(speaker_ids):
+            raise ValueError("speaker_ids_must_be_unique")
+
+        return self
 
 
 class WatchlistAudioArtifactSummary(BaseModel):

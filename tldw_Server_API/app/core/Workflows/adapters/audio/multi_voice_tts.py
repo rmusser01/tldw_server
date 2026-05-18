@@ -203,6 +203,57 @@ def _codec_args_for_format(fmt: str) -> list[str]:
     return codec_map.get(fmt, ["-c:a", "libmp3lame", "-q:a", "2"])
 
 
+def _speaker_artifact_filename(speaker_id: str, ext: str) -> str:
+    """Return a filesystem-safe filename for a generated speaker artifact."""
+    safe_id = "".join(char.lower() if char.isalnum() else "_" for char in speaker_id).strip("_")
+    return f"speaker_{safe_id or 'unknown'}.{ext}"
+
+
+def _group_speaker_segments(speaker_segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group synthesized section segments by speaker while preserving first-seen order."""
+    groups_by_id: dict[str, dict[str, Any]] = {}
+    ordered_groups: list[dict[str, Any]] = []
+
+    for segment in speaker_segments:
+        speaker_id = str(segment.get("speaker_id") or "").strip()
+        if not speaker_id:
+            continue
+
+        group = groups_by_id.get(speaker_id)
+        if group is None:
+            group = {
+                "speaker_id": speaker_id,
+                "label": segment.get("label") or speaker_id.replace("_", " ").title(),
+                "voice": segment.get("voice"),
+                "model": segment.get("model"),
+                "fallback": False,
+                "fallback_reason": None,
+                "segments": [],
+            }
+            groups_by_id[speaker_id] = group
+            ordered_groups.append(group)
+
+        group["fallback"] = bool(group["fallback"] or segment.get("fallback"))
+        if segment.get("fallback_reason") and not group.get("fallback_reason"):
+            group["fallback_reason"] = segment.get("fallback_reason")
+        group["segments"].append(segment)
+
+    return ordered_groups
+
+
+def _speaker_section_metadata(segment: dict[str, Any]) -> dict[str, Any]:
+    """Return per-section metadata embedded in one per-speaker artifact record."""
+    section_metadata = {
+        "section_index": segment["section_index"],
+        "voice": segment["voice"],
+        "model": segment["model"],
+        "fallback": bool(segment["fallback"]),
+    }
+    if segment.get("fallback_reason"):
+        section_metadata["fallback_reason"] = segment.get("fallback_reason")
+    return section_metadata
+
+
 async def _probe_duration_seconds(path: Path) -> float | None:
     ffprobe_path = shutil.which("ffprobe")
     if not ffprobe_path:
@@ -546,27 +597,49 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
         if callable(context.get("add_artifact")):
             import mimetypes
 
-            for segment in speaker_segments:
-                segment_path = segment.get("path")
-                if not isinstance(segment_path, Path) or not segment_path.exists():
+            for speaker_group in _group_speaker_segments(speaker_segments):
+                valid_segments = [
+                    segment
+                    for segment in speaker_group["segments"]
+                    if isinstance(segment.get("path"), Path) and segment["path"].exists()
+                ]
+                if not valid_segments:
                     continue
-                segment_mime, _ = mimetypes.guess_type(str(segment_path))
+
+                if len(valid_segments) == 1:
+                    speaker_path = valid_segments[0]["path"]
+                else:
+                    speaker_path = out_dir / _speaker_artifact_filename(str(speaker_group["speaker_id"]), ext)
+                    speaker_concat_ok = await _concat_files(
+                        [segment["path"] for segment in valid_segments],
+                        speaker_path,
+                        fmt,
+                    )
+                    if not speaker_concat_ok or not speaker_path.exists():
+                        logger.warning(
+                            f"multi_voice_tts: failed to aggregate speaker artifact for {speaker_group['speaker_id']}"
+                        )
+                        continue
+
+                speaker_sections = [_speaker_section_metadata(segment) for segment in valid_segments]
+                speaker_mime, _ = mimetypes.guess_type(str(speaker_path))
                 context["add_artifact"](
                     type="tts_audio",
-                    uri=f"file://{segment_path}",
-                    size_bytes=segment_path.stat().st_size,
-                    mime_type=segment_mime or "application/octet-stream",
+                    uri=f"file://{speaker_path}",
+                    size_bytes=speaker_path.stat().st_size,
+                    mime_type=speaker_mime or "application/octet-stream",
                     metadata={
                         "speaker_artifact": True,
-                        "speaker_id": segment["speaker_id"],
-                        "label": segment["label"],
-                        "voice": segment["voice"],
-                        "model": segment["model"],
-                        "section_index": segment["section_index"],
+                        "speaker_id": speaker_group["speaker_id"],
+                        "label": speaker_group["label"],
+                        "voice": speaker_group["voice"],
+                        "model": speaker_group["model"],
+                        "sections_count": len(speaker_sections),
+                        "sections": speaker_sections,
                         "format": ext,
                         "multi_voice": True,
-                        "fallback_artifact": segment["fallback"],
-                        "fallback_reason": segment.get("fallback_reason"),
+                        "fallback_artifact": speaker_group["fallback"],
+                        "fallback_reason": speaker_group.get("fallback_reason"),
                     },
                     artifact_id=f"mvtts_speaker_{uuid.uuid4()}",
                 )
