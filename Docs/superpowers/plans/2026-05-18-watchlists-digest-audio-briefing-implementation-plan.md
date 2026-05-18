@@ -13,7 +13,6 @@
 ## Source Documents
 
 - PRD: `Docs/superpowers/specs/2026-05-18-watchlists-digest-audio-briefing-prd-design.md`
-- Demo remediation addendum: `Docs/superpowers/specs/2026-05-22-watchlists-staged-demo-remediation-design.md`
 - Backlog: `TASK-425`
 - Key WebUI route: `apps/tldw-frontend/pages/watchlists.tsx`
 - Shared route/component entry: `apps/packages/ui/src/routes/option-watchlists.tsx`
@@ -22,8 +21,6 @@
 - Watchlists schemas: `tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py`
 - Watchlists pipeline: `tldw_Server_API/app/core/Watchlists/pipeline.py`
 - Audio workflow bridge: `tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py`
-
-Note: the 2026-05-18 PRD remains the parent product source of truth. The 2026-05-22 addendum narrows the immediate P0 implementation order around verified demo blockers: the `workflows` queue worker, run-audio status fallback, structured audio non-submission reasons, live Reports polling, and active watchlist selection.
 
 ## File Structure And Ownership
 
@@ -101,16 +98,10 @@ Note: the 2026-05-18 PRD remains the parent product source of truth. The 2026-05
 - Backend modify: `tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py`
   - Accept structured speaker config.
   - Persist script, per-speaker artifacts, final mix, and fallback reason as workflow/watchlist output metadata.
-- Backend modify: `tldw_Server_API/app/core/Workflows/adapters/content/audio_briefing.py`
-  - Use structured speaker config for script markers and persist the generated script artifact.
-- Backend modify: `tldw_Server_API/app/core/Workflows/adapters/audio/multi_voice_tts.py`
-  - Persist per-speaker audio artifacts separately from the final mix.
 - Test: `apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.audio.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/Watchlists/RunsTab/__tests__/RunDetailDrawer.stream-lifecycle.test.tsx`
 - Backend test: `tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py`
 - Backend test: `tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py`
-- Backend test: `tldw_Server_API/tests/Workflows/adapters/test_content_adapters.py`
-- Backend test: `tldw_Server_API/tests/Workflows/adapters/test_audio_adapters.py`
 
 ### Guided Pipeline MVP
 
@@ -184,7 +175,7 @@ Note: the 2026-05-18 PRD remains the parent product source of truth. The 2026-05
 - Test: `apps/packages/ui/src/services/__tests__/watchlists-overview.test.ts`
 - Test: new `apps/packages/ui/src/services/__tests__/watchlists-audio.test.ts`
 
-- [x] **Step 1: Write failing type/service tests**
+- [ ] **Step 1: Write failing type/service tests**
 
 Add service tests proving `getWatchlistRunAudio(123)` calls `/api/v1/watchlists/runs/123/audio`, and compile-time fixtures proving `WatchlistOutputCreate` accepts backend-supported audio fields.
 
@@ -208,7 +199,7 @@ const output: WatchlistOutputCreate = {
 }
 ```
 
-- [x] **Step 2: Run tests to verify failure**
+- [ ] **Step 2: Run tests to verify failure**
 
 Run:
 
@@ -219,7 +210,7 @@ bunx vitest run src/services/__tests__/watchlists-audio.test.ts src/components/O
 
 Expected: FAIL because the service helper and several output audio fields are missing or incomplete.
 
-- [x] **Step 3: Add types and service helper**
+- [ ] **Step 3: Add types and service helper**
 
 Add these types to `watchlists.ts`:
 
@@ -269,13 +260,13 @@ export const getWatchlistRunAudio = async (
 }
 ```
 
-- [x] **Step 4: Run focused tests**
+- [ ] **Step 4: Run focused tests**
 
 Run the command from Step 2 again.
 
 Expected: PASS.
 
-- [x] **Step 5: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add apps/packages/ui/src/types/watchlists.ts apps/packages/ui/src/services/watchlists.ts apps/packages/ui/src/services/__tests__/watchlists-audio.test.ts
@@ -293,7 +284,7 @@ git commit -m "feat: align watchlists audio contracts"
 - Test: `apps/packages/ui/src/components/Option/Watchlists/JobsTab/__tests__/schedule-utils.test.ts`
 - Test: `apps/packages/ui/src/components/Option/Watchlists/JobsTab/__tests__/SchedulePicker.help.test.tsx`
 
-- [x] **Step 1: Write failing schedule tests**
+- [ ] **Step 1: Write failing schedule tests**
 
 Add coverage for:
 
@@ -304,7 +295,7 @@ Add coverage for:
 - Weekly still works
 - Raw cron still available
 
-- [x] **Step 2: Run tests to verify failure**
+- [ ] **Step 2: Run tests to verify failure**
 
 ```bash
 cd apps/packages/ui
@@ -313,7 +304,7 @@ bunx vitest run src/components/Option/Watchlists/JobsTab/__tests__/schedule-util
 
 Expected: FAIL because presets are fixed to hourly/every6/daily/weekly.
 
-- [x] **Step 3: Implement interval preset state**
+- [ ] **Step 3: Implement interval preset state**
 
 Update `SchedulePresetKey` and state:
 
@@ -346,7 +337,7 @@ Keep custom cron as the escape hatch for schedules cron can express but the pres
 
 Update `parsePresetFromCron` so existing `*/6` schedules map into the interval model instead of appearing as raw cron after upgrade.
 
-- [x] **Step 4: Update UI copy and controls**
+- [ ] **Step 4: Update UI copy and controls**
 
 In `SchedulePicker.tsx`, use segmented/select controls for:
 
@@ -360,13 +351,13 @@ In `SchedulePicker.tsx`, use segmented/select controls for:
 
 Always show generated cron and a human-readable preview via `CronDisplay`.
 
-- [x] **Step 5: Run focused tests**
+- [ ] **Step 5: Run focused tests**
 
 Run the command from Step 2 again.
 
 Expected: PASS.
 
-- [x] **Step 6: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Watchlists/JobsTab/schedule-utils.ts apps/packages/ui/src/components/Option/Watchlists/JobsTab/schedule-frequency.ts apps/packages/ui/src/components/Option/Watchlists/JobsTab/SchedulePicker.tsx apps/packages/ui/src/components/Option/Watchlists/JobsTab/__tests__/schedule-utils.test.ts apps/packages/ui/src/components/Option/Watchlists/JobsTab/__tests__/SchedulePicker.help.test.tsx
@@ -385,7 +376,7 @@ git commit -m "feat: add variable watchlist cadence controls"
 - Test: `apps/packages/ui/src/components/Option/Watchlists/SourcesTab/__tests__/SourceFormModal.test-source.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/Watchlists/SourcesTab/__tests__/SourceFormModal.forum-help.test.tsx`
 
-- [x] **Step 1: Write failing source settings tests**
+- [ ] **Step 1: Write failing source settings tests**
 
 Cover:
 
@@ -395,7 +386,7 @@ Cover:
 - Empty advanced fields do not create noisy settings.
 - Forum source option is enabled only when watchlists settings report `forums_enabled`.
 
-- [x] **Step 2: Run tests to verify failure**
+- [ ] **Step 2: Run tests to verify failure**
 
 ```bash
 cd apps/packages/ui
@@ -404,7 +395,7 @@ bunx vitest run src/components/Option/Watchlists/SourcesTab/__tests__/source-set
 
 Expected: FAIL because settings are not exposed or submitted.
 
-- [x] **Step 3: Implement pure merge helpers**
+- [ ] **Step 3: Implement pure merge helpers**
 
 Add helpers:
 
@@ -420,7 +411,7 @@ export const mergeSourceSettings = (
 
 Use more specific functions for scrape rules, so fields can be deleted intentionally without wiping unrelated advanced settings.
 
-- [x] **Step 4: Update `SourceFormModal`**
+- [ ] **Step 4: Update `SourceFormModal`**
 
 Change `onSubmit` values to include `settings`.
 
@@ -441,7 +432,7 @@ await testWatchlistSourceDraft(
 )
 ```
 
-- [x] **Step 5: Add validation display placeholders**
+- [ ] **Step 5: Add validation display placeholders**
 
 Show a compact diagnostics block when preview response includes:
 
@@ -454,13 +445,13 @@ Show a compact diagnostics block when preview response includes:
 
 Do not invent those fields in the UI if the backend does not return them yet; render only when present.
 
-- [x] **Step 6: Run focused tests**
+- [ ] **Step 6: Run focused tests**
 
 Run the command from Step 2 again.
 
 Expected: PASS.
 
-- [x] **Step 7: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Watchlists/SourcesTab/source-settings.ts apps/packages/ui/src/components/Option/Watchlists/SourcesTab/SourceFormModal.tsx apps/packages/ui/src/components/Option/Watchlists/SourcesTab/SourcesTab.tsx apps/packages/ui/src/components/Option/Watchlists/SourcesTab/__tests__/source-settings.test.ts apps/packages/ui/src/components/Option/Watchlists/SourcesTab/__tests__/SourceFormModal.test-source.test.tsx apps/packages/ui/src/components/Option/Watchlists/SourcesTab/__tests__/SourceFormModal.forum-help.test.tsx
@@ -477,7 +468,7 @@ git commit -m "feat: preserve watchlist source settings"
 - Test: `tldw_Server_API/tests/Watchlists/test_fetchers_scrape_rules.py`
 - Test: `tldw_Server_API/tests/Watchlists/test_preview_endpoint.py`
 
-- [x] **Step 1: Write failing backend tests**
+- [ ] **Step 1: Write failing backend tests**
 
 Add tests proving draft/saved source test returns diagnostics for site sources with scrape rules:
 
@@ -486,7 +477,7 @@ assert response.json()["diagnostics"]["fetch_mode"] == "scrape_rules"
 assert "selector_warnings" in response.json()["diagnostics"]
 ```
 
-- [x] **Step 2: Run tests to verify failure**
+- [ ] **Step 2: Run tests to verify failure**
 
 ```bash
 source .venv/bin/activate
@@ -495,7 +486,7 @@ python -m pytest tldw_Server_API/tests/Watchlists/test_fetchers_scrape_rules.py 
 
 Expected: FAIL because preview result currently exposes only item counts/items to the frontend contract.
 
-- [x] **Step 3: Add response schema**
+- [ ] **Step 3: Add response schema**
 
 Extend preview response schema with optional diagnostics:
 
@@ -509,17 +500,17 @@ class SourcePreviewDiagnostics(BaseModel):
 
 Keep fields optional to avoid breaking existing callers.
 
-- [x] **Step 4: Populate diagnostics**
+- [ ] **Step 4: Populate diagnostics**
 
 Reuse existing `validate_selector_rules` output for site/forum scrape rules. For RSS and discovery fallback, report `fetch_mode` only if no selector diagnostics exist.
 
-- [x] **Step 5: Run backend tests**
+- [ ] **Step 5: Run backend tests**
 
 Run the command from Step 2 again.
 
 Expected: PASS.
 
-- [x] **Step 6: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py tldw_Server_API/app/api/v1/endpoints/watchlists.py tldw_Server_API/tests/Watchlists/test_fetchers_scrape_rules.py tldw_Server_API/tests/Watchlists/test_preview_endpoint.py
@@ -541,7 +532,7 @@ git commit -m "feat: expose watchlist source validation diagnostics"
 - Backend test: `tldw_Server_API/tests/Watchlists/test_job_output_prefs_roundtrip.py`
 - Backend test: `tldw_Server_API/tests/Watchlists/test_newsletter_briefing_gaps.py`
 
-- [x] **Step 1: Write failing frontend tests**
+- [ ] **Step 1: Write failing frontend tests**
 
 Cover:
 
@@ -549,14 +540,14 @@ Cover:
 - Manual/test output creation remains explicit.
 - Delivery status helper distinguishes `sent`, `skipped`, `failed`, and `pending`.
 
-- [x] **Step 2: Run frontend tests to verify failure**
+- [ ] **Step 2: Run frontend tests to verify failure**
 
 ```bash
 cd apps/packages/ui
 bunx vitest run src/components/Option/Watchlists/OverviewTab/__tests__/pipeline-contract.test.ts src/components/Option/Watchlists/JobsTab/__tests__/JobFormModal.live-summary.test.tsx src/components/Option/Watchlists/OutputsTab/__tests__/outputMetadata.test.ts --maxWorkers=1 --no-file-parallelism
 ```
 
-- [x] **Step 3: Add `auto_output` type and UI**
+- [ ] **Step 3: Add `auto_output` type and UI**
 
 Add to `JobOutputPrefs`:
 
@@ -572,11 +563,11 @@ auto_output?: {
 
 In `JobFormModal`, make scheduled output explicit: when delivery or audio is enabled for recurring monitors, require or default `auto_output.enabled` and show review copy that output artifacts will be generated each run.
 
-- [x] **Step 4: Update pipeline payload helpers**
+- [ ] **Step 4: Update pipeline payload helpers**
 
 In `pipeline-contract.ts`, set `auto_output.enabled` when the user chooses scheduled digest/newsletter output. Do not set it for manual/test-only flows.
 
-- [x] **Step 5: Confirm backend roundtrip**
+- [ ] **Step 5: Confirm backend roundtrip**
 
 Run:
 
@@ -587,13 +578,13 @@ python -m pytest tldw_Server_API/tests/Watchlists/test_job_output_prefs_roundtri
 
 Expected: PASS or only frontend-driven behavior needs update. If backend drops the field, fix schema/persistence before proceeding.
 
-- [x] **Step 6: Run focused frontend tests**
+- [ ] **Step 6: Run focused frontend tests**
 
 Run the command from Step 2 again.
 
 Expected: PASS.
 
-- [x] **Step 7: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add apps/packages/ui/src/types/watchlists.ts apps/packages/ui/src/components/Option/Watchlists/JobsTab/JobFormModal.tsx apps/packages/ui/src/components/Option/Watchlists/OverviewTab/pipeline-contract.ts apps/packages/ui/src/components/Option/Watchlists/OutputsTab/outputMetadata.ts apps/packages/ui/src/components/Option/Watchlists/JobsTab/__tests__/JobFormModal.live-summary.test.tsx apps/packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/pipeline-contract.test.ts apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/outputMetadata.test.ts
@@ -613,7 +604,7 @@ git commit -m "feat: make watchlist scheduled outputs explicit"
 - Test: `apps/packages/ui/src/components/Option/Watchlists/RunsTab/__tests__/RunDetailDrawer.stream-lifecycle.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.audio.test.tsx`
 
-- [x] **Step 1: Write failing UI tests**
+- [ ] **Step 1: Write failing UI tests**
 
 Cover:
 
@@ -622,14 +613,14 @@ Cover:
 - Final audio renders a player/download link.
 - Output preview shows fallback reason when metadata has fallback.
 
-- [x] **Step 2: Run tests to verify failure**
+- [ ] **Step 2: Run tests to verify failure**
 
 ```bash
 cd apps/packages/ui
 bunx vitest run src/components/Option/Watchlists/RunsTab/__tests__/RunDetailDrawer.stream-lifecycle.test.tsx src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.audio.test.tsx --maxWorkers=1 --no-file-parallelism
 ```
 
-- [x] **Step 3: Implement status helpers**
+- [ ] **Step 3: Implement status helpers**
 
 Add pure helpers in `outputMetadata.ts` for:
 
@@ -637,7 +628,7 @@ Add pure helpers in `outputMetadata.ts` for:
 - audio requested/pending/final/failed/fallback summary
 - script/per-speaker/final artifact extraction
 
-- [x] **Step 4: Render states**
+- [ ] **Step 4: Render states**
 
 In run/output surfaces, distinguish:
 
@@ -649,13 +640,13 @@ In run/output surfaces, distinguish:
 - fallback single-voice audio
 - status unknown
 
-- [x] **Step 5: Run focused tests**
+- [ ] **Step 5: Run focused tests**
 
 Run the command from Step 2 again.
 
 Expected: PASS.
 
-- [x] **Step 6: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add apps/packages/ui/src/services/watchlists.ts apps/packages/ui/src/components/Option/Watchlists/RunsTab/RunDetailDrawer.tsx apps/packages/ui/src/components/Option/Watchlists/RunsTab/RunsTab.tsx apps/packages/ui/src/components/Option/Watchlists/OutputsTab/OutputPreviewDrawer.tsx apps/packages/ui/src/components/Option/Watchlists/OutputsTab/outputMetadata.ts apps/packages/ui/src/components/Option/Watchlists/RunsTab/__tests__/RunDetailDrawer.stream-lifecycle.test.tsx apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.audio.test.tsx
@@ -670,16 +661,10 @@ git commit -m "feat: surface watchlist audio run status"
 - Modify: `tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/watchlists.py`
 - Modify: `tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py`
-- Modify: `tldw_Server_API/app/core/Workflows/adapters/content/_config.py`
-- Modify: `tldw_Server_API/app/core/Workflows/adapters/content/audio_briefing.py`
-- Modify: `tldw_Server_API/app/core/Workflows/adapters/audio/multi_voice_tts.py`
 - Test: `tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py`
 - Test: `tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py`
-- Test: `tldw_Server_API/tests/Watchlists/test_watchlists_api.py`
-- Test: `tldw_Server_API/tests/Workflows/adapters/test_content_adapters.py`
-- Test: `tldw_Server_API/tests/Workflows/adapters/test_audio_adapters.py`
 
-- [x] **Step 1: Write failing backend tests**
+- [ ] **Step 1: Write failing backend tests**
 
 Add tests for `GET /runs/{run_id}/audio` returning:
 
@@ -688,7 +673,7 @@ Add tests for `GET /runs/{run_id}/audio` returning:
 - final artifact
 - fallback reason when multi-voice fails
 
-- [x] **Step 2: Run tests to verify failure**
+- [ ] **Step 2: Run tests to verify failure**
 
 ```bash
 source .venv/bin/activate
@@ -697,7 +682,7 @@ python -m pytest tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.p
 
 Expected: FAIL because the endpoint currently chooses a final audio candidate and does not expose the full artifact graph.
 
-- [x] **Step 3: Add structured audio cast schema**
+- [ ] **Step 3: Add structured audio cast schema**
 
 Add optional `audio_cast` to output create/job prefs schemas. Preserve `voice_map` compatibility.
 
@@ -714,11 +699,11 @@ class WatchlistAudioCast(BaseModel):
     speakers: list[WatchlistAudioCastSpeaker]
 ```
 
-- [x] **Step 4: Persist intermediate artifacts**
+- [ ] **Step 4: Persist intermediate artifacts**
 
 Extend workflow metadata/artifact naming so script, per-speaker clips, final mix, and fallback reason can be retrieved by run ID. Do not create a new podcast job system.
 
-- [x] **Step 5: Expand run audio endpoint**
+- [ ] **Step 5: Expand run audio endpoint**
 
 Return a stable shape:
 
@@ -735,13 +720,13 @@ Return a stable shape:
 }
 ```
 
-- [x] **Step 6: Run backend tests**
+- [ ] **Step 6: Run backend tests**
 
 Run the command from Step 2 again.
 
 Expected: PASS.
 
-- [x] **Step 7: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py tldw_Server_API/app/api/v1/endpoints/watchlists.py tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py
@@ -763,7 +748,7 @@ git commit -m "feat: persist watchlist audio briefing artifacts"
 - Test: `apps/packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/pipeline-contract.test.ts`
 - Regression: `apps/packages/ui/src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.experimental-ia.test.tsx`
 
-- [x] **Step 1: Write failing wizard state tests**
+- [ ] **Step 1: Write failing wizard state tests**
 
 Cover:
 
@@ -774,18 +759,18 @@ Cover:
 - Optional audio supports 0-4 speakers.
 - Review summary names source, cadence, filters, output, delivery, and audio.
 
-- [x] **Step 2: Run tests to verify failure**
+- [ ] **Step 2: Run tests to verify failure**
 
 ```bash
 cd apps/packages/ui
 bunx vitest run src/components/Option/Watchlists/OverviewTab/__tests__/pipeline-wizard-state.test.ts src/components/Option/Watchlists/OverviewTab/__tests__/PipelineWizard.test.tsx src/components/Option/Watchlists/OverviewTab/__tests__/pipeline-contract.test.ts --maxWorkers=1 --no-file-parallelism
 ```
 
-- [x] **Step 3: Implement wizard state helpers**
+- [ ] **Step 3: Implement wizard state helpers**
 
 Keep state pure. Use existing service calls from the component, not from helper files.
 
-- [x] **Step 4: Implement additive `PipelineWizard`**
+- [ ] **Step 4: Implement additive `PipelineWizard`**
 
 Wizard steps:
 
@@ -797,17 +782,17 @@ Wizard steps:
 
 The wizard should call existing `createWatchlistSource`, `createWatchlistJob`, `triggerWatchlistRun`, and `createWatchlistOutput` helpers. It must not bypass existing API contracts.
 
-- [x] **Step 5: Wire into overview without removing full controls**
+- [ ] **Step 5: Wire into overview without removing full controls**
 
 Add "Create briefing pipeline" as an entry point. Preserve current Sources/Items/Outputs primary tabs and "Show all views".
 
-- [x] **Step 6: Run focused tests**
+- [ ] **Step 6: Run focused tests**
 
 Run the command from Step 2 again.
 
 Expected: PASS.
 
-- [x] **Step 7: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Watchlists/OverviewTab/OverviewTab.tsx apps/packages/ui/src/components/Option/Watchlists/OverviewTab/pipeline-contract.ts apps/packages/ui/src/components/Option/Watchlists/OverviewTab/quick-setup.ts apps/packages/ui/src/components/Option/Watchlists/OverviewTab/PipelineWizard.tsx apps/packages/ui/src/components/Option/Watchlists/OverviewTab/pipeline-wizard-state.ts apps/packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/PipelineWizard.test.tsx apps/packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/pipeline-wizard-state.test.ts apps/packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/pipeline-contract.test.ts apps/packages/ui/src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.experimental-ia.test.tsx
@@ -818,8 +803,6 @@ git commit -m "feat: add watchlists briefing pipeline wizard"
 
 ## Task 9: Power-User Reuse And Batch Operations
 
-Completion note: Implemented in PR #1864 (`0a892b044`) under `TASK-436`; clone/reuse and batch/palette behavior are tracked in the Backlog final summary and merged into `origin/dev`.
-
 **Files:**
 - Modify: `apps/packages/ui/src/components/Option/Watchlists/JobsTab/JobsTab.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Watchlists/SourcesTab/SourcesTab.tsx`
@@ -827,7 +810,7 @@ Completion note: Implemented in PR #1864 (`0a892b044`) under `TASK-436`; clone/r
 - Modify as needed: `tldw_Server_API/app/api/v1/endpoints/watchlists.py`
 - Test: existing Jobs/Sources batch tests plus new focused tests.
 
-- [x] **Step 1: Write failing clone/reuse tests**
+- [ ] **Step 1: Write failing clone/reuse tests**
 
 Cover:
 
@@ -835,22 +818,22 @@ Cover:
 - Clone source rules preserves settings but resets status/seen state.
 - Command palette exposes create, clone, run, preview, retry, export.
 
-- [x] **Step 2: Implement frontend-only clone where possible**
+- [ ] **Step 2: Implement frontend-only clone where possible**
 
 Prefer composing existing create APIs with copied payloads. Add backend batch APIs only where frontend composition is unsafe or inefficient.
 
-- [x] **Step 3: Add batch test/validation actions**
+- [ ] **Step 3: Add batch test/validation actions**
 
 Source batch rule test can reuse `checkWatchlistSourcesNow` initially, then move to a richer validation endpoint when Task 4 exists.
 
-- [x] **Step 4: Run watchlists scale and batch tests**
+- [ ] **Step 4: Run watchlists scale and batch tests**
 
 ```bash
 cd apps/packages/ui
 bun run test:watchlists:scale
 ```
 
-- [x] **Step 5: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Watchlists/JobsTab/JobsTab.tsx apps/packages/ui/src/components/Option/Watchlists/SourcesTab/SourcesTab.tsx apps/packages/ui/src/components/Option/Watchlists/shared/WatchlistsCommandPalette.tsx
@@ -861,8 +844,6 @@ git commit -m "feat: add watchlists reuse and batch controls"
 
 ## Task 10: Operator Recovery And Diagnostics
 
-Completion note: Implemented in PR #1864 (`0a892b044`) under `TASK-436`; delivery/audio retry controls, diagnostics export, and related frontend/backend verification are recorded in the Backlog task.
-
 **Files:**
 - Modify: `apps/packages/ui/src/components/Option/Watchlists/shared/WatchlistsHealthBar.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Watchlists/RunsTab/RunDetailDrawer.tsx`
@@ -872,7 +853,7 @@ Completion note: Implemented in PR #1864 (`0a892b044`) under `TASK-436`; deliver
 - Test: `tldw_Server_API/tests/Watchlists/test_delivery_integrations.py`
 - Test: `tldw_Server_API/tests/Watchlists/test_runs_csv_export.py`
 
-- [x] **Step 1: Write failing operator tests**
+- [ ] **Step 1: Write failing operator tests**
 
 Cover:
 
@@ -880,14 +861,14 @@ Cover:
 - Audio-only retry does not rerun ingestion.
 - Diagnostic bundle contains source statuses, filter tallies, output metadata, delivery statuses, audio task metadata, and logs.
 
-- [x] **Step 2: Run backend tests to verify failure**
+- [ ] **Step 2: Run backend tests to verify failure**
 
 ```bash
 source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py tldw_Server_API/tests/Watchlists/test_delivery_integrations.py tldw_Server_API/tests/Watchlists/test_runs_csv_export.py -q
 ```
 
-- [x] **Step 3: Add backend retry and diagnostics endpoints**
+- [ ] **Step 3: Add backend retry and diagnostics endpoints**
 
 Only add endpoints that cannot safely be represented with existing APIs. Keep them stage-specific:
 
@@ -895,15 +876,15 @@ Only add endpoints that cannot safely be represented with existing APIs. Keep th
 - audio retry
 - diagnostic bundle export
 
-- [x] **Step 4: Render operator controls**
+- [ ] **Step 4: Render operator controls**
 
 Controls must show confirmation copy that names what will and will not rerun.
 
-- [x] **Step 5: Run backend and frontend focused tests**
+- [ ] **Step 5: Run backend and frontend focused tests**
 
 Run backend command from Step 2 and focused `RunsTab` Vitest tests.
 
-- [x] **Step 6: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/endpoints/watchlists.py tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py tldw_Server_API/tests/Watchlists/test_delivery_integrations.py tldw_Server_API/tests/Watchlists/test_runs_csv_export.py apps/packages/ui/src/components/Option/Watchlists/shared/WatchlistsHealthBar.tsx apps/packages/ui/src/components/Option/Watchlists/RunsTab/RunDetailDrawer.tsx apps/packages/ui/src/components/Option/Watchlists/RunsTab/RunsTab.tsx
@@ -914,13 +895,11 @@ git commit -m "feat: add watchlists operator recovery controls"
 
 ## Task 11: End-To-End Verification And Browser QA
 
-Completion note: Completed in PR #1867 (`a1d34679`) under `TASK-439`; focused frontend/backend/security verification and browser-observed `/watchlists` QA are recorded in the Backlog task.
-
 **Files:**
 - Create or modify: `apps/tldw-frontend/e2e/...` only if an existing watchlists workflow spec is present and suitable.
 - Otherwise rely on component/API tests plus browser-observed manual QA.
 
-- [x] **Step 1: Run focused frontend verification**
+- [ ] **Step 1: Run focused frontend verification**
 
 ```bash
 cd apps/packages/ui
@@ -929,21 +908,21 @@ bun run test:watchlists:scale
 bun run test:watchlists:typecheck
 ```
 
-- [x] **Step 2: Run focused backend verification**
+- [ ] **Step 2: Run focused backend verification**
 
 ```bash
 source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/Watchlists/test_watchlists_api.py tldw_Server_API/tests/Watchlists/test_full_pipeline_integration.py tldw_Server_API/tests/Watchlists/test_job_output_prefs_roundtrip.py tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py -q
 ```
 
-- [x] **Step 3: Run Bandit on touched backend code**
+- [ ] **Step 3: Run Bandit on touched backend code**
 
 ```bash
 source .venv/bin/activate
 python -m bandit -r tldw_Server_API/app/api/v1/endpoints/watchlists.py tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py tldw_Server_API/app/core/Watchlists -f json -o /tmp/bandit_watchlists_digest_audio.json
 ```
 
-- [x] **Step 4: Browser QA `/watchlists`**
+- [ ] **Step 4: Browser QA `/watchlists`**
 
 Start local services per repo conventions, then verify:
 
@@ -958,7 +937,7 @@ Start local services per repo conventions, then verify:
 - Output preview shows digest, delivery status, final audio, and fallback when applicable.
 - Full tab workflow and "Show all views" still work.
 
-- [x] **Step 5: Final regression sweep**
+- [ ] **Step 5: Final regression sweep**
 
 ```bash
 git diff --check
