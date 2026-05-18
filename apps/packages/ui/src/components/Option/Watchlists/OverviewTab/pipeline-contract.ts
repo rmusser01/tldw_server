@@ -78,9 +78,10 @@ export const toPipelineJobCreatePayload = (
   const schedule = resolveQuickSetupSchedule(draft.schedulePreset)
   const recipients = normalizeRecipients(draft.emailRecipients)
   const normalizedTemplateName = String(draft.templateName || "").trim()
+  const templateVersionNum = Number(draft.templateVersion)
   const normalizedTemplateVersion =
-    Number.isFinite(Number(draft.templateVersion)) && Number(draft.templateVersion) > 0
-      ? Number(draft.templateVersion)
+    Number.isFinite(templateVersionNum) && templateVersionNum > 0
+      ? templateVersionNum
       : undefined
   const templateFormat =
     draft.templateFormat === "html" || draft.templateFormat === "md"

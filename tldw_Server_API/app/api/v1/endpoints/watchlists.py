@@ -2353,9 +2353,9 @@ def _build_source_preview_diagnostics(
     validation = validate_selector_rules(scrape_rules)
     diagnostics.selector_errors = [
         _format_selector_diagnostic(issue)
-        for issue in validation.get("errors", [])
+        for issue in (validation.get("errors") or [])
     ]
-    for issue in validation.get("warnings", []):
+    for issue in (validation.get("warnings") or []):
         warning = issue.get("warning") if isinstance(issue, dict) else None
         formatted = _format_selector_diagnostic(issue)
         if warning == "no_matches":
