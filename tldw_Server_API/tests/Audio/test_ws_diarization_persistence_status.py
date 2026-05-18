@@ -89,9 +89,8 @@ async def test_status_emitted_when_persistence_degraded(monkeypatch):
         "diarization_enabled": True,
         "diarization_store_audio": True,
     })
-    commit = json.dumps({"type": "commit"})
     stop = json.dumps({"type": "stop"})
-    ws = _DummyWebSocket([cfg, commit, stop])
+    ws = _DummyWebSocket([cfg, stop])
 
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified import (
         handle_unified_websocket, UnifiedStreamingConfig
@@ -145,9 +144,8 @@ async def test_status_emitted_when_persistence_disabled(monkeypatch):
         "diarization_enabled": True,
         "diarization_store_audio": True,
     })
-    commit = json.dumps({"type": "commit"})
     stop = json.dumps({"type": "stop"})
-    ws = _DummyWebSocket([cfg, commit, stop])
+    ws = _DummyWebSocket([cfg, stop])
 
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified import (
         handle_unified_websocket, UnifiedStreamingConfig
@@ -194,9 +192,8 @@ async def test_full_transcript_marks_diarization_unavailable_when_init_fails(mon
         "diarization_enabled": True,
         "diarization_store_audio": True,
     })
-    commit = json.dumps({"type": "commit"})
     stop = json.dumps({"type": "stop"})
-    ws = _DummyWebSocket([cfg, commit, stop])
+    ws = _DummyWebSocket([cfg, stop])
 
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified import (
         handle_unified_websocket, UnifiedStreamingConfig
