@@ -616,12 +616,23 @@ class PreviewItem(BaseModel):
     flagged: bool = False
 
 
+class SourcePreviewDiagnostics(BaseModel):
+    fetch_mode: str | None = None
+    selector_errors: list[str] = Field(default_factory=list)
+    selector_warnings: list[str] = Field(default_factory=list)
+    no_match_warnings: list[str] = Field(default_factory=list)
+    non_unique_warnings: list[str] = Field(default_factory=list)
+    fragile_selector_warnings: list[str] = Field(default_factory=list)
+    dedupe_preview_key: str | None = None
+
+
 class PreviewResponse(BaseModel):
     items: list[PreviewItem]
     total: int
     pagination: OffsetPaginationMeta
     ingestable: int
     filtered: int
+    diagnostics: SourcePreviewDiagnostics | None = None
 
 
 class RunDetail(BaseModel):

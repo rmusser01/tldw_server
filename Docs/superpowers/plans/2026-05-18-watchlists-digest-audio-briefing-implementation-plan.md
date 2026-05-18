@@ -468,7 +468,7 @@ git commit -m "feat: preserve watchlist source settings"
 - Test: `tldw_Server_API/tests/Watchlists/test_fetchers_scrape_rules.py`
 - Test: `tldw_Server_API/tests/Watchlists/test_preview_endpoint.py`
 
-- [ ] **Step 1: Write failing backend tests**
+- [x] **Step 1: Write failing backend tests**
 
 Add tests proving draft/saved source test returns diagnostics for site sources with scrape rules:
 
@@ -477,7 +477,7 @@ assert response.json()["diagnostics"]["fetch_mode"] == "scrape_rules"
 assert "selector_warnings" in response.json()["diagnostics"]
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 ```bash
 source .venv/bin/activate
@@ -486,7 +486,7 @@ python -m pytest tldw_Server_API/tests/Watchlists/test_fetchers_scrape_rules.py 
 
 Expected: FAIL because preview result currently exposes only item counts/items to the frontend contract.
 
-- [ ] **Step 3: Add response schema**
+- [x] **Step 3: Add response schema**
 
 Extend preview response schema with optional diagnostics:
 
@@ -500,17 +500,17 @@ class SourcePreviewDiagnostics(BaseModel):
 
 Keep fields optional to avoid breaking existing callers.
 
-- [ ] **Step 4: Populate diagnostics**
+- [x] **Step 4: Populate diagnostics**
 
 Reuse existing `validate_selector_rules` output for site/forum scrape rules. For RSS and discovery fallback, report `fetch_mode` only if no selector diagnostics exist.
 
-- [ ] **Step 5: Run backend tests**
+- [x] **Step 5: Run backend tests**
 
 Run the command from Step 2 again.
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py tldw_Server_API/app/api/v1/endpoints/watchlists.py tldw_Server_API/tests/Watchlists/test_fetchers_scrape_rules.py tldw_Server_API/tests/Watchlists/test_preview_endpoint.py
@@ -532,7 +532,7 @@ git commit -m "feat: expose watchlist source validation diagnostics"
 - Backend test: `tldw_Server_API/tests/Watchlists/test_job_output_prefs_roundtrip.py`
 - Backend test: `tldw_Server_API/tests/Watchlists/test_newsletter_briefing_gaps.py`
 
-- [ ] **Step 1: Write failing frontend tests**
+- [x] **Step 1: Write failing frontend tests**
 
 Cover:
 
@@ -540,14 +540,14 @@ Cover:
 - Manual/test output creation remains explicit.
 - Delivery status helper distinguishes `sent`, `skipped`, `failed`, and `pending`.
 
-- [ ] **Step 2: Run frontend tests to verify failure**
+- [x] **Step 2: Run frontend tests to verify failure**
 
 ```bash
 cd apps/packages/ui
 bunx vitest run src/components/Option/Watchlists/OverviewTab/__tests__/pipeline-contract.test.ts src/components/Option/Watchlists/JobsTab/__tests__/JobFormModal.live-summary.test.tsx src/components/Option/Watchlists/OutputsTab/__tests__/outputMetadata.test.ts --maxWorkers=1 --no-file-parallelism
 ```
 
-- [ ] **Step 3: Add `auto_output` type and UI**
+- [x] **Step 3: Add `auto_output` type and UI**
 
 Add to `JobOutputPrefs`:
 
@@ -563,11 +563,11 @@ auto_output?: {
 
 In `JobFormModal`, make scheduled output explicit: when delivery or audio is enabled for recurring monitors, require or default `auto_output.enabled` and show review copy that output artifacts will be generated each run.
 
-- [ ] **Step 4: Update pipeline payload helpers**
+- [x] **Step 4: Update pipeline payload helpers**
 
 In `pipeline-contract.ts`, set `auto_output.enabled` when the user chooses scheduled digest/newsletter output. Do not set it for manual/test-only flows.
 
-- [ ] **Step 5: Confirm backend roundtrip**
+- [x] **Step 5: Confirm backend roundtrip**
 
 Run:
 
@@ -578,13 +578,13 @@ python -m pytest tldw_Server_API/tests/Watchlists/test_job_output_prefs_roundtri
 
 Expected: PASS or only frontend-driven behavior needs update. If backend drops the field, fix schema/persistence before proceeding.
 
-- [ ] **Step 6: Run focused frontend tests**
+- [x] **Step 6: Run focused frontend tests**
 
 Run the command from Step 2 again.
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/packages/ui/src/types/watchlists.ts apps/packages/ui/src/components/Option/Watchlists/JobsTab/JobFormModal.tsx apps/packages/ui/src/components/Option/Watchlists/OverviewTab/pipeline-contract.ts apps/packages/ui/src/components/Option/Watchlists/OutputsTab/outputMetadata.ts apps/packages/ui/src/components/Option/Watchlists/JobsTab/__tests__/JobFormModal.live-summary.test.tsx apps/packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/pipeline-contract.test.ts apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/outputMetadata.test.ts

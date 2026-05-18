@@ -563,6 +563,45 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
       }
     }
 
+    const hasRecurringSchedule = Boolean(schedule && schedule.trim().length > 0)
+    const existingAutoOutput = isRecord(basePrefs.auto_output)
+      ? { ...basePrefs.auto_output }
+      : {}
+    const shouldAutoOutput = (
+      hasRecurringSchedule &&
+      (
+        deliveryEmailEnabled ||
+        deliveryChatbookEnabled ||
+        audioBriefingEnabled ||
+        existingAutoOutput.enabled === true
+      )
+    )
+    if (shouldAutoOutput) {
+      existingAutoOutput.enabled = true
+      existingAutoOutput.type =
+        typeof existingAutoOutput.type === "string" && existingAutoOutput.type.trim().length > 0
+          ? existingAutoOutput.type.trim()
+          : "briefing_markdown"
+      if (isOutputFormat(outputTemplateFormat)) {
+        existingAutoOutput.format = outputTemplateFormat
+      } else {
+        delete existingAutoOutput.format
+      }
+      if (normalizedTemplateName) {
+        existingAutoOutput.template_name = normalizedTemplateName
+      } else {
+        delete existingAutoOutput.template_name
+      }
+      if (typeof outputTemplateVersion === "number" && outputTemplateVersion > 0) {
+        existingAutoOutput.template_version = Math.floor(outputTemplateVersion)
+      } else {
+        delete existingAutoOutput.template_version
+      }
+      basePrefs.auto_output = existingAutoOutput
+    } else {
+      delete basePrefs.auto_output
+    }
+
     if (Object.keys(basePrefs).length > 0) {
       return basePrefs as JobOutputPrefs
     }

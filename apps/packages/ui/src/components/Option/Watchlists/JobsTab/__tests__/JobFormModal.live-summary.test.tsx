@@ -404,6 +404,43 @@ describe("JobFormModal live summary", () => {
     )
   }, 15_000)
 
+  it("enables scheduled auto-output when recurring delivery or audio is configured", async () => {
+    render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(servicesMock.fetchWatchlistSources).toHaveBeenCalled()
+      expect(servicesMock.fetchWatchlistGroups).toHaveBeenCalled()
+    })
+
+    fireEvent.change(screen.getByPlaceholderText("e.g., Daily Tech News"), {
+      target: { value: "Scheduled Audio Brief" }
+    })
+    fireEvent.click(screen.getByTestId("scope-setter"))
+    fireEvent.click(screen.getByTestId("job-form-mode-advanced"))
+    const collapseHeaders = Array.from(document.querySelectorAll(".ant-collapse-header"))
+    fireEvent.click(collapseHeaders[1] as Element)
+    fireEvent.click(screen.getByTestId("schedule-setter"))
+    fireEvent.click(screen.getByText("Output & Delivery"))
+    fireEvent.click(screen.getByTestId("job-form-audio-enabled-switch"))
+    fireEvent.click(screen.getByRole("button", { name: "Create" }))
+
+    await waitFor(() => {
+      expect(servicesMock.createWatchlistJob).toHaveBeenCalledTimes(1)
+    })
+
+    expect(servicesMock.createWatchlistJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        output_prefs: expect.objectContaining({
+          auto_output: expect.objectContaining({
+            enabled: true,
+            type: "briefing_markdown"
+          }),
+          generate_audio: true
+        })
+      })
+    )
+  }, 15_000)
+
   it("shows practical audio setup guidance in monitor form", async () => {
     render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
 

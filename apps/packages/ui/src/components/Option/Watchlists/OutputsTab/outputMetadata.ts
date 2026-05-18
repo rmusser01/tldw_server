@@ -348,6 +348,7 @@ export const getDeliveryStatusLabel = (status: string): string => {
   if (normalized === "queued") return "Queued"
   if (normalized === "pending") return "Pending"
   if (normalized === "in_progress") return "In progress"
+  if (normalized === "skipped") return "Skipped"
   if (normalized === "failed") return "Failed"
   if (normalized === "error") return "Error"
   return status

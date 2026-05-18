@@ -77,10 +77,16 @@ export const toPipelineJobCreatePayload = (
 ): WatchlistJobCreate => {
   const schedule = resolveQuickSetupSchedule(draft.schedulePreset)
   const recipients = normalizeRecipients(draft.emailRecipients)
+  const normalizedTemplateName = String(draft.templateName || "").trim()
+  const normalizedTemplateVersion =
+    Number.isFinite(Number(draft.templateVersion)) && Number(draft.templateVersion) > 0
+      ? Number(draft.templateVersion)
+      : undefined
   const templateFormat =
     draft.templateFormat === "html" || draft.templateFormat === "md"
       ? draft.templateFormat
       : undefined
+  const shouldAutoOutput = draft.schedulePreset !== "none"
 
   return {
     name: String(draft.monitorName || "").trim(),
@@ -88,14 +94,22 @@ export const toPipelineJobCreatePayload = (
     active: true,
     ...schedule,
     output_prefs: {
-      template_name: String(draft.templateName || "").trim(),
+      ...(shouldAutoOutput
+        ? {
+            auto_output: {
+              enabled: true,
+              type: "briefing_markdown",
+              ...(templateFormat ? { format: templateFormat } : {}),
+              ...(normalizedTemplateName ? { template_name: normalizedTemplateName } : {}),
+              ...(normalizedTemplateVersion ? { template_version: normalizedTemplateVersion } : {})
+            }
+          }
+        : {}),
+      template_name: normalizedTemplateName,
       template: {
-        default_name: String(draft.templateName || "").trim(),
+        default_name: normalizedTemplateName,
         ...(templateFormat ? { default_format: templateFormat } : {}),
-        default_version:
-          Number.isFinite(Number(draft.templateVersion)) && Number(draft.templateVersion) > 0
-            ? Number(draft.templateVersion)
-            : undefined
+        default_version: normalizedTemplateVersion
       },
       generate_audio: draft.includeAudio,
       audio_voice: draft.includeAudio
