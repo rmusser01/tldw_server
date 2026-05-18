@@ -317,8 +317,8 @@ export const SttPlaygroundPage: React.FC = () => {
   // ── Render ────────────────────────────────────────────────────────
   return (
     <PageShell maxWidthClassName="max-w-5xl" className="py-6">
-      <Title level={3}>
-        {t("playground:stt.title", "STT Playground")}
+      <Title level={1} className="!text-2xl">
+        {t("playground:speechToText", "Speech to Text")}
       </Title>
       <Text type="secondary">
         {t("playground:stt.subtitle", "Record audio and compare transcription results across multiple models.")}

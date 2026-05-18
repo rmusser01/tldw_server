@@ -147,10 +147,10 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   const [chatBackgroundImage] = useSetting(CHAT_BACKGROUND_IMAGE_SETTING);
   const [stickyChatInput] = useStorage('stickyChatInput', false);
   const isChatScreen = location.pathname === '/chat';
-  const isViewportConstrainedRoute = (VIEWPORT_CONSTRAINED_PATHS as readonly string[]).includes(
-    location.pathname
-  );
   const stickyChatLayoutActive = isChatScreen && stickyChatInput;
+  const isViewportConstrainedRoute =
+    stickyChatLayoutActive ||
+    (VIEWPORT_CONSTRAINED_PATHS as readonly string[]).includes(location.pathname);
   const chatScreenBackgroundStyle =
     isChatScreen && chatBackgroundImage
       ? {
@@ -348,7 +348,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     <BuddyShellRenderContextProvider>
       <div
         className={classNames(
-          'relative flex w-full',
+          'relative flex w-full min-w-0',
           isViewportConstrainedRoute ? 'h-screen min-h-0' : 'min-h-screen'
         )}
         style={chatScreenBackgroundStyle}
@@ -388,13 +388,13 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                   onOpenNotifications={handleOpenNotifications}
                 />
               </div>
-              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+              <div className="relative flex min-h-0 min-w-0 w-full max-w-full flex-1 flex-col">
                 {children}
                 {shortcutLoading && renderShortcutOverlay()}
               </div>
             </div>
           ) : (
-            <div className="relative flex min-w-0 flex-col min-h-[135vh]">
+            <div className="relative flex w-full min-w-0 max-w-full flex-col min-h-[135vh]">
               <div className="relative z-20 w-full min-w-0">
                 <Header
                   onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
@@ -405,7 +405,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                   onOpenNotifications={handleOpenNotifications}
                 />
               </div>
-              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+              <div className="relative flex min-h-0 min-w-0 w-full max-w-full flex-1 flex-col">
                 {children}
                 {shortcutLoading && renderShortcutOverlay()}
               </div>

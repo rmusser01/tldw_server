@@ -166,7 +166,7 @@ export const McpHubPage = () => {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 p-4" data-testid="mcp-hub-shell">
-      <Typography.Title level={3} style={{ margin: 0 }}>
+      <Typography.Title level={1} className="!mb-0 !text-2xl">
         MCP Hub
       </Typography.Title>
       <Typography.Text type="secondary">

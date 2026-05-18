@@ -71,7 +71,7 @@ export const SourcesWorkspacePage: React.FC<SourcesWorkspacePageProps> = ({
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <Typography.Title level={2} className="!mb-0">
+              <Typography.Title level={1} className="!mb-0 !text-2xl">
                 {t("sources:title", "Sources")}
               </Typography.Title>
               {mode === "admin" && <Tag color="gold">Admin view</Tag>}

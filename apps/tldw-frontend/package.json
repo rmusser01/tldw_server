@@ -27,7 +27,7 @@
     "e2e:smoke": "playwright test e2e/smoke/all-pages.spec.ts --reporter=list",
     "e2e:smoke:all-pages:gate": "playwright test e2e/smoke/all-pages.spec.ts --reporter=line --grep \"Smoke Tests - All Pages\" --workers=1 --global-timeout=1800000",
     "e2e:nextgen-composer": "playwright test e2e/smoke/composer-*.spec.ts e2e/smoke/playground-nextgen-*.spec.ts e2e/smoke/sidepanel-nextgen-*.spec.ts --reporter=line --workers=1",
-    "e2e:smoke:stage4": "playwright test e2e/smoke/stage4-axe-high-risk-routes.spec.ts --reporter=line",
+    "e2e:smoke:stage4": "playwright test e2e/smoke/stage4-axe-high-risk-routes.spec.ts e2e/smoke/stage4-responsive-landmarks.spec.ts --reporter=line",
     "e2e:smoke:stage5": "playwright test e2e/smoke/stage5-release-gate.spec.ts --reporter=line --workers=1",
     "e2e:smoke:interaction:stage1": "playwright test e2e/smoke/stage6-interaction-stage1.spec.ts --reporter=line",
     "e2e:smoke:interaction:stage2": "playwright test e2e/smoke/stage6-interaction-stage2.spec.ts --reporter=line",

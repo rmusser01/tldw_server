@@ -388,7 +388,9 @@ describe("SpeechPlaygroundPage", () => {
   it("uses TTS-specific page copy and history controls when locked to listen mode", (): void => {
     render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
 
-    expect(screen.getByText("TTS Playground")).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Text to Speech" })
+    ).toBeInTheDocument()
     expect(
       screen.getByText("Draft text, choose a voice, and generate audio in one place.")
     ).toBeInTheDocument()

@@ -357,6 +357,15 @@ export async function seedAuth(
         localStorage.setItem("assistant_setup_dismissed", "true")
       } catch {}
       try {
+        localStorage.setItem("__tldw_test_bypass", "true")
+      } catch {}
+      try {
+        localStorage.setItem("dw-tips-tour-completed", "true")
+      } catch {}
+      try {
+        localStorage.setItem("document-workspace-onboarding-dismissed", "true")
+      } catch {}
+      try {
         if (cfg.allowOffline) {
           localStorage.setItem("__tldw_allow_offline", "true")
         } else {

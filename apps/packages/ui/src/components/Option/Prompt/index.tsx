@@ -2613,7 +2613,7 @@ export const PromptBody = () => {
   )
 
   return (
-    <div>
+    <div className="min-w-0 max-w-full">
       {/* Screen reader status announcements */}
       <div
         role="status"
@@ -2654,7 +2654,7 @@ export const PromptBody = () => {
           }
         />
       )}
-      <div className="flex gap-0">
+      <div className="flex min-w-0 max-w-full gap-0">
         {/* Sidebar - desktop only */}
         {!isCompactViewport && (
           <PromptSidebar
@@ -2689,7 +2689,7 @@ export const PromptBody = () => {
 
       {/* Mobile segment tabs */}
       {isCompactViewport && (
-      <div className="flex flex-col items-start gap-1 mb-6 px-4">
+      <div className="flex w-full max-w-full flex-col items-start gap-1 overflow-x-auto px-4 pb-1 mb-6">
         <Segmented
           size="large"
           options={[

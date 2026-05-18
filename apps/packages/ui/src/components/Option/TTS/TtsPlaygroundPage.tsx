@@ -493,8 +493,8 @@ const TtsPlaygroundPage: React.FC = () => {
 
   return (
     <PageShell maxWidthClassName="max-w-3xl" className="py-6">
-      <Title level={3} className="!mb-1">
-        {t("playground:tts.title", "TTS Playground")}
+      <Title level={1} className="!mb-1 !text-2xl">
+        {t("playground:textToSpeech", "Text to Speech")}
       </Title>
       <Text type="secondary">
         {t(
