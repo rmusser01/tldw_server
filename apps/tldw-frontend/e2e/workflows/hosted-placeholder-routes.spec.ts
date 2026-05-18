@@ -25,7 +25,19 @@ const HOSTED_PLACEHOLDER_ROUTES = [
     path: "/auth/reset-password",
     title: /Password Reset Is Not Active Here/i,
   },
+  {
+    path: "/auth/magic-link",
+    title: /Magic Link Sign-In Is Not Active Here/i,
+  },
+  {
+    path: "/auth/verify-email",
+    title: /Email Verification Is Not Active Here/i,
+  },
 ]
+
+const hostedMode =
+  String(process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE || "").trim().toLowerCase() ===
+  "hosted"
 
 test.describe("Hosted placeholder routes", () => {
   for (const route of HOSTED_PLACEHOLDER_ROUTES) {
@@ -42,9 +54,16 @@ test.describe("Hosted placeholder routes", () => {
         authedPage.getByRole("heading", { name: route.title })
       ).toBeVisible({ timeout: 15_000 })
 
-      const loginLink = authedPage.getByRole("link", { name: /^Open Login$/i })
-      await expect(loginLink).toHaveCount(1)
-      await expect(loginLink).toHaveAttribute("href", "/login")
+      await expect(authedPage.getAllByText(route.path)).toHaveCount(2)
+
+      const primaryLink = authedPage.getByTestId("route-placeholder-primary")
+      await expect(primaryLink).toHaveText(
+        hostedMode ? "Open Login" : "Open Local Auth Settings"
+      )
+      await expect(primaryLink).toHaveAttribute(
+        "href",
+        hostedMode ? "/login" : "/settings/tldw"
+      )
 
       await assertNoCriticalErrors(diagnostics)
     })

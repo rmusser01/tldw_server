@@ -4,7 +4,7 @@ title: Implement WebUI setup and connection flow
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-05-18 03:59'
+updated_date: '2026-05-18 04:06'
 labels:
   - ux
   - webui
@@ -35,8 +35,8 @@ Implement the Task 3 WebUI/extension UX remediation slice for first-run setup, h
 - [x] #1 Connection UX state matrix is locked with focused tests or documented as already covered.
 - [x] #2 / route behavior is explicit for hosted, first-run incomplete, character-chat intent, first-run complete, and degraded states.
 - [x] #3 /setup renders as a setup-only shell with one semantic setup heading and no chat/sidebar chrome.
-- [ ] #4 Self-host /login and hosted /login behavior are explicit and covered by tests.
-- [ ] #5 Hosted-only OSS placeholders for signup/account/billing/auth recovery routes expose route context and appropriate primary actions instead of defaulting to chat.
+- [x] #4 Self-host /login and hosted /login behavior are explicit and covered by tests.
+- [x] #5 Hosted-only OSS placeholders for signup/account/billing/auth recovery routes expose route context and appropriate primary actions instead of defaulting to chat.
 - [ ] #6 /profile, /config, /privileges, and /404 recovery labels/actions are explicit and covered by tests.
 - [ ] #7 Browser or Playwright QA evidence is recorded for setup/recovery routes, with environment gaps documented.
 - [ ] #8 No backend auth API changes, broad shell redesign, or route renaming are included.
@@ -55,6 +55,10 @@ Task 1 connection state matrix: baseline focused tests passed after installing U
 Task 2 / resolver behavior: added src/routes/__tests__/option-index.setup-flow.test.tsx to lock hosted home, first-run onboarding, character-chat return intent, completed-first-run companion home, automatic beginOnboarding for unconfigured first-run users, and checkOnce refresh for completed users. Existing option-index implementation satisfied the matrix, so no product route code changed. Verification: bunx vitest run src/routes/__tests__/option-index.setup-flow.test.tsx src/routes/__tests__/core-route-identity.test.tsx passed 2 files / 13 tests.
 
 Task 3 /setup shell: added setup-only shell assertions to OnboardingConnectForm.design-system.test.tsx and changed option-setup.tsx so the route owns exactly one semantic h1 (`Setup Wizard`) while the setup-required StatePanel handles the connection action as `Connect your server`. Verification: bunx vitest run src/components/Option/Onboarding/__tests__/OnboardingConnectForm.design-system.test.tsx src/routes/__tests__/core-route-identity.test.tsx passed 2 files / 11 tests.
+
+Task 4 login and hosted-only placeholders: added unit coverage for self-host /login redirect/recovery, hosted /login auth form, hosted-only account/billing/signup/auth placeholder pages in self-host and hosted deployment modes, and RoutePlaceholder settings-child CTA suppression. Patched self-host /login to render RouteRedirect to /settings/tldw with preserved query/hash instead of a blank interim page. Added HostedOnlyRoutePlaceholder so OSS hosted-only pages use /settings/tldw + Open Local Auth Settings in self-host mode and /login + Open Login in hosted mode, with plannedPath route context on every owned placeholder. Expanded hosted-placeholder-routes e2e coverage to include magic-link and verify-email and to assert deployment-specific primary CTAs. Verification: bunx vitest run __tests__/navigation/login-page.test.tsx __tests__/navigation/hosted-placeholder-pages.test.tsx __tests__/navigation/route-placeholder-component.test.tsx passed 3 files / 23 tests.
+
+Task 4 additional focused verification: bunx vitest run __tests__/navigation/login-page.test.tsx __tests__/navigation/hosted-placeholder-pages.test.tsx __tests__/navigation/route-placeholder-component.test.tsx __tests__/navigation/route-redirect-component.test.tsx passed 4 files / 28 tests; git diff --check passed for the slice.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

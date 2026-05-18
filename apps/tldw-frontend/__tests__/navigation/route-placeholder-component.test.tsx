@@ -116,4 +116,24 @@ describe('RoutePlaceholder recovery', () => {
     await user.tab();
     expect(goBack).toHaveFocus();
   });
+
+  it('suppresses the secondary settings link when the primary CTA opens a settings child route', () => {
+    mockRouter.asPath = '/account';
+
+    render(
+      <RoutePlaceholder
+        title="Hosted Account Pages Live In The Private Distribution"
+        description="The OSS web client does not ship the hosted account surface."
+        plannedPath="/account"
+        primaryCtaHref="/settings/tldw"
+        primaryCtaLabel="Open Local Auth Settings"
+      />
+    );
+
+    expect(screen.getByTestId('route-placeholder-primary')).toHaveAttribute(
+      'href',
+      '/settings/tldw'
+    );
+    expect(screen.queryByTestId('route-placeholder-open-settings')).not.toBeInTheDocument();
+  });
 });

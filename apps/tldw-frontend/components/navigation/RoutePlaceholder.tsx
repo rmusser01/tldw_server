@@ -2,7 +2,7 @@ import React, { startTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 
-type RoutePlaceholderProps = {
+export type RoutePlaceholderProps = {
   title: string;
   description: string;
   plannedPath?: string;
@@ -19,7 +19,7 @@ export const RoutePlaceholder: React.FC<RoutePlaceholderProps> = ({
 }) => {
   const router = useRouter();
   const routeLabel = String(router.asPath || '/');
-  const showSettingsShortcut = primaryCtaHref !== '/settings';
+  const showSettingsShortcut = !primaryCtaHref.startsWith('/settings');
 
   return (
     <div className="flex min-h-[70vh] w-full items-center justify-center px-6 py-12">
