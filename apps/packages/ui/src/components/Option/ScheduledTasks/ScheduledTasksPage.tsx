@@ -2,10 +2,13 @@ import React, { useState } from "react"
 import { Spin, Typography, message } from "antd"
 import { useQuery } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
+import { useTranslation } from "react-i18next"
 import {
   StatePanel,
   buildCapabilityState,
-  classifyCapabilityError
+  classifyCapabilityError,
+  messageFromError,
+  statusFromError
 } from "@/components/ui/state"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import {
@@ -21,37 +24,10 @@ import { ScheduledTaskTable } from "./ScheduledTaskTable"
 import { ReminderTaskEditor } from "./ReminderTaskEditor"
 
 const SCHEDULED_TASKS_PATH = "/api/v1/scheduled-tasks"
-const SCHEDULED_TASKS_FEATURE_NAME = "Scheduled tasks"
-const SCHEDULED_TASKS_CAPABILITY_NAME = "scheduled tasks"
-
-const errorStatus = (error: unknown): number | undefined => {
-  if (!error || typeof error !== "object") {
-    return undefined
-  }
-
-  const status = (error as { status?: unknown; response?: { status?: unknown } }).status ??
-    (error as { response?: { status?: unknown } }).response?.status
-
-  return typeof status === "number" ? status : undefined
-}
-
-const errorMessage = (error: unknown, fallback: string): string => {
-  if (error instanceof Error) {
-    return error.message
-  }
-
-  if (error && typeof error === "object" && "message" in error) {
-    const messageValue = (error as { message?: unknown }).message
-    if (typeof messageValue === "string" && messageValue.trim()) {
-      return messageValue
-    }
-  }
-
-  return typeof error === "string" && error.trim() ? error : fallback
-}
 
 export const ScheduledTasksPage: React.FC = () => {
   const navigate = useNavigate()
+  const { t } = useTranslation(["scheduledTasks", "common"])
   const { config: connectionConfig, loading: connectionConfigLoading } =
     useCanonicalConnectionConfig()
   const [editorOpen, setEditorOpen] = useState(false)
@@ -165,15 +141,20 @@ export const ScheduledTasksPage: React.FC = () => {
 
   const partialErrors = tasksQuery.data?.errors ?? []
   const serverUrl = connectionConfig?.serverUrl?.trim()
+  const scheduledTasksFeatureName = t("scheduledTasks:title", "Scheduled tasks")
+  const scheduledTasksCapabilityName = t(
+    "scheduledTasks:capability.scheduledTasks",
+    "scheduled tasks"
+  )
   const unsupportedState = buildCapabilityState({
     kind: "unavailable",
-    featureName: SCHEDULED_TASKS_FEATURE_NAME,
-    capabilityName: SCHEDULED_TASKS_CAPABILITY_NAME,
+    featureName: scheduledTasksFeatureName,
+    capabilityName: scheduledTasksCapabilityName,
     method: "GET",
     endpoint: SCHEDULED_TASKS_PATH,
     serverUrl,
     primaryAction: {
-      label: "Check server setup",
+      label: t("scheduledTasks:actions.checkServerSetup", "Check server setup"),
       onClick: () => {
         navigate("/settings/health")
       }
@@ -182,17 +163,17 @@ export const ScheduledTasksPage: React.FC = () => {
   const loadErrorState = tasksQuery.isError
     ? buildCapabilityState({
         kind: classifyCapabilityError(tasksQuery.error),
-        featureName: SCHEDULED_TASKS_FEATURE_NAME,
-        capabilityName: SCHEDULED_TASKS_CAPABILITY_NAME,
+        featureName: scheduledTasksFeatureName,
+        capabilityName: scheduledTasksCapabilityName,
         method: "GET",
         endpoint: SCHEDULED_TASKS_PATH,
-        status: errorStatus(tasksQuery.error),
-        rawMessage: errorMessage(
-          tasksQuery.error,
+        status: statusFromError(tasksQuery.error),
+        rawMessage: messageFromError(tasksQuery.error) || t(
+          "scheduledTasks:errors.overviewLoadFailed",
           "The scheduled tasks overview could not be loaded."
         ),
         primaryAction: {
-          label: "Try again",
+          label: t("common:actions.retry", "Try again"),
           onClick: () => {
             void tasksQuery.refetch()
           }
@@ -202,12 +183,15 @@ export const ScheduledTasksPage: React.FC = () => {
   const degradedState = tasksQuery.data?.partial
     ? buildCapabilityState({
         kind: "degraded",
-        featureName: SCHEDULED_TASKS_FEATURE_NAME,
+        featureName: scheduledTasksFeatureName,
         rawMessage: partialErrors.length
           ? partialErrors.join(", ")
-          : "The overview is partially available.",
+          : t(
+              "scheduledTasks:errors.partialOverview",
+              "The overview is partially available."
+            ),
         primaryAction: {
-          label: "Refresh",
+          label: t("common:actions.refresh", "Refresh"),
           onClick: () => {
             void tasksQuery.refetch()
           }
@@ -219,10 +203,13 @@ export const ScheduledTasksPage: React.FC = () => {
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <Typography.Title level={2} style={{ marginBottom: 0 }}>
-          Scheduled tasks
+          {scheduledTasksFeatureName}
         </Typography.Title>
         <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-          Review reminder tasks here. Watchlist jobs remain managed from Watchlists.
+          {t(
+            "scheduledTasks:description",
+            "Review reminder tasks here. Watchlist jobs remain managed from Watchlists."
+          )}
         </Typography.Paragraph>
       </div>
 

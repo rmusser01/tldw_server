@@ -2,10 +2,13 @@ import React, { useMemo, useState } from "react"
 import { Button, Card, Col, Row, Skeleton, Space, Tag, Typography, message } from "antd"
 import { useQuery } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
+import { useTranslation } from "react-i18next"
 import {
   StatePanel,
   buildCapabilityState,
-  classifyCapabilityError
+  classifyCapabilityError,
+  messageFromError,
+  statusFromError
 } from "@/components/ui/state"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -57,32 +60,6 @@ const WORKSPACE_INTEGRATIONS_PATH = "/api/v1/integrations/workspace"
 const WORKSPACE_TELEGRAM_LINKED_ACTORS_PATH =
   "/api/v1/integrations/workspace/telegram/linked-actors"
 
-const errorStatus = (error: unknown): number | undefined => {
-  if (!error || typeof error !== "object") {
-    return undefined
-  }
-
-  const status = (error as { status?: unknown; response?: { status?: unknown } }).status ??
-    (error as { response?: { status?: unknown } }).response?.status
-
-  return typeof status === "number" ? status : undefined
-}
-
-const errorMessage = (error: unknown, fallback: string): string => {
-  if (error instanceof Error) {
-    return error.message
-  }
-
-  if (error && typeof error === "object" && "message" in error) {
-    const messageValue = (error as { message?: unknown }).message
-    if (typeof messageValue === "string" && messageValue.trim()) {
-      return messageValue
-    }
-  }
-
-  return typeof error === "string" && error.trim() ? error : fallback
-}
-
 const isUnsupportedOverviewError = (scope: IntegrationScope, error: unknown): boolean => {
   if (scope !== "personal" || !error || typeof error !== "object") {
     return false
@@ -111,6 +88,7 @@ export const buildIntegrationQueryKey = (
 
 export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps> = ({ scope }) => {
   const navigate = useNavigate()
+  const { t } = useTranslation(["integrations", "common"])
   const { config: connectionConfig, loading: connectionConfigLoading } = useCanonicalConnectionConfig()
   const [activeOrgId, setActiveOrgId] = useState<number | null>(connectionConfig?.orgId ?? null)
   const [selectedConnection, setSelectedConnection] = useState<IntegrationConnection | null>(null)
@@ -215,7 +193,9 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
     queryKey: buildIntegrationQueryKey(scope, activeOrgId, "overview"),
     queryFn: scope === "workspace" ? listWorkspaceIntegrations : listPersonalIntegrations,
     enabled: scope === "workspace" || personalIntegrationsSupported === true,
-    retry: false
+    retry: (failureCount, error) =>
+      !isUnsupportedOverviewError(scope, error) && failureCount < 3,
+    retryDelay: (attemptIndex) => Math.min(250 * 2 ** attemptIndex, 1000)
   })
 
   const slackPolicyQuery = useQuery({
@@ -290,18 +270,38 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
   const personalIntegrationsCheckingSupport =
     scope === "personal" && (connectionConfigLoading || personalIntegrationsSupported === null)
   const overviewPath = scope === "workspace" ? WORKSPACE_INTEGRATIONS_PATH : PERSONAL_INTEGRATIONS_PATH
-  const featureName = isWorkspace ? "Workspace integrations" : "Personal integrations"
-  const capabilityName = isWorkspace ? "workspace integrations" : "personal integrations"
+  const workspaceIntegrationsFeatureName = t(
+    "integrations:workspace.title",
+    "Workspace integrations"
+  )
+  const personalIntegrationsFeatureName = t(
+    "integrations:personal.title",
+    "Personal integrations"
+  )
+  const workspaceIntegrationsCapabilityName = t(
+    "integrations:workspace.capability",
+    "workspace integrations"
+  )
+  const personalIntegrationsCapabilityName = t(
+    "integrations:personal.capability",
+    "personal integrations"
+  )
+  const featureName = isWorkspace
+    ? workspaceIntegrationsFeatureName
+    : personalIntegrationsFeatureName
+  const capabilityName = isWorkspace
+    ? workspaceIntegrationsCapabilityName
+    : personalIntegrationsCapabilityName
   const serverUrl = connectionConfig?.serverUrl?.trim()
   const personalUnsupportedState = buildCapabilityState({
     kind: "unavailable",
-    featureName: "Personal integrations",
-    capabilityName: "personal integrations",
+    featureName: personalIntegrationsFeatureName,
+    capabilityName: personalIntegrationsCapabilityName,
     method: "GET",
     endpoint: PERSONAL_INTEGRATIONS_PATH,
     serverUrl,
     primaryAction: {
-      label: "Check server setup",
+      label: t("integrations:actions.checkServerSetup", "Check server setup"),
       onClick: () => {
         navigate("/settings/health")
       }
@@ -315,13 +315,13 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
           capabilityName,
           method: "GET",
           endpoint: overviewPath,
-          status: errorStatus(overviewQuery.error),
-          rawMessage: errorMessage(
-            overviewQuery.error,
+          status: statusFromError(overviewQuery.error),
+          rawMessage: messageFromError(overviewQuery.error) || t(
+            "integrations:errors.overviewLoadFailed",
             "The integrations overview could not be loaded."
           ),
           primaryAction: {
-            label: "Try again",
+            label: t("common:actions.retry", "Try again"),
             onClick: () => {
               void overviewQuery.refetch()
             }
@@ -332,16 +332,19 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
     telegramActorsQuery.isError
       ? buildCapabilityState({
           kind: "degraded",
-          featureName: "Workspace integrations",
+          featureName: workspaceIntegrationsFeatureName,
           method: "GET",
           endpoint: WORKSPACE_TELEGRAM_LINKED_ACTORS_PATH,
-          status: errorStatus(telegramActorsQuery.error),
-          rawMessage: errorMessage(
-            telegramActorsQuery.error,
+          status: statusFromError(telegramActorsQuery.error),
+          rawMessage: messageFromError(telegramActorsQuery.error) || t(
+            "integrations:errors.telegramActorsLoadFailed",
             "Telegram linked actors could not be loaded."
           ),
           primaryAction: {
-            label: "Refresh Telegram actors",
+            label: t(
+              "integrations:actions.refreshTelegramActors",
+              "Refresh Telegram actors"
+            ),
             onClick: () => {
               void telegramActorsQuery.refetch()
             }
@@ -393,7 +396,7 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
             <div>
               <Typography.Title level={2} style={{ marginBottom: 0 }}>
-                {isWorkspace ? "Workspace integrations" : "Personal integrations"}
+                {featureName}
               </Typography.Title>
               <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
                 {isWorkspace

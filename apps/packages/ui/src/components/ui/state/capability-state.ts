@@ -12,6 +12,7 @@ export type CapabilityStateKind =
   | "degraded"
   | "unsupported_version"
   | "network_failure"
+  | "error"
 
 export type CapabilityStateDescriptor = {
   kind: CapabilityStateKind
@@ -35,6 +36,8 @@ export type CapabilityStateInput = CapabilityDiagnosticInput & {
   kind: CapabilityStateKind
   featureName: string
   capabilityName?: string
+  title?: string
+  message?: string
   primaryAction?: StateAction
   secondaryActions?: StateAction[]
 }
@@ -48,10 +51,11 @@ const KIND_TO_STATE: Record<CapabilityStateKind, DesignSystemStateKey> = {
   not_configured: "setup_required",
   degraded: "degraded",
   unsupported_version: "unavailable",
-  network_failure: "unavailable"
+  network_failure: "unavailable",
+  error: "error"
 }
 
-const statusFromError = (error: unknown): number | undefined => {
+export const statusFromError = (error: unknown): number | undefined => {
   if (!error || typeof error !== "object") {
     return undefined
   }
@@ -62,7 +66,7 @@ const statusFromError = (error: unknown): number | undefined => {
   return typeof status === "number" ? status : undefined
 }
 
-const messageFromError = (error: unknown): string => {
+export const messageFromError = (error: unknown): string => {
   if (error instanceof Error) {
     return error.message
   }
@@ -82,7 +86,8 @@ export const classifyCapabilityError = (error: unknown): CapabilityStateKind => 
   if (status === 401) return "auth_required"
   if (status === 403) return "permission_denied"
   if (status === 404 || status === 410) return "unavailable"
-  if (status && status >= 500) return "unavailable"
+  if (status && status >= 500) return "error"
+  if (status && status >= 400) return "error"
 
   const message = messageFromError(error).toLowerCase()
 
@@ -104,7 +109,46 @@ export const classifyCapabilityError = (error: unknown): CapabilityStateKind => 
     return "not_configured"
   }
 
-  return "unavailable"
+  return "error"
+}
+
+export const redactDiagnosticServerUrl = (serverUrl: string): string => {
+  const trimmed = serverUrl.trim()
+  if (!trimmed) return ""
+
+  try {
+    const url = new URL(trimmed)
+    if (url.origin !== "null") {
+      url.username = ""
+      url.password = ""
+      url.search = ""
+      url.hash = ""
+
+      return url.origin
+    }
+  } catch {
+    // Fall through to the tolerant parser below.
+  }
+
+  const withoutQueryOrHash = trimmed.split(/[?#]/, 1)[0] ?? trimmed
+  const schemeMatch = withoutQueryOrHash.match(/^([a-z][a-z\d+\-.]*:\/\/)(.*)$/i)
+
+  if (!schemeMatch) {
+    const slashIndex = withoutQueryOrHash.indexOf("/")
+    const authority = slashIndex >= 0
+      ? withoutQueryOrHash.slice(0, slashIndex)
+      : withoutQueryOrHash
+    const atIndex = authority.lastIndexOf("@")
+    return atIndex >= 0 ? authority.slice(atIndex + 1) : authority
+  }
+
+  const [, scheme, rest] = schemeMatch
+  const slashIndex = rest.indexOf("/")
+  const authority = slashIndex >= 0 ? rest.slice(0, slashIndex) : rest
+  const atIndex = authority.lastIndexOf("@")
+  const host = atIndex >= 0 ? authority.slice(atIndex + 1) : authority
+
+  return `${scheme}${host}`
 }
 
 export const buildCapabilityDiagnostics = ({
@@ -129,7 +173,10 @@ export const buildCapabilityDiagnostics = ({
   }
 
   if (serverUrl) {
-    diagnostics.push({ label: "Server URL", value: serverUrl, code: true })
+    const redactedServerUrl = redactDiagnosticServerUrl(serverUrl)
+    if (redactedServerUrl) {
+      diagnostics.push({ label: "Server URL", value: redactedServerUrl, code: true })
+    }
   }
 
   if (rawMessage) {
@@ -160,6 +207,8 @@ const titleForKind = (
       return `${featureName} need a newer server`
     case "network_failure":
       return `${featureName} cannot reach the server`
+    case "error":
+      return `${featureName} could not load`
     case "unavailable":
     default:
       return `${featureName} are unavailable`
@@ -193,6 +242,8 @@ const messageForKind = ({
       return `The connected server is older or does not expose the ${capability} capability.`
     case "network_failure":
       return "The frontend cannot reach the configured server."
+    case "error":
+      return "The request failed before this feature could load. Check diagnostics or try again."
     case "unavailable":
     default:
       return `This server does not expose the ${capability} capability.`
@@ -204,8 +255,8 @@ export const buildCapabilityState = (
 ): CapabilityStateDescriptor => ({
   kind: input.kind,
   state: KIND_TO_STATE[input.kind],
-  title: titleForKind(input.kind, input.featureName),
-  message: messageForKind(input),
+  title: input.title ?? titleForKind(input.kind, input.featureName),
+  message: input.message ?? messageForKind(input),
   diagnostics: buildCapabilityDiagnostics(input),
   primaryAction: input.primaryAction,
   secondaryActions: input.secondaryActions

@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from "vitest"
 import {
   buildCapabilityDiagnostics,
   buildCapabilityState,
-  classifyCapabilityError
+  classifyCapabilityError,
+  messageFromError,
+  statusFromError
 } from "../capability-state"
 
 describe("capability state mapping", () => {
@@ -38,6 +40,8 @@ describe("capability state mapping", () => {
     expect(classifyCapabilityError({ status: 401 })).toBe("auth_required")
     expect(classifyCapabilityError({ status: 403 })).toBe("permission_denied")
     expect(classifyCapabilityError({ status: 404 })).toBe("unavailable")
+    expect(classifyCapabilityError({ status: 500 })).toBe("error")
+    expect(classifyCapabilityError({ response: { status: 503 } })).toBe("error")
     expect(classifyCapabilityError(new TypeError("fetch failed"))).toBe(
       "network_failure"
     )
@@ -47,6 +51,73 @@ describe("capability state mapping", () => {
     expect(classifyCapabilityError(new Error("provider not configured"))).toBe(
       "not_configured"
     )
+  })
+
+  it("exports shared error parsing helpers", () => {
+    expect(statusFromError({ response: { status: 503 } })).toBe(503)
+    expect(messageFromError({ message: "service unavailable" })).toBe(
+      "service unavailable"
+    )
+    expect(messageFromError("plain failure")).toBe("plain failure")
+  })
+
+  it("uses request-error copy for server failures", () => {
+    const descriptor = buildCapabilityState({
+      kind: classifyCapabilityError({ status: 500 }),
+      featureName: "Workspace integrations",
+      capabilityName: "workspace integrations",
+      method: "GET",
+      endpoint: "/api/v1/integrations/workspace",
+      status: 500,
+      rawMessage: "Internal Server Error"
+    })
+
+    expect(descriptor.state).toBe("error")
+    expect(descriptor.title).toBe("Workspace integrations could not load")
+    expect(descriptor.message).toBe(
+      "The request failed before this feature could load. Check diagnostics or try again."
+    )
+  })
+
+  it("allows callers to provide pretranslated primary copy", () => {
+    const descriptor = buildCapabilityState({
+      kind: "error",
+      featureName: "Workspace integrations",
+      title: "Integrations failed to load",
+      message: "Retry after checking the server."
+    })
+
+    expect(descriptor.title).toBe("Integrations failed to load")
+    expect(descriptor.message).toBe("Retry after checking the server.")
+  })
+
+  it("redacts credentials, paths, queries, and fragments from diagnostic server URLs", () => {
+    const diagnostics = buildCapabilityDiagnostics({
+      serverUrl: "https://user:secret@example.test:8443/base?api_key=secret#token"
+    })
+
+    expect(diagnostics).toEqual([
+      {
+        label: "Server URL",
+        value: "https://example.test:8443",
+        code: true
+      }
+    ])
+    expect(diagnostics?.[0]?.value).not.toContain("user")
+    expect(diagnostics?.[0]?.value).not.toContain("secret")
+    expect(diagnostics?.[0]?.value).not.toContain("api_key")
+  })
+
+  it("redacts paths and credentials from no-scheme diagnostic server URLs", () => {
+    expect(buildCapabilityDiagnostics({
+      serverUrl: "user:secret@example.test:8000/base?api_key=secret#token"
+    })).toEqual([
+      {
+        label: "Server URL",
+        value: "example.test:8000",
+        code: true
+      }
+    ])
   })
 
   it("keeps optional diagnostics out of the descriptor when no details exist", () => {

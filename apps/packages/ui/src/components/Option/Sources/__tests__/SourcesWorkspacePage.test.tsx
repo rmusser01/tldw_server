@@ -193,7 +193,7 @@ describe("SourcesWorkspacePage", () => {
       isLoading: false,
       error: {
         status: 404,
-        message: "Not Found (GET /api/v1/sources)"
+        message: "Not Found (GET /api/v1/ingestion-sources)"
       }
     })
 
@@ -205,10 +205,10 @@ describe("SourcesWorkspacePage", () => {
     const primaryState = heading.closest("div")
     const diagnostics = screen.getByLabelText("Diagnostics")
 
-    expect(primaryState).not.toHaveTextContent("/api/v1/sources")
-    expect(diagnostics).toHaveTextContent("/api/v1/sources")
+    expect(primaryState).not.toHaveTextContent("/api/v1/ingestion-sources")
+    expect(diagnostics).toHaveTextContent("/api/v1/ingestion-sources")
     expect(diagnostics).toHaveTextContent("404")
-    expect(diagnostics).toHaveTextContent("Not Found (GET /api/v1/sources)")
+    expect(diagnostics).toHaveTextContent("Not Found (GET /api/v1/ingestion-sources)")
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument()
   })
 

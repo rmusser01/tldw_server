@@ -27,6 +27,17 @@ vi.mock("@/services/scheduled-tasks-control-plane", () => ({
   deleteScheduledTaskReminder: (...args: unknown[]) => mocks.deleteScheduledTaskReminder(...args)
 }))
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (_key: string, fallback?: string | { defaultValue?: string }) => {
+      if (typeof fallback === "string") {
+        return fallback
+      }
+      return fallback?.defaultValue ?? _key
+    }
+  })
+}))
+
 import { ScheduledTasksPage } from "../ScheduledTasksPage"
 
 const fetchMock = vi.fn()

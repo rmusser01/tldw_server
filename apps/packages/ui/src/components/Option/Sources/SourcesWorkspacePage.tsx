@@ -7,7 +7,9 @@ import { PageShell } from "@/components/Common/PageShell"
 import {
   StatePanel,
   buildCapabilityState,
-  classifyCapabilityError
+  classifyCapabilityError,
+  messageFromError,
+  statusFromError
 } from "@/components/ui/state"
 import { useIngestionSourcesQuery } from "@/hooks/use-ingestion-sources"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
@@ -34,18 +36,16 @@ export const SourcesWorkspacePage: React.FC<SourcesWorkspacePageProps> = ({
     "sources:capability.ingestionSources",
     "ingestion sources"
   )
-  const queryError = sourcesQuery.error as
-    | { status?: number; message?: string }
-    | undefined
+  const queryError = sourcesQuery.error
   const queryErrorState = queryError
     ? buildCapabilityState({
         kind: classifyCapabilityError(queryError),
         featureName: sourceFeatureName,
         capabilityName: sourceCapabilityName,
         method: "GET",
-        endpoint: "/api/v1/sources",
-        status: queryError.status,
-        rawMessage: queryError.message || "Failed to load sources",
+        endpoint: "/api/v1/ingestion-sources",
+        status: statusFromError(queryError),
+        rawMessage: messageFromError(queryError) || "Failed to load sources",
         primaryAction: {
           label: t("common:actions.retry", "Try again"),
           onClick: () => {

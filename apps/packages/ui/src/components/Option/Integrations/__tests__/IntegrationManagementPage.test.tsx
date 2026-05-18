@@ -53,6 +53,17 @@ vi.mock("@/services/integrations-control-plane", () => ({
   revokeWorkspaceTelegramLinkedActor: (...args: unknown[]) => mocks.revokeWorkspaceTelegramLinkedActor(...args)
 }))
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (_key: string, fallback?: string | { defaultValue?: string }) => {
+      if (typeof fallback === "string") {
+        return fallback
+      }
+      return fallback?.defaultValue ?? _key
+    }
+  })
+}))
+
 import {
   IntegrationManagementPage,
   buildIntegrationQueryKey
@@ -371,9 +382,13 @@ describe("IntegrationManagementPage", () => {
 
     renderWithQueryClient(<IntegrationManagementPage scope="workspace" />)
 
-    const heading = await screen.findByRole("heading", {
-      name: "Workspace integrations are unavailable"
-    })
+    const heading = await screen.findByRole(
+      "heading",
+      {
+        name: "Workspace integrations could not load"
+      },
+      { timeout: 4000 }
+    )
     const primaryState = heading.closest("div")
     const diagnostics = screen.getByLabelText("Diagnostics")
 
@@ -384,6 +399,39 @@ describe("IntegrationManagementPage", () => {
       "Internal Server Error (GET /api/v1/integrations/workspace)"
     )
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument()
+  })
+
+  it("retries transient integration overview failures before showing state", async () => {
+    mockWorkspaceQueries()
+    mocks.listWorkspaceIntegrations
+      .mockRejectedValueOnce(
+        Object.assign(new Error("Temporary gateway error"), { status: 502 })
+      )
+      .mockRejectedValueOnce(
+        Object.assign(new Error("Temporary gateway error"), { status: 502 })
+      )
+      .mockResolvedValueOnce({
+        scope: "workspace",
+        items: [
+          {
+            id: "workspace:slack",
+            provider: "slack",
+            scope: "workspace",
+            display_name: "Slack workspace",
+            status: "connected",
+            enabled: true,
+            metadata: {},
+            actions: ["disable", "remove"]
+          }
+        ]
+      })
+
+    renderWithQueryClient(<IntegrationManagementPage scope="workspace" />)
+
+    expect(await screen.findByText("Slack workspace", {}, { timeout: 4000 })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(mocks.listWorkspaceIntegrations).toHaveBeenCalledTimes(3)
+    })
   })
 
   it("keys workspace-scoped queries by the active org id", () => {
