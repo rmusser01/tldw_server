@@ -275,6 +275,11 @@ describe('useMediaReadAlongSession', () => {
       playbackSpeed: 1,
       supported: true,
       formatInfo: { requested: 'mp3', resolved: 'mp3', isFallback: false },
+      cacheSettings: {
+        provider: 'tldw',
+        speed: 1,
+        format: 'mp3'
+      },
       normalizeText: (text: string) => text,
       synthesize: vi.fn(async (text: string) => {
         eventLog.push(`synthesize:${text}`)
@@ -819,6 +824,11 @@ describe('useMediaReadAlongSession', () => {
       playbackSpeed: 1,
       supported: true,
       formatInfo: { requested: 'mp3', resolved: 'mp3', isFallback: false },
+      cacheSettings: {
+        provider: 'tldw',
+        speed: 1,
+        format: 'mp3'
+      },
       normalizeText: (text: string) => text,
       synthesize: firstSynthesize
     }
@@ -833,6 +843,11 @@ describe('useMediaReadAlongSession', () => {
       playbackSpeed: 1,
       supported: true,
       formatInfo: { requested: 'wav', resolved: 'wav', isFallback: false },
+      cacheSettings: {
+        provider: 'tldw',
+        speed: 1,
+        format: 'wav'
+      },
       normalizeText: (text: string) => text,
       synthesize: secondSynthesize
     }
@@ -907,6 +922,38 @@ describe('useMediaReadAlongSession', () => {
     )
   })
 
+  it('does not include playback-only speed in generated-audio cache signatures', async () => {
+    providerContext = {
+      provider: 'openai',
+      utterance: '',
+      playbackSpeed: 1.75,
+      supported: true,
+      cacheSettings: {
+        provider: 'openai',
+        model: 'tts-model-a',
+        voice: 'voice-a',
+        format: 'mp3'
+      },
+      normalizeText: (text: string) => text,
+      synthesize: vi.fn(async (text: string) => ({
+        buffer: new TextEncoder().encode(text).buffer,
+        format: 'mp3',
+        mimeType: 'audio/mpeg'
+      }))
+    }
+    const { result } = setupHook()
+
+    await act(async () => {
+      await result.current.start('selection')
+    })
+
+    expect(eventLog).toContain('settings:openai|tts-model-a|voice-a||mp3|')
+    expect(eventLog).not.toContain('settings:openai|tts-model-a|voice-a|1.75|mp3|')
+    expect(eventLog).toContain(
+      'cache-key:media-1:0:sentence:0:15:openai|tts-model-a|voice-a||mp3|'
+    )
+  })
+
   it('audio.play() rejection enters segment-error', async () => {
     playRejects = true
     const { result } = setupHook()
@@ -917,6 +964,24 @@ describe('useMediaReadAlongSession', () => {
 
     await waitFor(() => expect(result.current.state.status).toBe('segment-error'))
     expect(result.current.state.error).toContain('autoplay blocked')
+  })
+
+  it('resume safely no-ops when generated audio is unavailable after an error', async () => {
+    providerContext.synthesize = vi.fn(async () => {
+      throw new Error('synthesis failed')
+    })
+    const { result } = setupHook()
+
+    await act(async () => {
+      await result.current.start('selection')
+    })
+
+    await waitFor(() => expect(result.current.state.status).toBe('segment-error'))
+    expect(() => result.current.resume()).not.toThrow()
+    expect(result.current.state).toMatchObject({
+      status: 'segment-error',
+      error: 'synthesis failed'
+    })
   })
 
   it('ignores old browser utterance callbacks after skip cancels speech', async () => {

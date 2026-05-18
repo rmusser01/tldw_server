@@ -37,7 +37,7 @@ Address the four live PR #1835 review findings: avoid blob-heavy cache eviction 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Verified live PR surface via gh pr view, gh pr checks, and GraphQL review threads. CodeRabbit skipped; actionable comments came from Gemini/Qodo. Local checks: targeted review-fix tests passed 45 tests; broader read-along suite passed 107 tests; route parity passed 6 tests; git diff --check passed. Bandit not applicable because only frontend TypeScript/backlog files changed.
+Second live-thread pass found Qodo #1 and #2: resume null-audio crash and playback-only speed in cache signatures. Fixed resume to no-op when no generated audio is available; removed playbackSpeed fallback from generated-audio cache signatures while retaining synthesis-specific cacheSettings.speed. Regression checks: targeted session/cache tests passed 42 tests; broader read-along suite passed 109 tests; route parity passed 6 tests; git diff --check passed. Bandit not applicable because only frontend TypeScript/backlog files changed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

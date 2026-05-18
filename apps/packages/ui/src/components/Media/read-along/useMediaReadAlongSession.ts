@@ -768,7 +768,6 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
       const settingsSignature = buildTtsSettingsSignature({
         provider: providerContext.provider,
         ...providerContext.cacheSettings,
-        speed: providerContext.cacheSettings?.speed ?? providerContext.playbackSpeed,
         format: providerContext.cacheSettings?.format ?? providerContext.formatInfo?.resolved
       })
       const session: ReadAlongSession = {
@@ -849,7 +848,10 @@ export function useMediaReadAlongSession(args: UseMediaReadAlongSessionArgs) {
       return
     }
 
-    void session.audio?.play().then(() => {
+    const playPromise = session.audio?.play()
+    if (!playPromise) return
+
+    void playPromise.then(() => {
       if (!isCurrentSession(session.token)) return
       setState((previous) => ({
         ...previous,
