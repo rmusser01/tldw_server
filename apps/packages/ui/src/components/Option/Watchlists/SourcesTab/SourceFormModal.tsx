@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef } from "react"
 import { Alert, Button, Form, Input, Modal, Select, message } from "antd"
 import { useTranslation } from "react-i18next"
 import { testWatchlistSource, testWatchlistSourceDraft } from "@/services/watchlists"
-import type { JobPreviewResult } from "@/types/watchlists"
+import type { JobPreviewResult, SourcePreviewDiagnostics } from "@/types/watchlists"
 import type { WatchlistSource, SourceType } from "@/types/watchlists"
 import { buildWatchlistsModalChrome, useWatchlistsViewport } from "../shared"
 import { mapWatchlistsError } from "../shared/watchlists-error"
@@ -90,6 +90,30 @@ const resolveTestSourceErrorHint = (
   )
 }
 
+const toDiagnosticList = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is string => typeof item === "string" && item.length > 0)
+}
+
+const buildDiagnosticsLines = (
+  diagnostics: SourcePreviewDiagnostics | null | undefined
+): string[] => {
+  if (!diagnostics) return []
+  const lines: string[] = []
+  if (diagnostics.fetch_mode) {
+    lines.push(`Fetch mode: ${diagnostics.fetch_mode}`)
+  }
+  lines.push(...toDiagnosticList(diagnostics.selector_errors))
+  lines.push(...toDiagnosticList(diagnostics.selector_warnings))
+  lines.push(...toDiagnosticList(diagnostics.no_match_warnings))
+  lines.push(...toDiagnosticList(diagnostics.non_unique_warnings))
+  lines.push(...toDiagnosticList(diagnostics.fragile_selector_warnings))
+  if (diagnostics.dedupe_preview_key) {
+    lines.push(`Dedupe preview key: ${diagnostics.dedupe_preview_key}`)
+  }
+  return lines
+}
+
 export const SourceFormModal: React.FC<SourceFormModalProps> = ({
   open,
   onClose,
@@ -112,6 +136,7 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
   const isEditing = !!initialValues
   const testSourceId = typeof initialValues?.id === "number" ? initialValues.id : null
   const modalChrome = buildWatchlistsModalChrome(isConstrained, 500)
+  const diagnosticsLines = buildDiagnosticsLines(testResult?.diagnostics)
 
   useLayoutEffect(() => {
     if (open) {
@@ -376,6 +401,23 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
                   filtered: Number(testResult.filtered || 0),
                   plural: Number(testResult.total || 0) === 1 ? "" : "s"
                 }
+              )}
+            />
+          )}
+          {diagnosticsLines.length > 0 && (
+            <Alert
+              type="info"
+              showIcon
+              message={t(
+                "watchlists:sources.form.validationDiagnostics",
+                "Validation diagnostics"
+              )}
+              description={(
+                <div className="space-y-1">
+                  {diagnosticsLines.map((line) => (
+                    <div key={line}>{line}</div>
+                  ))}
+                </div>
               )}
             />
           )}

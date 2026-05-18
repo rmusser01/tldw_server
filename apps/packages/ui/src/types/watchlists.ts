@@ -993,6 +993,17 @@ export interface JobPreviewResult {
   total: number
   ingestable: number
   filtered: number
+  diagnostics?: SourcePreviewDiagnostics | null
+}
+
+export interface SourcePreviewDiagnostics {
+  fetch_mode?: string | null
+  selector_errors?: string[]
+  selector_warnings?: string[]
+  no_match_warnings?: string[]
+  non_unique_warnings?: string[]
+  fragile_selector_warnings?: string[]
+  dedupe_preview_key?: string | null
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

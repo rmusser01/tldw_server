@@ -269,6 +269,48 @@ describe("SourceFormModal test-source preflight", () => {
     })
   })
 
+  it("renders optional source validation diagnostics from preview", async () => {
+    formApi.validateFields.mockResolvedValue({
+      url: "https://example.com/news",
+      source_type: "site",
+      scrape_item_selector: "css:article",
+      scrape_link_selector: ".//a/@href",
+      scrape_title_selector: "css:h2",
+      scrape_limit: 10,
+      source_top_n: null,
+      discover_method: "auto"
+    })
+    mocks.testWatchlistSourceDraft.mockResolvedValue({
+      items: [],
+      total: 1,
+      ingestable: 1,
+      filtered: 0,
+      diagnostics: {
+        fetch_mode: "scrape_rules",
+        selector_warnings: ["title selector matched 0 nodes"],
+        dedupe_preview_key: "guid_xpath"
+      }
+    })
+
+    render(
+      <SourceFormModal
+        open
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+        existingTags={[]}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Test Feed" }))
+
+    await waitFor(() => {
+      expect(screen.getByText("Validation diagnostics")).toBeInTheDocument()
+      expect(screen.getByText("Fetch mode: scrape_rules")).toBeInTheDocument()
+      expect(screen.getByText("title selector matched 0 nodes")).toBeInTheDocument()
+      expect(screen.getByText("Dedupe preview key: guid_xpath")).toBeInTheDocument()
+    })
+  })
+
   it("shows inline remediation guidance when draft preflight fails", async () => {
     mocks.testWatchlistSourceDraft.mockRejectedValue(
       new Error("invalid_youtube_rss_url: channel feed required")
