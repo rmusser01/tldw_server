@@ -352,7 +352,9 @@ this table as the current status map before selecting new sandbox work.
 
    Add narrow manual drills or documented operator checks for stale socket,
    stuck boot/readiness, and guest-agent mismatch behavior. Keep host reboot
-   out of scheduled CI and avoid destructive repair defaults.
+   out of scheduled CI and avoid destructive repair defaults. Use
+   `Docs/superpowers/specs/2026-05-18-vz-linux-lifecycle-drill-gaps-design.md`
+   as the contract for those follow-up slices.
 
 3. **Operator/admin status consolidation**
 
