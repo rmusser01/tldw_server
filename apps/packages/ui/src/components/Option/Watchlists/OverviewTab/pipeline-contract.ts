@@ -1,4 +1,8 @@
-import type { WatchlistJobCreate, WatchlistOutputCreate } from "@/types/watchlists"
+import type {
+  WatchlistAudioCast,
+  WatchlistJobCreate,
+  WatchlistOutputCreate
+} from "@/types/watchlists"
 import {
   resolveQuickSetupSchedule,
   type QuickSetupSchedulePreset
@@ -8,11 +12,15 @@ export interface BriefingPipelineDraft {
   monitorName: string
   sourceIds: number[]
   schedulePreset: QuickSetupSchedulePreset
+  scheduleExpr?: string | null
+  timezone?: string
   templateName: string
   templateFormat?: "md" | "html"
   templateVersion?: number
   includeAudio: boolean
   audioVoice?: string
+  audioCast?: WatchlistAudioCast
+  voiceMap?: Record<string, string>
   targetAudioMinutes?: number
   emailRecipients?: string[]
   createChatbook?: boolean
@@ -75,7 +83,12 @@ export const validateBriefingPipelineDraft = (
 export const toPipelineJobCreatePayload = (
   draft: BriefingPipelineDraft
 ): WatchlistJobCreate => {
-  const schedule = resolveQuickSetupSchedule(draft.schedulePreset)
+  const schedule = draft.scheduleExpr
+    ? {
+        schedule_expr: draft.scheduleExpr,
+        timezone: draft.timezone
+      }
+    : resolveQuickSetupSchedule(draft.schedulePreset)
   const recipients = normalizeRecipients(draft.emailRecipients)
   const normalizedTemplateName = String(draft.templateName || "").trim()
   const templateVersionNum = Number(draft.templateVersion)
@@ -87,7 +100,8 @@ export const toPipelineJobCreatePayload = (
     draft.templateFormat === "html" || draft.templateFormat === "md"
       ? draft.templateFormat
       : undefined
-  const shouldAutoOutput = draft.schedulePreset !== "none"
+  const shouldAutoOutput = Boolean(schedule.schedule_expr)
+  const normalizedAudioVoice = String(draft.audioVoice || "").trim() || undefined
 
   return {
     name: String(draft.monitorName || "").trim(),
@@ -113,9 +127,9 @@ export const toPipelineJobCreatePayload = (
         default_version: normalizedTemplateVersion
       },
       generate_audio: draft.includeAudio,
-      audio_voice: draft.includeAudio
-        ? String(draft.audioVoice || "").trim() || undefined
-        : undefined,
+      audio_voice: draft.includeAudio ? normalizedAudioVoice : undefined,
+      audio_cast: draft.includeAudio ? draft.audioCast : undefined,
+      voice_map: draft.includeAudio ? draft.voiceMap : undefined,
       target_audio_minutes: draft.includeAudio
         ? Number(draft.targetAudioMinutes)
         : undefined,
@@ -161,11 +175,21 @@ export const toPipelineOutputCreatePayload = (
   }
 
   if (draft.includeAudio) {
+    const normalizedAudioVoice = String(draft.audioVoice || "").trim() || undefined
+    payload.generate_audio = true
+    if (normalizedAudioVoice) payload.audio_voice = normalizedAudioVoice
+    if (draft.audioCast) payload.audio_cast = draft.audioCast
+    if (draft.voiceMap) payload.voice_map = draft.voiceMap
+    const targetAudioMinutes = Number(draft.targetAudioMinutes)
+    if (Number.isFinite(targetAudioMinutes) && targetAudioMinutes > 0) {
+      payload.target_audio_minutes = targetAudioMinutes
+    }
     payload.metadata = {
       audio: {
         enabled: true,
-        voice: String(draft.audioVoice || "").trim() || null,
-        target_minutes: Number(draft.targetAudioMinutes)
+        voice: normalizedAudioVoice || null,
+        ...(draft.audioCast ? { speaker_count: draft.audioCast.speaker_count } : {}),
+        target_minutes: targetAudioMinutes
       }
     }
   }

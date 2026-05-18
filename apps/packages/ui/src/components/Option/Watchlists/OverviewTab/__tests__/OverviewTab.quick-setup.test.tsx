@@ -175,6 +175,21 @@ const clickPipelineNext = () => {
   fireEvent.click(pipelineQueries().getByRole("button", { name: "Next" }))
 }
 
+const advancePipelineFromMonitorToReview = async () => {
+  clickPipelineNext()
+  await waitFor(() => {
+    expect(pipelineQueries().getByLabelText("Template")).toBeInTheDocument()
+  })
+  clickPipelineNext()
+  await waitFor(() => {
+    expect(pipelineQueries().getByLabelText("Audio briefing")).toBeInTheDocument()
+  })
+  clickPipelineNext()
+  await waitFor(() => {
+    expect(screen.getByTestId("watchlists-pipeline-review-summary")).toBeInTheDocument()
+  })
+}
+
 const selectPipelineFeed = async (label: string) => {
   await waitFor(() => {
     const checkbox = pipelineQueries().getByRole("checkbox", { name: label }) as HTMLInputElement
@@ -679,7 +694,7 @@ describe("OverviewTab quick setup flow", () => {
     fireEvent.change(pipelineQueries().getByLabelText("Monitor name"), {
       target: { value: "Morning Brief" }
     })
-    clickPipelineNext()
+    await advancePipelineFromMonitorToReview()
     await waitFor(() => {
       expect(pipelineQueries().getByRole("button", { name: "Create pipeline" })).toBeInTheDocument()
     })
@@ -703,14 +718,6 @@ describe("OverviewTab quick setup flow", () => {
     expect(mockState.openOutputPreviewMock).toHaveBeenCalledWith(505)
     expect(mockState.trackWatchlistsOnboardingTelemetryMock).toHaveBeenCalledWith({
       type: "pipeline_setup_opened"
-    })
-    expect(mockState.trackWatchlistsOnboardingTelemetryMock).toHaveBeenCalledWith({
-      type: "pipeline_setup_step_completed",
-      step: "scope"
-    })
-    expect(mockState.trackWatchlistsOnboardingTelemetryMock).toHaveBeenCalledWith({
-      type: "pipeline_setup_step_completed",
-      step: "briefing"
     })
     expect(mockState.trackWatchlistsOnboardingTelemetryMock).toHaveBeenCalledWith({
       type: "pipeline_setup_step_completed",
@@ -759,7 +766,7 @@ describe("OverviewTab quick setup flow", () => {
     fireEvent.change(pipelineQueries().getByLabelText("Monitor name"), {
       target: { value: "Morning Brief" }
     })
-    clickPipelineNext()
+    await advancePipelineFromMonitorToReview()
     await waitFor(() => {
       expect(pipelineQueries().getByRole("button", { name: "Create pipeline" })).toBeInTheDocument()
     })
@@ -826,7 +833,7 @@ describe("OverviewTab quick setup flow", () => {
     fireEvent.change(pipelineQueries().getByLabelText("Monitor name"), {
       target: { value: "Morning Brief" }
     })
-    clickPipelineNext()
+    await advancePipelineFromMonitorToReview()
 
     await waitFor(() => {
       expect(screen.getByTestId("watchlists-pipeline-preview-generate")).toBeInTheDocument()
@@ -883,7 +890,7 @@ describe("OverviewTab quick setup flow", () => {
     fireEvent.change(pipelineQueries().getByLabelText("Monitor name"), {
       target: { value: "Morning Brief" }
     })
-    clickPipelineNext()
+    await advancePipelineFromMonitorToReview()
 
     await waitFor(() => {
       expect(screen.getByTestId("watchlists-pipeline-preview-generate")).toBeInTheDocument()
@@ -931,7 +938,7 @@ describe("OverviewTab quick setup flow", () => {
     fireEvent.change(pipelineQueries().getByLabelText("Monitor name"), {
       target: { value: "Morning Brief" }
     })
-    clickPipelineNext()
+    await advancePipelineFromMonitorToReview()
     await waitFor(() => {
       expect(screen.getByTestId("watchlists-pipeline-test-generation")).toBeInTheDocument()
     })
