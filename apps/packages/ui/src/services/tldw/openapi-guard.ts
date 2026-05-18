@@ -25,6 +25,16 @@
 // added here so TypeScript can verify it exists in the spec.
 export type ClientPath =
   | "/api/v1/health"
+  | "/api/v1/setup/readiness/profiles"
+  | "/api/v1/setup/readiness/status"
+  | "/api/v1/setup/readiness/preview"
+  | "/api/v1/setup/readiness/provision"
+  | "/api/v1/setup/readiness/verify"
+  | "/api/v1/setup/admin/readiness/profiles"
+  | "/api/v1/setup/admin/readiness/status"
+  | "/api/v1/setup/admin/readiness/preview"
+  | "/api/v1/setup/admin/readiness/provision"
+  | "/api/v1/setup/admin/readiness/verify"
   | "/api/v1/llm/models"
   | "/api/v1/llm/models/metadata"
   | "/api/v1/llm/providers"

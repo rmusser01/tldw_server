@@ -535,8 +535,9 @@ Verification:
 - Create: `apps/packages/ui/src/components/Option/Setup/hooks/useSetupReadiness.ts`
 - Create: `apps/packages/ui/src/components/Option/Setup/hooks/__tests__/useSetupReadiness.test.tsx`
 - Modify: `apps/packages/ui/src/services/tldw/openapi-guard.ts`
+- Modify: `apps/packages/ui/src/services/tldw/index.ts`
 
-- [ ] **Step 1: Write failing hook tests**
+- [x] **Step 1: Write failing hook tests**
 
 ```tsx
 it("loads readiness profiles and status without provisioning", async () => {
@@ -566,13 +567,13 @@ it("maps 403 setup guard failures to remote setup blocked fallback", async () =>
 })
 ```
 
-- [ ] **Step 2: Run hook tests to verify failure**
+- [x] **Step 2: Run hook tests to verify failure**
 
-Run: `bunx vitest run apps/packages/ui/src/components/Option/Setup/hooks/__tests__/useSetupReadiness.test.tsx`
+Run: `bunx vitest run src/components/Option/Setup/hooks/__tests__/useSetupReadiness.test.tsx`
 
-Expected: FAIL with missing hook/client.
+Result: FAIL with missing `../useSetupReadiness` import, confirming the test exercised new behavior.
 
-- [ ] **Step 3: Implement client and hook**
+- [x] **Step 3: Implement client and hook**
 
 Implementation responsibilities:
 
@@ -582,13 +583,18 @@ Implementation responsibilities:
 - Map 401/403/404 setup guard cases into display states.
 - Preserve fallback link to backend `/setup`.
 
-- [ ] **Step 4: Run hook tests**
+- [x] **Step 4: Run hook tests**
 
-Run: `bunx vitest run apps/packages/ui/src/components/Option/Setup/hooks/__tests__/useSetupReadiness.test.tsx`
+Run: `bunx vitest run src/components/Option/Setup/hooks/__tests__/useSetupReadiness.test.tsx`
 
-Expected: PASS.
+Result: PASS, 4 tests.
 
-- [ ] **Step 5: Commit**
+Additional verification:
+- `bun run verify:openapi` -> PASS, 269 ClientPath entries verified; existing 10 reviewed OSS exception paths allowed by the verifier.
+- `bunx tsc --noEmit --pretty false` -> FAIL on existing UI TypeScript debt outside the setup readiness files; no reported errors referenced `setup-readiness.ts`, `useSetupReadiness.ts`, or the new test.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_setup_readiness_profiles.py tldw_Server_API/tests/Setup/test_setup_readiness_preview.py tldw_Server_API/tests/Setup/test_setup_readiness_api.py tldw_Server_API/tests/Setup/test_setup_readiness_store.py -q --timeout=30` -> 26 passed.
+
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/packages/ui/src/services/tldw/setup-readiness.ts \
