@@ -41,6 +41,7 @@ class SetupReadinessSecretField(BaseModel):
 
 
 class SetupReadinessPreviewResponse(BaseModel):
+    preview_id: str | None = None
     profile_id: str | None = None
     lane_ids: list[str] = Field(default_factory=list)
     lanes: dict[str, dict[str, Any]] = Field(default_factory=dict)
@@ -49,6 +50,33 @@ class SetupReadinessPreviewResponse(BaseModel):
     secret_fields: list[SetupReadinessSecretField] = Field(default_factory=list)
     install_plan: dict[str, Any] = Field(default_factory=dict)
     operation_required: bool
+
+
+class SetupReadinessProvisionRequest(BaseModel):
+    preview_id: str | None = Field(
+        None,
+        description="Identifier returned by /setup/readiness/preview.",
+    )
+    selection: dict[str, Any] | None = Field(
+        None,
+        description="Optional inline selection to preview and provision in one request.",
+    )
+    confirmed: bool = Field(
+        False,
+        description="Must be true to persist config updates or queue provisioning work.",
+    )
+
+
+class SetupReadinessProvisionResponse(BaseModel):
+    operation_id: str
+    operation_status: str
+    status_url: str
+    status: str
+    lanes: list[dict[str, Any]] = Field(default_factory=list)
+    overlays: list[str] = Field(default_factory=list)
+    install_plan_submitted: bool
+    config_updates_applied: bool
+    backup_path: str | None = None
 
 
 class SetupCompleteRequest(BaseModel):

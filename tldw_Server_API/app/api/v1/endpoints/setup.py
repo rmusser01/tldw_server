@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
@@ -37,6 +38,8 @@ from tldw_Server_API.app.api.v1.schemas.setup_schemas import (
     SetupInstallStatusResponse,
     SetupReadinessPreviewRequest,
     SetupReadinessPreviewResponse,
+    SetupReadinessProvisionRequest,
+    SetupReadinessProvisionResponse,
     SetupResetResponse,
     SetupStatusResponse,
 )
@@ -46,6 +49,7 @@ from tldw_Server_API.app.core.Setup import install_manager, setup_manager
 from tldw_Server_API.app.core.Setup import audio_pack_service
 from tldw_Server_API.app.core.Setup import audio_profile_service
 from tldw_Server_API.app.core.Setup import audio_readiness_store
+from tldw_Server_API.app.core.Setup import readiness_store
 from tldw_Server_API.app.core.Setup.audio_bundle_catalog import (
     DEFAULT_AUDIO_RESOURCE_PROFILE,
     get_audio_bundle_catalog,
@@ -291,7 +295,134 @@ def _build_setup_readiness_profiles_payload() -> dict[str, Any]:
         audio_recommendations=recommendations,
     )
     payload["overlays"] = list(payload.get("active_overlays", []))
-    return payload
+    return _merge_setup_readiness_store_payload(payload)
+
+
+def _merge_setup_readiness_store_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Overlay persisted preview/provision status onto the profile/status payload."""
+
+    store = readiness_store.get_setup_readiness_store()
+    readiness = _refresh_setup_readiness_operation_status(store.load(), store)
+    if readiness.get("status") == "not_started":
+        return payload
+
+    merged = dict(payload)
+    merged["readiness_status"] = readiness.get("status")
+    merged["selected_profile_id"] = readiness.get("selected_profile_id")
+    merged["operation_id"] = readiness.get("operation_id")
+    merged["operation_status"] = readiness.get("operation_status")
+    merged["last_preview"] = readiness.get("last_preview")
+    merged["last_provision"] = readiness.get("last_provision")
+    merged["errors"] = readiness.get("errors", [])
+    if readiness.get("lanes"):
+        merged["lanes"] = readiness["lanes"]
+    merged["overlays"] = list(dict.fromkeys([*merged.get("overlays", []), *readiness.get("overlays", [])]))
+    return merged
+
+
+def _refresh_setup_readiness_operation_status(
+    readiness: dict[str, Any],
+    store: readiness_store.SetupReadinessStore,
+) -> dict[str, Any]:
+    """Map the shared installer status back onto the pollable readiness operation."""
+
+    if readiness.get("operation_status") not in {"queued", "running"}:
+        return readiness
+
+    last_provision = readiness.get("last_provision")
+    expected_plan = last_provision.get("install_plan") if isinstance(last_provision, dict) else None
+    if not expected_plan:
+        return readiness
+
+    install_status = install_manager.get_install_status_snapshot()
+    if not install_status or install_status.get("plan") != expected_plan:
+        return readiness
+
+    installer_status = install_status.get("status")
+    operation_status = readiness.get("operation_status")
+    readiness_status = readiness.get("status")
+    if installer_status == "in_progress":
+        operation_status = "running"
+        readiness_status = "provisioning"
+    elif installer_status == "completed":
+        operation_status = "completed"
+        readiness_status = "ready_with_warnings"
+    elif installer_status == "failed":
+        operation_status = "failed"
+        readiness_status = "failed"
+
+    if operation_status == readiness.get("operation_status") and readiness_status == readiness.get("status"):
+        return readiness
+
+    last_provision = dict(last_provision)
+    last_provision["operation_status"] = operation_status
+    last_provision["install_status"] = install_status
+    return store.update(
+        status=readiness_status,
+        operation_status=operation_status,
+        last_provision=last_provision,
+        errors=install_status.get("errors", []),
+    )
+
+
+def _new_setup_readiness_preview_id() -> str:
+    return f"preview-{uuid.uuid4().hex}"
+
+
+def _new_setup_readiness_operation_id() -> str:
+    return f"setup-readiness-{uuid.uuid4().hex}"
+
+
+def _preview_lanes_as_list(preview: dict[str, Any]) -> list[dict[str, Any]]:
+    lanes = preview.get("lanes") or {}
+    return [lane for lane in lanes.values() if isinstance(lane, dict)]
+
+
+def _preview_has_blockers(preview: dict[str, Any]) -> bool:
+    return any(lane.get("status") == "blocked" for lane in _preview_lanes_as_list(preview))
+
+
+def _provision_lanes_from_preview(preview: dict[str, Any], *, install_plan_submitted: bool) -> list[dict[str, Any]]:
+    lanes: list[dict[str, Any]] = []
+    for lane in _preview_lanes_as_list(preview):
+        lane_payload = dict(lane)
+        if lane_payload.get("status") == "previewed" and install_plan_submitted:
+            lane_payload["status"] = "provisioning"
+        lanes.append(lane_payload)
+    return lanes
+
+
+def _readiness_status_after_provision(preview: dict[str, Any], *, install_plan_submitted: bool) -> str:
+    if install_plan_submitted:
+        return "provisioning"
+    if preview.get("overlays"):
+        return "ready_with_warnings"
+    return "ready"
+
+
+def _resolve_setup_readiness_preview(
+    payload: SetupReadinessProvisionRequest,
+    store: readiness_store.SetupReadinessStore,
+) -> dict[str, Any]:
+    """Return the preview payload selected for provisioning."""
+
+    if payload.selection:
+        preview = preview_readiness_selection(payload.selection)
+        preview["preview_id"] = _new_setup_readiness_preview_id()
+        return preview
+
+    preview_id = (payload.preview_id or "").strip()
+    stored_preview = store.load().get("last_preview")
+    if (
+        not preview_id
+        or not isinstance(stored_preview, dict)
+        or stored_preview.get("preview_id") != preview_id
+    ):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="A current readiness preview is required before provisioning.",
+        )
+    return dict(stored_preview)
 
 
 @router.get("/audio/recommendations", openapi_extra={"security": []}, response_model=AudioRecommendationsResponse)
@@ -339,7 +470,99 @@ async def preview_setup_readiness(
 
     status_snapshot = setup_manager.get_status_snapshot()
     _ensure_setup_readiness_available(status_snapshot)
-    return preview_readiness_selection(payload)
+    preview = preview_readiness_selection(payload)
+    preview["preview_id"] = _new_setup_readiness_preview_id()
+    readiness_store.get_setup_readiness_store().save(
+        {
+            "status": "previewed",
+            "selected_profile_id": preview.get("profile_id"),
+            "lanes": _preview_lanes_as_list(preview),
+            "overlays": preview.get("overlays", []),
+            "last_preview": preview,
+        }
+    )
+    return preview
+
+
+@router.post(
+    "/readiness/provision",
+    openapi_extra={"security": []},
+    response_model=SetupReadinessProvisionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def provision_setup_readiness(
+    payload: SetupReadinessProvisionRequest,
+    background_tasks: BackgroundTasks,
+    _guard: None = Depends(require_local_setup_access),
+) -> JSONResponse:
+    """Persist previewed config changes and queue any selected setup provisioning work."""
+
+    status_snapshot = setup_manager.get_status_snapshot()
+    _ensure_setup_readiness_available(status_snapshot)
+    if not payload.confirmed:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Provisioning requires explicit confirmation.")
+
+    store = readiness_store.get_setup_readiness_store()
+    preview = _resolve_setup_readiness_preview(payload, store)
+    if _preview_has_blockers(preview):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="Resolve blocked readiness lanes before provisioning.",
+        )
+
+    backup_path = None
+    config_updates = preview.get("config_updates") or {}
+    if config_updates:
+        backup_path = setup_manager.update_config(config_updates)
+
+    install_plan = InstallPlan.model_validate(preview.get("install_plan") or {})
+    install_plan_submitted = not install_plan.is_empty()
+    install_plan_payload = model_dump_compat(install_plan)
+    if install_plan_submitted:
+        background_tasks.add_task(execute_install_plan, install_plan_payload)
+
+    operation_id = _new_setup_readiness_operation_id()
+    operation_status = "queued" if install_plan_submitted else "completed"
+    readiness_status = _readiness_status_after_provision(
+        preview,
+        install_plan_submitted=install_plan_submitted,
+    )
+    lanes = _provision_lanes_from_preview(preview, install_plan_submitted=install_plan_submitted)
+    provision_payload = {
+        "operation_id": operation_id,
+        "operation_status": operation_status,
+        "status": readiness_status,
+        "preview_id": preview.get("preview_id"),
+        "install_plan_submitted": install_plan_submitted,
+        "config_updates_applied": bool(config_updates),
+        "backup_path": str(backup_path) if backup_path else None,
+        "install_plan": install_plan_payload if install_plan_submitted else None,
+    }
+    saved = store.save(
+        {
+            "status": readiness_status,
+            "selected_profile_id": preview.get("profile_id"),
+            "lanes": lanes,
+            "overlays": preview.get("overlays", []),
+            "last_preview": preview,
+            "last_provision": provision_payload,
+            "operation_id": operation_id,
+            "operation_status": operation_status,
+        }
+    )
+
+    response = {
+        "operation_id": operation_id,
+        "operation_status": operation_status,
+        "status_url": "/api/v1/setup/readiness/status",
+        "status": saved["status"],
+        "lanes": saved["lanes"],
+        "overlays": saved["overlays"],
+        "install_plan_submitted": install_plan_submitted,
+        "config_updates_applied": bool(config_updates),
+        "backup_path": str(backup_path) if backup_path else None,
+    }
+    return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=response)
 
 
 def _build_audio_recommendations_response(

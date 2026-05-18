@@ -347,7 +347,7 @@ git commit -m "feat: expose setup readiness read APIs"
 - Test: `tldw_Server_API/tests/Setup/test_setup_readiness_store.py`
 - Test: `tldw_Server_API/tests/Setup/test_setup_readiness_api.py`
 
-- [ ] **Step 1: Write failing store tests**
+- [x] **Step 1: Write failing store tests**
 
 ```python
 from tldw_Server_API.app.core.Setup.readiness_store import SetupReadinessStore
@@ -364,7 +364,7 @@ def test_readiness_store_round_trips_lane_status(tmp_path):
     assert store.load()["overlays"] == ["restart_required"]
 ```
 
-- [ ] **Step 2: Write failing provision API tests**
+- [x] **Step 2: Write failing provision API tests**
 
 ```python
 def test_provision_returns_pollable_status_without_waiting_for_download(client, monkeypatch):
@@ -381,13 +381,13 @@ def test_provision_returns_pollable_status_without_waiting_for_download(client, 
     assert response.json()["status_url"] == "/api/v1/setup/readiness/status"
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_setup_readiness_store.py tldw_Server_API/tests/Setup/test_setup_readiness_api.py -q`
 
 Expected: FAIL with missing store/provision endpoint.
 
-- [ ] **Step 4: Implement store and provision endpoint**
+- [x] **Step 4: Implement store and provision endpoint**
 
 Implementation responsibilities:
 
@@ -399,13 +399,13 @@ Implementation responsibilities:
 - Return `202 Accepted` for queued/running work and a pollable `status_url`.
 - Preserve `restart_required` overlay until status/verification clears it after restart.
 
-- [ ] **Step 5: Run targeted tests**
+- [x] **Step 5: Run targeted tests**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_setup_readiness_store.py tldw_Server_API/tests/Setup/test_setup_readiness_api.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Setup/readiness_store.py \
@@ -415,6 +415,10 @@ git add tldw_Server_API/app/core/Setup/readiness_store.py \
   tldw_Server_API/tests/Setup/test_setup_readiness_api.py
 git commit -m "feat: add pollable setup readiness provisioning"
 ```
+
+Verification:
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_setup_readiness_profiles.py tldw_Server_API/tests/Setup/test_setup_readiness_preview.py tldw_Server_API/tests/Setup/test_setup_readiness_api.py tldw_Server_API/tests/Setup/test_setup_readiness_store.py -q --timeout=30` -> 17 passed.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Setup/readiness_store.py tldw_Server_API/app/api/v1/endpoints/setup.py tldw_Server_API/app/api/v1/schemas/setup_schemas.py -f json -o /tmp/bandit_first_time_readiness_provision.json` -> 0 findings.
 
 ---
 
