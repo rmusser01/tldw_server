@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.main import app
 import tldw_Server_API.app.api.v1.endpoints.setup as setup_endpoint
 from tldw_Server_API.app.core.Setup.readiness_store import SetupReadinessStore
@@ -84,6 +85,86 @@ def _readiness_api_setup(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(setup_endpoint, "get_audio_bundle_catalog", lambda: _EmptyBundleCatalog())
     return store
+
+
+@pytest.fixture()
+def _admin_readiness_api_setup(monkeypatch, tmp_path):
+    store = SetupReadinessStore(tmp_path / "setup_readiness.json")
+    monkeypatch.setattr(setup_endpoint.readiness_store, "get_setup_readiness_store", lambda: store)
+    monkeypatch.setattr(
+        setup_endpoint.setup_manager,
+        "get_status_snapshot",
+        lambda: {
+            "enabled": False,
+            "setup_completed": True,
+            "completed": True,
+            "needs_setup": False,
+            "config_path": "config.txt",
+            "allow_remote_setup_access": False,
+            "remote_access_env_override": False,
+            "remote_access_active": False,
+            "placeholder_fields": [],
+        },
+    )
+    monkeypatch.setattr(
+        setup_endpoint.setup_manager,
+        "get_config_snapshot",
+        lambda: {
+            "config_path": "config.txt",
+            "sections": [
+                {
+                    "name": "API",
+                    "fields": [{"key": "default_api", "value": "openai", "placeholder": False}],
+                },
+                {
+                    "name": "Embeddings",
+                    "fields": [
+                        {"key": "embedding_provider", "value": "huggingface", "placeholder": False},
+                        {
+                            "key": "embedding_model",
+                            "value": "Qwen/Qwen3-Embedding-0.6B",
+                            "placeholder": False,
+                        },
+                    ],
+                },
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        setup_endpoint.audio_profile_service,
+        "detect_machine_profile",
+        lambda: {
+            "platform": "linux",
+            "arch": "x86_64",
+            "apple_silicon": False,
+            "cuda_available": False,
+            "ffmpeg_available": True,
+            "espeak_available": True,
+            "free_disk_gb": 64.0,
+            "network_available_for_downloads": True,
+        },
+    )
+    monkeypatch.setattr(
+        setup_endpoint.audio_profile_service,
+        "recommend_audio_bundles",
+        lambda *args, **kwargs: {"recommendations": [], "excluded": []},
+    )
+    monkeypatch.setattr(setup_endpoint, "get_audio_bundle_catalog", lambda: _EmptyBundleCatalog())
+    return store
+
+
+async def _admin_principal(_request):
+    return AuthPrincipal(
+        kind="user",
+        user_id=42,
+        roles=["admin"],
+        permissions=["system.configure"],
+        is_admin=False,
+    )
+
+
+async def _regular_user_principal(_request):
+    return AuthPrincipal(kind="user", user_id=42, roles=["user"], permissions=[], is_admin=False)
 
 
 def test_readiness_profiles_available_during_local_first_run(_readiness_api_setup):
@@ -244,3 +325,47 @@ def test_readiness_verify_route_persists_speech_warnings(monkeypatch, _readiness
     status_response = client.get("/api/v1/setup/readiness/status", headers={"host": "localhost"})
     assert status_response.status_code == 200
     assert status_response.json()["readiness_status"] == "ready_with_warnings"
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "json_body"),
+    [
+        ("get", "/api/v1/setup/admin/readiness/profiles", None),
+        ("get", "/api/v1/setup/admin/readiness/status", None),
+        ("post", "/api/v1/setup/admin/readiness/preview", {"lanes": {"chat": {"mode": "skip"}}}),
+        ("post", "/api/v1/setup/admin/readiness/provision", {"confirmed": False}),
+        ("post", "/api/v1/setup/admin/readiness/verify", {"selection": {"lanes": {"chat": {"mode": "skip"}}}}),
+    ],
+)
+def test_admin_readiness_routes_require_admin(
+    monkeypatch,
+    _admin_readiness_api_setup,
+    method,
+    path,
+    json_body,
+):
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal",
+        _regular_user_principal,
+    )
+
+    client = _make_client()
+    request_kwargs = {"json": json_body} if json_body is not None else {}
+    response = getattr(client, method)(path, **request_kwargs)
+
+    assert response.status_code == 403
+
+
+def test_admin_readiness_profiles_available_after_setup_completed(monkeypatch, _admin_readiness_api_setup):
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal",
+        _admin_principal,
+    )
+
+    client = _make_client()
+    response = client.get("/api/v1/setup/admin/readiness/profiles")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["setup_access"]["mode"] == "admin"
+    assert [lane["lane_id"] for lane in payload["lanes"]] == ["chat", "embeddings_rag", "speech"]

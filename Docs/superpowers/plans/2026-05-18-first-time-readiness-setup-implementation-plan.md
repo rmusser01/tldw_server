@@ -501,6 +501,33 @@ Verification:
 
 ---
 
+### Task 5.5: Admin Setup Readiness Route Parity
+
+**Files:**
+- Modify: `tldw_Server_API/app/api/v1/endpoints/setup.py`
+- Test: `tldw_Server_API/tests/Setup/test_setup_readiness_api.py`
+
+- [x] **Step 1: Add failing admin readiness endpoint coverage**
+
+Covered admin-gated route availability for:
+- `GET /api/v1/setup/admin/readiness/profiles`
+- `GET /api/v1/setup/admin/readiness/status`
+- `POST /api/v1/setup/admin/readiness/preview`
+- `POST /api/v1/setup/admin/readiness/provision`
+- `POST /api/v1/setup/admin/readiness/verify`
+
+- [x] **Step 2: Implement shared first-run/admin readiness helpers**
+
+Shared the profiles, status, preview, provision, and verify implementations while keeping first-run routes behind `require_local_setup_access` and admin routes behind `require_shared_audio_installer_access`.
+
+- [x] **Step 3: Run targeted backend tests**
+
+Verification:
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_setup_readiness_profiles.py tldw_Server_API/tests/Setup/test_setup_readiness_preview.py tldw_Server_API/tests/Setup/test_setup_readiness_api.py tldw_Server_API/tests/Setup/test_setup_readiness_store.py -q --timeout=30` -> 26 passed.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/setup.py -f json -o /tmp/bandit_first_time_readiness_admin.json` -> 0 findings.
+
+---
+
 ### Task 6: WebUI Setup Readiness Client And Hook
 
 **Files:**

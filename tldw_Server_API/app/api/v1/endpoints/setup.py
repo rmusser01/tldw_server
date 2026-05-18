@@ -270,26 +270,44 @@ def _get_audio_install_status(*, allow_completed_when_disabled: bool = False) ->
     return JSONResponse(install_status)
 
 
-def _ensure_setup_readiness_available(status_snapshot: dict[str, Any]) -> None:
+def _ensure_setup_readiness_available(
+    status_snapshot: dict[str, Any],
+    *,
+    allow_completed_when_disabled: bool = False,
+) -> None:
     """Validate whether first-run setup readiness routes should be visible."""
 
-    if not status_snapshot["enabled"]:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Setup flow not enabled in config.txt")
-    if not status_snapshot["needs_setup"]:
+    if status_snapshot["enabled"]:
+        if status_snapshot["needs_setup"] or allow_completed_when_disabled:
+            return
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             detail="Setup already completed. Use the admin setup readiness endpoints.",
         )
 
+    if allow_completed_when_disabled and (
+        status_snapshot.get("setup_completed") or status_snapshot.get("completed")
+    ):
+        return
 
-def _build_setup_readiness_profiles_payload() -> dict[str, Any]:
+    raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Setup flow not enabled in config.txt")
+
+
+def _build_setup_readiness_profiles_payload(
+    *,
+    allow_completed_when_disabled: bool = False,
+) -> dict[str, Any]:
     """Build the read-only first-run setup readiness profile/status payload."""
 
     status_snapshot = setup_manager.get_status_snapshot()
-    _ensure_setup_readiness_available(status_snapshot)
+    _ensure_setup_readiness_available(
+        status_snapshot,
+        allow_completed_when_disabled=allow_completed_when_disabled,
+    )
     recommendations = _build_audio_recommendations_response(
         prefer_offline_runtime=True,
         allow_hosted_fallbacks=True,
+        allow_completed_when_disabled=allow_completed_when_disabled,
     )
     payload = build_readiness_profiles(
         setup_status=status_snapshot,
@@ -492,8 +510,21 @@ async def preview_setup_readiness(
 ) -> SetupReadinessPreviewResponse:
     """Preview setup readiness changes without writing config or provisioning assets."""
 
+    return _preview_setup_readiness(payload)
+
+
+def _preview_setup_readiness(
+    payload: SetupReadinessPreviewRequest,
+    *,
+    allow_completed_when_disabled: bool = False,
+) -> dict[str, Any]:
+    """Shared first-run/admin readiness preview implementation."""
+
     status_snapshot = setup_manager.get_status_snapshot()
-    _ensure_setup_readiness_available(status_snapshot)
+    _ensure_setup_readiness_available(
+        status_snapshot,
+        allow_completed_when_disabled=allow_completed_when_disabled,
+    )
     preview = preview_readiness_selection(payload)
     preview["preview_id"] = _new_setup_readiness_preview_id()
     readiness_store.get_setup_readiness_store().save(
@@ -521,8 +552,22 @@ async def provision_setup_readiness(
 ) -> JSONResponse:
     """Persist previewed config changes and queue any selected setup provisioning work."""
 
+    return _provision_setup_readiness(payload, background_tasks)
+
+
+def _provision_setup_readiness(
+    payload: SetupReadinessProvisionRequest,
+    background_tasks: BackgroundTasks,
+    *,
+    allow_completed_when_disabled: bool = False,
+) -> JSONResponse:
+    """Shared first-run/admin readiness provisioning implementation."""
+
     status_snapshot = setup_manager.get_status_snapshot()
-    _ensure_setup_readiness_available(status_snapshot)
+    _ensure_setup_readiness_available(
+        status_snapshot,
+        allow_completed_when_disabled=allow_completed_when_disabled,
+    )
     if not payload.confirmed:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Provisioning requires explicit confirmation.")
 
@@ -600,8 +645,21 @@ async def verify_setup_readiness(
 ) -> SetupReadinessVerifyResponse:
     """Explicitly verify selected setup readiness lanes."""
 
+    return await _verify_setup_readiness(payload)
+
+
+async def _verify_setup_readiness(
+    payload: SetupReadinessVerifyRequest,
+    *,
+    allow_completed_when_disabled: bool = False,
+) -> dict[str, Any]:
+    """Shared first-run/admin readiness verification implementation."""
+
     status_snapshot = setup_manager.get_status_snapshot()
-    _ensure_setup_readiness_available(status_snapshot)
+    _ensure_setup_readiness_available(
+        status_snapshot,
+        allow_completed_when_disabled=allow_completed_when_disabled,
+    )
 
     store = readiness_store.get_setup_readiness_store()
     selection = _resolve_setup_readiness_verification_selection(payload, store)
@@ -614,6 +672,63 @@ async def verify_setup_readiness(
         last_verification=verification,
     )
     return verification
+
+
+@router.get("/admin/readiness/profiles")
+async def get_admin_setup_readiness_profiles(
+    _guard: None = Depends(require_shared_audio_installer_access),
+) -> dict[str, Any]:
+    """Return admin-gated setup readiness profiles after first-run setup."""
+
+    return _build_setup_readiness_profiles_payload(allow_completed_when_disabled=True)
+
+
+@router.get("/admin/readiness/status")
+async def get_admin_setup_readiness_status(
+    _guard: None = Depends(require_shared_audio_installer_access),
+) -> dict[str, Any]:
+    """Return admin-gated setup readiness status after first-run setup."""
+
+    return _build_setup_readiness_profiles_payload(allow_completed_when_disabled=True)
+
+
+@router.post("/admin/readiness/preview", response_model=SetupReadinessPreviewResponse)
+async def preview_admin_setup_readiness(
+    payload: SetupReadinessPreviewRequest,
+    _guard: None = Depends(require_shared_audio_installer_access),
+) -> SetupReadinessPreviewResponse:
+    """Preview setup readiness changes through the admin setup surface."""
+
+    return _preview_setup_readiness(payload, allow_completed_when_disabled=True)
+
+
+@router.post(
+    "/admin/readiness/provision",
+    response_model=SetupReadinessProvisionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def provision_admin_setup_readiness(
+    payload: SetupReadinessProvisionRequest,
+    background_tasks: BackgroundTasks,
+    _guard: None = Depends(require_shared_audio_installer_access),
+) -> JSONResponse:
+    """Provision setup readiness changes through the admin setup surface."""
+
+    return _provision_setup_readiness(
+        payload,
+        background_tasks,
+        allow_completed_when_disabled=True,
+    )
+
+
+@router.post("/admin/readiness/verify", response_model=SetupReadinessVerifyResponse)
+async def verify_admin_setup_readiness(
+    payload: SetupReadinessVerifyRequest,
+    _guard: None = Depends(require_shared_audio_installer_access),
+) -> SetupReadinessVerifyResponse:
+    """Verify setup readiness lanes through the admin setup surface."""
+
+    return await _verify_setup_readiness(payload, allow_completed_when_disabled=True)
 
 
 def _build_audio_recommendations_response(
