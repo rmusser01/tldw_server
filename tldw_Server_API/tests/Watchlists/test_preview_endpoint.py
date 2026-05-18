@@ -168,3 +168,29 @@ def test_draft_source_test_returns_scrape_rule_diagnostics(client_with_user: Tes
     assert diagnostics.get("dedupe_preview_key") == "guid_xpath"
     assert any("link_xpath" in item for item in diagnostics.get("selector_errors", []))
     assert "selector_warnings" in diagnostics
+
+
+def test_source_diagnostics_preserve_warning_detail_and_selector_identity():
+    from tldw_Server_API.app.api.v1.endpoints.watchlists import (
+        _format_selector_diagnostic,
+        _infer_source_dedupe_preview_key,
+    )
+
+    formatted = _format_selector_diagnostic(
+        {
+            "key": "title_selector",
+            "selector": "css:.xYz123abc",
+            "warning": "fragile_selector",
+            "detail": "fragile class 'xYz123abc'",
+        }
+    )
+
+    assert "fragile_selector" in formatted
+    assert "fragile class 'xYz123abc'" in formatted
+    assert _infer_source_dedupe_preview_key({"guid_selector": "css:.entry-id"}) == "guid_selector"
+    assert (
+        _infer_source_dedupe_preview_key(
+            {"alternates": [{"url_selector": "css:a::attr(href)"}]}
+        )
+        == "alternates.url_selector"
+    )

@@ -2295,10 +2295,14 @@ def _normalize_source_test_url(source_url: str, source_type: str) -> str:
 
 
 def _format_selector_diagnostic(issue: Any) -> str:
+    """Format selector validation output into one concise preview diagnostic."""
     if not isinstance(issue, dict):
         return str(issue)
     key = str(issue.get("key") or "selector").strip() or "selector"
     label = str(issue.get("error") or issue.get("warning") or issue.get("detail") or "issue")
+    detail = str(issue.get("detail") or "").strip()
+    if detail and detail != label:
+        label = f"{label}: {detail}"
     selector = str(issue.get("selector") or "").strip()
     count = issue.get("count")
     summary = f"{key}: {label}"
@@ -2310,6 +2314,7 @@ def _format_selector_diagnostic(issue: Any) -> str:
 
 
 def _first_present_rule_key(rules: dict[str, Any], keys: tuple[str, ...]) -> str | None:
+    """Return the first configured scrape-rule key from a preferred key list."""
     for key in keys:
         value = rules.get(key)
         if value is None:
@@ -2320,10 +2325,23 @@ def _first_present_rule_key(rules: dict[str, Any], keys: tuple[str, ...]) -> str
     return None
 
 
+_SOURCE_DEDUPE_IDENTITY_KEYS = (
+    "guid_xpath",
+    "guid_selector",
+    "id_xpath",
+    "id_selector",
+    "link_xpath",
+    "link_selector",
+    "url_xpath",
+    "url_selector",
+)
+
+
 def _infer_source_dedupe_preview_key(rules: dict[str, Any]) -> str:
+    """Infer which scrape-rule field will likely provide item identity."""
     identity_key = _first_present_rule_key(
         rules,
-        ("guid_xpath", "id_xpath", "link_xpath", "url_xpath"),
+        _SOURCE_DEDUPE_IDENTITY_KEYS,
     )
     if identity_key:
         return identity_key
@@ -2334,7 +2352,7 @@ def _infer_source_dedupe_preview_key(rules: dict[str, Any]) -> str:
                 continue
             identity_key = _first_present_rule_key(
                 alt,
-                ("guid_xpath", "id_xpath", "link_xpath", "url_xpath"),
+                _SOURCE_DEDUPE_IDENTITY_KEYS,
             )
             if identity_key:
                 return f"alternates.{identity_key}"
@@ -2346,6 +2364,7 @@ def _build_source_preview_diagnostics(
     fetch_mode: str,
     scrape_rules: dict[str, Any] | None = None,
 ) -> SourcePreviewDiagnostics:
+    """Build optional source-test diagnostics without changing preview item behavior."""
     diagnostics = SourcePreviewDiagnostics(fetch_mode=fetch_mode)
     if not scrape_rules:
         return diagnostics

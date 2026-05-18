@@ -60,9 +60,10 @@ Initial implementation:
 Review-fix pass:
 - Addressed Gemini review comments by making selector validation errors/warnings tolerant of missing/None lists.
 - Normalized frontend template version once before reuse in pipeline payload construction.
+- Addressed CodeRabbit/Qodo comments by including selector identity variants in dedupe key inference, preserving warning detail text, and documenting diagnostics helpers.
 
 Verification after review fixes:
-- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Watchlists/test_fetchers_scrape_rules.py tldw_Server_API/tests/Watchlists/test_preview_endpoint.py -q -> 9 passed.
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Watchlists/test_fetchers_scrape_rules.py tldw_Server_API/tests/Watchlists/test_preview_endpoint.py -q -> 10 passed.
 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Watchlists/test_job_output_prefs_roundtrip.py tldw_Server_API/tests/Watchlists/test_newsletter_briefing_gaps.py -q -> 47 passed.
 - bun run test -- src/components/Option/Watchlists/OverviewTab/__tests__/pipeline-contract.test.ts src/components/Option/Watchlists/JobsTab/__tests__/JobFormModal.live-summary.test.tsx src/components/Option/Watchlists/OutputsTab/__tests__/outputMetadata.test.ts --maxWorkers=1 --no-file-parallelism -> 42 passed.
 - git diff --check -> passed.
