@@ -457,6 +457,7 @@ async def _start_llamacpp_acquisition_jobs_worker(
 ) -> tuple[Any | None, Any | None]:
     """Start the llama.cpp acquisition jobs poller and return its shutdown handles."""
 
+    task = None
     try:
         enabled = should_start_worker(
             "LLAMACPP_ACQUISITION_JOBS_WORKER_ENABLED",
@@ -490,6 +491,7 @@ async def _start_llamacpp_acquisition_jobs_worker(
         )
         return stop_event, task
     except _STARTUP_GUARD_EXCEPTIONS as exc:
+        _safe_cancel_task(task)
         logger.warning(f"Failed to start llama.cpp Acquisition Jobs worker: {exc}")
         return None, None
 

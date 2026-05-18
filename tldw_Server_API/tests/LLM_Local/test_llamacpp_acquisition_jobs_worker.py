@@ -18,7 +18,7 @@ class _FakeDownloadStream:
         self._chunks = chunks
         self.total_bytes = total_bytes
 
-    async def __aenter__(self) -> "_FakeDownloadStream":
+    async def __aenter__(self) -> _FakeDownloadStream:
         return self
 
     async def __aexit__(self, exc_type: object, exc: object, tb: object) -> bool:
@@ -241,6 +241,73 @@ async def test_worker_cancellation_deletes_partial_and_skips_registration(
     assert list(final_path.parent.glob("*.partial")) == []
     assert registered == []
     assert job_manager.cancelled == [{"job_id": 41, "reason": "cancel requested during download"}]
+
+
+@pytest.mark.asyncio
+async def test_worker_cancel_check_error_falls_back_to_jobs_status(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.services import llamacpp_acquisition_jobs_worker as worker
+
+    final_path = tmp_path / "models" / "model.gguf"
+    final_path.parent.mkdir()
+    _allow_destination(monkeypatch, worker, final_path.parent)
+
+    def _stream_factory(_url: str, *, timeout_seconds: float):
+        del timeout_seconds
+        raise AssertionError("download should not start when Jobs status is cancelled")
+
+    def _cancel_check() -> bool:
+        raise RuntimeError("transient cancel callback failure")
+
+    job_manager = _RecordingJobManager(status="cancelled")
+    result = await worker.process_llamacpp_acquisition_job(
+        _job_for(final_path),
+        job_manager=job_manager,
+        progress=worker._ProgressState(),
+        stream_factory=_stream_factory,
+        cancel_check=_cancel_check,
+    )
+
+    assert result == {}
+    assert not final_path.exists()
+    assert list(final_path.parent.glob("*.partial")) == []
+    assert job_manager.cancelled == [{"job_id": 41, "reason": "cancel requested before download"}]
+
+
+@pytest.mark.asyncio
+async def test_worker_throttles_small_chunk_progress_updates(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.services import llamacpp_acquisition_jobs_worker as worker
+
+    final_path = tmp_path / "models" / "model.gguf"
+    final_path.parent.mkdir()
+    _allow_destination(monkeypatch, worker, final_path.parent)
+    chunks = [b"x"] * 20
+
+    def _stream_factory(_url: str, *, timeout_seconds: float):
+        del timeout_seconds
+        return _FakeDownloadStream(chunks, total_bytes=1_000_000_000)
+
+    job_manager = _RecordingJobManager()
+    progress = worker._ProgressState()
+    result = await worker.process_llamacpp_acquisition_job(
+        _job_for(final_path, payload_overrides={"register_asset": False}),
+        job_manager=job_manager,
+        progress=progress,
+        stream_factory=_stream_factory,
+    )
+
+    downloading_updates = [
+        update for update in job_manager.progress_updates if update["progress_message"] == "downloading"
+    ]
+    assert len(downloading_updates) == 1
+    assert job_manager.progress_updates[-1]["progress_message"] == "completed"
+    assert progress.bytes_downloaded == len(chunks)
+    assert result["bytes"] == len(chunks)
 
 
 @pytest.mark.asyncio

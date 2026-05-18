@@ -3,8 +3,8 @@ id: TASK-416.3
 title: Implement llama.cpp acquisition download worker
 status: Done
 assignee: []
-created_date: ''
-updated_date: 2026-05-17 22:22
+created_date: '2026-05-17T22:22:00Z'
+updated_date: 2026-05-18 03:22
 labels:
 - llamacpp
 - backend
@@ -44,7 +44,7 @@ Implement Task 3 from the llama.cpp model acquisition/import workflow plan: add 
 
 <!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Verification: source .venv/bin/activate && python -m pytest tldw_Server_API/tests/LLM_Local/test_llamacpp_acquisition_service.py tldw_Server_API/tests/LLM_Local/test_llamacpp_acquisition_api.py tldw_Server_API/tests/LLM_Local/test_llamacpp_acquisition_jobs_worker.py tldw_Server_API/tests/AuthNZ_Unit/test_llamacpp_permissions_claims.py tldw_Server_API/tests/Services/test_startup_content_jobs_pollers.py -q --tb=short (82 passed, 5 warnings); source .venv/bin/activate && python -m pytest tldw_Server_API/tests/LLM_Local/test_llamacpp_acquisition_jobs_worker.py tldw_Server_API/tests/Services/test_startup_content_jobs_pollers.py -v (21 passed, 5 warnings); source .venv/bin/activate && python -m bandit -r touched service paths -f json -o /tmp/bandit_llamacpp_acquisition_worker.json (0 findings); git diff --check (clean). Docs skip: Task 3 is worker/startup code only; docs are Task 5.
+Verification: source .venv/bin/activate && python -m pytest tldw_Server_API/tests/LLM_Local/test_llamacpp_acquisition_service.py tldw_Server_API/tests/LLM_Local/test_llamacpp_acquisition_api.py tldw_Server_API/tests/LLM_Local/test_llamacpp_acquisition_jobs_worker.py tldw_Server_API/tests/AuthNZ_Unit/test_llamacpp_permissions_claims.py tldw_Server_API/tests/Services/test_startup_content_jobs_pollers.py -q --tb=short (85 passed, 5 warnings); source .venv/bin/activate && python -m ruff check tldw_Server_API/app/core/Local_LLM/llamacpp_acquisition_service.py tldw_Server_API/app/services/llamacpp_acquisition_jobs_worker.py tldw_Server_API/app/services/startup_content_jobs_pollers.py tldw_Server_API/tests/LLM_Local/test_llamacpp_acquisition_jobs_worker.py tldw_Server_API/tests/Services/test_startup_content_jobs_pollers.py (passed); source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Local_LLM/llamacpp_acquisition_service.py tldw_Server_API/app/services/llamacpp_acquisition_jobs_worker.py tldw_Server_API/app/services/startup_content_jobs_pollers.py -f json -o /tmp/bandit_llamacpp_acquisition_worker.json (0 findings); git diff --check (clean). Docs skip: Task 3 is worker/startup code only; docs are Task 5.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 <!-- SECTION:NOTES:END -->
 

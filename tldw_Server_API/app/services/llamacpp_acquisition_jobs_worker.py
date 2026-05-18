@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -16,17 +17,28 @@ from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int as _coerce_int
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env as _jobs_manager
 from tldw_Server_API.app.core.Local_LLM import llamacpp_acquisition_service as acquisition_service
-from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
 from tldw_Server_API.app.core.Local_LLM.llamacpp_acquisition_jobs import (
     LLAMACPP_ACQUISITION_DOMAIN,
     LLAMACPP_ACQUISITION_QUEUE,
     LLAMACPP_DOWNLOAD_JOB_TYPE,
 )
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
 
 _SECRET_ASSIGNMENT_RE = re.compile(
     r"(?i)\b((?:bearer|token|api[_-]?key|password|secret|signature)\s*[:=]\s*)[^\s,;]+"
 )
 _URL_USERINFO_RE = re.compile(r"(?i)(https?://)[^/@\s]+@")
+_CANCEL_CHECK_EXCEPTIONS = (
+    AttributeError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
+_PROGRESS_DB_UPDATE_INTERVAL_SECONDS = 1.0
+_PROGRESS_DB_UPDATE_PERCENT_DELTA = 1.0
+_PROGRESS_DB_UPDATE_BYTES_DELTA = 5 * 1024 * 1024
+_CANCELLATION_DB_POLL_INTERVAL_SECONDS = 1.0
 
 
 @dataclass
@@ -37,6 +49,77 @@ class _ProgressState:
     message: str | None = None
     bytes_downloaded: int = 0
     total_bytes: int | None = None
+
+
+@dataclass
+class _ProgressUpdateThrottle:
+    """Rate-limit persisted progress updates while keeping in-memory progress fresh."""
+
+    interval_seconds: float = _PROGRESS_DB_UPDATE_INTERVAL_SECONDS
+    percent_delta: float = _PROGRESS_DB_UPDATE_PERCENT_DELTA
+    bytes_delta: int = _PROGRESS_DB_UPDATE_BYTES_DELTA
+    _last_updated_at: float | None = None
+    _last_percent: float | None = None
+    _last_bytes: int = 0
+    _last_message: str | None = None
+
+    def should_update(self, *, bytes_downloaded: int, percent: float | None, message: str) -> bool:
+        """Return whether a progress row should be persisted for this update."""
+
+        now = time.monotonic()
+        if self._last_updated_at is None:
+            self._record(now=now, bytes_downloaded=bytes_downloaded, percent=percent, message=message)
+            return True
+        if message != self._last_message:
+            self._record(now=now, bytes_downloaded=bytes_downloaded, percent=percent, message=message)
+            return True
+        if percent is not None and self._last_percent is not None:
+            if abs(percent - self._last_percent) >= self.percent_delta:
+                self._record(now=now, bytes_downloaded=bytes_downloaded, percent=percent, message=message)
+                return True
+        if bytes_downloaded - self._last_bytes >= self.bytes_delta:
+            self._record(now=now, bytes_downloaded=bytes_downloaded, percent=percent, message=message)
+            return True
+        if now - self._last_updated_at >= self.interval_seconds:
+            self._record(now=now, bytes_downloaded=bytes_downloaded, percent=percent, message=message)
+            return True
+        return False
+
+    def _record(self, *, now: float, bytes_downloaded: int, percent: float | None, message: str) -> None:
+        self._last_updated_at = now
+        self._last_percent = percent
+        self._last_bytes = bytes_downloaded
+        self._last_message = message
+
+
+@dataclass
+class _CancellationPoller:
+    """Poll injected cancellation each chunk and Jobs status at a bounded rate."""
+
+    job_manager: Any
+    job_id: int
+    cancel_check: acquisition_service.CancelCheck | None
+    interval_seconds: float = _CANCELLATION_DB_POLL_INTERVAL_SECONDS
+    _last_status_poll_at: float | None = None
+
+    def __call__(self) -> bool:
+        if self._cancel_check_requested():
+            return True
+        now = time.monotonic()
+        if self._last_status_poll_at is not None and now - self._last_status_poll_at < self.interval_seconds:
+            return False
+        self._last_status_poll_at = now
+        return _job_status_cancelled(self.job_manager, self.job_id)
+
+    def _cancel_check_requested(self) -> bool:
+        if self.cancel_check is None:
+            return False
+        try:
+            return bool(self.cancel_check())
+        except _CANCEL_CHECK_EXCEPTIONS as exc:
+            logger.debug(f"llama.cpp acquisition cancel_check failed for job {self.job_id}: {exc}")
+            self._last_status_poll_at = time.monotonic()
+            return _job_status_cancelled(self.job_manager, self.job_id)
 
 
 class LlamaCppAcquisitionJobError(RuntimeError):
@@ -110,11 +193,16 @@ def _should_cancel(job_manager: Any, job_id: int, cancel_check: acquisition_serv
         try:
             if bool(cancel_check()):
                 return True
-        except Exception:
-            return False
+        except _CANCEL_CHECK_EXCEPTIONS as exc:
+            logger.debug(f"llama.cpp acquisition cancel_check failed for job {job_id}: {exc}")
+    return _job_status_cancelled(job_manager, job_id)
+
+
+def _job_status_cancelled(job_manager: Any, job_id: int) -> bool:
     try:
         current = job_manager.get_job(int(job_id)) or {}
-    except Exception:
+    except _CANCEL_CHECK_EXCEPTIONS as exc:
+        logger.debug(f"llama.cpp acquisition Jobs status check failed for job {job_id}: {exc}")
         return False
     return str(current.get("status") or "").lower() == "cancelled"
 
@@ -170,25 +258,38 @@ async def process_llamacpp_acquisition_job(
             progress.percent = 0.0
             progress.message = "queued"
 
+        progress_throttle = _ProgressUpdateThrottle()
+
         async def _progress_callback(update: dict[str, Any]) -> None:
+            bytes_downloaded = int(update.get("bytes_downloaded") or 0)
+            percent_value = update.get("progress_percent")
+            percent = float(percent_value) if percent_value is not None else None
+            message = str(update.get("progress_message") or "downloading")
             if progress is not None:
-                progress.bytes_downloaded = int(update.get("bytes_downloaded") or 0)
+                progress.bytes_downloaded = bytes_downloaded
                 total = update.get("total_bytes")
                 progress.total_bytes = int(total) if total is not None else None
-                percent = update.get("progress_percent")
-                progress.percent = float(percent) if percent is not None else progress.percent
-                progress.message = str(update.get("progress_message") or "downloading")
+                progress.percent = percent if percent is not None else progress.percent
+                progress.message = message
+            persisted_percent = progress.percent if progress is not None else percent
+            if not progress_throttle.should_update(
+                bytes_downloaded=bytes_downloaded,
+                percent=persisted_percent,
+                message=message,
+            ):
+                return
             job_manager.update_job_progress(
                 job_id,
-                progress_percent=(progress.percent if progress is not None else update.get("progress_percent")),
-                progress_message=str(update.get("progress_message") or "downloading"),
+                progress_percent=persisted_percent,
+                progress_message=message,
             )
 
+        cancellation_poller = _CancellationPoller(job_manager, job_id, cancel_check)
         bytes_written = await acquisition_service.download_to_partial(
             validated,
             partial_path,
             progress_callback=_progress_callback,
-            cancel_check=lambda: _should_cancel(job_manager, job_id, cancel_check),
+            cancel_check=cancellation_poller,
             stream_factory=stream_factory,
         )
 

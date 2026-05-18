@@ -557,6 +557,54 @@ async def test_start_llamacpp_acquisition_jobs_worker_registers_owned_poller_whe
 
 
 @pytest.mark.asyncio
+async def test_start_llamacpp_acquisition_jobs_worker_cancels_task_when_registration_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    created_coroutines: list[object] = []
+
+    class _FakeTask:
+        def __init__(self) -> None:
+            self.cancelled = False
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    task = _FakeTask()
+    monkeypatch.setattr(startup_pollers, "_make_event", lambda: "llamacpp-stop")
+    monkeypatch.setattr(
+        startup_pollers,
+        "_create_task",
+        lambda coro: created_coroutines.append(coro) or task,
+    )
+    monkeypatch.setattr(
+        startup_pollers,
+        "_run_llamacpp_acquisition_jobs_worker_service",
+        lambda stop_event: f"llamacpp-coro:{stop_event}",
+    )
+
+    def _register_owned_job_poller(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise RuntimeError("registration failed")
+
+    stop_event, returned_task = await startup_pollers._start_llamacpp_acquisition_jobs_worker(
+        app="app",
+        owned_job_pollers=[],
+        register_owned_job_poller=_register_owned_job_poller,
+        should_start_worker=lambda flag, route, **kwargs: (flag, route, kwargs) == (
+            "LLAMACPP_ACQUISITION_JOBS_WORKER_ENABLED",
+            "llamacpp-acquisition",
+            {},
+        ),
+    )
+
+    assert stop_event is None
+    assert returned_task is None
+    assert created_coroutines == ["llamacpp-coro:llamacpp-stop"]
+    assert task.cancelled is True
+
+
+@pytest.mark.asyncio
 async def test_start_vn_asset_jobs_workers_use_stable_defaults(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import ipaddress
 import os
 import re
 import socket
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -20,11 +21,10 @@ from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
     LlamaCppAsset,
     LlamaCppAssetDownloadRequest,
 )
+from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.Local_LLM import handler_utils, llamacpp_inventory_service
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
 from tldw_Server_API.app.core.Setup import setup_manager
-from tldw_Server_API.app.core.config import load_comprehensive_config
-
 
 _DOWNLOAD_SCHEMES = {"http", "https"}
 _FILENAME_DELIMITERS = {",", os.pathsep}
@@ -237,7 +237,7 @@ async def download_to_partial(
                     bytes_written += len(chunk)
                     if byte_limit is not None and bytes_written > byte_limit:
                         raise ServerError("Downloaded file exceeded the configured maximum size.")
-                    handle.write(chunk)
+                    await asyncio.to_thread(handle.write, chunk)
                     await _emit_progress(
                         progress_callback,
                         bytes_downloaded=bytes_written,
@@ -323,6 +323,8 @@ def _validate_source_url(url: str, saved_config: dict[str, Any], warnings: list[
 
 
 def _validate_payload_source_url(url: str, saved_config: dict[str, Any]) -> str:
+    """Validate a queued download URL without DNS lookups and return its sanitized form."""
+
     raw_url = str(url or "").strip()
     if not raw_url:
         raise ServerError("Download URL is required.")
@@ -635,7 +637,7 @@ class _HttpxDownloadStream:
         self._response: httpx.Response | None = None
         self.total_bytes: int | None = None
 
-    async def __aenter__(self) -> "_HttpxDownloadStream":
+    async def __aenter__(self) -> _HttpxDownloadStream:
         self._client = httpx.AsyncClient(timeout=self._timeout_seconds, follow_redirects=True)
         self._response_cm = self._client.stream("GET", self._url)
         self._response = await self._response_cm.__aenter__()
@@ -650,7 +652,7 @@ class _HttpxDownloadStream:
             await self._client.aclose()
         return False
 
-    async def aiter_bytes(self):
+    async def aiter_bytes(self) -> AsyncIterator[bytes]:
         if self._response is None:
             raise LlamaCppDownloadError("Download stream was not opened.")
         async for chunk in self._response.aiter_bytes():
@@ -681,7 +683,7 @@ def _cancel_requested(cancel_check: CancelCheck | None) -> bool:
         return False
     try:
         return bool(cancel_check())
-    except Exception:
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
         return False
 
 
