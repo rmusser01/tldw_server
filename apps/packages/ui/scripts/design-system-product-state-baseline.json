@@ -2189,105 +2189,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx:Alert#antd-alert-promptstudioplaygroundpage-type-error-line-10-1at0kqu",
-    "path": "src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx:Alert#antd-alert-promptstudioplaygroundpage-type-error-line-11-g545ab",
-    "path": "src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx:Alert#antd-alert-promptstudioplaygroundpage-type-error-line-71-15cr4gy",
-    "path": "src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx:Alert#antd-alert-promptstudioplaygroundpage-type-info-line-654-1v3wnib",
-    "path": "src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx:Alert#antd-alert-promptstudioplaygroundpage-type-info-line-968-k7o9kd",
-    "path": "src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx:Alert#antd-alert-promptstudioplaygroundpage-type-warning-add-y-1pwgyhe",
-    "path": "src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx:Alert#antd-alert-promptstudioplaygroundpage-type-warning-can-t-kafs0z",
-    "path": "src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx:Alert#antd-alert-promptstudioplaygroundpage-type-warning-finis-fq7ljf",
-    "path": "src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx:Alert#antd-alert-promptstudioplaygroundpage-type-warning-line-qkbnrd",
-    "path": "src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/PromptStudio/PromptStudioPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Settings/chatbooks.tsx:Alert",
     "path": "src/components/Option/Settings/chatbooks.tsx",
     "rule": "antd-product-state-import",
@@ -3014,13 +2915,24 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Watchlists/SourcesTab/SourceFormModal.tsx:Alert",
+    "id": "antd-product-state-import:src/components/Option/Watchlists/SourcesTab/SourceFormModal.tsx:Alert#antd-alert-sourceformmodal-type-error-line-440-1b05f6o",
     "path": "src/components/Option/Watchlists/SourcesTab/SourceFormModal.tsx",
     "rule": "antd-product-state-import",
     "subject": "Alert",
     "state": "allowed_legacy_exception",
     "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Watchlists/SourcesTab/SourceFormModal.tsx before the guard.",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/Watchlists/SourcesTab/SourceFormModal.tsx before the stable duplicate-id guard.",
+    "replacement": "tldw design-system state primitive",
+    "migrationQueue": "shared-product-state"
+  },
+  {
+    "id": "antd-product-state-import:src/components/Option/Watchlists/SourcesTab/SourceFormModal.tsx:Alert#antd-alert-sourceformmodal-type-info-line-423-bgehad",
+    "path": "src/components/Option/Watchlists/SourcesTab/SourceFormModal.tsx",
+    "rule": "antd-product-state-import",
+    "subject": "Alert",
+    "state": "allowed_legacy_exception",
+    "owner": "design-system",
+    "reason": "Existing AntD Alert product-state UI in src/components/Option/Watchlists/SourcesTab/SourceFormModal.tsx before the stable duplicate-id guard.",
     "replacement": "tldw design-system state primitive",
     "migrationQueue": "shared-product-state"
   },

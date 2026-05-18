@@ -172,6 +172,11 @@ const renderPage = () => {
   )
 }
 
+const expectDesignSystemAlertForText = (text: string) => {
+  const alertText = screen.getByText(text)
+  expect(alertText.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+}
+
 describe("PromptStudioPlaygroundPage connection states", () => {
   beforeEach(() => {
     mocks.online = true
@@ -196,6 +201,7 @@ describe("PromptStudioPlaygroundPage connection states", () => {
     expect(
       screen.getByText("Add your credentials to use Prompt Studio")
     ).toBeInTheDocument()
+    expectDesignSystemAlertForText("Add your credentials to use Prompt Studio")
     expect(
       screen.queryByText("Connect to your server to use Prompt Studio")
     ).not.toBeInTheDocument()
@@ -214,6 +220,7 @@ describe("PromptStudioPlaygroundPage connection states", () => {
     expect(
       screen.getByText("Finish setup to use Prompt Studio")
     ).toBeInTheDocument()
+    expectDesignSystemAlertForText("Finish setup to use Prompt Studio")
 
     fireEvent.click(screen.getByRole("button", { name: "Finish Setup" }))
     expect(mocks.navigate).toHaveBeenCalledWith("/")
@@ -228,6 +235,7 @@ describe("PromptStudioPlaygroundPage connection states", () => {
     expect(
       screen.getByText("Can't reach your tldw server right now")
     ).toBeInTheDocument()
+    expectDesignSystemAlertForText("Can't reach your tldw server right now")
 
     fireEvent.click(screen.getByRole("button", { name: "Health & diagnostics" }))
     expect(mocks.navigate).toHaveBeenCalledWith("/settings/health")
