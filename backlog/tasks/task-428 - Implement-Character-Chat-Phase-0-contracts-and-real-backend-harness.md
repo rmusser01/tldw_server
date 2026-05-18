@@ -2,19 +2,23 @@
 id: TASK-428
 title: Implement Character Chat Phase 0 contracts and real-backend harness
 status: Done
+assignee: []
+created_date: ''
+updated_date: 2026-05-18 14:36
 labels:
 - chat
 - characters
 - role-play
 - phase-0
 - tests
-priority: High
+dependencies: []
 references:
 - Docs/Product/WebUI/Character_Chat_Roleplay_First_Class_PRD_2026_05_18.md
-- https://github.com/rmusser01/tldw_server/pull/1840
+- https://github.com/rmusser01/tldw_server/pull/1841
 - TASK-429
 documentation:
 - Docs/Product/WebUI/Character_Chat_Roleplay_First_Class_PRD_2026_05_18.md
+priority: high
 modified_files:
 - Docs/Development/Character_Chat_Real_Backend_E2E.md
 - Docs/Development/Running_Chat_Tests.md
@@ -34,18 +38,20 @@ Implement Phase 0 from the first-class Character Chat PRD. Scope: freeze current
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Tests verify current character chat creation and streaming payload shape at service or hook level.
-- [ ] #2 Tests verify character-scoped chat history uses filterMode=character and backend character_scope mapping.
-- [ ] #3 A real-backend E2E profile is documented and runnable locally for character select/send/resume using backend provider path, not frontend-only simulation.
-- [ ] #4 The per-user chat DB corruption blocker has an owner, linked task, and release-gate decision documented for Character Chat GA.
-- [ ] #5 No production behavior changes are introduced except optional test IDs or diagnostics needed for reliable tests.
+- [x] #1 Tests verify current character chat creation and streaming payload shape at service or hook level.
+- [x] #2 Tests verify character-scoped chat history uses filterMode=character and backend character_scope mapping.
+- [x] #3 A real-backend E2E profile is documented and runnable locally for character select/send/resume using backend provider path, not frontend-only simulation.
+- [x] #4 The per-user chat DB corruption blocker has an owner, linked task, and release-gate decision documented for Character Chat GA.
+- [x] #5 No production behavior changes are introduced except optional test IDs or diagnostics needed for reliable tests.
 <!-- AC:END -->
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
@@ -55,10 +61,10 @@ Implemented Character Chat Phase 0 contracts and documentation. Verification: `b
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
