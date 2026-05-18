@@ -3,6 +3,7 @@
 **Status:** Active policy for real `vz_linux` Apple silicon CI.
 **Date:** 2026-05-03.
 **Workflow:** `.github/workflows/vz-linux-host-gated.yml`.
+**Evidence tracker:** `Docs/Sandbox/vz-linux-prepared-host-evidence.md`.
 
 ## Purpose
 
@@ -12,6 +13,9 @@ canonical Linux bundle on the runner. That cannot be part of normal hosted CI.
 
 This policy defines when the host-gated workflow should run, what it proves,
 which skips are expected, and what counts as a blocking regression.
+Prepared-host results should be recorded in
+`Docs/Sandbox/vz-linux-prepared-host-evidence.md` so manual and nightly runs
+remain reviewable without making real VM execution part of normal PR CI.
 
 ## Entry Points
 
@@ -208,9 +212,16 @@ secondary failures.
 Uploaded logs are for operator debugging. They must not be treated as public API
 output and should not contain secrets or raw user data.
 
+Record the workflow run URL, artifact names, relevant byte sizes or checksums,
+and redacted log pointers in
+`Docs/Sandbox/vz-linux-prepared-host-evidence.md`. Do not paste secrets, raw user
+data, or full runner logs into the tracker.
+
 ## Maintenance Rules
 
 - Keep this policy aligned with `.github/workflows/vz-linux-host-gated.yml`.
+- Keep prepared-host acceptance evidence in
+  `Docs/Sandbox/vz-linux-prepared-host-evidence.md`.
 - Update `tldw_Server_API/tests/Infrastructure/test_vz_linux_host_gated_workflow.py`
   when changing workflow triggers, labels, action pins, permissions, artifact
   paths, failure-drill opt-in behavior, or nightly opt-in behavior.

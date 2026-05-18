@@ -5,12 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "vz-linux-host-gated.yml"
 POLICY_PATH = REPO_ROOT / "Docs" / "Sandbox" / "vz-linux-host-gated-ci-acceptance-policy.md"
+EVIDENCE_TRACKER_PATH = REPO_ROOT / "Docs" / "Sandbox" / "vz-linux-prepared-host-evidence.md"
 SMOKE_SCRIPT_PATH = REPO_ROOT / "tools" / "vz-linux-image" / "scripts" / "run-host-e2e-smoke.sh"
 
 
@@ -26,6 +28,17 @@ def _workflow_triggers(workflow: dict[str, Any]) -> dict[str, Any]:
     triggers = workflow.get("on", workflow.get(True))
     assert isinstance(triggers, dict)  # nosec B101
     return triggers
+
+
+def _normalized_text(path: Path) -> str:
+    """Return doc text normalized so wrapping-only edits do not break contracts."""
+    return " ".join(path.read_text(encoding="utf-8").split())
+
+
+def _require(condition: bool, message: str) -> None:
+    """Fail with a targeted message for easier doc-contract triage."""
+    if not condition:
+        pytest.fail(message)
 
 
 def test_vz_linux_host_gated_workflow_is_manual_and_nightly() -> None:
@@ -175,3 +188,53 @@ def test_vz_linux_host_gated_acceptance_policy_doc_exists_and_references_workflo
     assert ".github/workflows/vz-linux-host-gated.yml" in policy  # nosec B101
     assert "TLDW_SANDBOX_VZ_LINUX_HOST_GATED_NIGHTLY" in policy  # nosec B101
     assert "blocking regression" in policy.lower()  # nosec B101
+    assert "Docs/Sandbox/vz-linux-prepared-host-evidence.md" in policy  # nosec B101
+
+
+def test_vz_linux_prepared_host_evidence_tracker_defines_packet() -> None:
+    """Prepared-host evidence should be durable, reviewable, and non-secret."""
+    tracker = _normalized_text(EVIDENCE_TRACKER_PATH)
+
+    for section in (
+        "## Evidence Packet",
+        "## Acceptance Checklist",
+        "## Expected Skip Taxonomy",
+        "## Current Residual Gaps",
+        "## Recording Guidance",
+    ):
+        _require(section in tracker, f"Evidence tracker should include section {section}")
+
+    for required_term in (
+        "Prepared Apple silicon",
+        "Git state",
+        "Helper build/signing",
+        "Real `vz_linux` ephemeral execution",
+        "Same-session VM reuse",
+        "Artifacts",
+        "Expected skips",
+        "Residual gaps",
+        "Do not paste secrets",
+    ):
+        _require(
+            required_term in tracker,
+            f"Evidence tracker should include packet term {required_term}",
+        )
+
+
+def test_vz_linux_prepared_host_evidence_tracker_keeps_real_vm_runs_gated() -> None:
+    """The tracker must not promote real VM execution into normal PR CI."""
+    tracker = _normalized_text(EVIDENCE_TRACKER_PATH)
+
+    for boundary in (
+        "manual or host-gated only",
+        "pull request triggers",
+        "push triggers",
+        "scheduled destructive drills",
+        "manual opt-in only",
+        "launchd-drill",
+        "host reboot",
+    ):
+        _require(
+            boundary in tracker.lower(),
+            f"Evidence tracker should preserve gated-run boundary: {boundary}",
+        )
