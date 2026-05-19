@@ -33,9 +33,10 @@ if sys.version_info < (3, 10):
     EXPECTED_HELPER_PROTOCOL_VERSION = "1"
 else:
     try:
-        from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
-            EXPECTED_HELPER_PROTOCOL_VERSION,
-        )
+        with contextlib.redirect_stdout(io.StringIO()):
+            from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
+                EXPECTED_HELPER_PROTOCOL_VERSION,
+            )
     except ModuleNotFoundError as exc:
         missing_name = str(exc.name or "")
         if missing_name != "tldw_Server_API" and not missing_name.startswith("tldw_Server_API."):
@@ -51,6 +52,14 @@ HOST_REBOOT_POST_MANIFEST = "host-reboot-post.json"
 HOST_REBOOT_PRE_MANIFEST_MAX_BYTES = 64 * 1024
 HOST_REBOOT_HELPER_DETAIL_KEYS = frozenset({"helper_instance_id", "helper_started_at"})
 HOST_REBOOT_HELPER_DETAIL_VALUE_MAX_LENGTH = 256
+HOST_REBOOT_METADATA_MATCH_KEYS = (
+    "helper_mode",
+    "launchd_label",
+    "launchd_plist_path",
+    "socket_path",
+    "helper_path",
+    "bundle_path",
+)
 
 
 def _resolve_operational_path(path: Path) -> Path | None:
@@ -219,6 +228,7 @@ def ensure_host_reboot_evidence_dir(
     evidence_dir: Path,
     *,
     create: bool = False,
+    dry_run: bool = False,
     allow_volatile: bool = False,
 ) -> CheckResult:
     try:
@@ -230,7 +240,7 @@ def ensure_host_reboot_evidence_dir(
             return CheckResult(False, "host_reboot_evidence_dir_not_private", str(evidence_dir))
         if not evidence_dir.exists() and not create:
             return CheckResult(False, "host_reboot_evidence_dir_missing", str(evidence_dir))
-        result = ensure_private_dir(evidence_dir, dry_run=not create)
+        result = ensure_private_dir(evidence_dir, dry_run=dry_run or not create)
     except (FileExistsError, NotADirectoryError, PermissionError, OSError, RuntimeError, ValueError) as exc:
         return CheckResult(False, "host_reboot_evidence_dir_not_private", str(exc))
     if not result.ok:
@@ -978,6 +988,7 @@ def run_host_reboot_pre(
     launchd_plist_path: Path | None = None,
     create_evidence_dir: bool = False,
     allow_volatile_evidence_dir: bool = False,
+    dry_run: bool = False,
     ping_checker: Callable[[Path], CheckResult | PingState] = ping_helper_state,
     created_at_factory: Callable[[], str] = _host_reboot_created_at,
     hostname_provider: Callable[[], str] = socket.gethostname,
@@ -985,10 +996,13 @@ def run_host_reboot_pre(
     evidence_result = ensure_host_reboot_evidence_dir(
         evidence_dir,
         create=create_evidence_dir,
+        dry_run=dry_run,
         allow_volatile=allow_volatile_evidence_dir,
     )
     if not evidence_result.ok:
         return evidence_result
+    if dry_run:
+        return CheckResult(True, "host_reboot_pre_dry_run", str(evidence_dir))
 
     try:
         ping_state = _coerce_ping_state(ping_checker(socket_path))
@@ -998,15 +1012,19 @@ def run_host_reboot_pre(
         "phase": "pre",
         "created_at": created_at_factory(),
         "hostname": hostname_provider(),
-        "helper_mode": helper_mode,
-        "bundle_path": str(bundle_path),
-        "helper_path": str(helper_path),
-        "socket_path": str(socket_path),
         "log_dir": str(log_dir),
         "serial_log_dir": str(serial_log_dir if serial_log_dir is not None else log_dir / "serial"),
-        "launchd_label": launchd_label,
-        "launchd_plist_path": str(launchd_plist_path) if launchd_plist_path is not None else "",
     }
+    payload.update(
+        _host_reboot_metadata_payload(
+            bundle_path=bundle_path,
+            helper_path=helper_path,
+            helper_mode=helper_mode,
+            socket_path=socket_path,
+            launchd_label=launchd_label,
+            launchd_plist_path=launchd_plist_path,
+        )
+    )
     payload.update(_host_reboot_ping_state_payload(ping_state))
 
     manifest_path = evidence_dir / HOST_REBOOT_PRE_MANIFEST
@@ -1082,6 +1100,39 @@ def _helper_generation_result(pre_instance_id: str, post_instance_id: str) -> Ch
     return CheckResult(True, "helper_generation_changed")
 
 
+def _host_reboot_metadata_payload(
+    *,
+    bundle_path: Path,
+    helper_path: Path,
+    helper_mode: str,
+    socket_path: Path,
+    launchd_label: str,
+    launchd_plist_path: Path | None,
+) -> dict[str, str]:
+    return {
+        "helper_mode": helper_mode,
+        "launchd_label": launchd_label,
+        "launchd_plist_path": str(launchd_plist_path) if launchd_plist_path is not None else "",
+        "socket_path": str(socket_path),
+        "helper_path": str(helper_path),
+        "bundle_path": str(bundle_path),
+    }
+
+
+def _host_reboot_metadata_match_result(
+    pre_manifest: Mapping[str, Any],
+    current_metadata: Mapping[str, str],
+) -> CheckResult:
+    mismatched_keys = [
+        key
+        for key in HOST_REBOOT_METADATA_MATCH_KEYS
+        if str(pre_manifest.get(key, "")) != current_metadata[key]
+    ]
+    if mismatched_keys:
+        return CheckResult(False, "host_reboot_metadata_mismatch", ",".join(mismatched_keys))
+    return CheckResult(True, "host_reboot_metadata_match")
+
+
 def run_host_reboot_post(
     *,
     evidence_dir: Path,
@@ -1094,6 +1145,7 @@ def run_host_reboot_post(
     launchd_label: str = "",
     launchd_plist_path: Path | None = None,
     allow_volatile_evidence_dir: bool = False,
+    dry_run: bool = False,
     ping_checker: Callable[[Path], CheckResult | PingState] = ping_helper_state,
     created_at_factory: Callable[[], str] = _host_reboot_created_at,
     hostname_provider: Callable[[], str] = socket.gethostname,
@@ -1103,6 +1155,7 @@ def run_host_reboot_post(
     evidence_result = ensure_host_reboot_evidence_dir(
         evidence_dir,
         create=False,
+        dry_run=dry_run,
         allow_volatile=allow_volatile_evidence_dir,
     )
     results.append(("evidence_directory", evidence_result))
@@ -1114,6 +1167,20 @@ def run_host_reboot_post(
     results.append(("pre_manifest", pre_result))
     if not pre_result.ok or pre_manifest is None:
         results.append(("host_reboot_post", pre_result))
+        return results
+
+    current_metadata = _host_reboot_metadata_payload(
+        bundle_path=bundle_path,
+        helper_path=helper_path,
+        helper_mode=helper_mode,
+        socket_path=socket_path,
+        launchd_label=launchd_label,
+        launchd_plist_path=launchd_plist_path,
+    )
+    metadata_result = _host_reboot_metadata_match_result(pre_manifest, current_metadata)
+    results.append(("metadata_match", metadata_result))
+    if not metadata_result.ok:
+        results.append(("host_reboot_post", metadata_result))
         return results
 
     try:
@@ -1131,23 +1198,21 @@ def run_host_reboot_post(
         "phase": "post",
         "created_at": created_at_factory(),
         "hostname": hostname_provider(),
-        "helper_mode": helper_mode,
-        "bundle_path": str(bundle_path),
-        "helper_path": str(helper_path),
-        "socket_path": str(socket_path),
         "log_dir": str(log_dir),
         "serial_log_dir": str(serial_log_dir if serial_log_dir is not None else log_dir / "serial"),
-        "launchd_label": launchd_label,
-        "launchd_plist_path": str(launchd_plist_path) if launchd_plist_path is not None else "",
         "pre_helper_instance_id": pre_instance_id,
         "post_helper_instance_id": post_instance_id,
         "helper_generation_reason": generation_result.reason,
     }
+    payload.update(current_metadata)
     payload.update(_host_reboot_ping_state_payload(ping_state))
 
     manifest_path = evidence_dir / HOST_REBOOT_POST_MANIFEST
-    write_result = write_json_private(manifest_path, payload)
-    if write_result.ok:
+    if dry_run:
+        write_result = CheckResult(True, "host_reboot_post_dry_run", str(manifest_path))
+    else:
+        write_result = write_json_private(manifest_path, payload)
+    if write_result.ok and not dry_run:
         write_result = CheckResult(True, "host_reboot_post_manifest_written", write_result.message)
     results.append(("post_manifest", write_result))
 
@@ -2451,6 +2516,7 @@ def _host_reboot_drill_command(args: argparse.Namespace) -> int:
         return 1
 
     common_kwargs = _host_reboot_drill_common_kwargs(args)
+    common_kwargs["dry_run"] = args.dry_run
     if args.phase == "pre":
         pre_kwargs = dict(common_kwargs)
         pre_kwargs["create_evidence_dir"] = args.create_evidence_dir
@@ -2471,7 +2537,15 @@ def _host_reboot_drill_command(args: argparse.Namespace) -> int:
         results = run_host_reboot_post(**post_kwargs)
 
     if args.run_smoke:
-        if not args.bundle:
+        post_result = results[-1][1] if results else CheckResult(False, "host_reboot_post_missing")
+        if not post_result.ok:
+            results.append(
+                (
+                    "vz_linux_smoke",
+                    CheckResult(False, "host_reboot_smoke_skipped", post_result.reason),
+                )
+            )
+        elif not args.bundle:
             results.append(
                 (
                     "vz_linux_smoke",
@@ -2662,10 +2736,7 @@ def build_parser() -> argparse.ArgumentParser:
     host_reboot_parent.add_argument("--serial-log-dir")
     host_reboot_parent.add_argument("--label")
     host_reboot_parent.add_argument("--plist-output")
-    host_reboot_parent.add_argument("--create-evidence-dir", action="store_true")
     host_reboot_parent.add_argument("--allow-volatile-evidence-dir", action="store_true")
-    host_reboot_parent.add_argument("--run-smoke", action="store_true")
-    host_reboot_parent.add_argument("--python")
     host_reboot_parent.add_argument("--dry-run", action="store_true")
     host_reboot_parent.add_argument("--json", action="store_true")
     host_reboot_pre = host_reboot_subparsers.add_parser(
@@ -2673,12 +2744,15 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[host_reboot_parent],
         help="record bounded pre-reboot helper evidence",
     )
+    host_reboot_pre.add_argument("--create-evidence-dir", action="store_true")
     host_reboot_pre.set_defaults(func=_host_reboot_drill_command)
     host_reboot_post = host_reboot_subparsers.add_parser(
         "post",
         parents=[host_reboot_parent],
         help="validate helper state after a manual host reboot",
     )
+    host_reboot_post.add_argument("--run-smoke", action="store_true")
+    host_reboot_post.add_argument("--python")
     host_reboot_post.set_defaults(func=_host_reboot_drill_command)
 
     start = subparsers.add_parser("start", help="start the helper")

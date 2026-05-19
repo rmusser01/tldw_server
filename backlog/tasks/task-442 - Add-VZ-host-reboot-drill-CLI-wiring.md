@@ -41,14 +41,21 @@ Implement Task 4 from Docs/superpowers/plans/2026-05-19-vz-helper-host-reboot-va
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented Task 4 only. Added `host-reboot-drill {pre,post}` CLI wiring, JSON-safe output, explicit launchd metadata validation, and post-reboot restored-helper smoke execution through `run_vz_linux_host_smoke(...)` instead of `smoke_helper`.
+Task 4 code-quality review findings fixed only; Task 5 docs/final closeout intentionally not implemented.
+
+Review fixes:
+- `host-reboot-drill pre/post --dry-run` now returns named dry-run results without creating evidence directories or writing pre/post manifests.
+- Host reboot CLI parser now keeps `--create-evidence-dir` pre-only and `--run-smoke`/`--python` post-only.
+- Added subprocess JSON coverage for `host-reboot-drill pre --json --dry-run`; helperctl now suppresses import-time stdout from the backend helper-client import path so JSON stdout remains parseable.
+- Post validation now compares `helper_mode`, `launchd_label`, `launchd_plist_path`, `socket_path`, `helper_path`, and `bundle_path` against the pre manifest before post evidence is written or smoke is considered.
+- `post --run-smoke` is gated on successful post validation and appends `host_reboot_smoke_skipped` when post validation fails; smoke failure still drives a nonzero CLI exit.
 
 Verification:
-- Red run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -k "host_reboot_drill_cli or host_reboot_post_runs_smoke" -q` failed with `host-reboot-drill` missing from argparse choices.
-- Focused green: same selector passed with `4 passed, 174 deselected`.
-- Full helperctl file: `python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py` passed with `172 passed, 6 skipped`.
-- Bandit: `python -m bandit -r tools/macos-vz-helper/scripts/vz-helperctl.py -f json -o /tmp/bandit_task442.json` completed with zero findings.
-- Compile: `python -m py_compile tools/macos-vz-helper/scripts/vz-helperctl.py` passed.
+- Red run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -k "host_reboot_drill_cli or host_reboot_post_runs_smoke or host_reboot_pre_dry_run or host_reboot_post_dry_run or metadata_mismatch" -q` failed with the expected seven review-finding failures.
+- Focused green: same selector passed with `12 passed, 174 deselected`.
+- Full helperctl file: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py` passed with `180 passed, 6 skipped`.
+- Bandit: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tools/macos-vz-helper/scripts/vz-helperctl.py -f json -o /tmp/bandit_task442_task4.json` completed with zero findings.
+- Compile: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m py_compile tools/macos-vz-helper/scripts/vz-helperctl.py` passed.
 - Whitespace: `git diff --check` passed.
 
 Known skips: full helperctl test file reported six existing platform/socket dependent skips; no Task 4 blocker.

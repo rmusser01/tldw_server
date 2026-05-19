@@ -534,6 +534,35 @@ def test_host_reboot_pre_writes_bounded_manifest(
     CASE.assertNotIn("serial_log_contents", payload)
 
 
+def test_host_reboot_pre_dry_run_does_not_create_evidence_or_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    monkeypatch.setattr(helperctl, "VOLATILE_EVIDENCE_ROOTS", ())
+
+    result = helperctl.run_host_reboot_pre(
+        evidence_dir=evidence,
+        bundle_path=tmp_path / "bundle",
+        helper_path=tmp_path / "bundle" / "macos-vz-helper",
+        helper_mode="direct",
+        socket_path=tmp_path / "helper.sock",
+        log_dir=tmp_path / "logs",
+        create_evidence_dir=True,
+        dry_run=True,
+        ping_checker=lambda path: helperctl.PingState(
+            result=helperctl.CheckResult(True),
+            protocol_version="1",
+            helper_version="test",
+        ),
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(True, "host_reboot_pre_dry_run", str(evidence)))
+    CASE.assertFalse(evidence.exists())
+    CASE.assertFalse((evidence / "host-reboot-pre.json").exists())
+
+
 def test_host_reboot_pre_writes_manifest_and_returns_failed_ping(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -831,6 +860,11 @@ def test_host_reboot_post_reports_generation_changed(
             {
                 "phase": "pre",
                 "helper_mode": "direct",
+                "bundle_path": str(tmp_path / "bundle"),
+                "helper_path": str(tmp_path / "bundle" / "macos-vz-helper"),
+                "socket_path": str(tmp_path / "helper.sock"),
+                "launchd_label": "org.tldw.test-helper",
+                "launchd_plist_path": str(tmp_path / "LaunchAgents" / "org.tldw.test-helper.plist"),
                 "helper_details": {"helper_instance_id": "before"},
             }
         ),
@@ -905,6 +939,110 @@ def test_host_reboot_post_reports_generation_changed(
     CASE.assertNotIn("serial_log_contents", payload)
 
 
+def test_host_reboot_post_reports_metadata_mismatch_before_writing_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    evidence.mkdir(parents=True, mode=0o700)
+    evidence.chmod(0o700)
+    (evidence / "host-reboot-pre.json").write_text(
+        json.dumps(
+            {
+                "phase": "pre",
+                "helper_mode": "direct",
+                "bundle_path": str(tmp_path / "bundle"),
+                "helper_path": str(tmp_path / "bundle" / "macos-vz-helper"),
+                "socket_path": str(tmp_path / "helper.sock"),
+                "launchd_label": "org.tldw.test-helper",
+                "launchd_plist_path": str(tmp_path / "LaunchAgents" / "org.tldw.test-helper.plist"),
+                "helper_details": {"helper_instance_id": "before"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(helperctl, "VOLATILE_EVIDENCE_ROOTS", ())
+
+    results = helperctl.run_host_reboot_post(
+        evidence_dir=evidence,
+        bundle_path=tmp_path / "different-bundle",
+        helper_path=tmp_path / "bundle" / "macos-vz-helper",
+        helper_mode="direct",
+        socket_path=tmp_path / "helper.sock",
+        log_dir=tmp_path / "logs",
+        launchd_label="org.tldw.test-helper",
+        launchd_plist_path=tmp_path / "LaunchAgents" / "org.tldw.test-helper.plist",
+        ping_checker=lambda path: helperctl.PingState(
+            result=helperctl.CheckResult(True),
+            protocol_version="1",
+            helper_version="test",
+            details={"helper_instance_id": "after"},
+        ),
+    )
+
+    by_name = dict(results)
+    CASE.assertEqual(by_name["metadata_match"].reason, "host_reboot_metadata_mismatch")
+    CASE.assertFalse(by_name["metadata_match"].ok)
+    CASE.assertEqual(by_name["metadata_match"].message, "bundle_path")
+    CASE.assertEqual(results[-1], ("host_reboot_post", by_name["metadata_match"]))
+    CASE.assertFalse((evidence / "host-reboot-post.json").exists())
+
+
+def test_host_reboot_post_dry_run_does_not_write_post_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    bundle = tmp_path / "bundle"
+    helper_path = bundle / "macos-vz-helper"
+    socket_path = tmp_path / "helper.sock"
+    plist_path = tmp_path / "LaunchAgents" / "org.tldw.test-helper.plist"
+    evidence.mkdir(parents=True, mode=0o700)
+    evidence.chmod(0o700)
+    (evidence / "host-reboot-pre.json").write_text(
+        json.dumps(
+            {
+                "phase": "pre",
+                "helper_mode": "direct",
+                "bundle_path": str(bundle),
+                "helper_path": str(helper_path),
+                "socket_path": str(socket_path),
+                "launchd_label": "org.tldw.test-helper",
+                "launchd_plist_path": str(plist_path),
+                "helper_details": {"helper_instance_id": "before"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(helperctl, "VOLATILE_EVIDENCE_ROOTS", ())
+
+    results = helperctl.run_host_reboot_post(
+        evidence_dir=evidence,
+        bundle_path=bundle,
+        helper_path=helper_path,
+        helper_mode="direct",
+        socket_path=socket_path,
+        log_dir=tmp_path / "logs",
+        launchd_label="org.tldw.test-helper",
+        launchd_plist_path=plist_path,
+        dry_run=True,
+        ping_checker=lambda path: helperctl.PingState(
+            result=helperctl.CheckResult(True),
+            protocol_version="1",
+            helper_version="test",
+            details={"helper_instance_id": "after"},
+        ),
+    )
+
+    by_name = dict(results)
+    CASE.assertEqual(by_name["post_manifest"].reason, "host_reboot_post_dry_run")
+    CASE.assertTrue(by_name["post_manifest"].ok)
+    CASE.assertEqual(results[-1], ("host_reboot_post", helperctl.CheckResult(ok=True)))
+    CASE.assertFalse((evidence / "host-reboot-post.json").exists())
+
+
 def test_host_reboot_post_wraps_raising_ping_checker_and_writes_manifest(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -918,6 +1056,11 @@ def test_host_reboot_post_wraps_raising_ping_checker_and_writes_manifest(
             {
                 "phase": "pre",
                 "helper_mode": "direct",
+                "bundle_path": str(tmp_path / "bundle"),
+                "helper_path": str(tmp_path / "bundle" / "macos-vz-helper"),
+                "socket_path": str(tmp_path / "helper.sock"),
+                "launchd_label": "",
+                "launchd_plist_path": "",
                 "helper_details": {"helper_instance_id": "before"},
             }
         ),
@@ -1029,6 +1172,74 @@ def test_host_reboot_drill_cli_post_json_outputs_parseable_json(
     CASE.assertEqual(output, [{"name": "host_reboot_post", "ok": True, "reason": "ok", "message": ""}])
 
 
+def test_host_reboot_drill_cli_pre_rejects_post_only_smoke_flag(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+
+    with pytest.raises(SystemExit) as exc_info:
+        helperctl.main(
+            [
+                "host-reboot-drill",
+                "pre",
+                "--evidence-dir",
+                str(tmp_path / "durable" / "drill"),
+                "--run-smoke",
+            ]
+        )
+
+    CASE.assertEqual(exc_info.value.code, 2)
+
+
+def test_host_reboot_drill_cli_post_rejects_pre_only_create_evidence_flag(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+
+    with pytest.raises(SystemExit) as exc_info:
+        helperctl.main(
+            [
+                "host-reboot-drill",
+                "post",
+                "--evidence-dir",
+                str(tmp_path / "durable" / "drill"),
+                "--create-evidence-dir",
+            ]
+        )
+
+    CASE.assertEqual(exc_info.value.code, 2)
+
+
+def test_host_reboot_drill_cli_pre_json_subprocess_is_clean_and_dry_run_does_not_write(
+    tmp_path: Path,
+) -> None:
+    evidence = tmp_path / "durable" / "drill"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT_PATH),
+            "host-reboot-drill",
+            "pre",
+            "--evidence-dir",
+            str(evidence),
+            "--bundle",
+            str(tmp_path / "bundle"),
+            "--socket",
+            str(tmp_path / "helper.sock"),
+            "--create-evidence-dir",
+            "--allow-volatile-evidence-dir",
+            "--dry-run",
+            "--json",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    CASE.assertEqual(completed.returncode, 0, completed.stderr)
+    output = json.loads(completed.stdout)
+    CASE.assertEqual(output[0]["name"], "host_reboot_pre")
+    CASE.assertEqual(output[0]["reason"], "host_reboot_pre_dry_run")
+    CASE.assertFalse(evidence.exists())
+    CASE.assertFalse((evidence / "host-reboot-pre.json").exists())
+
+
 def test_host_reboot_post_runs_smoke_against_restored_helper_socket(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1079,6 +1290,81 @@ def test_host_reboot_post_runs_smoke_against_restored_helper_socket(
     CASE.assertEqual(calls[0]["python_path"], python_path)
     CASE.assertIs(calls[0]["dry_run"], True)
     CASE.assertIn("vz_linux_smoke: ok dry_run", capsys.readouterr().out)
+
+
+def test_host_reboot_post_runs_smoke_skips_when_post_validation_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    helperctl = load_helperctl()
+    calls: list[dict[str, Any]] = []
+
+    def fake_run_host_reboot_post(**kwargs: Any) -> list[tuple[str, helperctl.CheckResult]]:
+        return [("host_reboot_post", helperctl.CheckResult(False, "helper_ping_failed"))]
+
+    def fake_run_vz_linux_host_smoke(**kwargs: Any) -> helperctl.CheckResult:
+        calls.append(kwargs)
+        return helperctl.CheckResult(ok=True)
+
+    monkeypatch.setattr(helperctl, "run_host_reboot_post", fake_run_host_reboot_post)
+    monkeypatch.setattr(helperctl, "run_vz_linux_host_smoke", fake_run_vz_linux_host_smoke)
+
+    code = helperctl.main(
+        [
+            "host-reboot-drill",
+            "post",
+            "--evidence-dir",
+            str(tmp_path / "durable" / "drill"),
+            "--bundle",
+            str(tmp_path / "bundle"),
+            "--run-smoke",
+            "--json",
+        ]
+    )
+
+    CASE.assertEqual(code, 1)
+    CASE.assertEqual(calls, [])
+    output = json.loads(capsys.readouterr().out)
+    CASE.assertEqual(output[-1]["name"], "vz_linux_smoke")
+    CASE.assertEqual(output[-1]["reason"], "host_reboot_smoke_skipped")
+    CASE.assertFalse(output[-1]["ok"])
+
+
+def test_host_reboot_post_runs_smoke_reports_smoke_failure_exit_code(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    helperctl = load_helperctl()
+
+    def fake_run_host_reboot_post(**kwargs: Any) -> list[tuple[str, helperctl.CheckResult]]:
+        return [("host_reboot_post", helperctl.CheckResult(ok=True))]
+
+    def fake_run_vz_linux_host_smoke(**kwargs: Any) -> helperctl.CheckResult:
+        return helperctl.CheckResult(False, "vz_linux_smoke_failed", "7")
+
+    monkeypatch.setattr(helperctl, "run_host_reboot_post", fake_run_host_reboot_post)
+    monkeypatch.setattr(helperctl, "run_vz_linux_host_smoke", fake_run_vz_linux_host_smoke)
+
+    code = helperctl.main(
+        [
+            "host-reboot-drill",
+            "post",
+            "--evidence-dir",
+            str(tmp_path / "durable" / "drill"),
+            "--bundle",
+            str(tmp_path / "bundle"),
+            "--run-smoke",
+            "--json",
+        ]
+    )
+
+    CASE.assertEqual(code, 1)
+    output = json.loads(capsys.readouterr().out)
+    CASE.assertEqual(output[-1]["name"], "vz_linux_smoke")
+    CASE.assertEqual(output[-1]["reason"], "vz_linux_smoke_failed")
+    CASE.assertEqual(output[-1]["message"], "7")
 
 
 def test_host_reboot_drill_cli_launchd_requires_explicit_metadata(
