@@ -612,8 +612,9 @@ git commit -m "feat: add WebUI setup readiness client"
 - Create: `apps/packages/ui/src/components/Option/Setup/ReadinessSetupScreen.tsx`
 - Create: `apps/packages/ui/src/components/Option/Setup/__tests__/ReadinessSetupScreen.test.tsx`
 - Modify: `apps/packages/ui/src/routes/option-setup.tsx`
+- Create: `apps/packages/ui/src/routes/__tests__/option-setup-readiness.test.tsx`
 
-- [ ] **Step 1: Write failing component tests**
+- [x] **Step 1: Write failing component tests**
 
 ```tsx
 it("renders profile picker, canonical lanes, and secondary TTS copy", async () => {
@@ -640,13 +641,13 @@ it("does not provision until Provision now is clicked", async () => {
 })
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
-Run: `bunx vitest run apps/packages/ui/src/components/Option/Setup/__tests__/ReadinessSetupScreen.test.tsx`
+Run: `bunx vitest run src/components/Option/Setup/__tests__/ReadinessSetupScreen.test.tsx src/routes/__tests__/option-setup-readiness.test.tsx`
 
-Expected: FAIL with missing component.
+Result: FAIL with missing `ReadinessSetupScreen` and route still rendering onboarding for configured backends.
 
-- [ ] **Step 3: Implement screen**
+- [x] **Step 3: Implement screen**
 
 Implementation responsibilities:
 
@@ -659,21 +660,22 @@ Implementation responsibilities:
 - Fallback `/setup` link always visible.
 - Completion area with skipped-lane consequences.
 
-- [ ] **Step 4: Wire `/setup` route**
+- [x] **Step 4: Wire `/setup` route**
 
 In `option-setup.tsx`:
 
 - Render native readiness screen when a backend is configured and setup readiness APIs load.
 - Keep existing `OnboardingWizard` when the server URL is missing or connection setup is still needed.
 - Show remote setup blocked state when hook reports setup guard failure.
+- Switch the same screen to `mode="admin"` after WebUI first-run completion so post-setup use calls `/api/v1/setup/admin/readiness/*`.
 
-- [ ] **Step 5: Run component tests**
+- [x] **Step 5: Run component tests**
 
-Run: `bunx vitest run apps/packages/ui/src/components/Option/Setup/__tests__/ReadinessSetupScreen.test.tsx`
+Run: `bunx vitest run src/components/Option/Setup/__tests__/ReadinessSetupScreen.test.tsx src/routes/__tests__/option-setup-readiness.test.tsx`
 
-Expected: PASS.
+Result: PASS, 8 tests.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Setup/ReadinessSetupScreen.tsx \
