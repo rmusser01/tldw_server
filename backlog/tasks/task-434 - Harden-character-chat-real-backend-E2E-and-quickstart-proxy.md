@@ -4,7 +4,7 @@ title: Harden character chat real-backend E2E and quickstart proxy
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-19 01:56'
+updated_date: '2026-05-19 02:38'
 labels:
   - chat
   - characters
@@ -51,6 +51,20 @@ Verification:
 Known local artifacts:
 - Backend startup generated two untracked watchlist template files under tldw_Server_API/Config_Files/templates/watchlists; they are unrelated and left untracked.
 - A stale duplicate untracked Backlog task file with TASK-433 was not committed because TASK-433 already belongs to unrelated VZ work.
+
+PR #1859 review follow-up:
+- Qodo/Gemini model-preflight feedback was verified against the backend metadata contract: /api/v1/llm/models/metadata is multi-modality and supports type/output_modality filters.
+- Updated the E2E preflight to request type=chat&output_modality=text and to filter non-chat/non-text descriptors defensively.
+- Fixed metadata extraction to preserve string model IDs and avoid double-prefixing provider-qualified IDs.
+- Normalized the provider fallback into the same provider:model ID shape and deduped fallback results.
+- Evaluated Qodo unused Tooltip feedback: Tooltip is still used by the favorite-star control in AssistantSelect, so the import is intentionally retained. Removing it failed AssistantSelect behavior tests with ReferenceError.
+
+Review-fix verification:
+- bunx vitest run __tests__/e2e-fixture-models.test.ts --reporter=verbose passed: 1 file, 3 tests.
+- bunx vitest run src/components/Common/__tests__/AssistantSelect.behavior.test.tsx --reporter=verbose passed: 1 file, 16 tests.
+- bunx vitest run __tests__/frontend-quickstart-networking.test.ts __tests__/e2e-fixture-models.test.ts --reporter=verbose passed: 2 files, 12 tests.
+- git diff --check passed.
+- Real backend/WebUI Playwright rerun passed against backend http://127.0.0.1:8000 and WebUI http://localhost:8081: character-chat.spec.ts --project=journeys --reporter=line passed: 1 test.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

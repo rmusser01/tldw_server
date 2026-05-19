@@ -124,7 +124,8 @@ export const test = base.extend<WorkflowFixtures>({
       // Check available models. Prefer the richer metadata endpoint because the
       // providers endpoint includes catalog-only models that may not be runnable.
       if (info.available) {
-        const metadataUrl = `${TEST_CONFIG.serverUrl}/api/v1/llm/models/metadata`
+        const metadataUrl =
+          `${TEST_CONFIG.serverUrl}/api/v1/llm/models/metadata?type=chat&output_modality=text`
         const metadataRes = await fetchWithApiKey(metadataUrl).catch(() => null)
         if (metadataRes?.ok) {
           const metadataData = await metadataRes.json().catch(() => ({}))
@@ -180,13 +181,17 @@ export function extractUsableModelIds(payload: any): string[] {
       : []
 
   for (const model of entries) {
-    if (!isRunnableModelDescriptor(model)) continue
+    if (!isRunnableModelDescriptor(model, { requireChatTextModel: true })) continue
+    if (typeof model === "string") {
+      models.push(model)
+      continue
+    }
     const provider = normalizeModelField(
       model?.provider ?? model?.provider_key ?? model?.api_provider
     )
     const id = normalizeModelField(model?.id ?? model?.model ?? model?.name)
     if (!id) continue
-    models.push(provider ? `${provider}:${id}` : id)
+    models.push(formatModelId(id, provider))
   }
 
   return [...new Set(models)]
@@ -208,13 +213,24 @@ export function extractModelIds(payload: any): string[] {
   for (const provider of providers) {
     if (Array.isArray(provider?.models)) {
       const providerUsable = isRunnableModelDescriptor(provider)
+      const providerName = normalizeModelField(
+        provider?.name ?? provider?.id ?? provider?.provider
+      )
       for (const model of provider.models) {
-        if (!providerUsable || !isRunnableModelDescriptor(model)) continue
+        if (
+          !providerUsable ||
+          !isRunnableModelDescriptor(model, { requireChatTextModel: true })
+        ) {
+          continue
+        }
         if (typeof model === "string") {
-          models.push(model)
+          models.push(formatModelId(model, providerName))
         } else {
-          const id = model?.id || model?.model || model?.name
-          if (id) models.push(String(id))
+          const providerOverride = normalizeModelField(
+            model?.provider ?? model?.provider_key ?? model?.api_provider
+          )
+          const id = normalizeModelField(model?.id ?? model?.model ?? model?.name)
+          if (id) models.push(formatModelId(id, providerOverride ?? providerName))
         }
       }
     }
@@ -223,21 +239,28 @@ export function extractModelIds(payload: any): string[] {
   // Fallback: payload.models direct array
   if (models.length === 0 && Array.isArray(payload?.models)) {
     for (const model of payload.models) {
-      if (!isRunnableModelDescriptor(model)) continue
+      if (!isRunnableModelDescriptor(model, { requireChatTextModel: true })) continue
       if (typeof model === "string") {
         models.push(model)
       } else {
-        const id = model?.id || model?.model || model?.name
-        if (id) models.push(String(id))
+        const provider = normalizeModelField(
+          model?.provider ?? model?.provider_key ?? model?.api_provider
+        )
+        const id = normalizeModelField(model?.id ?? model?.model ?? model?.name)
+        if (id) models.push(formatModelId(id, provider))
       }
     }
   }
 
-  return models
+  return [...new Set(models)]
 }
 
-function isRunnableModelDescriptor(value: any): boolean {
+function isRunnableModelDescriptor(
+  value: any,
+  options: { requireChatTextModel?: boolean } = {}
+): boolean {
   if (!value || typeof value === "string") return true
+  if (options.requireChatTextModel && !isChatTextModelDescriptor(value)) return false
   const catalogOnly = firstBoolean(value, ["catalog_only", "catalogOnly", "is_catalog_only"])
   if (catalogOnly === true) return false
   const configured = firstBoolean(value, ["is_configured", "isConfigured", "configured"])
@@ -254,6 +277,21 @@ function isRunnableModelDescriptor(value: any): boolean {
   return true
 }
 
+function isChatTextModelDescriptor(value: any): boolean {
+  const modelTypes = firstStringList(value, ["type", "model_type", "modelType"])
+  if (modelTypes.length > 0 && !modelTypes.includes("chat")) return false
+
+  const outputModalities = firstStringList(value, [
+    "output_modality",
+    "outputModalities",
+    "output_modalities",
+    "modalities_output"
+  ])
+  if (outputModalities.length > 0 && !outputModalities.includes("text")) return false
+
+  return true
+}
+
 function firstBoolean(value: any, keys: string[]): boolean | null {
   for (const key of keys) {
     const field = value?.[key] ?? value?.details?.[key] ?? value?.metadata?.[key]
@@ -262,10 +300,35 @@ function firstBoolean(value: any, keys: string[]): boolean | null {
   return null
 }
 
+function firstStringList(value: any, keys: string[]): string[] {
+  for (const key of keys) {
+    const field = value?.[key] ?? value?.details?.[key] ?? value?.metadata?.[key]
+    const normalized = normalizeStringList(field)
+    if (normalized.length > 0) return normalized
+  }
+  return []
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => normalizeModelField(item)?.toLowerCase())
+      .filter((item): item is string => Boolean(item))
+  }
+  const normalized = normalizeModelField(value)
+  return normalized ? [normalized.toLowerCase()] : []
+}
+
 function normalizeModelField(value: unknown): string | null {
   if (typeof value !== "string" && typeof value !== "number") return null
   const trimmed = String(value).trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+function formatModelId(id: string, provider: string | null): string {
+  if (!provider) return id
+  const prefix = `${provider}:`
+  return id.toLowerCase().startsWith(prefix.toLowerCase()) ? id : `${prefix}${id}`
 }
 
 /**
