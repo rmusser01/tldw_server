@@ -31,6 +31,7 @@ describe("audio route parity", () => {
 
     expect(webRoute).toContain('lockedMode="listen"')
     expect(webRoute).toContain("hideModeSwitcher")
+    expect(webRoute).not.toContain('initialMode="listen"')
     expect(extRoute).toContain('lockedMode="listen"')
     expect(extRoute).toContain("hideModeSwitcher")
     expect(extRoute).not.toContain('initialMode="listen"')

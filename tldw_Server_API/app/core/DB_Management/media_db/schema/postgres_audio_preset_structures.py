@@ -63,8 +63,24 @@ def ensure_postgres_audio_presets(db: PostgresAudioPresetDB, conn: Any) -> None:
             """,
             connection=conn,
         )
+        db.backend.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_presets_user_kind_name_active
+            ON audio_presets(user_id, kind, LOWER(name))
+            WHERE deleted = FALSE
+            """,
+            connection=conn,
+        )
+        db.backend.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_presets_user_kind_default_active
+            ON audio_presets(user_id, kind)
+            WHERE is_default = TRUE AND deleted = FALSE
+            """,
+            connection=conn,
+        )
     except Exception as exc:  # pragma: no cover - defensive schema bootstrap logging
-        logger.warning("Could not ensure audio_presets table on PostgreSQL: {}", exc)
+        logger.warning(f"Could not ensure audio_presets table on PostgreSQL: {exc}")
         raise
 
 

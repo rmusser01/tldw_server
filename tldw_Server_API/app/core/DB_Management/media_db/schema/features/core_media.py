@@ -72,6 +72,7 @@ _POSTGRES_REQUIRED_TABLES = [
     "sync_log",
     "chunkingtemplates",
     "claims",
+    "audio_presets",
 ]
 
 _SQLITE_ADDITIONAL_CORE_SCHEMA_SQL = """

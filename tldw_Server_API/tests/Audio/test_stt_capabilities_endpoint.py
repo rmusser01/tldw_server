@@ -14,7 +14,17 @@ def client(monkeypatch):
     app = FastAPI()
     app.include_router(audio_router, prefix="/api/v1/audio")
     with TestClient(app) as c:
+        c.headers.update({"X-API-KEY": "test-api-key-1234567890"})
         yield c
+
+
+@pytest.fixture(autouse=True)
+def reset_stt_capabilities_cache():
+    from tldw_Server_API.app.api.v1.endpoints.audio import audio_health
+
+    audio_health._STT_CAPABILITIES_CACHE = None
+    yield
+    audio_health._STT_CAPABILITIES_CACHE = None
 
 
 @pytest.fixture
@@ -118,7 +128,7 @@ def test_transcription_capabilities_combines_catalog_health_and_provider_sources
             "description": "static_catalog",
             "availability": "health",
         },
-        "message": "Whisper Small is ready.",
+        "message": "Ready",
     }
     assert by_id["nemo-canary-1b"]["provider"] == "canary"
     assert by_id["nemo-canary-1b"]["availability"] == "on_demand"
@@ -126,6 +136,41 @@ def test_transcription_capabilities_combines_catalog_health_and_provider_sources
     assert by_id["nemo-canary-1b"]["capabilities"]["streaming"] == "unsupported"
     assert by_id["nemo-canary-1b"]["capabilities"]["diarization"] == "unsupported"
     assert by_id["nemo-canary-1b"]["sources"]["streaming"] == "provider"
+
+
+@pytest.mark.unit
+def test_transcription_capabilities_use_cache_and_sanitize_status_messages(
+    monkeypatch,
+    client: TestClient,
+    small_catalog,
+):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files as audio_files
+
+    checked_models: list[str] = []
+
+    def fake_status(model_name: str):
+        checked_models.append(model_name)
+        return {
+            "available": True,
+            "usable": False,
+            "on_demand": False,
+            "provider": "whisper",
+            "model": model_name,
+            "message": "Traceback from /Users/local/dev/path should stay server-side",
+        }
+
+    monkeypatch.setattr(audio_files, "check_transcription_model_status", fake_status)
+
+    first = client.get("/api/v1/audio/transcriptions/capabilities")
+    second = client.get("/api/v1/audio/transcriptions/capabilities")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert checked_models == ["whisper-small", "nemo-canary-1b"]
+    first_model = first.json()["models"][0]
+    assert first_model["availability"] == "unavailable"
+    assert first_model["message"] == "Unavailable"
+    assert "Traceback" not in str(first.json())
 
 
 @pytest.mark.unit

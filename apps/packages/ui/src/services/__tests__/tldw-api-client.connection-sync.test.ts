@@ -66,6 +66,20 @@ describe("TldwApiClient connection storage sync", () => {
     })
   })
 
+  it("clears mirrored server URLs when the saved URL is removed", async () => {
+    const client = new TldwApiClient()
+
+    await client.updateConfig({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-api-key"
+    })
+    await client.updateConfig({ serverUrl: "" })
+
+    expect(mocks.storage.has("tldwServerUrl")).toBe(false)
+    expect(window.localStorage.getItem("tldw-api-host")).toBeNull()
+  })
+
   it("uses the in-memory WebUI config for audio preset mutations", async () => {
     const client = new TldwApiClient()
     await client.updateConfig({

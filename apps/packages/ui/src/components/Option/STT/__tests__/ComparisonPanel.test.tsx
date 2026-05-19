@@ -132,6 +132,7 @@ describe("ComparisonPanel", () => {
       ...hookReturnRef.current,
       results: [
         {
+          id: "result-error",
           model: "whisper-large",
           text: "",
           status: "error",

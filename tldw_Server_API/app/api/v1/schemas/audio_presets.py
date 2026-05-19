@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 AudioPresetKind = Literal["tts", "stt", "speech"]
 
-_SECRET_CONFIG_KEYS = frozenset(
+_SECRET_KEY_NORMALIZER_RE = re.compile(r"[^a-z0-9]")
+
+
+def _normalize_secret_key(value: Any) -> str:
+    return _SECRET_KEY_NORMALIZER_RE.sub("", str(value or "").strip().lower())
+
+
+_SECRET_CONFIG_KEY_ALIASES = frozenset(
     {
+        "access_token",
         "api_key",
         "apikey",
         "apiKey",
@@ -22,16 +31,19 @@ _SECRET_CONFIG_KEYS = frozenset(
         "oauth_token",
         "oauthToken",
         "password",
+        "private_key",
+        "refresh_token",
         "secret",
         "token",
     }
 )
+_SECRET_CONFIG_KEYS = frozenset(_normalize_secret_key(key) for key in _SECRET_CONFIG_KEY_ALIASES)
 
 
 def _contains_secret_key(value: Any) -> bool:
     if isinstance(value, dict):
         for key, child in value.items():
-            if str(key) in _SECRET_CONFIG_KEYS:
+            if _normalize_secret_key(key) in _SECRET_CONFIG_KEYS:
                 return True
             if _contains_secret_key(child):
                 return True

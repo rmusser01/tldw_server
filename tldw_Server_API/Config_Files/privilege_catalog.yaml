@@ -784,6 +784,23 @@ scopes:
     ownership_predicates:
       - same_org
     doc_url: https://docs.example.com/privileges/audio-transcriptions
+  - id: audio.transcriptions.capabilities
+    description: Read STT model capability and readiness metadata.
+    resource_tags:
+      - audio
+      - stt
+      - capabilities
+    sensitivity_tier: moderate
+    rate_limit_class: standard
+    default_roles:
+      - admin
+      - analyst
+      - developer
+      - viewer
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/audio-transcriptions-capabilities
   - id: audio.translations
     description: Request audio translation jobs.
     resource_tags:

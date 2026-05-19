@@ -145,6 +145,41 @@ def test_audio_presets_crud_default_and_soft_delete(preset_client: PresetClient)
 
 
 @pytest.mark.unit
+def test_audio_presets_reject_duplicate_and_null_names(preset_client: PresetClient):
+    client = preset_client.client
+
+    created = client.post("/api/v1/audio/presets", json=_tts_payload(name="Shared name"))
+    assert created.status_code == 201
+
+    duplicate = client.post(
+        "/api/v1/audio/presets",
+        json=_tts_payload(name="shared NAME", is_default=False),
+    )
+    assert duplicate.status_code == 409
+
+    null_name = client.patch(
+        f"/api/v1/audio/presets/{created.json()['id']}",
+        json={"name": None},
+    )
+    assert null_name.status_code == 400
+
+
+@pytest.mark.unit
+def test_audio_presets_enforce_per_user_limit(monkeypatch, preset_client: PresetClient):
+    from tldw_Server_API.app.api.v1.endpoints.audio import audio_presets
+
+    monkeypatch.setattr(audio_presets, "_MAX_AUDIO_PRESETS_PER_USER", 1)
+    client = preset_client.client
+
+    first = client.post("/api/v1/audio/presets", json=_tts_payload(name="First preset"))
+    assert first.status_code == 201
+
+    second = client.post("/api/v1/audio/presets", json=_tts_payload(name="Second preset"))
+    assert second.status_code == 409
+    assert "limit reached" in second.json()["detail"]
+
+
+@pytest.mark.unit
 def test_audio_presets_are_owner_scoped(preset_client: PresetClient):
     client = preset_client.client
 
@@ -221,3 +256,15 @@ def test_audio_presets_reject_unknown_kind_and_secret_config_keys(
         json=_tts_payload(config={"provider": "openai", "model": "tts-1", "api_key": "sk-test"}),
     )
     assert secret_config.status_code == 422
+
+    secret_aliases = client.post(
+        "/api/v1/audio/presets",
+        json=_tts_payload(
+            config={
+                "provider": "openai",
+                "model": "tts-1",
+                "nested": {"api-key": "sk-test", "Auth Token": "secret"},
+            }
+        ),
+    )
+    assert secret_aliases.status_code == 422

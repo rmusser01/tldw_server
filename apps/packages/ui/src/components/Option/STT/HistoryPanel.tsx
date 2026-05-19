@@ -7,9 +7,7 @@ import type {
   SttComparisonMetadata
 } from "@/components/Option/Audio/comparison-provenance"
 import {
-  formatByteSize,
-  formatClientLatency,
-  formatCreatedAt
+  buildSttProvenanceTags
 } from "@/components/Option/Audio/comparison-provenance"
 
 const { Text } = Typography
@@ -69,34 +67,12 @@ const truncateText = (text: string): string =>
     : text
 
 const buildProvenanceTags = (result: SttHistoryResult): string[] => {
-  const metadata = result.metadata
-  const config = result.config
-  const wordCount = metadata?.wordCount ?? result.wordCount
-  return [
-    metadata?.createdAt ? formatCreatedAt(metadata.createdAt) : undefined,
-    metadata?.audioSourceLabel,
-    formatByteSize(metadata?.audioSizeBytes),
-    formatClientLatency(metadata?.clientLatencyMs ?? result.latencyMs),
-    metadata?.language || config?.language
-      ? `Language ${metadata?.language || config?.language}`
-      : undefined,
-    config?.task ? `Task ${config.task}` : undefined,
-    config?.responseFormat ? `Format ${config.responseFormat}` : undefined,
-    config?.timestampGranularities?.length
-      ? `Timestamps ${config.timestampGranularities.join(", ")}`
-      : undefined,
-    config?.segmentationEnabled ? "Segmentation on" : undefined,
-    config?.diarizationRequested ? "Diarization requested" : undefined,
-    metadata?.durationSeconds != null
-      ? `Duration ${metadata.durationSeconds.toFixed(1)}s`
-      : undefined,
-    metadata?.segmentCount != null
-      ? `${metadata.segmentCount} ${
-          metadata.segmentCount === 1 ? "segment" : "segments"
-        }`
-      : undefined,
-    wordCount != null ? `${wordCount} words` : undefined
-  ].filter((tag): tag is string => Boolean(tag))
+  return buildSttProvenanceTags({
+    metadata: result.metadata,
+    config: result.config,
+    latencyMs: result.latencyMs,
+    wordCount: result.wordCount
+  })
 }
 
 /* ------------------------------------------------------------------ */

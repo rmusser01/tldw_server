@@ -131,6 +131,7 @@ const availabilityFromHealth = (
 ): AvailabilityState => {
   if (!health) return "unknown"
   if (health.on_demand) return "on_demand"
+  if (health.usable === false) return "unavailable"
   if (health.usable || health.available) return "ready"
   return "unavailable"
 }
@@ -176,10 +177,15 @@ export function buildSttModelOptions({
     const capability = capabilityById.get(id)
     const availability = capability?.availability || availabilityFromHealth(health)
     const sources: SttModelOption["sources"] = { ...(capability?.sources ?? {}) }
-    if (metadata?.label || capability?.label) {
+    if (capability?.label) {
+      sources.label = sources.label || capability.sources?.label || "response_schema"
+    } else if (metadata?.label) {
       sources.label = sources.label || "static_catalog"
     }
-    if (metadata?.description || capability?.description) {
+    if (capability?.description) {
+      sources.description =
+        sources.description || capability.sources?.description || "response_schema"
+    } else if (metadata?.description) {
       sources.description = sources.description || "static_catalog"
     }
     if (capability?.availability_source) {
@@ -289,6 +295,10 @@ export function buildTtsReadinessItems({
   providersInfo,
   elevenLabsApiKey
 }: BuildTtsReadinessItemsArgs): ReadinessItem[] {
+  const hasElevenLabsApiKey =
+    typeof elevenLabsApiKey === "string"
+      ? elevenLabsApiKey.trim().length > 0
+      : Boolean(elevenLabsApiKey)
   const items: ReadinessItem[] = [
     {
       id: "browser-preview",
@@ -302,7 +312,7 @@ export function buildTtsReadinessItems({
     return items
   }
 
-  if (provider === "elevenlabs" && !elevenLabsApiKey) {
+  if (provider === "elevenlabs" && !hasElevenLabsApiKey) {
     items.push({
       id: "elevenlabs-credentials",
       label: "ElevenLabs setup",

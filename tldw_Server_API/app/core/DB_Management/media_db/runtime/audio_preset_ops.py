@@ -7,7 +7,11 @@ import uuid
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
-from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError
+from tldw_Server_API.app.core.DB_Management.media_db.errors import (
+    ConflictError,
+    DatabaseError,
+    InputError,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
@@ -33,6 +37,23 @@ def _json_loads(value: Any) -> dict[str, Any]:
     except _MEDIA_NONCRITICAL_EXCEPTIONS:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _normalize_preset_name(value: Any) -> str:
+    name = value.strip() if isinstance(value, str) else ""
+    if not name:
+        raise InputError("Audio preset name must be a non-empty string.")
+    return name
+
+
+def _raise_audio_preset_constraint_conflict(exc: DatabaseError) -> None:
+    message = str(exc).lower()
+    if "unique" not in message and "duplicate" not in message:
+        return
+    if "default" in message:
+        raise ConflictError("Only one active default audio preset is allowed per user and kind.") from exc
+    if "name" in message or "audio_presets" in message:
+        raise ConflictError("An audio preset with this name already exists for this kind.") from exc
 
 
 def _row_to_audio_preset(row: Any) -> dict[str, Any] | None:
@@ -116,13 +137,14 @@ def create_audio_preset(
     now = self._get_current_utc_timestamp_str()
     user_id_str = str(user_id)
     kind_str = str(kind)
+    name_str = _normalize_preset_name(name)
 
     with self.transaction() as conn:
         _check_audio_preset_name_available(
             self,
             user_id=user_id_str,
             kind=kind_str,
-            name=name,
+            name=name_str,
             conn=conn,
         )
         if is_default:
@@ -131,30 +153,34 @@ def create_audio_preset(
                 (_db_bool(self, False), user_id_str, kind_str, _db_bool(self, False)),
                 connection=conn,
             )
-        self.execute_query(
-            (
-                "INSERT INTO audio_presets "
-                "(id, user_id, kind, name, description, favorite, is_default, config_json, "
-                "capability_assumptions_json, created_at, updated_at, deleted, version) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            ),
-            (
-                new_id,
-                user_id_str,
-                kind_str,
-                name,
-                description,
-                _db_bool(self, favorite),
-                _db_bool(self, is_default),
-                _json_dumps(config),
-                _json_dumps(capability_assumptions),
-                now,
-                now,
-                _db_bool(self, False),
-                1,
-            ),
-            connection=conn,
-        )
+        try:
+            self.execute_query(
+                (
+                    "INSERT INTO audio_presets "
+                    "(id, user_id, kind, name, description, favorite, is_default, config_json, "
+                    "capability_assumptions_json, created_at, updated_at, deleted, version) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                ),
+                (
+                    new_id,
+                    user_id_str,
+                    kind_str,
+                    name_str,
+                    description,
+                    _db_bool(self, favorite),
+                    _db_bool(self, is_default),
+                    _json_dumps(config),
+                    _json_dumps(capability_assumptions),
+                    now,
+                    now,
+                    _db_bool(self, False),
+                    1,
+                ),
+                connection=conn,
+            )
+        except DatabaseError as exc:
+            _raise_audio_preset_constraint_conflict(exc)
+            raise
         created = _get_audio_preset_row(self, user_id=user_id_str, preset_id=new_id, conn=conn)
     if created is None:
         raise ConflictError("Audio preset could not be created.")
@@ -295,11 +321,12 @@ def update_audio_preset(
             return None
         kind = str(current["kind"])
         if "name" in sanitized:
+            sanitized["name"] = _normalize_preset_name(sanitized["name"])
             _check_audio_preset_name_available(
                 self,
                 user_id=user_id_str,
                 kind=kind,
-                name=str(sanitized["name"]),
+                name=sanitized["name"],
                 exclude_id=preset_id_str,
                 conn=conn,
             )
@@ -332,15 +359,19 @@ def update_audio_preset(
             params.append(_json_dumps(sanitized["capability_assumptions"]))
         params.extend([preset_id_str, user_id_str, _db_bool(self, False)])
 
-        self.execute_query(
-            (
-                "UPDATE audio_presets SET "  # nosec B608
-                + ", ".join(set_clauses)
-                + " WHERE id = ? AND user_id = ? AND deleted = ?"
-            ),
-            tuple(params),
-            connection=conn,
-        )
+        try:
+            self.execute_query(
+                (
+                    "UPDATE audio_presets SET "  # nosec B608
+                    + ", ".join(set_clauses)
+                    + " WHERE id = ? AND user_id = ? AND deleted = ?"
+                ),
+                tuple(params),
+                connection=conn,
+            )
+        except DatabaseError as exc:
+            _raise_audio_preset_constraint_conflict(exc)
+            raise
         return _get_audio_preset_row(self, user_id=user_id_str, preset_id=preset_id_str, conn=conn)
 
 

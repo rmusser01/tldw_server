@@ -1290,6 +1290,12 @@ class MediaDatabase:
         ON audio_presets(user_id, kind, favorite, deleted);
     CREATE INDEX IF NOT EXISTS idx_audio_presets_user_kind_default
         ON audio_presets(user_id, kind, is_default, deleted);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_presets_user_kind_name_active
+        ON audio_presets(user_id, kind, LOWER(name))
+        WHERE deleted = 0;
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_presets_user_kind_default_active
+        ON audio_presets(user_id, kind)
+        WHERE is_default = 1 AND deleted = 0;
     """
 
     _DATA_TABLES_SQL = """

@@ -45,6 +45,15 @@ export type TtsResultMetadata = TextPreviewMetadata & {
   audioSizeBytes?: number
 }
 
+export type BuildSttProvenanceTagsArgs = {
+  metadata?: Partial<SttComparisonMetadata>
+  config?: SttComparisonConfig
+  latencyMs?: number
+  wordCount?: number
+  disabled?: boolean
+  wordsLabel?: string
+}
+
 const BYTES_PER_KB = 1024
 const BYTES_PER_MB = BYTES_PER_KB * 1024
 
@@ -104,7 +113,9 @@ const readStringOption = (
   key: string
 ): string | undefined => {
   const value = options[key]
-  return typeof value === "string" && value.trim() ? value : undefined
+  if (typeof value !== "string") return undefined
+  const trimmed = value.trim()
+  return trimmed ? trimmed : undefined
 }
 
 const readStringArrayOption = (
@@ -113,9 +124,9 @@ const readStringArrayOption = (
 ): string[] | undefined => {
   const value = options[key]
   if (!Array.isArray(value)) return undefined
-  const strings = value.filter(
-    (item): item is string => typeof item === "string" && item.trim().length > 0
-  )
+  const strings = value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0)
   return strings.length > 0 ? strings : undefined
 }
 
@@ -132,7 +143,7 @@ export function buildSttComparisonConfig(
     sttOptions.diarize === true || sttOptions.diarization === true
 
   return {
-    model,
+    model: model.trim() || model,
     language: readStringOption(sttOptions, "language"),
     task: readStringOption(sttOptions, "task"),
     responseFormat:
@@ -142,6 +153,43 @@ export function buildSttComparisonConfig(
     segmentationEnabled: segmentationEnabled || undefined,
     diarizationRequested: diarizationRequested || undefined
   }
+}
+
+export function buildSttProvenanceTags({
+  metadata,
+  config,
+  latencyMs,
+  wordCount,
+  disabled,
+  wordsLabel = "words"
+}: BuildSttProvenanceTagsArgs): string[] {
+  const resolvedWordCount = metadata?.wordCount ?? wordCount
+  return [
+    metadata?.createdAt ? formatCreatedAt(metadata.createdAt) : undefined,
+    metadata?.audioSourceLabel,
+    formatByteSize(metadata?.audioSizeBytes),
+    formatClientLatency(metadata?.clientLatencyMs ?? latencyMs),
+    metadata?.language || config?.language
+      ? `Language ${metadata?.language || config?.language}`
+      : undefined,
+    config?.task ? `Task ${config.task}` : undefined,
+    config?.responseFormat ? `Format ${config.responseFormat}` : undefined,
+    config?.timestampGranularities?.length
+      ? `Timestamps ${config.timestampGranularities.join(", ")}`
+      : undefined,
+    config?.segmentationEnabled ? "Segmentation on" : undefined,
+    config?.diarizationRequested ? "Diarization requested" : undefined,
+    metadata?.durationSeconds != null
+      ? `Duration ${metadata.durationSeconds.toFixed(1)}s`
+      : undefined,
+    metadata?.segmentCount != null
+      ? `${metadata.segmentCount} ${
+          metadata.segmentCount === 1 ? "segment" : "segments"
+        }`
+      : undefined,
+    resolvedWordCount != null ? `${resolvedWordCount} ${wordsLabel}` : undefined,
+    disabled ? "Disabled for Run All" : undefined
+  ].filter((tag): tag is string => Boolean(tag))
 }
 
 function extractTextFromSegments(segments: unknown): string | undefined {

@@ -46,13 +46,16 @@ _BROWSER_TTS_WARNING = AudioPresetValidationWarning(
     message="Browser TTS presets depend on the current browser and must be revalidated before use.",
     field="config.provider",
 )
+_MAX_AUDIO_PRESETS_PER_USER = 200
 
 
 def _user_id(request_user: User) -> str:
+    """Return the canonical string user id used by the media database."""
     return str(request_user.id)
 
 
 def _normalize_audio_preset_config(kind: str, config: dict[str, Any]) -> dict[str, Any]:
+    """Normalize persisted preset config without storing browser-local claims as portable."""
     normalized = dict(config or {})
     provider = str(normalized.get("provider") or "").strip().lower()
     if kind == "tts" and provider == "browser":
@@ -63,6 +66,7 @@ def _normalize_audio_preset_config(kind: str, config: dict[str, Any]) -> dict[st
 
 
 def _validation_warnings_for_preset(preset: dict[str, Any]) -> list[AudioPresetValidationWarning]:
+    """Return non-blocking warnings for configs that need client-side revalidation."""
     config = preset.get("config")
     if not isinstance(config, dict):
         return []
@@ -73,6 +77,7 @@ def _validation_warnings_for_preset(preset: dict[str, Any]) -> list[AudioPresetV
 
 
 def _preset_or_404(preset: dict[str, Any] | None) -> dict[str, Any]:
+    """Return a preset row or raise the API's stable not-found error."""
     if preset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audio preset not found")
     return preset
@@ -87,7 +92,7 @@ def _preset_or_404(preset: dict[str, Any] | None) -> dict[str, Any]:
         Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.presets.list", count_as="call")),
     ],
 )
-async def list_audio_presets_endpoint(
+def list_audio_presets_endpoint(
     kind: Optional[AudioPresetKind] = Query(default=None),
     favorite: Optional[bool] = Query(default=None),
     is_default: Optional[bool] = Query(default=None),
@@ -127,16 +132,22 @@ async def list_audio_presets_endpoint(
         Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.presets.create", count_as="call")),
     ],
 )
-async def create_audio_preset_endpoint(
+def create_audio_preset_endpoint(
     payload: AudioPresetCreateRequest,
     request_user: User = Depends(get_request_user),
     media_db: Any = Depends(get_media_db_for_user),
 ) -> dict[str, Any]:
     data = model_dump_compat(payload)
     data["config"] = _normalize_audio_preset_config(str(data["kind"]), data.get("config") or {})
+    user_id = _user_id(request_user)
     try:
+        total_presets = media_db.count_audio_presets(user_id=user_id)
+        if total_presets >= _MAX_AUDIO_PRESETS_PER_USER:
+            raise ConflictError(
+                f"Audio preset limit reached ({_MAX_AUDIO_PRESETS_PER_USER} per user)."
+            )
         return media_db.create_audio_preset(
-            user_id=_user_id(request_user),
+            user_id=user_id,
             kind=str(data["kind"]),
             name=str(data["name"]),
             description=data.get("description"),
@@ -158,7 +169,7 @@ async def create_audio_preset_endpoint(
         Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.presets.update", count_as="call")),
     ],
 )
-async def update_audio_preset_endpoint(
+def update_audio_preset_endpoint(
     preset_id: str,
     payload: AudioPresetUpdateRequest,
     request_user: User = Depends(get_request_user),
@@ -194,7 +205,7 @@ async def update_audio_preset_endpoint(
         Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.presets.delete", count_as="call")),
     ],
 )
-async def delete_audio_preset_endpoint(
+def delete_audio_preset_endpoint(
     preset_id: str,
     request_user: User = Depends(get_request_user),
     media_db: Any = Depends(get_media_db_for_user),
@@ -217,7 +228,7 @@ async def delete_audio_preset_endpoint(
         Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.presets.validate", count_as="call")),
     ],
 )
-async def validate_audio_preset_endpoint(
+def validate_audio_preset_endpoint(
     preset_id: str,
     request_user: User = Depends(get_request_user),
     media_db: Any = Depends(get_media_db_for_user),

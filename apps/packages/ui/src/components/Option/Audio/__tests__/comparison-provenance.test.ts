@@ -37,11 +37,11 @@ describe("comparison provenance helpers", () => {
 
   it("builds STT request config from existing options", () => {
     expect(
-      buildSttComparisonConfig("whisper-large", {
-        language: "en",
-        task: "translate",
-        response_format: "verbose_json",
-        timestamp_granularities: ["word", "segment"],
+      buildSttComparisonConfig(" whisper-large ", {
+        language: " en ",
+        task: " translate ",
+        response_format: " verbose_json ",
+        timestamp_granularities: [" word ", "segment", ""],
         segment: true
       })
     ).toEqual({

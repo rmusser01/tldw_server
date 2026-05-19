@@ -7,9 +7,7 @@ import type { ComparisonResult } from "@/hooks/useComparisonTranscribe"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import type { SttModelOption } from "@/components/Option/Audio/audio-readiness"
 import {
-  formatByteSize,
-  formatClientLatency,
-  formatCreatedAt
+  buildSttProvenanceTags
 } from "@/components/Option/Audio/comparison-provenance"
 
 const { Text } = Typography
@@ -58,39 +56,21 @@ const ResultCard: React.FC<ResultCardProps> = ({
   }, [result.text])
 
   const isPending = result.status === "pending" || result.status === "running"
-  const resultTarget = result.id || result.model
+  const resultTarget = result.id
   const metadata = result.metadata
   const config = result.config
   const wordCount =
     metadata?.wordCount ??
     result.wordCount ??
     editedText.split(/\s+/).filter(Boolean).length
-  const provenanceTags = [
-    metadata?.createdAt ? formatCreatedAt(metadata.createdAt) : undefined,
-    metadata?.audioSourceLabel,
-    formatByteSize(metadata?.audioSizeBytes),
-    formatClientLatency(metadata?.clientLatencyMs ?? result.latencyMs),
-    metadata?.language || config?.language
-      ? `Language ${metadata?.language || config?.language}`
-      : undefined,
-    config?.task ? `Task ${config.task}` : undefined,
-    config?.responseFormat ? `Format ${config.responseFormat}` : undefined,
-    config?.timestampGranularities?.length
-      ? `Timestamps ${config.timestampGranularities.join(", ")}`
-      : undefined,
-    config?.segmentationEnabled ? "Segmentation on" : undefined,
-    config?.diarizationRequested ? "Diarization requested" : undefined,
-    metadata?.durationSeconds != null
-      ? `Duration ${metadata.durationSeconds.toFixed(1)}s`
-      : undefined,
-    metadata?.segmentCount != null
-      ? `${metadata.segmentCount} ${
-          metadata.segmentCount === 1 ? "segment" : "segments"
-        }`
-      : undefined,
-    `${wordCount} ${t("stt.comparison.words", "words")}`,
-    result.disabled ? "Disabled for Run All" : undefined
-  ].filter((tag): tag is string => Boolean(tag))
+  const provenanceTags = buildSttProvenanceTags({
+    metadata,
+    config,
+    latencyMs: result.latencyMs,
+    wordCount,
+    disabled: result.disabled,
+    wordsLabel: t("stt.comparison.words", "words")
+  })
 
   return (
     <Card
@@ -362,7 +342,7 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {results.map((result) => (
             <ResultCard
-              key={result.id || result.model}
+              key={result.id}
               result={result}
               onCopy={handleCopy}
               onRetry={handleRetry}

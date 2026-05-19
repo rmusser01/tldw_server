@@ -135,9 +135,14 @@ export const useMultiRenderState = () => {
         state: "generating",
         progress: 0,
         errorMessage: undefined,
+        errorSettingsHref: undefined,
         metadata: buildTtsResultMetadata(text, createdAt)
       })
 
+      const previousController = abortControllersRef.current.get(id)
+      if (previousController) {
+        try { previousController.abort() } catch {}
+      }
       const controller = new AbortController()
       abortControllersRef.current.set(id, controller)
       const start = performance.now()
@@ -183,6 +188,8 @@ export const useMultiRenderState = () => {
           audioUrl: url,
           audioBlob: blob,
           progress: 100,
+          errorMessage: undefined,
+          errorSettingsHref: undefined,
           metadata: buildTtsResultMetadata(text, createdAt, {
             audioSizeBytes: blob.size,
             clientLatencyMs
@@ -200,7 +207,9 @@ export const useMultiRenderState = () => {
           })
         })
       } finally {
-        abortControllersRef.current.delete(id)
+        if (abortControllersRef.current.get(id) === controller) {
+          abortControllersRef.current.delete(id)
+        }
       }
     },
     [renders, updateRender]

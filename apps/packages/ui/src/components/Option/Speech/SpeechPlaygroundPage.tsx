@@ -1191,17 +1191,25 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
 
   const handleApplyServerTtsPreset = React.useCallback(
     async (config: Record<string, unknown>) => {
+      const normalizedProvider =
+        typeof config.provider === "string" ? config.provider.trim().toLowerCase() : ""
       const nextProvider =
-        typeof config.provider === "string" && config.provider.trim()
-          ? config.provider
+        normalizedProvider
+          ? normalizedProvider
           : provider
-      const nextModel = typeof config.model === "string" ? config.model : undefined
-      const nextVoice = typeof config.voice === "string" ? config.voice : undefined
+      const nextModel =
+        typeof config.model === "string" && config.model.trim()
+          ? config.model.trim()
+          : undefined
+      const nextVoice =
+        typeof config.voice === "string" && config.voice.trim()
+          ? config.voice.trim()
+          : undefined
       const nextFormat =
-        typeof config.response_format === "string"
-          ? config.response_format
-          : typeof config.format === "string"
-            ? config.format
+        typeof config.response_format === "string" && config.response_format.trim()
+          ? config.response_format.trim()
+          : typeof config.format === "string" && config.format.trim()
+            ? config.format.trim()
             : undefined
       const nextSpeed =
         typeof config.speed === "number" && Number.isFinite(config.speed)

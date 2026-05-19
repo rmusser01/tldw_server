@@ -164,6 +164,34 @@ describe("useComparisonTranscribe", () => {
     expect(result.current.results[0].errorSettingsHref).toBe("/settings/speech")
   })
 
+  it("clears stale error recovery fields after a successful rerun", async () => {
+    mockTranscribe
+      .mockRejectedValueOnce(
+        Object.assign(new Error("Request failed for sk_secret_inline"), {
+          response: { status: 401 }
+        })
+      )
+      .mockResolvedValueOnce({ text: "rerun succeeded" })
+
+    const { result } = renderHook(() => useComparisonTranscribe())
+    const blob = makeBlob()
+
+    await act(async () => {
+      await result.current.transcribeAll(blob, ["whisper-1"], {})
+    })
+    expect(result.current.results[0].errorSettingsHref).toBe("/settings/speech")
+
+    await act(async () => {
+      await result.current.retryModel(blob, result.current.results[0].id, {})
+    })
+
+    expect(result.current.results[0].status).toBe("done")
+    expect(result.current.results[0].text).toBe("rerun succeeded")
+    expect(result.current.results[0].error).toBeUndefined()
+    expect(result.current.results[0].errorSettingsHref).toBeUndefined()
+    expect(result.current.results[0].errorDebugMessage).toBeUndefined()
+  })
+
   it("retries a single model with the original row configuration", async () => {
     mockTranscribe
       .mockRejectedValueOnce(new Error("timeout"))

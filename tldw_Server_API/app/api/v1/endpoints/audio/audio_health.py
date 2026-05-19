@@ -1,6 +1,7 @@
 # audio_health.py
 # Description: Audio health endpoints.
 import asyncio
+import copy
 from dataclasses import asdict, is_dataclass
 import importlib.util
 import os
@@ -15,7 +16,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 from starlette import status
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard, check_rate_limit
 from tldw_Server_API.app.api.v1.endpoints.audio.audio_tts import get_tts_service
+from tldw_Server_API.app.api.v1.schemas.audio_health import SttCapabilitiesResponse
 from tldw_Server_API.app.core.Audio.error_payloads import _http_error_detail
 from tldw_Server_API.app.core.Audio.transcription_service import _map_openai_audio_model_to_whisper
 from tldw_Server_API.app.core.Ingestion_Media_Processing.transcription_models import get_transcription_models_payload
@@ -91,6 +94,8 @@ _PROVIDER_API_KEY_PLACEHOLDERS: dict[str, set[str]] = {
 }
 _STT_CAPABILITY_FIELDS = ("batch", "streaming", "diarization", "timestamps", "segments")
 _STT_RESPONSE_SCHEMA_SOURCE = "response_schema"
+_STT_CAPABILITIES_CACHE_TTL_SECONDS = 30.0
+_STT_CAPABILITIES_CACHE: tuple[float, dict[str, Any]] | None = None
 
 
 def _build_internal_health_request(path: str) -> Request:
@@ -746,11 +751,37 @@ def _stt_availability_from_health(status_info: dict[str, Any]) -> str:
         return "unknown"
     if bool(status_info.get("on_demand", False)):
         return "on_demand"
-    if bool(status_info.get("usable", status_info.get("available", False))):
-        return "ready"
-    if bool(status_info.get("available", False)):
+    if status_info.get("usable") is False:
+        return "unavailable"
+    if status_info.get("usable") is True or status_info.get("available") is True:
         return "ready"
     return "unavailable"
+
+
+def _public_stt_status_message(availability: str) -> str | None:
+    """Return a stable public status label without exposing raw health diagnostics."""
+    if availability == "ready":
+        return "Ready"
+    if availability == "on_demand":
+        return "Available on demand"
+    if availability == "unavailable":
+        return "Unavailable"
+    return None
+
+
+def _get_cached_stt_capabilities() -> dict[str, Any] | None:
+    cached = _STT_CAPABILITIES_CACHE
+    if cached is None:
+        return None
+    cached_at, payload = cached
+    if time.monotonic() - cached_at > _STT_CAPABILITIES_CACHE_TTL_SECONDS:
+        return None
+    return copy.deepcopy(payload)
+
+
+def _set_cached_stt_capabilities(payload: dict[str, Any]) -> None:
+    global _STT_CAPABILITIES_CACHE
+    _STT_CAPABILITIES_CACHE = (time.monotonic(), copy.deepcopy(payload))
 
 
 def _stt_catalog_entries() -> list[dict[str, Any]]:
@@ -823,8 +854,23 @@ def _stt_provider_capability_metadata(registry: Any, provider: str | None) -> tu
     return provider_capabilities, provider_sources
 
 
-@router.get("/transcriptions/capabilities", summary="Summarize STT model capabilities")
-async def get_stt_capabilities(request: Request) -> dict[str, Any]:
+@router.get(
+    "/transcriptions/capabilities",
+    response_model=SttCapabilitiesResponse,
+    summary="Summarize STT model capabilities",
+    dependencies=[
+        Depends(check_rate_limit),
+        Depends(
+            TokenScopeGuard(
+                "any",
+                require_if_present=True,
+                endpoint_id="audio.transcriptions.capabilities",
+                count_as="call",
+            )
+        ),
+    ],
+)
+def get_stt_capabilities(request: Request) -> dict[str, Any]:
     """Return read-only STT capability metadata without warming models."""
     from datetime import datetime
 
@@ -832,6 +878,10 @@ async def get_stt_capabilities(request: Request) -> dict[str, Any]:
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import stt_provider_adapter
 
     ensure_request_id(request)
+    cached_payload = _get_cached_stt_capabilities()
+    if cached_payload is not None:
+        return cached_payload
+
     registry = stt_provider_adapter.get_stt_provider_registry()
     models: list[dict[str, Any]] = []
 
@@ -880,7 +930,7 @@ async def get_stt_capabilities(request: Request) -> dict[str, Any]:
             "availability_source": sources["availability"],
             "capabilities": {field: capabilities.get(field, "unknown") for field in _STT_CAPABILITY_FIELDS},
             "sources": sources,
-            "message": status_info.get("message"),
+            "message": _public_stt_status_message(availability),
         }
         if catalog_entry.get("description"):
             model_payload["description"] = catalog_entry.get("description")
@@ -889,12 +939,14 @@ async def get_stt_capabilities(request: Request) -> dict[str, Any]:
 
         models.append(model_payload)
 
-    return _sanitize_public_health_payload(
+    payload = _sanitize_public_health_payload(
         {
             "models": models,
             "timestamp": datetime.utcnow().isoformat(),
         }
     )
+    _set_cached_stt_capabilities(payload)
+    return payload
 
 
 @router.get("/transcriptions/health", summary="Check STT transcription model health")

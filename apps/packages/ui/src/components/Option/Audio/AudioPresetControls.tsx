@@ -10,7 +10,7 @@ type AudioPresetControlsProps = {
   kind: Extract<AudioPresetKind, "tts" | "stt">
   currentConfig: Record<string, unknown>
   capabilityAssumptions?: Record<string, unknown>
-  onApply: (config: Record<string, unknown>, preset: AudioPreset) => void
+  onApply: (config: Record<string, unknown>, preset: AudioPreset) => Promise<void> | void
   className?: string
 }
 
@@ -18,6 +18,22 @@ const kindLabel = {
   tts: "TTS",
   stt: "STT"
 } as const
+
+const buildDuplicatePresetName = (
+  sourceName: string,
+  existingPresets: AudioPreset[]
+): string => {
+  const baseName = `${sourceName.trim() || "Preset"} copy`
+  const existingNames = new Set(
+    existingPresets.map((preset) => preset.name.trim().toLowerCase())
+  )
+  if (!existingNames.has(baseName.toLowerCase())) return baseName
+  let index = 2
+  while (existingNames.has(`${baseName} ${index}`.toLowerCase())) {
+    index += 1
+  }
+  return `${baseName} ${index}`
+}
 
 export const AudioPresetControls: React.FC<AudioPresetControlsProps> = ({
   kind,
@@ -41,6 +57,7 @@ export const AudioPresetControls: React.FC<AudioPresetControlsProps> = ({
   } = useAudioPresets({ kind })
   const [selectedId, setSelectedId] = React.useState<string | undefined>()
   const [name, setName] = React.useState("")
+  const syncedPresetIdRef = React.useRef<string | undefined>()
 
   const selectedPreset = React.useMemo(
     () => presets.find((preset) => preset.id === selectedId),
@@ -48,15 +65,23 @@ export const AudioPresetControls: React.FC<AudioPresetControlsProps> = ({
   )
 
   React.useEffect(() => {
-    if (selectedPreset) {
+    if (selectedPreset && selectedPreset.id !== syncedPresetIdRef.current) {
+      syncedPresetIdRef.current = selectedPreset.id
       setName(selectedPreset.name)
       return
     }
     if (!selectedId && presets.length > 0) {
       const defaultPreset = presets.find((preset) => preset.is_default)
       const next = defaultPreset || presets[0]
+      syncedPresetIdRef.current = next.id
       setSelectedId(next.id)
       setName(next.name)
+      return
+    }
+    if (selectedId && !selectedPreset) {
+      syncedPresetIdRef.current = undefined
+      setSelectedId(undefined)
+      setName("")
     }
   }, [presets, selectedId, selectedPreset])
 
@@ -119,7 +144,7 @@ export const AudioPresetControls: React.FC<AudioPresetControlsProps> = ({
           description: validation.warnings.map((warning) => warning.message).join(" ")
         })
       }
-      onApply(selectedPreset.config || {}, selectedPreset)
+      await onApply(selectedPreset.config || {}, selectedPreset)
     } catch (error: unknown) {
       notifyFailure("Preset validation failed", error)
     }
@@ -130,7 +155,7 @@ export const AudioPresetControls: React.FC<AudioPresetControlsProps> = ({
     try {
       const created = await createPreset({
         kind,
-        name: `${selectedPreset.name} copy`,
+        name: buildDuplicatePresetName(selectedPreset.name, presets),
         description: selectedPreset.description,
         favorite: selectedPreset.favorite,
         config: selectedPreset.config,
@@ -141,7 +166,7 @@ export const AudioPresetControls: React.FC<AudioPresetControlsProps> = ({
     } catch (error: unknown) {
       notifyFailure("Preset duplicate failed", error)
     }
-  }, [createPreset, kind, notification, notifyFailure, selectedPreset])
+  }, [createPreset, kind, notification, notifyFailure, presets, selectedPreset])
 
   const handleRename = React.useCallback(async () => {
     if (!selectedPreset) return

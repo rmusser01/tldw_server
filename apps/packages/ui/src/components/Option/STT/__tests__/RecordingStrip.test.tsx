@@ -81,7 +81,7 @@ describe("RecordingStrip", () => {
     expect(btn.getAttribute("aria-label")).toContain("Start recording")
   })
 
-  it("shows classified microphone recovery when recording cannot start", async () => {
+  it("shows classified microphone permission notification when recording cannot start", async () => {
     mockStartRecording.mockRejectedValueOnce(
       new DOMException("Permission denied", "NotAllowedError")
     )

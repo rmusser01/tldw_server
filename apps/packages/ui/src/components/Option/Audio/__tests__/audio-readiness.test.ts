@@ -137,6 +137,33 @@ describe("audio readiness helpers", () => {
     ])
   })
 
+  it("attributes capability-only labels and descriptions to the capability response", () => {
+    const options = buildSttModelOptions({
+      capabilitySummary: {
+        models: [
+          {
+            id: "remote-asr",
+            label: "Remote ASR",
+            description: "Hosted model metadata",
+            availability: "ready",
+            capabilities: {}
+          }
+        ]
+      }
+    })
+
+    expect(options[0]).toEqual(
+      expect.objectContaining({
+        label: "Remote ASR",
+        description: "Hosted model metadata",
+        sources: expect.objectContaining({
+          label: "response_schema",
+          description: "response_schema"
+        })
+      })
+    )
+  })
+
   it("keeps unsupported and unknown capability labels distinct", () => {
     expect(describeCapabilityValue("supported")).toEqual({
       label: "Supported",
@@ -176,7 +203,7 @@ describe("audio readiness helpers", () => {
       provider: "elevenlabs",
       hasAudio: true,
       providersInfo: null,
-      elevenLabsApiKey: ""
+      elevenLabsApiKey: "   "
     })
 
     expect(items).toEqual(

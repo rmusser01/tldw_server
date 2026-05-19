@@ -9,6 +9,7 @@ vi.mock("@/services/tts-provider", () => ({
     utterance: "test text",
     playbackSpeed: 1,
     supported: true,
+    normalizeText: vi.fn((text: string) => text),
     synthesize: vi.fn().mockResolvedValue({
       buffer: new ArrayBuffer(100),
       format: "mp3",
@@ -273,6 +274,7 @@ describe("useMultiRenderState", () => {
       utterance: "Hello world",
       playbackSpeed: 1,
       supported: true,
+      normalizeText: vi.fn((text: string) => text),
       synthesize: vi.fn().mockRejectedValue(
         new Error("Request failed for sk_secret_inline")
       )
@@ -303,5 +305,54 @@ describe("useMultiRenderState", () => {
     expect(result.current.renders[0].errorMessage).not.toContain(
       "sk_secret_inline"
     )
+  })
+
+  it("clears stale render recovery links after a successful rerun", async () => {
+    vi.mocked(resolveTtsProviderContext)
+      .mockResolvedValueOnce({
+        provider: "tldw",
+        utterance: "Hello world",
+        playbackSpeed: 1,
+        supported: true,
+        normalizeText: vi.fn((text: string) => text),
+        synthesize: vi.fn().mockRejectedValue(
+          new Error("Request failed for sk_secret_inline")
+        )
+      })
+      .mockResolvedValueOnce({
+        provider: "tldw",
+        utterance: "Hello world",
+        playbackSpeed: 1,
+        supported: true,
+        normalizeText: vi.fn((text: string) => text),
+        synthesize: vi.fn().mockResolvedValue({
+          buffer: new ArrayBuffer(100),
+          format: "mp3",
+          mimeType: "audio/mpeg"
+        })
+      })
+
+    const { result } = renderHook(() => useMultiRenderState())
+    act(() => {
+      result.current.addRender({
+        provider: "tldw",
+        voice: "af_heart",
+        model: "kokoro"
+      })
+    })
+    const id = result.current.renders[0].id
+
+    await act(async () => {
+      await result.current.generateRender(id, "Hello world")
+    })
+    expect(result.current.renders[0].errorSettingsHref).toBe("/settings/speech")
+
+    await act(async () => {
+      await result.current.generateRender(id, "Hello world")
+    })
+
+    expect(result.current.renders[0].state).toBe("ready")
+    expect(result.current.renders[0].errorMessage).toBeUndefined()
+    expect(result.current.renders[0].errorSettingsHref).toBeUndefined()
   })
 })

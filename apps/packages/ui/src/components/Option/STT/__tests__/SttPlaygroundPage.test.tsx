@@ -2,7 +2,7 @@
 
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 const storageValues: Record<string, unknown> = {
   speechToTextLanguage: "fr",
@@ -294,6 +294,29 @@ describe("SttPlaygroundPage", () => {
       )
     })
     expect(screen.getByTestId("settings-panel")).toBeTruthy()
+  })
+
+  it("applies an explicit empty model list from a saved preset", async () => {
+    render(<SttPlaygroundPage />)
+
+    act(() => {
+      audioPresetControlPropsRef.current?.onApply(
+        {
+          models: [],
+          language: "en"
+        },
+        { id: "preset-empty", name: "No selected models" }
+      )
+    })
+
+    await waitFor(() => {
+      expect(comparisonPanelProps?.selectedModels).toEqual([])
+      expect(comparisonPanelProps?.sttOptions).toEqual(
+        expect.objectContaining({
+          language: "en"
+        })
+      )
+    })
   })
 
   it("shows an inline retry control when model loading times out", async () => {

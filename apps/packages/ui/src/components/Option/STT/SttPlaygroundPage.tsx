@@ -182,12 +182,16 @@ export const SttPlaygroundPage: React.FC = () => {
       if (typeof config.seg_embeddings_model === "string") {
         nextSettings.segEmbeddingsModel = config.seg_embeddings_model
       }
-      const models = Array.isArray(config.models)
-        ? config.models.filter((model): model is string => typeof model === "string")
-        : typeof config.model === "string"
-          ? [config.model]
+      const rawModels = config.models
+      const hasExplicitModelList = Array.isArray(rawModels)
+      const models = hasExplicitModelList
+        ? rawModels
+            .map((model) => (typeof model === "string" ? model.trim() : ""))
+            .filter((model) => model.length > 0)
+        : typeof config.model === "string" && config.model.trim()
+          ? [config.model.trim()]
           : []
-      if (models.length > 0) setSelectedSttModels(models)
+      if (hasExplicitModelList || models.length > 0) setSelectedSttModels(models)
       setSttSettings(nextSettings)
       setShowSettings(true)
     },

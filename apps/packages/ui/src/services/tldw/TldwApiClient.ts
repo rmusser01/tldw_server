@@ -1318,7 +1318,16 @@ export class TldwApiClientBase {
   private async syncConnectionServerUrl(serverUrl: unknown): Promise<void> {
     const normalized =
       typeof serverUrl === "string" ? serverUrl.trim().replace(/\/$/, "") : ""
-    if (!normalized) return
+    if (!normalized) {
+      await this.storage.remove("tldwServerUrl").catch(() => undefined)
+      if (typeof window === "undefined") return
+      try {
+        window.localStorage?.removeItem("tldw-api-host")
+      } catch {
+        // Best-effort compatibility mirror for the WebUI bootstrap.
+      }
+      return
+    }
 
     await this.storage.set("tldwServerUrl", normalized).catch(() => undefined)
 

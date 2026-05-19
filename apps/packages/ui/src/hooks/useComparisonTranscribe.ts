@@ -89,9 +89,17 @@ export function useComparisonTranscribe() {
       }
       updateResult(resultId, {
         status: "running",
+        text: "",
         config,
         metadata: baseMetadata,
-        requestOptions
+        requestOptions,
+        error: undefined,
+        errorCategory: undefined,
+        errorRecovery: undefined,
+        errorSettingsHref: undefined,
+        errorDebugMessage: undefined,
+        latencyMs: undefined,
+        wordCount: undefined
       })
       const start = performance.now()
       try {
@@ -108,6 +116,11 @@ export function useComparisonTranscribe() {
           text,
           latencyMs,
           wordCount,
+          error: undefined,
+          errorCategory: undefined,
+          errorRecovery: undefined,
+          errorSettingsHref: undefined,
+          errorDebugMessage: undefined,
           metadata: {
             ...baseMetadata,
             ...normalized.metadata,
@@ -174,18 +187,20 @@ export function useComparisonTranscribe() {
       if (rowsToRun.length === 0) return
       setIsRunning(true)
 
-      await Promise.allSettled(
-        rowsToRun.map((result) =>
-          runSingleTranscription(
-            blob,
-            result.id,
-            result.model,
-            result.requestOptions || sttOptions
+      try {
+        await Promise.allSettled(
+          rowsToRun.map((result) =>
+            runSingleTranscription(
+              blob,
+              result.id,
+              result.model,
+              result.requestOptions || sttOptions
+            )
           )
         )
-      )
-
-      setIsRunning(false)
+      } finally {
+        setIsRunning(false)
+      }
     },
     [createResultId, runSingleTranscription]
   )

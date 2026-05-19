@@ -211,10 +211,10 @@ vi.mock("@/components/Option/Audio/AudioPresetControls", () => ({
         onClick={() =>
           props.onApply(
             {
-              provider: "openai",
-              model: "gpt-4o-mini-tts",
-              voice: "verse",
-              response_format: "opus",
+              provider: " openai ",
+              model: " gpt-4o-mini-tts ",
+              voice: " verse ",
+              response_format: " opus ",
               speed: 1.2,
               response_splitting: "paragraph",
               streaming: false

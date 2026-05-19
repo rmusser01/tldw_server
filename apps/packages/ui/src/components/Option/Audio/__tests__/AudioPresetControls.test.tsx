@@ -160,6 +160,63 @@ describe("AudioPresetControls", () => {
     })
   })
 
+  it("surfaces asynchronous apply failures after validation", async () => {
+    const preset = makePreset()
+    hookState.current.presets = [preset]
+    const onApply = vi.fn().mockRejectedValue(new Error("Apply failed"))
+
+    render(
+      <AudioPresetControls
+        kind="tts"
+        currentConfig={{ provider: "browser" }}
+        onApply={onApply}
+      />
+    )
+
+    await screen.findByDisplayValue("Warm narrator")
+    fireEvent.click(screen.getByRole("button", { name: "Apply preset" }))
+
+    await waitFor(() => {
+      expect(onApply).toHaveBeenCalledWith(preset.config, preset)
+      expect(notificationMock.error).toHaveBeenCalledWith({
+        message: "Preset validation failed",
+        description: "Apply failed"
+      })
+    })
+  })
+
+  it("does not overwrite an in-progress name edit on preset list refresh", async () => {
+    const preset = makePreset()
+    hookState.current.presets = [preset]
+
+    const { rerender } = render(
+      <AudioPresetControls
+        kind="tts"
+        currentConfig={{ provider: "tldw" }}
+        onApply={vi.fn()}
+      />
+    )
+
+    await screen.findByDisplayValue("Warm narrator")
+    fireEvent.change(screen.getByPlaceholderText("Preset name"), {
+      target: { value: "Draft edit" }
+    })
+
+    hookState.current = {
+      ...hookState.current,
+      presets: [makePreset({ updated_at: "2026-05-19T00:01:00Z" })]
+    }
+    rerender(
+      <AudioPresetControls
+        kind="tts"
+        currentConfig={{ provider: "tldw" }}
+        onApply={vi.fn()}
+      />
+    )
+
+    expect(screen.getByDisplayValue("Draft edit")).toBeInTheDocument()
+  })
+
   it("renames, favorites, defaults, duplicates, and deletes the selected preset", async () => {
     const preset = makePreset()
     hookState.current.presets = [preset]
@@ -201,6 +258,33 @@ describe("AudioPresetControls", () => {
         capability_assumptions: preset.capability_assumptions
       })
       expect(deletePresetMock).toHaveBeenCalledWith("preset-1")
+    })
+  })
+
+  it("uses a unique name when duplicating the selected preset repeatedly", async () => {
+    const preset = makePreset()
+    hookState.current.presets = [
+      preset,
+      makePreset({ id: "preset-copy", name: "Warm narrator copy" })
+    ]
+
+    render(
+      <AudioPresetControls
+        kind="tts"
+        currentConfig={{ provider: "tldw" }}
+        onApply={vi.fn()}
+      />
+    )
+
+    await screen.findByDisplayValue("Warm narrator")
+    fireEvent.click(screen.getByRole("button", { name: "Duplicate selected preset" }))
+
+    await waitFor(() => {
+      expect(createPresetMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "Warm narrator copy 2"
+        })
+      )
     })
   })
 })
