@@ -30,13 +30,14 @@ Verification notes:
 - Bandit initially flagged B405 stdlib XML imports in Watchlists RSS/OPML/WebSub parser files. Those imports were replaced with `defusedxml.ElementTree`, then Bandit passed with 0 findings on `watchlists.py`, `watchlists_schemas.py`, and `app/core/Watchlists`.
 - Parser-adjacent regressions passed after the XML parser patch: OPML API/edge/export tests (6 passed) and RSS/fetcher/WebSub tests (42 passed).
 - Browser QA used an isolated backend on `127.0.0.1:18002` and WebUI on `127.0.0.1:8082`. `/watchlists` rendered the Watchlists page with `Imported Watchlist`; observed Watchlists API calls returned 200; no console errors, request failures, or page errors in the final page-load pass. Create Watchlist opened the guided setup modal without errors. Overview shortcuts opened Feeds and Monitors content; telemetry/notification stream requests aborted only during scripted navigation/teardown.
-- `git diff --check` passed before browser QA and should be rerun before commit.
+- `git diff --check` passed before browser QA and again before commit.
+- Pull request: https://github.com/rmusser01/tldw_server/pull/1867
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed PR6 release-hardening verification for Watchlists. The only code change required was removing remaining stdlib XML imports from Watchlists RSS, OPML, and WebSub parsing paths so Bandit no longer reports B405 while existing defusedxml parsing remains intact. Focused frontend, backend, parser-adjacent, Bandit, and browser-observed `/watchlists` checks passed.
+Completed PR6 release-hardening verification for Watchlists in PR #1867. The only code change required was removing remaining stdlib XML imports from Watchlists RSS, OPML, and WebSub parsing paths so Bandit no longer reports B405 while existing defusedxml parsing remains intact. Focused frontend, backend, parser-adjacent, Bandit, and browser-observed `/watchlists` checks passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
