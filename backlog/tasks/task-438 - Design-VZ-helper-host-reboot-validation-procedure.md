@@ -74,8 +74,6 @@ Designed the next VZ Linux host-reboot validation slice and wrote an implementat
 Task 5 completed the operator documentation closeout for the implemented drill workflow and recorded verification/skip policy in TASK-443.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

@@ -497,7 +497,7 @@ python -m bandit -r tools/macos-vz-helper/scripts/vz-helperctl.py \
 
 Expected: `results=[]`, `errors=[]`.
 
-- [x] **Step 5: Optional prepared-host validation**
+- [x] **Step 5: Record optional prepared-host validation status**
 
 Only on a prepared Apple silicon host:
 

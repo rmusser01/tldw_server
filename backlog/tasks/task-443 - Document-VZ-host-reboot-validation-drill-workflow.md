@@ -21,6 +21,10 @@ Implement Task 5 from Docs/superpowers/plans/2026-05-19-vz-helper-host-reboot-va
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 README documents the durable evidence directory requirement and direct/launchd pre -> reboot -> post command sequence.
+- [x] #2 Operator notes explain restored-helper smoke targeting and keep diagnostics/dry-run repair separate and operator-reviewed.
+- [x] #3 Host-gated CI policy states scheduled/nightly CI must not reboot hosts and records skip/blocking behavior.
+- [x] #4 Task plan and Backlog records include verification results and the prepared-host reboot skip reason.
 <!-- AC:END -->
 
 ## Implementation Notes

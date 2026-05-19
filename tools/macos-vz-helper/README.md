@@ -123,9 +123,11 @@ Direct helper mode uses the managed helper socket directly:
 
 ```bash
 evidence_dir="$HOME/Library/Logs/tldw/vz-host-reboot-drill/manual-$(date +%Y%m%d-%H%M%S)"
+socket_path="$HOME/Library/Application Support/tldw/sandbox/macos-vz-helper/helper.sock"
 
 tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill pre \
   --evidence-dir "$evidence_dir" \
+  --socket "$socket_path" \
   --bundle /path/to/canonical/bundle \
   --create-evidence-dir
 
@@ -133,6 +135,7 @@ tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill pre \
 
 tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill post \
   --evidence-dir "$evidence_dir" \
+  --socket "$socket_path" \
   --bundle /path/to/canonical/bundle \
   --run-smoke
 ```
