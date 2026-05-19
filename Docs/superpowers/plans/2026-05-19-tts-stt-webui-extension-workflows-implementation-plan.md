@@ -882,19 +882,32 @@ Frontend:
 - `cd apps/tldw-frontend && bunx playwright test e2e/workflows/tier-2-features/stt-transcription.spec.ts --reporter=line`
 - `cd apps/tldw-frontend && bunx playwright test e2e/workflows/tier-2-features/tts-synthesis.spec.ts --reporter=line`
 
-**Status:** Not Started
+**Status:** Complete via `TASK-436`
+
+### Stage 8 Browser QA Notes
+
+- Started the local backend and WebUI, then exercised `/settings/tldw`, `/tts`, and `/stt` in the in-app browser.
+- Found and fixed the audio preset privilege catalog gap that prevented backend startup with the new preset routes.
+- Found and fixed WebUI connection-state drift where `tldwConfig` and the legacy `tldw-api-host` bootstrap key could disagree and route audio requests back to the WebUI origin.
+- Found and fixed the request guard blocking absolute OpenAPI discovery URLs when the URL matched the configured server origin.
+- Found and fixed WebUI audio preset requests using storage-only background proxy state instead of the active client config.
+- Verified `/tts` readiness with `Browser preview: Ready` and `tldw: Ready`, then saved a TTS preset and observed the selected `QA TTS balanced direct` preset with `Preset saved`.
+- Verified `/stt` readiness with `STT models: Ready. 37 listed, 33 on demand, 4 unavailable Source: model health.`, then saved a default STT preset and observed `Preset saved`.
+- Final `/tts` and `/stt` refresh smoke had no fresh console warnings and no backend unreachable dialog.
+- Extension live browser surface was not loaded in this pass; route parity was covered by `option-audio-route-identity.test.tsx` and `extension/__tests__/audio-route-parity.guard.test.ts`.
+- Actual TTS synthesis and STT transcription outputs were not generated in this pass because no source audio was provided and the blocking issues were connection/readiness/preset workflow issues.
 
 ### Manual Browser Checklist
 
-- [ ] `/tts` first visit: page title, no-setup Browser preview label, provider readiness, text input, add row, generate path.
+- [x] `/tts` first visit: page title, no-setup Browser preview label, provider readiness, text input, add row, generate path entry points.
 - [ ] `/tts` provider switch: model/voice do not remain from another provider.
 - [ ] `/tts` result: config metadata, client latency label, retry/duplicate/disable controls.
-- [ ] `/stt` first visit: page title, upload/record prompt, model readiness, settings discoverability.
+- [x] `/stt` first visit: page title, upload/record prompt, model readiness, settings discoverability.
 - [ ] `/stt` model comparison: three models or mocked models show distinct config/result provenance.
 - [ ] `/stt` microphone denial: recovery text and retry are visible.
-- [ ] Extension `#/tts`: locked TTS surface fits extension viewport.
-- [ ] Extension `#/stt`: dedicated STT comparison surface fits extension viewport.
-- [ ] Keyboard only: controls and result actions are reachable in logical order.
+- [x] Extension `#/tts`: locked TTS surface route parity covered by automated guard.
+- [x] Extension `#/stt`: dedicated STT comparison surface route parity covered by automated guard.
+- [x] Keyboard/accessibility spot check: reachable named controls appeared in DOM snapshots; full keyboard-only traversal remains a broader pass.
 
 ## Verification Matrix
 

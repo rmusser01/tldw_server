@@ -173,6 +173,31 @@ describe("runtime-bootstrap chrome shim", () => {
     })
   })
 
+  it("ignores a stale WebUI page-origin host in advanced mode", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
+    localStorage.setItem("tldw-api-host", window.location.origin)
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "single-user",
+        apiKey: "frontend-key",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+    )
+
+    await import("@web/extension/shims/runtime-bootstrap")
+
+    expect(localStorage.getItem("tldw-api-host")).toBe("http://127.0.0.1:8000")
+    await vi.waitFor(() => {
+      expect(readStoredValue("tldwServerUrl")).toBe("http://127.0.0.1:8000")
+
+      const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
+      expect(nextConfig.serverUrl).toBe("http://127.0.0.1:8000")
+      expect(nextConfig.apiKey).toBe("frontend-key")
+    })
+  })
+
   it("repairs a stale env LAN host to the current browser host during bootstrap", async () => {
     process.env.NEXT_PUBLIC_API_URL = "http://192.168.5.184:8000"
 

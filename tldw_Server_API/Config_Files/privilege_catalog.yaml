@@ -637,6 +637,93 @@ scopes:
     ownership_predicates:
       - same_org
     doc_url: https://docs.example.com/privileges/audio-history
+  - id: audio.presets.list
+    description: List saved per-user TTS and STT comparison presets.
+    resource_tags:
+      - audio
+      - tts
+      - stt
+      - presets
+    sensitivity_tier: moderate
+    rate_limit_class: standard
+    default_roles:
+      - admin
+      - analyst
+      - developer
+      - viewer
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/audio-presets-list
+  - id: audio.presets.create
+    description: Create saved per-user TTS and STT comparison presets.
+    resource_tags:
+      - audio
+      - tts
+      - stt
+      - presets
+    sensitivity_tier: moderate
+    rate_limit_class: elevated
+    default_roles:
+      - admin
+      - analyst
+      - developer
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/audio-presets-create
+  - id: audio.presets.update
+    description: Update saved per-user TTS and STT comparison presets.
+    resource_tags:
+      - audio
+      - tts
+      - stt
+      - presets
+    sensitivity_tier: moderate
+    rate_limit_class: elevated
+    default_roles:
+      - admin
+      - analyst
+      - developer
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/audio-presets-update
+  - id: audio.presets.delete
+    description: Delete saved per-user TTS and STT comparison presets.
+    resource_tags:
+      - audio
+      - tts
+      - stt
+      - presets
+    sensitivity_tier: moderate
+    rate_limit_class: elevated
+    default_roles:
+      - admin
+      - analyst
+      - developer
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/audio-presets-delete
+  - id: audio.presets.validate
+    description: Validate whether a saved audio preset can run with current provider capability state.
+    resource_tags:
+      - audio
+      - tts
+      - stt
+      - presets
+    sensitivity_tier: moderate
+    rate_limit_class: standard
+    default_roles:
+      - admin
+      - analyst
+      - developer
+      - viewer
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/audio-presets-validate
   - id: audio.tokenizer
     description: Encode/decode audio tokens for debugging and tooling.
     resource_tags:

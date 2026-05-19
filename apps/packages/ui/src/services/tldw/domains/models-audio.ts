@@ -52,6 +52,7 @@ export interface TldwApiClientCore {
   createImageArtifact(request: any): Promise<any>
   ensureConfigForRequest(requireAuth: boolean): Promise<any>
   request<T>(init: any, requireAuth?: boolean): Promise<T>
+  requestWithCurrentConfig<T>(init: any, requireAuth?: boolean): Promise<T>
   upload<T>(init: any, requireAuth?: boolean): Promise<T>
 }
 
@@ -714,7 +715,7 @@ export const modelsAudioMethods = {
       limit: options?.limit,
       offset: options?.offset
     })
-    return await bgRequest<AudioPresetListResponse>({
+    return await this.requestWithCurrentConfig<AudioPresetListResponse>({
       path: `/api/v1/audio/presets${query}`,
       method: "GET",
       timeoutMs: options?.timeoutMs
@@ -726,7 +727,7 @@ export const modelsAudioMethods = {
     payload: AudioPresetCreatePayload
   ): Promise<AudioPreset> {
     await this.ensureConfigForRequest(true)
-    return await bgRequest<AudioPreset>({
+    return await this.requestWithCurrentConfig<AudioPreset>({
       path: "/api/v1/audio/presets",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -740,7 +741,7 @@ export const modelsAudioMethods = {
     payload: AudioPresetUpdatePayload
   ): Promise<AudioPreset> {
     await this.ensureConfigForRequest(true)
-    return await bgRequest<AudioPreset>({
+    return await this.requestWithCurrentConfig<AudioPreset>({
       path: `/api/v1/audio/presets/${encodeURIComponent(presetId)}`,
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -753,7 +754,7 @@ export const modelsAudioMethods = {
     presetId: string
   ): Promise<void> {
     await this.ensureConfigForRequest(true)
-    await bgRequest<void>({
+    await this.requestWithCurrentConfig<void>({
       path: `/api/v1/audio/presets/${encodeURIComponent(presetId)}`,
       method: "DELETE"
     })
@@ -764,7 +765,7 @@ export const modelsAudioMethods = {
     presetId: string
   ): Promise<AudioPresetValidationResponse> {
     await this.ensureConfigForRequest(true)
-    return await bgRequest<AudioPresetValidationResponse>({
+    return await this.requestWithCurrentConfig<AudioPresetValidationResponse>({
       path: `/api/v1/audio/presets/${encodeURIComponent(presetId)}/validate`,
       method: "POST"
     })

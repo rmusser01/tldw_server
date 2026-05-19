@@ -1315,6 +1315,21 @@ export class TldwApiClientBase {
     return "tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing."
   }
 
+  private async syncConnectionServerUrl(serverUrl: unknown): Promise<void> {
+    const normalized =
+      typeof serverUrl === "string" ? serverUrl.trim().replace(/\/$/, "") : ""
+    if (!normalized) return
+
+    await this.storage.set("tldwServerUrl", normalized).catch(() => undefined)
+
+    if (typeof window === "undefined") return
+    try {
+      window.localStorage?.setItem("tldw-api-host", normalized)
+    } catch {
+      // Best-effort compatibility mirror for the WebUI bootstrap.
+    }
+  }
+
   normalizeRagQuery(rawQuery: string): string {
     const normalized =
       typeof rawQuery === "string" ? rawQuery : String(rawQuery ?? "")
@@ -1410,6 +1425,34 @@ export class TldwApiClientBase {
   async request<T = any>(init: any, requireAuth = true): Promise<T> {
     await this.ensureConfigForRequest(requireAuth && !init?.noAuth)
     return await bgRequest<T>(init)
+  }
+
+  async requestWithCurrentConfig<T = any>(
+    init: any,
+    requireAuth = true
+  ): Promise<T> {
+    const cfg = await this.ensureConfigForRequest(requireAuth && !init?.noAuth)
+    if (getCurrentBrowserSurface() !== "webui-page") {
+      return await bgRequest<T>(init)
+    }
+
+    const response = await tldwRequest(init, {
+      getConfig: async () => cfg
+    })
+    if (!response?.ok) {
+      const message =
+        typeof response?.error === "string" && response.error.trim()
+          ? response.error
+          : `Request failed: ${response?.status ?? 0}`
+      const error = new Error(message) as Error & {
+        status?: number
+        details?: unknown
+      }
+      error.status = response?.status
+      error.details = response?.data
+      throw error
+    }
+    return response.data as T
   }
 
   async fetchWithAuth(
@@ -1555,6 +1598,9 @@ export class TldwApiClientBase {
     const newConfig = { ...(currentConfig as any), ...config } as TldwConfig
     await this.storage.set('tldwConfig', newConfig)
     this.config = newConfig
+    if (Object.prototype.hasOwnProperty.call(config, "serverUrl")) {
+      await this.syncConnectionServerUrl(config.serverUrl)
+    }
     await this.initialize().catch(() => null)
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("tldw:config-updated"))
@@ -1796,10 +1842,10 @@ export class TldwApiClientBase {
     try {
       if (!this.baseUrl) await this.initialize()
       if (!this.baseUrl) return null
-      return await bgRequest<any>({
+      return await this.requestWithCurrentConfig<any>({
         path: `${this.baseUrl.replace(/\/$/, '')}/openapi.json` as any,
         method: 'GET' as any
-      })
+      }, false)
     } catch {
       return null
     }
@@ -6009,7 +6055,7 @@ export class TldwApiClientBase {
       limit: options?.limit,
       offset: options?.offset
     })
-    return await bgRequest<AudioPresetListResponse>({
+    return await this.requestWithCurrentConfig<AudioPresetListResponse>({
       path: `/api/v1/audio/presets${query}`,
       method: "GET",
       timeoutMs: options?.timeoutMs
@@ -6018,7 +6064,7 @@ export class TldwApiClientBase {
 
   async createAudioPreset(payload: AudioPresetCreatePayload): Promise<AudioPreset> {
     await this.ensureConfigForRequest(true)
-    return await bgRequest<AudioPreset>({
+    return await this.requestWithCurrentConfig<AudioPreset>({
       path: "/api/v1/audio/presets",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -6031,7 +6077,7 @@ export class TldwApiClientBase {
     payload: AudioPresetUpdatePayload
   ): Promise<AudioPreset> {
     await this.ensureConfigForRequest(true)
-    return await bgRequest<AudioPreset>({
+    return await this.requestWithCurrentConfig<AudioPreset>({
       path: `/api/v1/audio/presets/${encodeURIComponent(presetId)}`,
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -6041,7 +6087,7 @@ export class TldwApiClientBase {
 
   async deleteAudioPreset(presetId: string): Promise<void> {
     await this.ensureConfigForRequest(true)
-    await bgRequest<void>({
+    await this.requestWithCurrentConfig<void>({
       path: `/api/v1/audio/presets/${encodeURIComponent(presetId)}`,
       method: "DELETE"
     })
@@ -6051,7 +6097,7 @@ export class TldwApiClientBase {
     presetId: string
   ): Promise<AudioPresetValidationResponse> {
     await this.ensureConfigForRequest(true)
-    return await bgRequest<AudioPresetValidationResponse>({
+    return await this.requestWithCurrentConfig<AudioPresetValidationResponse>({
       path: `/api/v1/audio/presets/${encodeURIComponent(presetId)}/validate`,
       method: "POST"
     })
