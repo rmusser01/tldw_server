@@ -85,6 +85,7 @@ import {
   applyChatSettingsPatch,
   syncChatSettingsForServerChat,
 } from "@/services/chat-settings";
+import { fetchChatModels } from "@/services/tldw-server";
 import {
   buildResearchFollowUpPrompt,
   clearAttachedResearchContext,
@@ -125,6 +126,8 @@ import {
   type CharacterChatReadinessAction,
 } from "@/utils/chat-model-availability";
 import type { Character } from "@/types/character";
+
+type ChatModelCatalog = Awaited<ReturnType<typeof fetchChatModels>>;
 
 const toText = (value: unknown): string =>
   typeof value === "string" ? value : String(value);
@@ -220,6 +223,8 @@ export const Playground = () => {
     React.useState<MissingCharacterRecovery | null>(null);
   const [routeCharacterRetryToken, setRouteCharacterRetryToken] =
     React.useState(0);
+  const [characterChatAvailableModels, setCharacterChatAvailableModels] =
+    React.useState<ChatModelCatalog | null>(null);
   const [composerDockMetrics, setComposerDockMetrics] =
     React.useState<ComposerDockLayoutMetrics | null>(null);
   const [composerHasDraft, setComposerHasDraft] = React.useState(false);
@@ -240,6 +245,24 @@ export const Playground = () => {
       CHAT_WORKFLOW_MODE_STORAGE_KEY,
       "standard",
     );
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    void fetchChatModels({ returnEmpty: true })
+      .then((models) => {
+        if (cancelled) return;
+        setCharacterChatAvailableModels(Array.isArray(models) ? models : []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCharacterChatAvailableModels([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [characterModeIntentActive, setCharacterModeIntentActive] =
     React.useState(false);
   const [chatLayoutMode, setChatLayoutMode] =
@@ -2027,11 +2050,17 @@ export const Playground = () => {
         isServerConnected: serverReadinessState !== "blocked",
         selectedCharacter,
         selectedModel: providerRouteSummary.selectedModel,
+        availableModels: characterChatAvailableModels,
+        isSendBlocked: Boolean(streaming || isProcessing || isLoading),
       }),
     [
+      characterChatAvailableModels,
+      isLoading,
+      isProcessing,
       providerRouteSummary.selectedModel,
       selectedCharacter,
       serverReadinessState,
+      streaming,
     ],
   );
   React.useEffect(() => {
@@ -2389,6 +2418,15 @@ export const Playground = () => {
       settingsScope: providerRouteSummary.providerRouteLabel ?? null,
     });
   }, [providerRouteSummary.providerRouteLabel, setActiveSettingsScope]);
+  const openServerSettingsFromCockpit = React.useCallback(() => {
+    if (typeof setActiveSettingsScope === "function") {
+      setActiveSettingsScope(null);
+    }
+    openModelSettings({
+      returnFocusSelector: COCKPIT_MODEL_SETTINGS_TRIGGER_SELECTOR,
+      settingsScope: null,
+    });
+  }, [setActiveSettingsScope]);
   const openCharacterSelectorFromReadiness = React.useCallback(() => {
     openAssistantSelector({
       tab: "character",
@@ -2408,14 +2446,19 @@ export const Playground = () => {
         openCharacterSelectorFromReadiness();
         return;
       }
-      if (
-        action === "open-model-settings" ||
-        action === "open-server-settings"
-      ) {
+      if (action === "open-model-settings") {
         openModelSettingsFromCockpit();
+        return;
+      }
+      if (action === "open-server-settings") {
+        openServerSettingsFromCockpit();
       }
     },
-    [openCharacterSelectorFromReadiness, openModelSettingsFromCockpit],
+    [
+      openCharacterSelectorFromReadiness,
+      openModelSettingsFromCockpit,
+      openServerSettingsFromCockpit,
+    ],
   );
   const openMcpSettingsFromCockpit = React.useCallback(() => {
     openMcpSettings({

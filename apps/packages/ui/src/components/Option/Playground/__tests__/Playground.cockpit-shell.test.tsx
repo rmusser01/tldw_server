@@ -82,6 +82,15 @@ const tldwClientState = vi.hoisted(() => ({
   getResearchBundle: vi.fn(async () => null),
 }));
 
+const tldwServerState = vi.hoisted(() => ({
+  fetchChatModels: vi.fn(async () => [
+    {
+      model: "openai:gpt-4.1-mini",
+      provider: "openai",
+    },
+  ]),
+}));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
@@ -163,6 +172,10 @@ vi.mock("@/services/chat-settings", () => ({
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: tldwClientState,
+}));
+
+vi.mock("@/services/tldw-server", () => ({
+  fetchChatModels: tldwServerState.fetchChatModels,
 }));
 
 vi.mock("@/db/dexie/helpers", () => ({
@@ -307,6 +320,12 @@ describe("Playground cockpit shell", () => {
     sessionPersistenceState.value.sessionScopeReady = true;
     chatSettingsState.syncChatSettingsForServerChat.mockClear();
     cockpitChatRenderState.starterDeckSignals = [];
+    tldwServerState.fetchChatModels.mockResolvedValue([
+      {
+        model: "openai:gpt-4.1-mini",
+        provider: "openai",
+      },
+    ]);
     tldwClientState.getCharacter.mockImplementation(async (id: string | number) => ({
       id,
       name: "Route Character",
@@ -435,23 +454,25 @@ describe("Playground cockpit shell", () => {
     const assistantSelectListener = vi.fn();
     window.addEventListener("tldw:open-assistant-select", assistantSelectListener);
 
-    render(<Playground />);
+    try {
+      render(<Playground />);
 
-    expect(
-      await screen.findByText("Character missing-character could not be loaded"),
-    ).toBeInTheDocument();
+      expect(
+        await screen.findByText("Character missing-character could not be loaded"),
+      ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Choose character" }));
-    expect(assistantSelectListener).toHaveBeenCalledWith(
-      expect.objectContaining({
-        detail: expect.objectContaining({ tab: "character" }),
-      }),
-    );
-
-    window.removeEventListener(
-      "tldw:open-assistant-select",
-      assistantSelectListener,
-    );
+      fireEvent.click(screen.getByRole("button", { name: "Choose character" }));
+      expect(assistantSelectListener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          detail: expect.objectContaining({ tab: "character" }),
+        }),
+      );
+    } finally {
+      window.removeEventListener(
+        "tldw:open-assistant-select",
+        assistantSelectListener,
+      );
+    }
   });
 
   it("keeps restored route character recovery visible when an old character was selected", async () => {
@@ -505,30 +526,70 @@ describe("Playground cockpit shell", () => {
     const modelSettingsListener = vi.fn();
     window.addEventListener("tldw:open-model-settings", modelSettingsListener);
 
+    try {
+      render(<Playground />);
+
+      expect(
+        await screen.findByText("Choose a chat model before chatting as Ariadne"),
+      ).toBeInTheDocument();
+
+      fireEvent.click(
+        within(screen.getByTestId("character-chat-readiness-panel")).getByRole(
+          "button",
+          { name: "Open model settings" },
+        ),
+      );
+
+      expect(modelSettingsListener).toHaveBeenCalledTimes(1);
+      expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled();
+      expect(messageOptionState.value.selectedCharacter).toEqual({
+        id: "char-1",
+        name: "Ariadne",
+      });
+
+    } finally {
+      window.removeEventListener(
+        "tldw:open-model-settings",
+        modelSettingsListener,
+      );
+    }
+  });
+
+  it("surfaces unavailable selected chat models from the model catalog", async () => {
+    storageState.values.set("playgroundChatWorkflowMode", "character");
+    messageOptionState.value.selectedCharacter = {
+      id: "char-1",
+      name: "Ariadne",
+    };
+    messageOptionState.value.selectedModel = "missing-model";
+    tldwServerState.fetchChatModels.mockResolvedValueOnce([
+      {
+        model: "openai:gpt-4.1-mini",
+        provider: "openai",
+      },
+    ]);
+
     render(<Playground />);
 
     expect(
       await screen.findByText("Choose a chat model before chatting as Ariadne"),
     ).toBeInTheDocument();
+  });
 
-    fireEvent.click(
-      within(screen.getByTestId("character-chat-readiness-panel")).getByRole(
-        "button",
-        { name: "Open model settings" },
-      ),
-    );
-
-    expect(modelSettingsListener).toHaveBeenCalledTimes(1);
-    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled();
-    expect(messageOptionState.value.selectedCharacter).toEqual({
+  it("surfaces send-blocked readiness while character chat is streaming", async () => {
+    storageState.values.set("playgroundChatWorkflowMode", "character");
+    messageOptionState.value.selectedCharacter = {
       id: "char-1",
       name: "Ariadne",
-    });
+    };
+    messageOptionState.value.selectedModel = "openai:gpt-4.1-mini";
+    messageOptionState.value.streaming = true;
 
-    window.removeEventListener(
-      "tldw:open-model-settings",
-      modelSettingsListener,
-    );
+    render(<Playground />);
+
+    expect(
+      await screen.findByText("Character chat is preparing"),
+    ).toBeInTheDocument();
   });
 
   it("surfaces blocked server readiness locally in Character Chat mode", async () => {
@@ -537,19 +598,35 @@ describe("Playground cockpit shell", () => {
       id: "char-1",
       name: "Ariadne",
     };
+    const modelSettingsListener = vi.fn();
+    window.addEventListener("tldw:open-model-settings", modelSettingsListener);
 
-    render(<Playground />);
+    try {
+      render(<Playground />);
 
-    fireEvent(
-      window,
-      new CustomEvent("tldw:server-readiness-state", {
-        detail: { state: "blocked" },
-      }),
-    );
+      fireEvent(
+        window,
+        new CustomEvent("tldw:server-readiness-state", {
+          detail: { state: "blocked" },
+        }),
+      );
 
-    expect(
-      await screen.findByText("Connect to tldw_server before starting character chat"),
-    ).toBeInTheDocument();
+      expect(
+        await screen.findByText("Connect to tldw_server before starting character chat"),
+      ).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Open server settings" }));
+
+      const event = modelSettingsListener.mock.calls[0]?.[0] as CustomEvent;
+      expect(event.detail).toMatchObject({
+        settingsScope: null,
+      });
+    } finally {
+      window.removeEventListener(
+        "tldw:open-model-settings",
+        modelSettingsListener,
+      );
+    }
   });
 
   it("does not write a partial character when header intent only changes mode", async () => {
