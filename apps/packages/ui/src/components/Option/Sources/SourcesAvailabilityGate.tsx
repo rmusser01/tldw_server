@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom"
 
 import { PageShell } from "@/components/Common/PageShell"
 import WorkspaceConnectionGate from "@/components/Common/WorkspaceConnectionGate"
-import { StatePanel, buildCapabilityState } from "@/components/ui/state"
+import { RecoveryCallout, buildCapabilityState } from "@/components/ui/state"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import type { ServerCapabilities } from "@/services/tldw/server-capabilities"
 
@@ -27,15 +27,11 @@ export const SourcesAvailabilityGate: React.FC<SourcesAvailabilityGateProps> = (
   const defaultCapabilityState = useServerCapabilities()
   const { capabilities, loading } = capabilityState ?? defaultCapabilityState
   const unsupportedState = buildCapabilityState({
-    kind: "unavailable",
     featureName: t("sources:title", "Sources"),
-    capabilityName: t("sources:capability.ingestionSources", "ingestion sources"),
-    primaryAction: {
-      label: t("sources:actions.checkServerSetup", "Check server setup"),
-      onClick: () => {
-        navigate("/settings/health")
-      }
-    }
+    capabilityName: "ingestion source management",
+    endpoint: "/api/v1/ingestion-sources",
+    method: "GET",
+    reason: "unsupported"
   })
 
   return (
@@ -49,11 +45,11 @@ export const SourcesAvailabilityGate: React.FC<SourcesAvailabilityGateProps> = (
     >
       {!loading && capabilities && !capabilities.hasIngestionSources ? (
         <PageShell className="py-6" maxWidthClassName={maxWidthClassName}>
-          <StatePanel
+          <RecoveryCallout
             state={unsupportedState.state}
             title={unsupportedState.title}
             message={unsupportedState.message}
-            primaryAction={unsupportedState.primaryAction}
+            diagnostics={unsupportedState.diagnostics}
           />
         </PageShell>
       ) : (

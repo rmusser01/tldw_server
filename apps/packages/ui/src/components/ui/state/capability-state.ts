@@ -1,263 +1,219 @@
 import type { DesignSystemStateKey } from "@/design-system"
-import type { StateAction } from "./ActionGroup"
 import type { StatePanelDiagnostic } from "./StatePanel"
 
-export type CapabilityStateKind =
-  | "empty"
+export type CapabilityStateReason =
+  | "unsupported"
+  | "missing_config"
+  | "partial"
+  | "network"
+  | "unknown"
+
+export type CapabilityRecoveryState = Extract<
+  DesignSystemStateKey,
   | "unavailable"
-  | "missing_worker"
+  | "setup_required"
   | "auth_required"
   | "permission_denied"
-  | "not_configured"
   | "degraded"
-  | "unsupported_version"
-  | "network_failure"
   | "error"
+>
+
+export type CapabilityStateOptions = {
+  featureName: string
+  capabilityName: string
+  endpoint?: string
+  method?: string
+  serverUrl?: string | null
+  status?: number | string | null
+  error?: unknown
+  reason?: CapabilityStateReason
+  rawMessage?: string
+  partialErrors?: string[]
+  title?: string
+  message?: string
+}
 
 export type CapabilityStateDescriptor = {
-  kind: CapabilityStateKind
-  state: DesignSystemStateKey
+  state: CapabilityRecoveryState
   title: string
   message: string
   diagnostics?: StatePanelDiagnostic[]
-  primaryAction?: StateAction
-  secondaryActions?: StateAction[]
 }
 
-export type CapabilityDiagnosticInput = {
-  method?: string
-  endpoint?: string
-  status?: number | string
-  serverUrl?: string
+const NETWORK_ERROR_PATTERN =
+  /(failed to fetch|network error|load failed|err_connection|connection refused|could not establish connection|extension messaging timeout|receiving end does not exist)/i
+
+const lowerFirst = (value: string): string => {
+  const trimmed = value.trim()
+  if (!trimmed) return trimmed
+  return trimmed.charAt(0).toLowerCase() + trimmed.slice(1)
+}
+
+const singularDataName = (featureName: string): string => {
+  const lower = lowerFirst(featureName)
+  if (lower.endsWith(" tasks")) {
+    return lower.slice(0, -1)
+  }
+  return lower
+}
+
+const parseStatus = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const status = Math.trunc(value)
+    return status >= 100 && status <= 599 ? status : null
+  }
+  if (typeof value === "string" && value.trim()) {
+    const numeric = Number(value)
+    if (Number.isFinite(numeric)) {
+      return parseStatus(numeric)
+    }
+    const match = value.match(/\b([1-5]\d{2})\b/)
+    return match ? parseStatus(Number(match[1])) : null
+  }
+  return null
+}
+
+export const getCapabilityErrorStatus = (error: unknown): number | null => {
+  const candidate = error as
+    | {
+        status?: unknown
+        statusCode?: unknown
+        response?: { status?: unknown }
+        message?: unknown
+      }
+    | null
+    | undefined
+
+  return (
+    parseStatus(candidate?.status) ??
+    parseStatus(candidate?.statusCode) ??
+    parseStatus(candidate?.response?.status) ??
+    parseStatus(candidate?.message) ??
+    parseStatus(error)
+  )
+}
+
+export const getCapabilityRawMessage = (error: unknown): string | undefined => {
+  if (error == null) return undefined
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === "string") return error
+  const candidate = error as { message?: unknown } | null | undefined
+  if (typeof candidate?.message === "string" && candidate.message.trim()) {
+    return candidate.message
+  }
+  try {
+    return JSON.stringify(error)
+  } catch {
+    return String(error)
+  }
+}
+
+const classifyCapabilityState = (
+  options: CapabilityStateOptions,
+  status: number | null,
   rawMessage?: string
-}
-
-export type CapabilityStateInput = CapabilityDiagnosticInput & {
-  kind: CapabilityStateKind
-  featureName: string
-  capabilityName?: string
-  title?: string
-  message?: string
-  primaryAction?: StateAction
-  secondaryActions?: StateAction[]
-}
-
-const KIND_TO_STATE: Record<CapabilityStateKind, DesignSystemStateKey> = {
-  empty: "empty",
-  unavailable: "unavailable",
-  missing_worker: "degraded",
-  auth_required: "auth_required",
-  permission_denied: "permission_denied",
-  not_configured: "setup_required",
-  degraded: "degraded",
-  unsupported_version: "unavailable",
-  network_failure: "unavailable",
-  error: "error"
-}
-
-export const statusFromError = (error: unknown): number | undefined => {
-  if (!error || typeof error !== "object") {
-    return undefined
-  }
-
-  const maybeError = error as { status?: unknown; response?: { status?: unknown } }
-  const status = maybeError.status ?? maybeError.response?.status
-
-  return typeof status === "number" ? status : undefined
-}
-
-export const messageFromError = (error: unknown): string => {
-  if (error instanceof Error) {
-    return error.message
-  }
-
-  if (error && typeof error === "object" && "message" in error) {
-    const message = (error as { message?: unknown }).message
-
-    return typeof message === "string" ? message : ""
-  }
-
-  return typeof error === "string" ? error : ""
-}
-
-export const classifyCapabilityError = (error: unknown): CapabilityStateKind => {
-  const status = statusFromError(error)
-
+): CapabilityRecoveryState => {
+  if (options.reason === "partial") return "degraded"
+  if (options.reason === "missing_config") return "setup_required"
   if (status === 401) return "auth_required"
   if (status === 403) return "permission_denied"
-  if (status === 404 || status === 410) return "unavailable"
-  if (status && status >= 500) return "error"
-  if (status && status >= 400) return "error"
-
-  const message = messageFromError(error).toLowerCase()
-
-  if (
-    message.includes("fetch failed") ||
-    message.includes("failed to fetch") ||
-    message.includes("connection refused") ||
-    message.includes("network")
-  ) {
-    return "network_failure"
+  if (options.reason === "unsupported" || status === 404 || status === 405 || status === 422) {
+    return "unavailable"
   }
-
-  if (
-    message.includes("not configured") ||
-    message.includes("missing config") ||
-    message.includes("missing provider") ||
-    message.includes("api key")
-  ) {
-    return "not_configured"
+  if (options.reason === "network" || NETWORK_ERROR_PATTERN.test(rawMessage || "")) {
+    return "unavailable"
   }
-
   return "error"
 }
 
-export const redactDiagnosticServerUrl = (serverUrl: string): string => {
-  const trimmed = serverUrl.trim()
-  if (!trimmed) return ""
-
-  try {
-    const url = new URL(trimmed)
-    if (url.origin !== "null") {
-      url.username = ""
-      url.password = ""
-      url.search = ""
-      url.hash = ""
-
-      return url.origin
-    }
-  } catch {
-    // Fall through to the tolerant parser below.
-  }
-
-  const withoutQueryOrHash = trimmed.split(/[?#]/, 1)[0] ?? trimmed
-  const schemeMatch = withoutQueryOrHash.match(/^([a-z][a-z\d+\-.]*:\/\/)(.*)$/i)
-
-  if (!schemeMatch) {
-    const slashIndex = withoutQueryOrHash.indexOf("/")
-    const authority = slashIndex >= 0
-      ? withoutQueryOrHash.slice(0, slashIndex)
-      : withoutQueryOrHash
-    const atIndex = authority.lastIndexOf("@")
-    return atIndex >= 0 ? authority.slice(atIndex + 1) : authority
-  }
-
-  const [, scheme, rest] = schemeMatch
-  const slashIndex = rest.indexOf("/")
-  const authority = slashIndex >= 0 ? rest.slice(0, slashIndex) : rest
-  const atIndex = authority.lastIndexOf("@")
-  const host = atIndex >= 0 ? authority.slice(atIndex + 1) : authority
-
-  return `${scheme}${host}`
-}
-
-export const buildCapabilityDiagnostics = ({
-  method,
-  endpoint,
-  status,
-  serverUrl,
-  rawMessage
-}: CapabilityDiagnosticInput): StatePanelDiagnostic[] | undefined => {
-  const diagnostics: StatePanelDiagnostic[] = []
-
-  if (method) {
-    diagnostics.push({ label: "Method", value: method })
-  }
-
-  if (endpoint) {
-    diagnostics.push({ label: "Endpoint", value: endpoint, code: true })
-  }
-
-  if (status !== undefined) {
-    diagnostics.push({ label: "Status", value: String(status) })
-  }
-
-  if (serverUrl) {
-    const redactedServerUrl = redactDiagnosticServerUrl(serverUrl)
-    if (redactedServerUrl) {
-      diagnostics.push({ label: "Server URL", value: redactedServerUrl, code: true })
-    }
-  }
-
-  if (rawMessage) {
-    diagnostics.push({ label: "Raw message", value: rawMessage })
-  }
-
-  return diagnostics.length > 0 ? diagnostics : undefined
-}
-
-const titleForKind = (
-  kind: CapabilityStateKind,
-  featureName: string
+const defaultTitle = (
+  options: CapabilityStateOptions,
+  state: CapabilityRecoveryState
 ): string => {
-  switch (kind) {
-    case "empty":
-      return `No ${featureName.toLowerCase()} yet`
-    case "degraded":
-      return `${featureName} are partially available`
-    case "missing_worker":
-      return `${featureName} need a worker`
+  const feature = options.featureName.trim()
+  const lowerFeature = lowerFirst(feature)
+
+  switch (state) {
     case "auth_required":
-      return `${featureName} need credentials`
+      return `Sign in before using ${lowerFeature}`
     case "permission_denied":
-      return `${featureName} need permission`
-    case "not_configured":
-      return `${featureName} need setup`
-    case "unsupported_version":
-      return `${featureName} need a newer server`
-    case "network_failure":
-      return `${featureName} cannot reach the server`
-    case "error":
-      return `${featureName} could not load`
+      return `You do not have access to ${lowerFeature}`
+    case "setup_required":
+      return `${feature} needs setup`
+    case "degraded":
+      return `${feature} are partially available`
     case "unavailable":
+      if (options.reason === "network") {
+        return `Cannot reach ${feature}`
+      }
+      return NETWORK_ERROR_PATTERN.test(getCapabilityRawMessage(options.error) || "")
+        ? `Cannot reach ${feature}`
+        : `${feature} are unavailable on this server`
+    case "error":
     default:
-      return `${featureName} are unavailable`
+      return `Unable to load ${lowerFeature}`
   }
 }
 
-const messageForKind = ({
-  kind,
-  featureName,
-  capabilityName
-}: Pick<
-  CapabilityStateInput,
-  "kind" | "featureName" | "capabilityName"
->): string => {
-  const capability = capabilityName ?? featureName.toLowerCase()
+const defaultMessage = (
+  options: CapabilityStateOptions,
+  state: CapabilityRecoveryState
+): string => {
+  const capability = options.capabilityName.trim()
+  const dataName = singularDataName(options.featureName)
 
-  switch (kind) {
-    case "empty":
-      return `The feature is available, but there is no ${featureName.toLowerCase()} data yet.`
-    case "degraded":
-      return "Some data loaded, but part of this feature is limited."
-    case "missing_worker":
-      return "A background worker or service required for this feature is not running."
+  switch (state) {
     case "auth_required":
-      return "Connect or sign in before this feature can load."
+      return "Connect or repair your tldw credentials, then try again."
     case "permission_denied":
-      return "The current account cannot access this feature."
-    case "not_configured":
-      return "Required provider, server, or feature setup is missing."
-    case "unsupported_version":
-      return `The connected server is older or does not expose the ${capability} capability.`
-    case "network_failure":
-      return "The frontend cannot reach the configured server."
-    case "error":
-      return "The request failed before this feature could load. Check diagnostics or try again."
+      return `Use an account with access to ${capability}.`
+    case "setup_required":
+      return `Configure ${capability}, then try again.`
+    case "degraded":
+      return `Some ${dataName} data loaded, but one dependency could not be reached.`
     case "unavailable":
+      if (options.reason === "network" || NETWORK_ERROR_PATTERN.test(getCapabilityRawMessage(options.error) || "")) {
+        return "The frontend cannot reach the connected server. Check the server and try again."
+      }
+      return `The connected server does not advertise ${capability}.`
+    case "error":
     default:
-      return `This server does not expose the ${capability} capability.`
+      return `The ${capability} overview could not be loaded. Try again or open diagnostics.`
   }
+}
+
+const pushDiagnostic = (
+  diagnostics: StatePanelDiagnostic[],
+  label: string,
+  value: unknown,
+  code = false
+) => {
+  if (value === null || value === undefined || value === "") return
+  diagnostics.push({ label, value: String(value), code })
 }
 
 export const buildCapabilityState = (
-  input: CapabilityStateInput
-): CapabilityStateDescriptor => ({
-  kind: input.kind,
-  state: KIND_TO_STATE[input.kind],
-  title: input.title ?? titleForKind(input.kind, input.featureName),
-  message: input.message ?? messageForKind(input),
-  diagnostics: buildCapabilityDiagnostics(input),
-  primaryAction: input.primaryAction,
-  secondaryActions: input.secondaryActions
-})
+  options: CapabilityStateOptions
+): CapabilityStateDescriptor => {
+  const status =
+    parseStatus(options.status) ?? getCapabilityErrorStatus(options.error)
+  const rawMessage = options.rawMessage ?? getCapabilityRawMessage(options.error)
+  const state = classifyCapabilityState(options, status, rawMessage)
+  const diagnostics: StatePanelDiagnostic[] = []
+
+  pushDiagnostic(diagnostics, "Request method", options.method)
+  pushDiagnostic(diagnostics, "Request path", options.endpoint, true)
+  pushDiagnostic(diagnostics, "Configured server URL", options.serverUrl, true)
+  pushDiagnostic(diagnostics, "Status", status)
+  pushDiagnostic(diagnostics, "Raw message", rawMessage)
+  if (options.partialErrors?.length) {
+    pushDiagnostic(diagnostics, "Partial errors", options.partialErrors.join("; "))
+  }
+
+  return {
+    state,
+    title: options.title ?? defaultTitle(options, state),
+    message: options.message ?? defaultMessage(options, state),
+    diagnostics: diagnostics.length > 0 ? diagnostics : undefined
+  }
+}

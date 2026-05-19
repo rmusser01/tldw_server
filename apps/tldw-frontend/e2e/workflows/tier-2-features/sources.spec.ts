@@ -3,7 +3,7 @@
  *
  * Tests the Sources workspace page lifecycle:
  * - Page loads with expected elements (heading, description, new source button)
- * - Handles loading/offline/unsupported/unavailable/empty states gracefully
+ * - Handles offline/unsupported/unavailable/empty states gracefully
  * - "New source" button navigates to /sources/new
  * - "Sync now" button fires POST /api/v1/ingestion-sources/{id}/sync (requires sources)
  *
@@ -49,7 +49,7 @@ test.describe("Sources & Connectors", () => {
       const emptyVisible = await sources.emptyMessage.isVisible().catch(() => false)
 
       expect(
-        headingVisible || loadingVisible || offlineVisible || unsupportedVisible || unavailableVisible || emptyVisible
+        headingVisible || offlineVisible || unsupportedVisible || unavailableVisible || emptyVisible
       ).toBe(true)
 
       // If the online workspace is showing (heading + no unsupported/offline banner),

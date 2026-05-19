@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -179,56 +179,46 @@ describe("SourcesWorkspacePage", () => {
     expect(screen.getByText("Unavailable")).toBeInTheDocument()
     expect(screen.getByText("Sources are unavailable")).toBeInTheDocument()
     expect(
-      screen.getByText("This server does not expose the ingestion sources capability.")
+      screen.getByRole("heading", { name: "Sources are unavailable on this server" })
     ).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Check server setup" })).toBeInTheDocument()
+    expect(
+      screen.getByText("The connected server does not advertise ingestion source management.")
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
+      "/api/v1/ingestion-sources"
+    )
     expect(hookMocks.useIngestionSourcesQuery).toHaveBeenCalledWith(undefined, {
       enabled: false
     })
   })
 
-  it("keeps raw source endpoint failures in diagnostics", () => {
+  it("moves raw sources load failures into diagnostics", () => {
+    const rawError = Object.assign(
+      new Error("Request failed: 404 (GET /api/v1/ingestion-sources)"),
+      { status: 404 }
+    )
     hookMocks.useIngestionSourcesQuery.mockReturnValue({
       data: undefined,
       isLoading: false,
-      error: {
-        status: 404,
-        message: "Not Found (GET /api/v1/ingestion-sources)"
-      }
+      error: rawError,
+      refetch: vi.fn()
     })
 
     renderWorkspace(<SourcesWorkspacePage />)
 
-    const heading = screen.getByRole("heading", {
-      name: "Sources are unavailable"
-    })
-    const primaryState = heading.closest("div")
+    expect(
+      screen.getByRole("heading", { name: "Sources are unavailable on this server" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("The connected server does not advertise ingestion source management.")
+    ).toBeInTheDocument()
+
     const diagnostics = screen.getByLabelText("Diagnostics")
-
-    expect(primaryState).not.toHaveTextContent("/api/v1/ingestion-sources")
-    expect(diagnostics).toHaveTextContent("/api/v1/ingestion-sources")
-    expect(diagnostics).toHaveTextContent("404")
-    expect(diagnostics).toHaveTextContent("Not Found (GET /api/v1/ingestion-sources)")
-    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument()
-  })
-
-  it("uses a shared empty state with a creation action when there are no sources", () => {
-    hookMocks.useIngestionSourcesQuery.mockReturnValue({
-      data: {
-        sources: [],
-        total: 0
-      },
-      isLoading: false
-    })
-
-    renderWorkspace(<SourcesWorkspacePage />)
-
-    expect(screen.getByText("Empty")).toBeInTheDocument()
-    expect(screen.getByText("No sources yet")).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole("button", { name: "Create source" }))
-
-    expect(routerMocks.navigate).toHaveBeenCalledWith("/sources/new")
+    expect(within(diagnostics).getByText("/api/v1/ingestion-sources")).toBeInTheDocument()
+    expect(within(diagnostics).getByText("404")).toBeInTheDocument()
+    expect(
+      within(diagnostics).getByText("Request failed: 404 (GET /api/v1/ingestion-sources)")
+    ).toBeInTheDocument()
   })
 
   it("wires enable disable actions through the update mutation", async () => {

@@ -1,16 +1,10 @@
 import React from "react"
-import { Button, Spin, Tag, Typography } from "antd"
+import { Button, Empty, Spin, Tag, Typography } from "antd"
 import { useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 
 import { PageShell } from "@/components/Common/PageShell"
-import {
-  StatePanel,
-  buildCapabilityState,
-  classifyCapabilityError,
-  messageFromError,
-  statusFromError
-} from "@/components/ui/state"
+import { RecoveryCallout, buildCapabilityState } from "@/components/ui/state"
 import { useIngestionSourcesQuery } from "@/hooks/use-ingestion-sources"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { SourcesAvailabilityGate } from "./SourcesAvailabilityGate"
@@ -31,39 +25,15 @@ export const SourcesWorkspacePage: React.FC<SourcesWorkspacePageProps> = ({
       !capabilityState.loading &&
       capabilityState.capabilities?.hasIngestionSources !== false
   })
-  const sourceFeatureName = t("sources:title", "Sources")
-  const sourceCapabilityName = t(
-    "sources:capability.ingestionSources",
-    "ingestion sources"
-  )
-  const queryError = sourcesQuery.error
-  const queryErrorState = queryError
+  const loadErrorState = sourcesQuery.error
     ? buildCapabilityState({
-        kind: classifyCapabilityError(queryError),
-        featureName: sourceFeatureName,
-        capabilityName: sourceCapabilityName,
-        method: "GET",
+        featureName: t("sources:title", "Sources"),
+        capabilityName: "ingestion source management",
         endpoint: "/api/v1/ingestion-sources",
-        status: statusFromError(queryError),
-        rawMessage: messageFromError(queryError) || "Failed to load sources",
-        primaryAction: {
-          label: t("common:actions.retry", "Try again"),
-          onClick: () => {
-            void sourcesQuery.refetch?.()
-          }
-        }
+        method: "GET",
+        error: sourcesQuery.error
       })
     : null
-  const emptyState = buildCapabilityState({
-    kind: "empty",
-    featureName: sourceFeatureName,
-    primaryAction: {
-      label: t("sources:actions.create", "Create source"),
-      onClick: () => {
-        navigate("/sources/new")
-      }
-    }
-  })
 
   return (
     <SourcesAvailabilityGate capabilityState={capabilityState}>
@@ -103,14 +73,27 @@ export const SourcesWorkspacePage: React.FC<SourcesWorkspacePageProps> = ({
           </div>
         ) : null}
 
-        {!sourcesQuery.isLoading && queryErrorState ? (
-          <StatePanel
-            state={queryErrorState.state}
-            title={queryErrorState.title}
-            message={queryErrorState.message}
-            diagnostics={queryErrorState.diagnostics}
-            primaryAction={queryErrorState.primaryAction}
-            role="alert"
+        {!sourcesQuery.isLoading && sourcesQuery.error ? (
+          <RecoveryCallout
+            state={loadErrorState?.state ?? "error"}
+            title={loadErrorState?.title ?? "Unable to load sources"}
+            message={
+              loadErrorState?.message ??
+              "The ingestion source overview could not be loaded."
+            }
+            diagnostics={loadErrorState?.diagnostics}
+            primaryAction={{
+              label: t("common:actions.retry", "Try again"),
+              onClick: () => {
+                void sourcesQuery.refetch()
+              }
+            }}
+            secondaryActions={[
+              {
+                label: t("option:healthDiagnostics", "Health & diagnostics"),
+                onClick: () => navigate("/settings/health")
+              }
+            ]}
           />
         ) : null}
 

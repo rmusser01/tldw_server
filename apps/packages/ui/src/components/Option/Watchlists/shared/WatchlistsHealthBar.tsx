@@ -103,15 +103,12 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
   }, [loadData])
 
   const feedsCount = data?.sources.total ?? 0
+  const monitorsTotal = data?.jobs.total ?? 0
   const monitorsActive = data?.jobs.active ?? 0
   const runningRuns = data?.runs.running ?? 0
   const pendingRuns = data?.runs.pending ?? 0
   const failedRuns = data?.runs.failed ?? 0
-  const sourceErrorRuns = data?.runs.sourceErrors ?? 0
-  const zeroItemSourceErrorRuns = data?.runs.zeroItemSourceErrors ?? 0
   const outputsTotal = data?.outputs.total ?? 0
-  const hasOperationalData =
-    feedsCount + monitorsActive + runningRuns + pendingRuns + failedRuns + sourceErrorRuns + outputsTotal > 0
   const lastCheckedAt = data?.runs.running > 0
     ? t("watchlists:healthBar.runningNow", "running now")
     : data?.jobs.nextRunAt
@@ -122,6 +119,16 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
   const unreadUpdates = data?.items.unread ?? 0
   const attentionTotal = overviewHealth?.attention?.total ?? 0
   const hasAttention = attentionTotal > 0
+  const hasOperationalData =
+    feedsCount +
+      monitorsTotal +
+      unreadArticles +
+      runningRuns +
+      pendingRuns +
+      failedRuns +
+      outputsTotal >
+    0
+  const hasNoWatchlistData = Boolean(data) && !hasOperationalData
 
   const summaryParts: string[] = []
   if (feedsCount > 0) {
@@ -140,13 +147,6 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
     summaryParts.push(
       t("watchlists:healthBar.runsFailed", "{{count}} failed", {
         count: failedRuns
-      })
-    )
-  }
-  if (sourceErrorRuns > 0) {
-    summaryParts.push(
-      t("watchlists:healthBar.sourceErrorRuns", "{{count}} source-error runs", {
-        count: sourceErrorRuns
       })
     )
   }
@@ -205,6 +205,32 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
           {summaryParts.length > 0 ? summaryParts.join(" \u00B7 ") : t("watchlists:healthBar.noData", "No watchlist data yet")}
         </span>
         <div className="flex items-center gap-2">
+          {hasNoWatchlistData && (
+            <>
+              <Button
+                size="small"
+                type="default"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  goToTab("sources")
+                }}
+                data-testid="watchlists-health-setup-feeds"
+              >
+                {t("watchlists:quickActions.sources", "Set up feeds")}
+              </Button>
+              <Button
+                size="small"
+                type="default"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  goToTab("jobs")
+                }}
+                data-testid="watchlists-health-setup-monitors"
+              >
+                {t("watchlists:quickActions.jobs", "Configure monitors")}
+              </Button>
+            </>
+          )}
           {refreshing && <Spin size="small" />}
           <Tooltip title={t("watchlists:healthBar.refresh", "Refresh")}>
             <Button
@@ -336,14 +362,16 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
                 </AttentionBadgeButton>
               )}
               {(overviewHealth?.attention?.runs ?? 0) > 0 && (
-                <AttentionBadgeButton
-                  variant="danger"
+                <Button
+                  size="small"
+                  danger
                   onClick={() => goToTab("runs")}
+                  data-testid="watchlists-health-open-activity"
                 >
-                  {t("watchlists:healthBar.openActivityFailures", "Open Activity ({{count}} need review)", {
+                  {t("watchlists:healthBar.openActivityFailures", "Open Activity ({{count}} failed)", {
                     count: overviewHealth?.attention?.runs ?? 0
                   })}
-                </AttentionBadgeButton>
+                </Button>
               )}
               {(overviewHealth?.attention?.outputs ?? 0) > 0 && (
                 <AttentionBadgeButton

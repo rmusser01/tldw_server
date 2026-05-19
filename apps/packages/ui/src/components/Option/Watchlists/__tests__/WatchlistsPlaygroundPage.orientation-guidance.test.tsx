@@ -2,6 +2,7 @@
 
 import React from "react"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WatchlistsPlaygroundPage } from "../WatchlistsPlaygroundPage"
 
@@ -236,6 +237,13 @@ vi.mock("../shared/WatchlistsHealthBar", () => ({
   WatchlistsHealthBar: () => <div data-testid="watchlists-health-bar" />
 }))
 
+const renderPage = () =>
+  render(
+    <MemoryRouter initialEntries={["/watchlists"]}>
+      <WatchlistsPlaygroundPage />
+    </MemoryRouter>
+  )
+
 describe("WatchlistsPlaygroundPage orientation guidance", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -272,7 +280,7 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
 
   it("shows per-tab orientation and explicit Activity to Reports next action", () => {
     mocks.state.activeTab = "runs"
-    render(<WatchlistsPlaygroundPage />)
+    renderPage()
 
     expect(screen.getByTestId("watchlists-orientation-title")).toHaveTextContent("Activity")
     expect(
@@ -301,32 +309,61 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
   })
 
   it("supports the primary workflow journey from overview through reports", () => {
-    const { rerender } = render(<WatchlistsPlaygroundPage />)
+    const { rerender } = renderPage()
 
     fireEvent.click(screen.getByTestId("watchlists-orientation-action-open-feeds"))
     expect(mocks.state.setActiveTab).toHaveBeenCalledWith("sources")
 
     mocks.state.activeTab = "sources"
-    rerender(<WatchlistsPlaygroundPage />)
+    rerender(
+      <MemoryRouter initialEntries={["/watchlists"]}>
+        <WatchlistsPlaygroundPage />
+      </MemoryRouter>
+    )
     fireEvent.click(screen.getByTestId("watchlists-orientation-action-open-monitors"))
     expect(mocks.state.setActiveTab).toHaveBeenCalledWith("sources")
     expect(localStorage.getItem("watchlists:secondary-expanded:v1")).toContain("\"monitors\":true")
 
     mocks.state.activeTab = "jobs"
-    rerender(<WatchlistsPlaygroundPage />)
+    rerender(
+      <MemoryRouter initialEntries={["/watchlists"]}>
+        <WatchlistsPlaygroundPage />
+      </MemoryRouter>
+    )
     fireEvent.click(screen.getByTestId("watchlists-orientation-action-open-activity"))
     expect(mocks.state.setActiveTab).toHaveBeenCalledWith("items")
     expect(localStorage.getItem("watchlists:secondary-expanded:v1")).toContain("\"activity\":true")
 
     mocks.state.activeTab = "runs"
-    rerender(<WatchlistsPlaygroundPage />)
+    rerender(
+      <MemoryRouter initialEntries={["/watchlists"]}>
+        <WatchlistsPlaygroundPage />
+      </MemoryRouter>
+    )
     fireEvent.click(screen.getByTestId("watchlists-orientation-action-open-reports"))
     expect(mocks.state.setActiveTab).toHaveBeenCalledWith("outputs")
   })
 
+  it("keeps repeat-user jumps and command palette reachable before deep tabs", () => {
+    renderPage()
+
+    expect(screen.getByTestId("watchlists-health-bar")).toBeInTheDocument()
+    expect(screen.getByTestId("watchlists-repeat-actions")).toBeInTheDocument()
+    expect(screen.getByTestId("watchlists-repeat-open-runs")).toHaveTextContent("Check activity")
+    expect(screen.getByTestId("watchlists-repeat-open-items")).toHaveTextContent("Review articles")
+    expect(screen.getByTestId("watchlists-repeat-open-outputs")).toHaveTextContent("View reports")
+
+    fireEvent.click(screen.getByTestId("watchlists-repeat-open-runs"))
+    expect(mocks.state.setActiveTab).toHaveBeenCalledWith("items")
+    expect(localStorage.getItem("watchlists:secondary-expanded:v1")).toContain("\"activity\":true")
+
+    fireEvent.click(screen.getByTestId("watchlists-open-command-palette"))
+    expect(screen.getByTestId("watchlists-command-palette-input")).toBeInTheDocument()
+  })
+
   it("persists orientation dismissal per tab and restores on demand", () => {
     mocks.state.activeTab = "runs"
-    render(<WatchlistsPlaygroundPage />)
+    renderPage()
 
     expect(screen.getByTestId("watchlists-orientation-title")).toHaveTextContent("Activity")
     fireEvent.click(screen.getAllByRole("button", { name: "Dismiss" })[0])
@@ -340,7 +377,7 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
   })
 
   it("exposes an accessible label on the watchlists docs help icon", () => {
-    render(<WatchlistsPlaygroundPage />)
+    renderPage()
 
     expect(
       screen.getByRole("link", { name: "Open watchlists documentation" })

@@ -71,6 +71,72 @@ afterEach(() => {
 })
 
 describe("WorkflowEditor responsive layout", () => {
+  it("surfaces compact workflow readiness before the canvas", () => {
+    useWorkflowEditorStore.setState({
+      isDirty: true,
+      stepTypesStatus: "ready",
+      issues: [
+        {
+          id: "error-1",
+          severity: "error",
+          message: "Prompt node is missing a model"
+        },
+        {
+          id: "warn-1",
+          severity: "warning",
+          message: "Workflow has no description"
+        }
+      ]
+    })
+
+    render(<WorkflowEditor />)
+
+    const summary = screen.getByTestId("workflow-editor-status-summary")
+    expect(summary).toHaveTextContent("Step types ready")
+    expect(summary).toHaveTextContent("1 error")
+    expect(summary).toHaveTextContent("1 warning")
+    expect(summary).toHaveTextContent("Unsaved changes")
+    expect(
+      screen.getByRole("button", { name: "Open workflow panels" })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Import workflow" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Export workflow" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Open run panel" })).toBeInTheDocument()
+  })
+
+  it("names workflow step-type loading and failure states", () => {
+    useWorkflowEditorStore.setState({
+      stepTypesStatus: "loading"
+    })
+
+    const { rerender } = render(<WorkflowEditor />)
+
+    expect(screen.getByTestId("workflow-editor-status-summary")).toHaveTextContent(
+      "Step types loading"
+    )
+
+    useWorkflowEditorStore.setState({
+      stepTypesStatus: "error",
+      stepTypesError: "Step type registry unavailable"
+    })
+    rerender(<WorkflowEditor />)
+
+    expect(screen.getByTestId("workflow-editor-status-summary")).toHaveTextContent(
+      "Step types unavailable"
+    )
+    expect(screen.getByTestId("workflow-editor-status-summary")).toHaveTextContent(
+      "Step type registry unavailable"
+    )
+  })
+
+  it("shows a named validation-ready state when there are no issues", () => {
+    render(<WorkflowEditor />)
+
+    expect(screen.getByTestId("workflow-editor-status-summary")).toHaveTextContent(
+      "Validation clear"
+    )
+  })
+
   it("opens workflow panels in a drawer on non-desktop viewports", () => {
     render(<WorkflowEditor />)
 

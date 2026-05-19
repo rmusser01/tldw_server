@@ -6,6 +6,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import OptionSourcesNew from "../option-sources-new"
 import OptionSourcesDetail from "../option-sources-detail"
 
+const renderRoute = (ui: React.ReactElement) =>
+  render(<MemoryRouter initialEntries={["/sources"]}>{ui}</MemoryRouter>)
+
 const onlineMocks = vi.hoisted(() => ({
   useServerOnline: vi.fn()
 }))
@@ -80,16 +83,6 @@ vi.mock("@/hooks/useConnectionState", () => ({
   useConnectionUxState: () => connectionMocks.useConnectionUxState()
 }))
 
-const renderRoute = (
-  ui: React.ReactElement,
-  initialEntries: string[] = ["/sources"]
-) =>
-  render(ui, {
-    wrapper: ({ children }) => (
-      <MemoryRouter initialEntries={initialEntries}>{children}</MemoryRouter>
-    )
-  })
-
 describe("sources option route guards", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -111,7 +104,7 @@ describe("sources option route guards", () => {
       hasCompletedFirstRun: true
     })
 
-    renderRoute(<OptionSourcesNew />, ["/sources/new"])
+    renderRoute(<OptionSourcesNew />)
 
     expect(
       screen.getByText("Can't reach your tldw server right now.")
@@ -125,22 +118,29 @@ describe("sources option route guards", () => {
       capabilities: { hasIngestionSources: false }
     })
 
-    renderRoute(<OptionSourcesDetail />, ["/sources/42"])
+    renderRoute(<OptionSourcesDetail />)
 
     expect(screen.getByText("Sources are unavailable")).toBeInTheDocument()
     expect(
-      screen.getByText("This server does not expose the ingestion sources capability.")
+      screen.getByText("The connected server does not advertise ingestion source management.")
     ).toBeInTheDocument()
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
+      "/api/v1/ingestion-sources"
+    )
     expect(screen.queryByTestId("source-detail-page")).not.toBeInTheDocument()
   })
 
   it("renders the new and detail routes when ingestion sources are supported", () => {
-    const { rerender } = renderRoute(<OptionSourcesNew />, ["/sources/new"])
+    const { rerender } = renderRoute(<OptionSourcesNew />)
 
     expect(screen.getByTestId("route-boundary-sources-new")).toBeVisible()
     expect(screen.getByTestId("source-form-create")).toBeVisible()
 
-    rerender(<OptionSourcesDetail />)
+    rerender(
+      <MemoryRouter initialEntries={["/sources/42"]}>
+        <OptionSourcesDetail />
+      </MemoryRouter>
+    )
 
     expect(screen.getByTestId("route-boundary-sources-detail")).toBeVisible()
     expect(screen.getByTestId("source-detail-page")).toHaveTextContent("42")

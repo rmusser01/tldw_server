@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { ActionGroup, PermissionNotice, RecoveryCallout, SetupRequiredPanel, StatePanel } from "../"
 
@@ -41,33 +41,30 @@ describe("state primitives", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
   })
 
-  it("keeps raw endpoint details out of the primary capability message", () => {
+  it("keeps raw endpoint details in diagnostics instead of the primary state copy", () => {
     render(
       <RecoveryCallout
         state="unavailable"
-        title="Sources are unavailable"
-        message="This server does not expose the Sources capability."
-        primaryAction={{ label: "Check server setup", onClick: vi.fn() }}
+        title="Sources are unavailable on this server"
+        message="The connected server does not advertise ingestion source management."
         diagnostics={[
-          { label: "Method", value: "GET" },
-          { label: "Endpoint", value: "/api/v1/sources", code: true },
-          { label: "Status", value: "404 Not Found" }
+          { label: "Request path", value: "/api/v1/ingestion-sources", code: true },
+          { label: "Status", value: "404" }
         ]}
+        primaryAction={{ label: "Open diagnostics", onClick: vi.fn() }}
+        data-testid="capability-state"
       />
     )
 
-    const primaryState = screen.getByRole("heading", {
-      name: "Sources are unavailable"
-    }).closest("div")
-    const diagnostics = screen.getByLabelText("Diagnostics")
-    const disclosure = screen.getByText("Diagnostics")
-
-    expect(primaryState).not.toHaveTextContent("/api/v1/sources")
-    expect(disclosure.closest("details")).not.toHaveAttribute("open")
-    fireEvent.click(disclosure)
-    expect(disclosure.closest("details")).toHaveAttribute("open")
-    expect(diagnostics).toHaveTextContent("/api/v1/sources")
-    expect(screen.getByRole("button", { name: "Check server setup" })).toBeInTheDocument()
+    const panel = screen.getByTestId("capability-state")
+    expect(within(panel).getByRole("heading", { name: "Sources are unavailable on this server" }))
+      .not.toHaveTextContent("/api/v1/ingestion-sources")
+    expect(
+      within(panel).getByText("The connected server does not advertise ingestion source management.")
+    ).not.toHaveTextContent("/api/v1/ingestion-sources")
+    expect(within(panel).getByLabelText("Diagnostics")).toHaveTextContent(
+      "/api/v1/ingestion-sources"
+    )
   })
 
   it("does not render an empty diagnostics section", () => {
