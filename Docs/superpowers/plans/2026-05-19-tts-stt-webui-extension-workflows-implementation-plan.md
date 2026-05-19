@@ -716,7 +716,7 @@ Candidate response:
 
 **Tests:** Documentation review plus any architecture tests defined by the decision document.
 
-**Status:** Gated
+**Status:** Complete via `TASK-434`
 
 ### Decision Document
 
@@ -740,7 +740,9 @@ Minimum contents:
 
 ### Preset CRUD Candidate Shape
 
-Do not implement until the decision document is accepted.
+The decision document is accepted. Implement CRUD using
+`Docs/Design/Audio_Presets_Ownership_2026_05.md` as the Stage 7 source of
+truth.
 
 Candidate endpoints:
 
@@ -772,6 +774,33 @@ export type AudioPreset = {
 }
 ```
 
+### Stage 6 Decision Notes
+
+- Presets are per-user server state owned by the Audio API.
+- Presets live in the user's Media DB v2 database, in a new `audio_presets`
+  table, not in TTS history, STT transcript rows, generated artifacts,
+  comparison history, ChaChaNotes, or browser-local extension state.
+- Endpoint ownership follows the current audio subpackage shape:
+  `tldw_Server_API/app/api/v1/endpoints/audio/audio_presets.py`, mounted by
+  `tldw_Server_API/app/api/v1/endpoints/audio/audio.py`.
+- AuthNZ resolves the owner from `get_request_user` in both single-user and
+  multi-user modes; clients never submit an owner id.
+- Browser TTS remains a no-setup escape hatch. If persisted at all, it must be
+  marked non-portable and revalidated against the current browser.
+- WebUI and extension must use the same server API and shared `apps/packages/ui`
+  hooks/components for preset list/apply/validate flows.
+
+### Stage 6 Verification Notes
+
+- Added `Docs/Design/Audio_Presets_Ownership_2026_05.md`.
+- Reviewed current audio route ownership, TTS history endpoint ownership,
+  Media DB `tts_history` persistence, and the Stage 5 STT capability summary
+  contract before making the decision.
+- Verification is docs-focused: required-topic scan passed and `git diff
+  --check` passed.
+- Bandit is skipped for this stage because the slice changes documentation and
+  Backlog/plan records only.
+
 ## Stage 7: Preset CRUD And Reuse UX
 
 **Goal:** Add server-side per-user TTS/STT presets after Stage 5 is complete.
@@ -795,11 +824,11 @@ export type AudioPreset = {
 
 ### Potential Files
 
-Backend, exact owner to be confirmed in Stage 5:
+Backend, exact owner confirmed by Stage 6:
 
-- `tldw_Server_API/app/api/v1/endpoints/audio_presets.py`
+- `tldw_Server_API/app/api/v1/endpoints/audio/audio_presets.py`
 - `tldw_Server_API/app/api/v1/schemas/audio_presets.py`
-- `tldw_Server_API/app/core/DB_Management/*`
+- `tldw_Server_API/app/core/DB_Management/media_db/runtime/audio_preset_ops.py`
 - `tldw_Server_API/tests/audio/test_audio_presets.py`
 
 Frontend:
