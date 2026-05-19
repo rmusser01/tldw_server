@@ -9,6 +9,81 @@
     "panelMessage": "Guided connection setup for production use.",
     "startAction": "Start setup"
   },
+  "setupReadiness": {
+    "title": "Setup readiness",
+    "description": "Choose the defaults that make chat, search, ingestion, and speech ready before the first large import.",
+    "valueNotSet": "Not set",
+    "actions": {
+      "openBackendSetup": "Open backend setup",
+      "refresh": "Refresh",
+      "preview": "Preview selection",
+      "provision": "Provision now",
+      "verify": "Verify readiness",
+      "continue": "Continue"
+    },
+    "errors": {
+      "adminRequiredTitle": "Admin access required",
+      "requestFailedTitle": "Readiness request failed",
+      "localSetupRequiredTitle": "Local setup required",
+      "localSetupRequiredDescription": "First-run setup is restricted to local requests.",
+      "load": "Unable to load setup readiness.",
+      "preview": "Unable to preview setup readiness.",
+      "provision": "Unable to provision setup readiness.",
+      "verify": "Unable to verify setup readiness."
+    },
+    "profile": {
+      "title": "Readiness profile",
+      "description": "Profiles set defaults only. Provisioning is a separate action.",
+      "empty": "No setup readiness profiles are available.",
+      "advancedControls": "Advanced controls"
+    },
+    "machine": {
+      "appleSilicon": "Apple Silicon",
+      "freeDiskGb": "{{value}} GB free"
+    },
+    "lanes": {
+      "noSelection": "No selection yet.",
+      "ttsSelection": "TTS: {{value}}"
+    },
+    "preview": {
+      "title": "Preview and provision",
+      "configUpdates": "Config updates",
+      "configUpdateCount": "{{count}} section(s)",
+      "installPlan": "Install plan",
+      "installPlanWork": "Provisioning work planned",
+      "noDownloads": "No downloads needed",
+      "overlays": "Overlays",
+      "none": "None",
+      "reviewTitle": "Review before provisioning",
+      "reviewDescription": "Select a profile or preview the current selection before running Provision now."
+    },
+    "consequences": {
+      "title": "Skipped-lane consequences"
+    },
+    "provision": {
+      "statusTitle": "Provision status: {{status}}",
+      "description": "Readiness provisioning has started. Refresh or watch the status cards for progress."
+    },
+    "verification": {
+      "statusTitle": "Verification: {{status}}",
+      "description": "Verification completed."
+    },
+    "statuses": {
+      "not_configured": "not configured",
+      "ready": "ready",
+      "ready_with_warnings": "ready with warnings",
+      "previewed": "previewed",
+      "failed": "failed",
+      "blocked": "blocked",
+      "provisioning": "provisioning",
+      "queued": "queued",
+      "running": "running",
+      "in_progress": "in progress",
+      "completed": "completed",
+      "skipped": "skipped",
+      "restart_required": "restart required"
+    }
+  },
   "connectionCard": {
     "headlineMissing": "Connect tldw Assistant to your server",
     "headlineSearching": "Searching for your tldw server…",

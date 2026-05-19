@@ -10,6 +10,18 @@ The first-run setup experience lives in `tldw_Server_API/app/Setup_UI/` with ass
 
 This document explains how the setup stack is structured, how data flows from the backend to the UI, and the key extension points for developers.
 
+## Native WebUI Readiness Flow
+
+The WebUI also exposes a native setup readiness screen at `/setup` for users who have already configured a backend URL in the WebUI. This screen is separate from the static backend fallback UI, but both use the same setup contracts.
+
+- Before first-run setup is completed, `/setup` uses the first-run readiness endpoints under `/api/v1/setup/readiness/*`. These endpoints keep the same local-only unauthenticated guard as the backend setup UI.
+- After WebUI first-run setup is completed, the same screen switches to admin mode and calls `/api/v1/setup/admin/readiness/*`. Those endpoints require the admin setup dependency used by the server-side audio installer.
+- If the WebUI has no configured backend URL, or connection setup still needs attention, `/setup` keeps rendering the connection onboarding wizard.
+- The backend `/setup` page remains the recovery fallback and is always linked from the native readiness screen.
+- Profile selection and preview are non-mutating. Config writes and model/download provisioning only happen through the explicit `Provision now` action.
+
+The native screen is implemented in `apps/packages/ui/src/components/Option/Setup/ReadinessSetupScreen.tsx` and uses `useSetupReadiness()` from `apps/packages/ui/src/components/Option/Setup/hooks/useSetupReadiness.ts`. The hook is backed by the shared client in `apps/packages/ui/src/services/tldw/setup-readiness.ts`, which selects first-run or admin endpoint paths based on mode.
+
 ## Architecture Diagram (Textual)
 
 ```
@@ -48,6 +60,8 @@ setup.js assistant UI → show response + deep-link buttons
 - `/config` (GET/POST): fetch and persist the configuration snapshot. POST writes through `update_config()` so comments stay intact.
 - `/assistant` (POST): lightweight Q&A endpoint; no external LLM. Wraps `answer_setup_question()` and translates validation errors into `HTTP_400`.
 - `/install-status` (GET): exposes progress from the background installer (see below). The Setup UI polls this endpoint while dependencies/models are being provisioned.
+- `/readiness/profiles`, `/readiness/status`, `/readiness/preview`, `/readiness/provision`, `/readiness/verify`: first-run readiness endpoints for chat defaults, embeddings/RAG, and speech setup. These are local-only and available only while setup is still required.
+- `/admin/readiness/profiles`, `/admin/readiness/status`, `/admin/readiness/preview`, `/admin/readiness/provision`, `/admin/readiness/verify`: post-setup admin readiness endpoints with the same behavior, gated by admin setup access.
 
 ### `install_manager.py`
 
@@ -56,6 +70,12 @@ setup.js assistant UI → show response + deep-link buttons
 - **Status reporting**: Every dependency/model action is logged to `Config_Files/setup_install_status.json` (or the override specified by `TLDW_INSTALL_STATE_DIR`). The Setup UI renders these steps verbatim in the “Installer Progress” panel.
 
 ## Frontend Components (Setup UI)
+
+### Native WebUI Readiness Components
+
+- `ReadinessSetupScreen.tsx`: compact readiness dashboard used by the WebUI `/setup` route. It renders the profile picker, Chat/Embeddings/RAG/Speech lane summaries, secondary TTS details, preview summary, verification result, and the explicit `Provision now` action.
+- `useSetupReadiness.ts`: React hook that loads profiles and status in parallel, maps first-run/admin guard failures into display states, and polls status while provisioning is active.
+- `setup-readiness.ts`: typed client for the first-run and admin setup readiness endpoints. Keep this client aligned with `openapi-guard.ts` whenever endpoint paths change.
 
 ### Entry Point
 

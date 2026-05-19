@@ -161,7 +161,7 @@ async function clearOnboardingBlockingOverlays(page: Page): Promise<void> {
 async function openOnboardingSuccessScreen(
   page: Page
 ): Promise<"connected-now" | "already-connected"> {
-  await page.goto("/setup", { waitUntil: "domcontentloaded" })
+  await page.goto("/", { waitUntil: "domcontentloaded" })
 
   const connect = page.getByTestId("onboarding-connect")
   const success = page.getByTestId("onboarding-success-screen")
@@ -262,7 +262,7 @@ test.describe("Onboarding Ingestion-First Journey", () => {
         viewport.label,
         "01-setup-connect",
         initialConnectState === "connected-now"
-          ? "Connected via onboarding from setup."
+          ? "Connected via home onboarding."
           : "Onboarding success already visible from prior connected state."
       )
 
@@ -336,24 +336,37 @@ test.describe("Onboarding Ingestion-First Journey", () => {
         /\/media(?:[/?#].*)?$/
       )
       await waitForConnection(authedPage)
-      const quickIngestDialog = await openQuickIngestDialog(authedPage, 20_000)
+      const inlineQuickIngest = authedPage.getByRole("heading", {
+        name: /get started.*ingest your first content/i,
+      })
+      const hasInlineQuickIngest = await inlineQuickIngest
+        .waitFor({ state: "visible", timeout: 15_000 })
+        .then(() => true)
+        .catch(() => false)
+      const quickIngestDialog = hasInlineQuickIngest
+        ? null
+        : await openQuickIngestDialog(authedPage, 20_000)
       await captureStep(
         authedPage,
         evidenceRows,
         viewport.label,
         "05-quick-ingest-modal",
-        "Onboarding ingest CTA routes to Media, where Quick Ingest remains reachable."
+        hasInlineQuickIngest
+          ? "Onboarding ingest CTA routes to Media, where the inline Quick Ingest surface is visible."
+          : "Onboarding ingest CTA routes to Media, where Quick Ingest remains reachable."
       )
 
-      const quickIngestClose = quickIngestDialog
-        .locator(".ant-modal-close")
-        .first()
-      if (await quickIngestClose.isVisible().catch(() => false)) {
-        await quickIngestClose.evaluate((el: HTMLElement) => el.click())
-      } else {
-        await authedPage.keyboard.press("Escape")
+      if (quickIngestDialog) {
+        const quickIngestClose = quickIngestDialog
+          .locator(".ant-modal-close")
+          .first()
+        if (await quickIngestClose.isVisible().catch(() => false)) {
+          await quickIngestClose.evaluate((el: HTMLElement) => el.click())
+        } else {
+          await authedPage.keyboard.press("Escape")
+        }
+        await expect(quickIngestDialog).toBeHidden({ timeout: 10_000 })
       }
-      await expect(quickIngestDialog).toBeHidden({ timeout: 10_000 })
 
       await expect(authedPage).toHaveURL(/\/media(?:[/?#].*)?$/, {
         timeout: 20_000,
