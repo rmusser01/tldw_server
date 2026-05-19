@@ -48,9 +48,13 @@ Implementation notes:
 - Swift direct-launch coverage was reviewed and not changed. Existing `UnixSocketServerTests.swift` already covers regular-file preservation, symlink preservation, stale socket replacement, active socket refusal, stop-time replacement preservation, and unsafe parent refusal. Direct identity-race testing would need production test hooks, so it remains documented rather than added in this slice.
 - Updated `tools/macos-vz-helper/README.md` with manual command usage and evidence guidance.
 - Updated `Docs/Sandbox/vz-linux-prepared-host-evidence.md` with stale-socket evidence fields and residual-gap guidance.
+- PR review follow-up:
+  - Added docstrings for the new stale socket helper and CLI entrypoint.
+  - Added a fail-closed guard when `socket_creator()` returns without materializing a Unix socket identity.
+  - Added a regression test for the no-socket false-positive path.
 - Final verification:
-  - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -q -k stale_socket_drill` passed: 7 passed, 5 skipped.
-  - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -q` passed: 141 passed, 6 skipped.
+  - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -q -k stale_socket_drill` passed: 8 passed, 5 skipped.
+  - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -q` passed: 142 passed, 6 skipped.
   - `swift test` under `tools/macos-vz-helper` passed with host SwiftPM cache access: 88 tests passed.
   - `git diff --check` passed.
   - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -q tools/macos-vz-helper/scripts/vz-helperctl.py` passed.
@@ -62,7 +66,7 @@ Implementation notes:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added a manual `vz-helperctl.py stale-socket-drill` operator command that creates a controlled inactive Unix socket under validated private helper paths, delegates recovery to the existing managed `start_helper()` path, verifies the helper is actually running afterward, and cleans up only the drill-created socket identity on operational startup failure.
+Added a manual `vz-helperctl.py stale-socket-drill` operator command that creates a controlled inactive Unix socket under validated private helper paths, verifies socket identity before reporting creation success, delegates recovery to the existing managed `start_helper()` path, verifies the helper is actually running afterward, and cleans up only the drill-created socket identity on operational startup failure.
 
 Added host-independent Python coverage for successful stale socket recovery, pre-existing inactive socket recovery, fail-closed unsafe path shapes, unsafe parent permissions, dry-run behavior, start failure cleanup, and CLI argument forwarding. Updated the helper README and prepared-host evidence tracker so operators know how to run the drill manually and what evidence to capture.
 <!-- SECTION:FINAL_SUMMARY:END -->

@@ -154,6 +154,7 @@ def socket_accepts_connection(path: Path, *, timeout_sec: float = 0.1) -> bool:
 
 
 def create_stale_unix_socket(path: Path) -> None:
+    """Bind and close an inactive AF_UNIX socket for stale-socket recovery drills."""
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
         server.bind(str(path))
 
@@ -1673,6 +1674,15 @@ def stale_socket_drill(
             results.append(("stale_socket_drill", failed_create))
             return results
         created_socket_identity = socket_identity(socket_path)
+        if created_socket_identity is None:
+            failed_create = CheckResult(
+                ok=False,
+                reason="helper_socket_create_failed",
+                message="socket not created",
+            )
+            results.append(("stale_socket", failed_create))
+            results.append(("stale_socket_drill", failed_create))
+            return results
         results.append(("stale_socket", CheckResult(ok=True)))
 
     try:
@@ -2001,6 +2011,7 @@ def _restart_drill_command(args: argparse.Namespace) -> int:
 
 
 def _stale_socket_drill_command(args: argparse.Namespace) -> int:
+    """Run the stale-socket drill CLI and return success only when every check passes."""
     paths = default_paths()
     results = stale_socket_drill(
         Path(args.helper_path) if args.helper_path else DEFAULT_HELPER,

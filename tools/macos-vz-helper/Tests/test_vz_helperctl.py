@@ -3693,6 +3693,31 @@ def test_stale_socket_drill_removes_created_socket_when_starter_raises() -> None
         CASE.assertFalse(socket_path.exists())
 
 
+def test_stale_socket_drill_fails_when_socket_creator_leaves_no_socket(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    tmp_path.chmod(0o700)
+
+    results = helperctl.stale_socket_drill(
+        helper,
+        socket_path,
+        pid_file,
+        log_dir,
+        socket_creator=lambda path: None,
+        starter=lambda *args, **kwargs: pytest.fail("missing socket should not start helper"),
+        status_collector=lambda *args, **kwargs: pytest.fail("missing socket should not collect status"),
+    )
+
+    failed = helperctl.CheckResult(False, "helper_socket_create_failed", "socket not created")
+    CASE.assertIn(("stale_socket", failed), results)
+    CASE.assertEqual(results[-1], ("stale_socket_drill", failed))
+
+
 def test_stale_socket_drill_preserves_existing_inactive_socket_on_start_failure() -> None:
     helperctl = load_helperctl()
     with tempfile.TemporaryDirectory(prefix="vzsock-") as temp_dir:
@@ -3726,7 +3751,10 @@ def test_stale_socket_drill_preserves_existing_inactive_socket_on_start_failure(
         CASE.assertTrue(socket_path.exists())
 
 
-def test_stale_socket_drill_fails_when_post_status_is_not_running(tmp_path: Path) -> None:
+def test_stale_socket_drill_fails_when_post_status_is_not_running(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     helperctl = load_helperctl()
     helper = tmp_path / "macos-vz-helper"
     socket_path = tmp_path / "runtime" / "helper.sock"
@@ -3735,13 +3763,15 @@ def test_stale_socket_drill_fails_when_post_status_is_not_running(tmp_path: Path
     helper.write_text("#!/bin/sh\n", encoding="utf-8")
     helper.chmod(0o700)
     tmp_path.chmod(0o700)
+    created_identity = helperctl.SocketIdentity(device=1, inode=2)
+    monkeypatch.setattr(helperctl, "socket_identity", lambda path: created_identity)
 
     results = helperctl.stale_socket_drill(
         helper,
         socket_path,
         pid_file,
         log_dir,
-        socket_creator=lambda path: None,
+        socket_creator=lambda path: path.write_text("identity is supplied by the test", encoding="utf-8"),
         starter=lambda *args, **kwargs: helperctl.CheckResult(ok=True),
         status_collector=lambda *args, **kwargs: [
             ("process", helperctl.CheckResult(ok=True, reason="helper_not_running")),
