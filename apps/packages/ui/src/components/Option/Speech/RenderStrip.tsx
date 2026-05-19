@@ -8,7 +8,7 @@ export type RenderStripState = "idle" | "generating" | "ready" | "playing" | "er
 
 export type RenderStripConfig = {
   provider: string
-  voice: string
+  voice?: string
   model?: string
   format?: string
   speed?: number
@@ -112,9 +112,13 @@ export const RenderStrip: React.FC<RenderStripProps> = ({
 
   if (undoPending) return null
 
-  const providerLabel = config.provider === "tldw"
-    ? (config.model || "tldw")
-    : config.provider
+  const providerLabel =
+    config.provider === "browser"
+      ? "Browser preview"
+      : config.provider === "tldw"
+        ? (config.model || "tldw")
+        : config.provider
+  const ariaConfig = [providerLabel, config.voice].filter(Boolean).join(" ")
 
   const isGenerating = state === "generating"
   const isReady = state === "ready" || state === "playing"
@@ -124,7 +128,7 @@ export const RenderStrip: React.FC<RenderStripProps> = ({
   return (
     <div
       role="region"
-      aria-label={`Render strip: ${providerLabel} ${config.voice}`}
+      aria-label={`Render strip: ${ariaConfig}`}
       className="rounded-lg border border-border bg-card p-3 transition-colors hover:border-border-hover"
       data-strip-id={id}
       data-strip-state={state}
@@ -140,14 +144,16 @@ export const RenderStrip: React.FC<RenderStripProps> = ({
           </Tag>
         </Tooltip>
 
-        <Tooltip title={`Voice: ${config.voice}`}>
-          <Tag
-            className="cursor-pointer"
-            onClick={() => onConfigTagClick?.(id, "voice")}
-          >
-            {config.voice}
-          </Tag>
-        </Tooltip>
+        {config.voice && (
+          <Tooltip title={`Voice: ${config.voice}`}>
+            <Tag
+              className="cursor-pointer"
+              onClick={() => onConfigTagClick?.(id, "voice")}
+            >
+              {config.voice}
+            </Tag>
+          </Tooltip>
+        )}
 
         {config.format && (
           <Tooltip title={`Format: ${config.format}`}>

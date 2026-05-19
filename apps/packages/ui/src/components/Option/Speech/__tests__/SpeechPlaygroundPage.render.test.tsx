@@ -44,6 +44,7 @@ const {
   getTranscriptionModelsMock,
   getElevenLabsVoicesMock,
   getElevenLabsModelsMock,
+  addRenderMock,
   setTTSSettingsMock,
   ttsSettingsRef,
 } =
@@ -55,6 +56,7 @@ const {
     })),
     getElevenLabsVoicesMock: vi.fn(),
     getElevenLabsModelsMock: vi.fn(),
+    addRenderMock: vi.fn(),
     setTTSSettingsMock: vi.fn(async () => undefined),
     ttsSettingsRef: {
       current: {
@@ -156,7 +158,11 @@ vi.mock("@/components/Option/Speech/TtsProviderStrip", () => ({
 }))
 
 vi.mock("@/components/Option/Speech/TtsStickyActionBar", () => ({
-  TtsStickyActionBar: () => <div data-testid="tts-sticky-action-bar" />,
+  TtsStickyActionBar: ({ onAddRender }: { onAddRender?: () => void }) => (
+    <button type="button" data-testid="tts-sticky-action-bar" onClick={onAddRender}>
+      Add render
+    </button>
+  ),
 }))
 
 vi.mock("@/components/Option/Speech/TtsInspectorPanel", () => ({
@@ -244,7 +250,7 @@ vi.mock("@/hooks/useMultiRenderState", () => ({
     hasReady: false,
     hasIdle: false,
     playingId: null,
-    addRender: vi.fn(),
+    addRender: addRenderMock,
     updateConfig: vi.fn(),
     generateAll: vi.fn(async () => undefined),
     playAllSequentially: vi.fn(),
@@ -344,6 +350,7 @@ describe("SpeechPlaygroundPage", () => {
     getTranscriptionModelsMock.mockClear()
     getElevenLabsVoicesMock.mockReset()
     getElevenLabsModelsMock.mockReset()
+    addRenderMock.mockReset()
     setTTSSettingsMock.mockClear()
     ttsSettingsRef.current = {
       ttsProvider: "",
@@ -353,6 +360,7 @@ describe("SpeechPlaygroundPage", () => {
       responseSplitting: "punctuation",
     }
     storageValues.clear()
+    localStorage.clear()
     storageValues.set("speechPlaygroundMode", "roundtrip")
     storageValues.set("speechPlaygroundHistory", [])
     setSpeechModeMock.mockReset()
@@ -386,6 +394,37 @@ describe("SpeechPlaygroundPage", () => {
     expect(screen.queryByText("Current transcription model")).not.toBeInTheDocument()
     expect(screen.getByTestId("tts-provider-strip")).toBeInTheDocument()
     expect(getTranscriptionModelsMock).not.toHaveBeenCalled()
+  })
+
+  it("adds OpenAI render strips with OpenAI model and voice defaults", (): void => {
+    ttsSettingsRef.current = {
+      ...ttsSettingsRef.current,
+      ttsProvider: "openai",
+      openAITTSModel: "gpt-4o-mini-tts",
+      openAITTSVoice: "alloy",
+      tldwTtsModel: "KittenML/kitten-tts-nano-0.8",
+      tldwTtsVoice: "Bella",
+      tldwTtsResponseFormat: "mp3",
+    }
+
+    render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+
+    fireEvent.click(screen.getByTestId("tts-sticky-action-bar"))
+
+    expect(addRenderMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "openai",
+        model: "gpt-4o-mini-tts",
+        voice: "alloy",
+      })
+    )
+    expect(addRenderMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "openai",
+        model: "KittenML/kitten-tts-nano-0.8",
+        voice: "Bella",
+      })
+    )
   })
 
   it("uses TTS-specific page copy and history controls when locked to listen mode", (): void => {

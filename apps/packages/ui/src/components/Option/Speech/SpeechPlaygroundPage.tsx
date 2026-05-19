@@ -884,6 +884,75 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     enabled: isTldw && hasAudio
   })
 
+  const currentTtsSelection = React.useMemo(() => {
+    const format = tldwFormat || ttsSettings?.tldwTtsResponseFormat || "mp3"
+    const speed = ttsSettings?.tldwTtsSpeed ?? 1
+
+    if (provider === "browser") {
+      return {
+        provider,
+        model: "",
+        voice: "",
+        format,
+        speed
+      }
+    }
+
+    if (provider === "openai") {
+      const model =
+        openAiModel ||
+        ttsSettings?.openAITTSModel ||
+        OPENAI_TTS_MODELS[0]?.value ||
+        "tts-1"
+      const voice =
+        openAiVoice ||
+        ttsSettings?.openAITTSVoice ||
+        OPENAI_TTS_VOICES[model]?.[0]?.value ||
+        "alloy"
+      return { provider, model, voice, format, speed }
+    }
+
+    if (provider === "elevenlabs") {
+      const model =
+        elevenModelId ||
+        ttsSettings?.elevenLabsModel ||
+        elevenLabsData?.models?.[0]?.model_id ||
+        ""
+      const voice =
+        elevenVoiceId ||
+        ttsSettings?.elevenLabsVoiceId ||
+        elevenLabsData?.voices?.[0]?.voice_id ||
+        ""
+      return { provider, model, voice, format, speed }
+    }
+
+    return {
+      provider,
+      model:
+        tldwModel ||
+        ttsSettings?.tldwTtsModel ||
+        DEFAULT_TLDW_TTS_MODEL,
+      voice:
+        tldwVoice ||
+        ttsSettings?.tldwTtsVoice ||
+        DEFAULT_TLDW_TTS_VOICE,
+      format,
+      speed
+    }
+  }, [
+    elevenLabsData?.models,
+    elevenLabsData?.voices,
+    elevenModelId,
+    elevenVoiceId,
+    openAiModel,
+    openAiVoice,
+    provider,
+    tldwFormat,
+    tldwModel,
+    tldwVoice,
+    ttsSettings
+  ])
+
   React.useEffect(() => {
     if (provider !== "elevenlabs" || ttsSettings?.elevenLabsApiKey) {
       setInlineElevenLabsApiKey("")
@@ -900,23 +969,14 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
       if (stored) lastVoice = JSON.parse(stored)
     } catch {}
 
+    const matchingLastVoice = lastVoice?.provider === provider ? lastVoice : null
     const defaultConfig = {
-      provider: lastVoice?.provider || (provider === "browser" ? "tldw" : provider),
-      voice:
-        lastVoice?.voice ||
-        tldwVoice ||
-        ttsSettings?.tldwTtsVoice ||
-        DEFAULT_TLDW_TTS_VOICE,
-      model:
-        lastVoice?.model ||
-        tldwModel ||
-        ttsSettings?.tldwTtsModel ||
-        DEFAULT_TLDW_TTS_MODEL,
-      format: tldwFormat || ttsSettings?.tldwTtsResponseFormat || "mp3",
-      speed: ttsSettings?.tldwTtsSpeed ?? 1
+      ...currentTtsSelection,
+      voice: matchingLastVoice?.voice || currentTtsSelection.voice,
+      model: matchingLastVoice?.model || currentTtsSelection.model
     }
     multiRender.addRender(defaultConfig)
-  }, [provider, tldwVoice, tldwModel, tldwFormat, ttsSettings, multiRender])
+  }, [provider, currentTtsSelection, multiRender])
 
   const handleVoicePickerSelect = React.useCallback(
     (selection: VoiceSelection) => {
@@ -2456,7 +2516,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                   {withTemplateFallback(
                     t(
                       "playground:tooltip.speechToTextDetails",
-                      "Uses {{model}} · {{task}} · {{format}}. Configure in Settings → General → Speech-to-Text.",
+                      "Uses {{model}} · {{task}} · {{format}}. Configure in Settings -> Speech (/settings/speech).",
                       {
                         model: activeModel || sttModel || "whisper-1",
                         task: sttTask === "translate" ? "translate" : "transcribe",
@@ -2467,7 +2527,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                       activeModel || sttModel || "whisper-1"
                     } · ${sttTask === "translate" ? "translate" : "transcribe"} · ${(
                       sttResponseFormat || "json"
-                    ).toUpperCase()}. Configure in Settings -> General -> Speech-to-Text.`
+                    ).toUpperCase()}. Configure in Settings -> Speech (/settings/speech).`
                   )}
                 </div>
 
@@ -2560,10 +2620,10 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                   <div className="flex-1 overflow-y-auto p-4 space-y-4">
                     <TtsProviderStrip
                       provider={provider}
-                      model={tldwModel || ttsSettings?.tldwTtsModel || ""}
-                      voice={tldwVoice || ttsSettings?.tldwTtsVoice || ""}
-                      format={tldwFormat || ttsSettings?.tldwTtsResponseFormat || "mp3"}
-                      speed={ttsSettings?.tldwTtsSpeed ?? 1}
+                      model={currentTtsSelection.model}
+                      voice={currentTtsSelection.voice}
+                      format={currentTtsSelection.format}
+                      speed={currentTtsSelection.speed}
                       presetValue={(ttsPreset as TtsPresetKey) || "balanced"}
                       onPresetChange={(preset) => void applyTtsPreset(preset)}
                       onLabelClick={openInspectorAt}
@@ -3002,8 +3062,8 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                   voiceTab={
                     <TtsVoiceTab
                       provider={provider}
-                      model={tldwModel || ttsSettings?.tldwTtsModel || ""}
-                      voice={tldwVoice || ttsSettings?.tldwTtsVoice || ""}
+                      model={currentTtsSelection.model}
+                      voice={currentTtsSelection.voice}
                       onProviderChange={(val) => {
                         if (ttsSettings) {
                           void setTTSSettings({

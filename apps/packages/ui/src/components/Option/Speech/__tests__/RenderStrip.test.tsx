@@ -41,6 +41,19 @@ describe("RenderStrip", () => {
     expect(screen.getByText("MP3")).toBeInTheDocument()
   })
 
+  it("labels browser render strips as Browser preview", () => {
+    render(
+      <RenderStrip
+        id="r1"
+        state="idle"
+        config={{ provider: "browser", format: "mp3", speed: 1 }}
+      />
+    )
+
+    expect(screen.getByText("Browser preview")).toBeInTheDocument()
+    expect(screen.queryByText("browser")).not.toBeInTheDocument()
+  })
+
   it("shows Generate button in idle state", () => {
     render(<RenderStrip id="r1" state="idle" config={baseConfig} />)
     expect(screen.getByRole("button", { name: "Generate audio" })).toBeInTheDocument()
