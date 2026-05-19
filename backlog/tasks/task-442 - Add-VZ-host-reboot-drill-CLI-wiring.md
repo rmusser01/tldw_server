@@ -43,18 +43,25 @@ Implement Task 4 from Docs/superpowers/plans/2026-05-19-vz-helper-host-reboot-va
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Task 4 code-quality review findings fixed only; Task 5 docs/final closeout intentionally not implemented.
 
-Review fixes:
-- `host-reboot-drill pre/post --dry-run` now returns named dry-run results without creating evidence directories or writing pre/post manifests.
-- Host reboot CLI parser now keeps `--create-evidence-dir` pre-only and `--run-smoke`/`--python` post-only.
-- Added subprocess JSON coverage for `host-reboot-drill pre --json --dry-run`; helperctl now suppresses import-time stdout from the backend helper-client import path so JSON stdout remains parseable.
-- Post validation now compares `helper_mode`, `launchd_label`, `launchd_plist_path`, `socket_path`, `helper_path`, and `bundle_path` against the pre manifest before post evidence is written or smoke is considered.
+Prior Task 4 review fixes:
+- `host-reboot-drill pre/post --dry-run` returns named dry-run results without creating evidence directories or writing pre/post manifests.
+- Host reboot CLI parser keeps `--create-evidence-dir` pre-only and `--run-smoke`/`--python` post-only.
+- Subprocess JSON coverage for `host-reboot-drill pre --json --dry-run` keeps JSON stdout parseable despite helper-client import-time stdout.
+- Post validation compares `helper_mode`, `launchd_label`, `launchd_plist_path`, `socket_path`, `helper_path`, and `bundle_path` against the pre manifest before post evidence is written or smoke is considered.
 - `post --run-smoke` is gated on successful post validation and appends `host_reboot_smoke_skipped` when post validation fails; smoke failure still drives a nonzero CLI exit.
 
+Additional review fixes in this commit:
+- Host reboot metadata path fields (`bundle_path`, `helper_path`, `socket_path`, `launchd_plist_path`) are now canonicalized with `expanduser().resolve(strict=False)` before pre/post manifests are written or compared; omitted launchd plist remains the explicit empty string.
+- Post validation now rejects any loaded `host-reboot-pre.json` whose `phase` is not `pre` with `host_reboot_pre_manifest_invalid`.
+- Added regressions for equivalent relative/absolute metadata paths and for rejecting `phase: post` pre manifests.
+
 Verification:
-- Red run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -k "host_reboot_drill_cli or host_reboot_post_runs_smoke or host_reboot_pre_dry_run or host_reboot_post_dry_run or metadata_mismatch" -q` failed with the expected seven review-finding failures.
-- Focused green: same selector passed with `12 passed, 174 deselected`.
-- Full helperctl file: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py` passed with `180 passed, 6 skipped`.
-- Bandit: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tools/macos-vz-helper/scripts/vz-helperctl.py -f json -o /tmp/bandit_task442_task4.json` completed with zero findings.
+- Prior red run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -k "host_reboot_drill_cli or host_reboot_post_runs_smoke or host_reboot_pre_dry_run or host_reboot_post_dry_run or metadata_mismatch" -q` failed with the expected seven review-finding failures.
+- Prior focused green: same selector passed with `12 passed, 174 deselected`.
+- Current red run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -k "post_phase or equivalent_relative_paths" -q` failed with the expected two review-finding failures on current behavior.
+- Current focused green: same selector passed with `2 passed, 186 deselected`.
+- Full helperctl file: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py` passed with `182 passed, 6 skipped`.
+- Bandit: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tools/macos-vz-helper/scripts/vz-helperctl.py -f json -o /tmp/bandit_task442_task4_final.json` completed; JSON check reported `results=0, errors=0`.
 - Compile: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m py_compile tools/macos-vz-helper/scripts/vz-helperctl.py` passed.
 - Whitespace: `git diff --check` passed.
 

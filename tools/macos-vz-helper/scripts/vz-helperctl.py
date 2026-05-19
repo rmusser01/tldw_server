@@ -1084,6 +1084,8 @@ def _read_host_reboot_pre_manifest(evidence_dir: Path) -> tuple[CheckResult, dic
             os.close(fd)
     if not isinstance(raw_payload, dict):
         return CheckResult(False, "host_reboot_pre_manifest_invalid", str(manifest_path)), None
+    if raw_payload.get("phase") != "pre":
+        return CheckResult(False, "host_reboot_pre_manifest_invalid", str(manifest_path)), None
     return CheckResult(True, "host_reboot_pre_manifest_loaded", str(manifest_path)), raw_payload
 
 
@@ -1112,11 +1114,20 @@ def _host_reboot_metadata_payload(
     return {
         "helper_mode": helper_mode,
         "launchd_label": launchd_label,
-        "launchd_plist_path": str(launchd_plist_path) if launchd_plist_path is not None else "",
-        "socket_path": str(socket_path),
-        "helper_path": str(helper_path),
-        "bundle_path": str(bundle_path),
+        "launchd_plist_path": _host_reboot_metadata_path(launchd_plist_path),
+        "socket_path": _host_reboot_metadata_path(socket_path),
+        "helper_path": _host_reboot_metadata_path(helper_path),
+        "bundle_path": _host_reboot_metadata_path(bundle_path),
     }
+
+
+def _host_reboot_metadata_path(path: Path | None) -> str:
+    if path is None:
+        return ""
+    try:
+        return str(path.expanduser().resolve(strict=False))
+    except (OSError, RuntimeError, ValueError):
+        return str(path.expanduser())
 
 
 def _host_reboot_metadata_match_result(

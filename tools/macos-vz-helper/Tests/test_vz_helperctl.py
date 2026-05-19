@@ -687,6 +687,19 @@ def test_host_reboot_post_reports_invalid_pre_manifest(
     CASE.assertFalse((evidence / "host-reboot-post.json").exists())
 
 
+def test_read_host_reboot_pre_manifest_rejects_post_phase(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    evidence.mkdir(parents=True, mode=0o700)
+    (evidence / "host-reboot-pre.json").write_text('{"phase": "post"}', encoding="utf-8")
+
+    result, payload = helperctl._read_host_reboot_pre_manifest(evidence)
+
+    CASE.assertFalse(result.ok)
+    CASE.assertEqual(result.reason, "host_reboot_pre_manifest_invalid")
+    CASE.assertIsNone(payload)
+
+
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="requires fifo support")
 def test_read_host_reboot_pre_manifest_rejects_fifo_without_unsafe_read(
     monkeypatch: pytest.MonkeyPatch,
@@ -987,6 +1000,67 @@ def test_host_reboot_post_reports_metadata_mismatch_before_writing_manifest(
     CASE.assertEqual(by_name["metadata_match"].message, "bundle_path")
     CASE.assertEqual(results[-1], ("host_reboot_post", by_name["metadata_match"]))
     CASE.assertFalse((evidence / "host-reboot-post.json").exists())
+
+
+def test_host_reboot_metadata_matches_equivalent_relative_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    evidence.mkdir(parents=True, mode=0o700)
+    evidence.chmod(0o700)
+    runtime_dir = tmp_path / "runtime"
+    bundle = runtime_dir / "bundle"
+    helper = bundle / "macos-vz-helper"
+    socket_path = runtime_dir / "helper.sock"
+    logs = runtime_dir / "logs"
+    runtime_dir.mkdir()
+    pre_metadata = helperctl._host_reboot_metadata_payload(
+        bundle_path=bundle,
+        helper_path=helper,
+        helper_mode="direct",
+        socket_path=socket_path,
+        launchd_label="",
+        launchd_plist_path=None,
+    )
+    (evidence / "host-reboot-pre.json").write_text(
+        json.dumps(
+            {
+                "phase": "pre",
+                **pre_metadata,
+                "helper_details": {"helper_instance_id": "before"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(helperctl, "VOLATILE_EVIDENCE_ROOTS", ())
+    monkeypatch.chdir(runtime_dir)
+
+    results = helperctl.run_host_reboot_post(
+        evidence_dir=evidence,
+        bundle_path=Path("./bundle"),
+        helper_path=Path("./bundle/macos-vz-helper"),
+        helper_mode="direct",
+        socket_path=Path("./helper.sock"),
+        log_dir=logs,
+        ping_checker=lambda path: helperctl.PingState(
+            result=helperctl.CheckResult(True),
+            protocol_version="1",
+            helper_version="test",
+            details={"helper_instance_id": "after"},
+        ),
+    )
+
+    by_name = dict(results)
+    CASE.assertEqual(by_name["metadata_match"].reason, "host_reboot_metadata_match")
+    CASE.assertTrue(by_name["metadata_match"].ok)
+    CASE.assertEqual(results[-1], ("host_reboot_post", helperctl.CheckResult(ok=True)))
+    post_payload = json.loads((evidence / "host-reboot-post.json").read_text(encoding="utf-8"))
+    CASE.assertEqual(post_payload["bundle_path"], str(bundle.resolve(strict=False)))
+    CASE.assertEqual(post_payload["helper_path"], str(helper.resolve(strict=False)))
+    CASE.assertEqual(post_payload["socket_path"], str(socket_path.resolve(strict=False)))
+    CASE.assertEqual(post_payload["launchd_plist_path"], "")
 
 
 def test_host_reboot_post_dry_run_does_not_write_post_manifest(
