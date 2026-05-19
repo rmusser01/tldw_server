@@ -28,6 +28,7 @@ export interface ServerInfo {
   available: boolean
   version?: string
   models?: string[]
+  modelSource?: "metadata" | "providers"
 }
 
 /**
@@ -120,13 +121,25 @@ export const test = base.extend<WorkflowFixtures>({
         info.available = rootRes?.ok ?? false
       }
 
-      // Check available models
+      // Check available models. Prefer the richer metadata endpoint because the
+      // providers endpoint includes catalog-only models that may not be runnable.
       if (info.available) {
-        const modelsUrl = `${TEST_CONFIG.serverUrl}/api/v1/llm/providers`
-        const modelsRes = await fetchWithApiKey(modelsUrl).catch(() => null)
-        if (modelsRes?.ok) {
-          const modelsData = await modelsRes.json().catch(() => ({}))
-          info.models = extractModelIds(modelsData)
+        const metadataUrl = `${TEST_CONFIG.serverUrl}/api/v1/llm/models/metadata`
+        const metadataRes = await fetchWithApiKey(metadataUrl).catch(() => null)
+        if (metadataRes?.ok) {
+          const metadataData = await metadataRes.json().catch(() => ({}))
+          info.models = extractUsableModelIds(metadataData)
+          info.modelSource = "metadata"
+        }
+
+        if (!info.models || info.models.length === 0) {
+          const modelsUrl = `${TEST_CONFIG.serverUrl}/api/v1/llm/providers`
+          const modelsRes = await fetchWithApiKey(modelsUrl).catch(() => null)
+          if (modelsRes?.ok) {
+            const modelsData = await modelsRes.json().catch(() => ({}))
+            info.models = extractModelIds(modelsData)
+            info.modelSource = "providers"
+          }
         }
       }
     } catch {
@@ -156,9 +169,33 @@ export function loadModerationReviewItemsFixture(): ModerationReviewItemsFixture
 }
 
 /**
- * Extract model IDs from provider response
+ * Extract configured model IDs from the metadata response.
  */
-function extractModelIds(payload: any): string[] {
+export function extractUsableModelIds(payload: any): string[] {
+  const models: string[] = []
+  const entries = Array.isArray(payload?.models)
+    ? payload.models
+    : Array.isArray(payload)
+      ? payload
+      : []
+
+  for (const model of entries) {
+    if (!isRunnableModelDescriptor(model)) continue
+    const provider = normalizeModelField(
+      model?.provider ?? model?.provider_key ?? model?.api_provider
+    )
+    const id = normalizeModelField(model?.id ?? model?.model ?? model?.name)
+    if (!id) continue
+    models.push(provider ? `${provider}:${id}` : id)
+  }
+
+  return [...new Set(models)]
+}
+
+/**
+ * Extract model IDs from provider response.
+ */
+export function extractModelIds(payload: any): string[] {
   const models: string[] = []
 
   // Handle { providers: [{ name, models: [...] }, ...] } shape (actual API response)
@@ -170,7 +207,9 @@ function extractModelIds(payload: any): string[] {
 
   for (const provider of providers) {
     if (Array.isArray(provider?.models)) {
+      const providerUsable = isRunnableModelDescriptor(provider)
       for (const model of provider.models) {
+        if (!providerUsable || !isRunnableModelDescriptor(model)) continue
         if (typeof model === "string") {
           models.push(model)
         } else {
@@ -184,6 +223,7 @@ function extractModelIds(payload: any): string[] {
   // Fallback: payload.models direct array
   if (models.length === 0 && Array.isArray(payload?.models)) {
     for (const model of payload.models) {
+      if (!isRunnableModelDescriptor(model)) continue
       if (typeof model === "string") {
         models.push(model)
       } else {
@@ -194,6 +234,38 @@ function extractModelIds(payload: any): string[] {
   }
 
   return models
+}
+
+function isRunnableModelDescriptor(value: any): boolean {
+  if (!value || typeof value === "string") return true
+  const catalogOnly = firstBoolean(value, ["catalog_only", "catalogOnly", "is_catalog_only"])
+  if (catalogOnly === true) return false
+  const configured = firstBoolean(value, ["is_configured", "isConfigured", "configured"])
+  if (configured === false) return false
+  const providerConfigured = firstBoolean(value, [
+    "provider_is_configured",
+    "providerIsConfigured",
+    "provider_configured",
+    "providerConfigured"
+  ])
+  if (providerConfigured === false) return false
+  const deprecated = firstBoolean(value, ["deprecated", "is_deprecated", "isDeprecated"])
+  if (deprecated === true) return false
+  return true
+}
+
+function firstBoolean(value: any, keys: string[]): boolean | null {
+  for (const key of keys) {
+    const field = value?.[key] ?? value?.details?.[key] ?? value?.metadata?.[key]
+    if (typeof field === "boolean") return field
+  }
+  return null
+}
+
+function normalizeModelField(value: unknown): string | null {
+  if (typeof value !== "string" && typeof value !== "number") return null
+  const trimmed = String(value).trim()
+  return trimmed.length > 0 ? trimmed : null
 }
 
 /**
