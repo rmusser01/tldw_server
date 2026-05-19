@@ -27,7 +27,7 @@ Fix final review findings on the host-reboot-drill branch: add stronger pre/post
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Final review found that pre/post relied too heavily on helper ping and metadata. The fix adds non-mutating lifecycle readiness collection for direct and launchd modes, records bounded readiness results into evidence manifests, runs bundle validation through the existing host smoke dry-run path, records a host boot marker, and makes post validation fail with `host_reboot_not_detected` when the marker is unchanged.
+Final review found that pre/post relied too heavily on helper ping and metadata. The fix adds non-mutating lifecycle readiness collection for direct and launchd modes, records bounded readiness results into evidence manifests, runs bundle validation through the existing shell host-smoke `--dry-run` path so bundle input checks actually execute, records a host boot marker, and makes post validation fail with `host_reboot_not_detected` when the marker is unchanged.
 
 The host reboot drill still remains explicit operator workflow only. No workflow files or scheduled reboot automation were added.
 

@@ -1030,16 +1030,24 @@ def host_reboot_bundle_dry_run_validation(
     bundle_path: Path,
     socket_path: Path,
     python_path: Path | None = None,
+    command_runner: Callable[..., int] = run_command_captured,
 ) -> CheckResult:
     if not str(bundle_path) or str(bundle_path) == ".":
         return CheckResult(False, "host_reboot_bundle_missing")
-    return run_vz_linux_host_smoke(
-        bundle_path=bundle_path,
-        socket_path=socket_path,
-        python_path=python_path,
-        dry_run=True,
-        command_runner=run_command_captured,
-    )
+    argv = [
+        str(host_smoke_script_path()),
+        "--bundle",
+        str(bundle_path),
+        "--socket",
+        str(socket_path),
+        "--dry-run",
+    ]
+    if python_path is not None:
+        argv.extend(["--python", str(python_path)])
+    code = command_runner(argv, dry_run=False)
+    if code != 0:
+        return CheckResult(False, "host_reboot_bundle_validation_failed", str(code))
+    return CheckResult(True, "dry_run")
 
 
 def _host_reboot_bundle_payload(result: CheckResult) -> dict[str, Any]:

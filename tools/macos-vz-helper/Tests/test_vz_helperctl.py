@@ -626,6 +626,21 @@ def test_host_reboot_lifecycle_readiness_checks_launchd_status(tmp_path: Path) -
     CASE.assertEqual(dict(results)["helper_readiness"].reason, "host_reboot_helper_ready")
 
 
+def test_host_reboot_bundle_dry_run_validation_rejects_missing_kernel(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "rootfs.img").write_text("rootfs", encoding="utf-8")
+
+    result = helperctl.host_reboot_bundle_dry_run_validation(
+        bundle_path=bundle,
+        socket_path=tmp_path / "helper.sock",
+    )
+
+    CASE.assertFalse(result.ok)
+    CASE.assertEqual(result.reason, "host_reboot_bundle_validation_failed")
+
+
 def test_host_reboot_pre_dry_run_does_not_create_evidence_or_manifest(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
