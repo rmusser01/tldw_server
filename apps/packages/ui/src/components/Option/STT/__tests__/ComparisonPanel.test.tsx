@@ -106,4 +106,38 @@ describe("ComparisonPanel", () => {
       )
     ).toBeInTheDocument()
   })
+
+  it("shows classified recovery copy and settings link for STT result errors", () => {
+    hookReturnRef.current = {
+      ...hookReturnRef.current,
+      results: [
+        {
+          model: "whisper-large",
+          text: "",
+          status: "error",
+          error: "Credentials need attention",
+          errorRecovery: "Open Settings -> Speech, check the selected provider credentials, and retry.",
+          errorSettingsHref: "/settings/speech"
+        }
+      ]
+    }
+
+    render(
+      <ComparisonPanel
+        blob={new Blob(["audio"], { type: "audio/webm" })}
+        availableModels={["whisper-large"]}
+        sttOptions={{}}
+        onSaveToNotes={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText("Credentials need attention")).toBeInTheDocument()
+    expect(
+      screen.getByText("Open Settings -> Speech, check the selected provider credentials, and retry.")
+    ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Open Settings" })).toHaveAttribute(
+      "href",
+      "/settings/speech"
+    )
+  })
 })

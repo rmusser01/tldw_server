@@ -4,6 +4,10 @@ import {
   type TtsProviderOverrides
 } from "@/services/tts-provider"
 import type { RenderStripConfig, RenderStripState } from "@/components/Option/Speech/RenderStrip"
+import {
+  classifyAudioError,
+  type AudioErrorClassification
+} from "@/components/Option/Audio/audio-error-classification"
 
 export type RenderEntry = {
   id: string
@@ -12,11 +16,19 @@ export type RenderEntry = {
   audioUrl?: string
   audioBlob?: Blob
   errorMessage?: string
+  errorSettingsHref?: "/settings/speech"
   progress?: number
 }
 
 let nextId = 1
 const genId = () => `render-${Date.now()}-${nextId++}`
+
+const classifyRenderError = (error: unknown): AudioErrorClassification => {
+  return classifyAudioError(error)
+}
+
+const formatRenderErrorMessage = (classified: AudioErrorClassification): string =>
+  `${classified.title}. ${classified.recovery}`
 
 const configToOverrides = (config: RenderStripConfig): TtsProviderOverrides => {
   const overrides: TtsProviderOverrides = { provider: config.provider }
@@ -118,9 +130,13 @@ export const useMultiRenderState = () => {
         const context = await resolveTtsProviderContext(text, overrides)
 
         if (!context.supported || !context.synthesize) {
+          const classified = classifyRenderError(
+            new Error(`Provider "${entry.config.provider}" is not supported`)
+          )
           updateRender(id, {
             state: "error",
-            errorMessage: `Provider "${entry.config.provider}" is not supported`
+            errorMessage: formatRenderErrorMessage(classified),
+            errorSettingsHref: classified.settingsHref
           })
           return
         }
@@ -149,10 +165,11 @@ export const useMultiRenderState = () => {
         })
       } catch (error) {
         if (controller.signal.aborted) return
+        const classified = classifyRenderError(error)
         updateRender(id, {
           state: "error",
-          errorMessage:
-            error instanceof Error ? error.message : "Generation failed"
+          errorMessage: formatRenderErrorMessage(classified),
+          errorSettingsHref: classified.settingsHref
         })
       } finally {
         abortControllersRef.current.delete(id)

@@ -113,6 +113,23 @@ describe("RenderStrip", () => {
     expect(onRetry).toHaveBeenCalledWith("r1")
   })
 
+  it("shows a settings link for recoverable credential errors", () => {
+    render(
+      <RenderStrip
+        id="r1"
+        state="error"
+        config={baseConfig}
+        errorMessage="Credentials need attention. Open Settings -> Speech, check the selected provider credentials, and retry."
+        errorSettingsHref="/settings/speech"
+      />
+    )
+
+    expect(screen.getByRole("link", { name: "Open Settings" })).toHaveAttribute(
+      "href",
+      "/settings/speech"
+    )
+  })
+
   it("does not show speed tag when speed is 1", () => {
     render(<RenderStrip id="r1" state="idle" config={{ ...baseConfig, speed: 1 }} />)
     expect(screen.queryByText("1x")).not.toBeInTheDocument()

@@ -79,7 +79,7 @@ describe("useComparisonTranscribe", () => {
   it("isolates per-model errors", async () => {
     mockTranscribe
       .mockResolvedValueOnce({ text: "success" })
-      .mockRejectedValueOnce(new Error("model not found"))
+      .mockRejectedValueOnce(new Error("model not found: sk_secret_inline"))
 
     const { result } = renderHook(() => useComparisonTranscribe())
 
@@ -91,10 +91,31 @@ describe("useComparisonTranscribe", () => {
     expect(result.current.results[0].text).toBe("success")
 
     expect(result.current.results[1].status).toBe("error")
-    expect(result.current.results[1].error).toBe("model not found")
+    expect(result.current.results[1].error).toBe("Model is not available")
+    expect(result.current.results[1].errorCategory).toBe("missing_model")
+    expect(result.current.results[1].errorRecovery).toContain("Audio Setup Guide")
+    expect(result.current.results[1].errorDebugMessage).toContain("[redacted]")
+    expect(result.current.results[1].errorDebugMessage).not.toContain("sk_secret_inline")
     expect(result.current.results[1].text).toBe("")
 
     expect(result.current.isRunning).toBe(false)
+  })
+
+  it("preserves a settings recovery link for credential failures", async () => {
+    mockTranscribe.mockRejectedValueOnce(
+      Object.assign(new Error("Request failed for sk_secret_inline"), {
+        response: { status: 401 }
+      })
+    )
+
+    const { result } = renderHook(() => useComparisonTranscribe())
+
+    await act(async () => {
+      await result.current.transcribeAll(makeBlob(), ["whisper-1"], {})
+    })
+
+    expect(result.current.results[0].error).toBe("Credentials need attention")
+    expect(result.current.results[0].errorSettingsHref).toBe("/settings/speech")
   })
 
   it("retries a single model", async () => {

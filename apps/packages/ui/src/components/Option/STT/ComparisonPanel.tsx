@@ -65,7 +65,17 @@ const ResultCard: React.FC<ResultCardProps> = ({
           <Text type="danger">
             {result.error || t("stt.comparison.unknownError", "Transcription failed")}
           </Text>
-          <div>
+          {result.errorRecovery && (
+            <Text type="secondary" className="block text-xs">
+              {result.errorRecovery}
+            </Text>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {result.errorSettingsHref && (
+              <Button size="small" type="link" href={result.errorSettingsHref}>
+                Open Settings
+              </Button>
+            )}
             <Button
               size="small"
               icon={<RotateCcw className="h-3.5 w-3.5" />}

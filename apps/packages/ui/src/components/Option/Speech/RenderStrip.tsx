@@ -21,6 +21,7 @@ export type RenderStripProps = {
   audioUrl?: string
   audioBlob?: Blob
   errorMessage?: string
+  errorSettingsHref?: string
   /** Progress 0-100 for long-running generations */
   progress?: number
   /** Whether this strip's audio is currently playing */
@@ -56,6 +57,7 @@ export const RenderStrip: React.FC<RenderStripProps> = ({
   audioUrl,
   audioBlob,
   errorMessage,
+  errorSettingsHref,
   progress,
   isPlaying,
   forcePaused,
@@ -252,6 +254,11 @@ export const RenderStrip: React.FC<RenderStripProps> = ({
           <span className="flex-1 text-sm text-red-700 dark:text-red-400">
             {errorMessage || "Generation failed"}
           </span>
+          {errorSettingsHref && (
+            <Button size="small" type="link" href={errorSettingsHref}>
+              Open Settings
+            </Button>
+          )}
           <Button
             size="small"
             icon={<RefreshCw className="h-3.5 w-3.5" />}

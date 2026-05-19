@@ -75,6 +75,7 @@ import { VoiceCloningManager } from "@/components/Option/TTS/VoiceCloningManager
 import { RenderStrip } from "@/components/Option/Speech/RenderStrip"
 import { AudioReadinessStrip } from "@/components/Option/Audio/AudioReadinessStrip"
 import { buildTtsReadinessItems } from "@/components/Option/Audio/audio-readiness"
+import { classifyAudioError } from "@/components/Option/Audio/audio-error-classification"
 import { VoicePickerModal, type VoiceSelection } from "@/components/Option/Speech/VoicePickerModal"
 import { useAudioSourceCatalog } from "@/hooks/useAudioSourceCatalog"
 import { useAudioSourcePreferences } from "@/hooks/useAudioSourcePreferences"
@@ -699,11 +700,11 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
             })
             setLastTranscript(text)
           }
-        } catch (e: any) {
+        } catch (e: unknown) {
+          const classified = classifyAudioError(e)
           notification.error({
             message: t("playground:actions.speechErrorTitle", "Dictation failed"),
-            description:
-              e?.message ||
+            description: classified.recovery ||
               t(
                 "playground:actions.speechErrorBody",
                 "Transcription request failed. Check tldw server health."
@@ -720,9 +721,10 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
 
       recorder.start(useLongRunning ? 5000 : undefined)
       setIsRecording(true)
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const classified = classifyAudioError(e)
       const description =
-        e?.message ||
+        classified.recovery ||
         t(
           "playground:actions.speechMicError",
           "Unable to access your microphone. Check browser permissions and try again."
@@ -1239,8 +1241,9 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     const config = await tldwClient.getConfig()
     const serverUrl = String(config?.serverUrl || "").trim()
     if (!serverUrl) {
+      const classified = classifyAudioError("tldw server not configured")
       setStreamStatus("error")
-      setStreamErrorSafe("tldw server not configured")
+      setStreamErrorSafe(classified.recovery)
       return
     }
     const token =
@@ -1248,8 +1251,9 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
         ? String(config?.accessToken || "").trim()
         : String(config?.apiKey || "").trim()
     if (!token) {
+      const classified = classifyAudioError("Missing authentication token")
       setStreamStatus("error")
-      setStreamErrorSafe("Missing authentication token")
+      setStreamErrorSafe(classified.recovery)
       return
     }
 
@@ -1314,8 +1318,9 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
         try {
           const payload = JSON.parse(event.data)
           if (payload?.type === "error") {
+            const classified = classifyAudioError(payload?.message || "Streaming error")
             setStreamStatus("error")
-            setStreamErrorSafe(payload?.message || "Streaming error")
+            setStreamErrorSafe(classified.recovery)
           }
         } catch {
           // ignore non-JSON status frames
@@ -1330,8 +1335,9 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     }
 
     ws.onerror = () => {
+      const classified = classifyAudioError("Streaming connection error")
       setStreamStatus("error")
-      setStreamErrorSafe("Streaming connection error")
+      setStreamErrorSafe(classified.recovery)
     }
 
     ws.onclose = () => {
@@ -1518,12 +1524,14 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
             })
             setTtsJobStatus("success")
           } else {
+            const classified = classifyAudioError("No audio artifact found for this job.")
             setTtsJobStatus("error")
-            setTtsJobError("No audio artifact found for this job.")
+            setTtsJobError(classified.recovery)
           }
-        } catch (error: any) {
+        } catch (error: unknown) {
+          const classified = classifyAudioError(error)
           setTtsJobStatus("error")
-          setTtsJobError(error?.message || "Long-form TTS job failed.")
+          setTtsJobError(classified.recovery || "Long-form TTS job failed.")
         } finally {
           ttsJobAbortRef.current = null
         }
@@ -2142,10 +2150,11 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
       }
       setVoicePreviewUrl(url)
       setVoicePreviewCardId(card.id)
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const classified = classifyAudioError(error)
       notification.error({
         message: "Preview failed",
-        description: error?.message || "Unable to generate preview audio."
+        description: classified.recovery || "Unable to generate preview audio."
       })
     } finally {
       setVoicePreviewingId(null)
@@ -2860,6 +2869,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                             audioUrl={render.audioUrl}
                             audioBlob={render.audioBlob}
                             errorMessage={render.errorMessage}
+                            errorSettingsHref={render.errorSettingsHref}
                             progress={render.progress}
                             isPlaying={multiRender.playingId === render.id}
                             forcePaused={multiRender.playingId !== null && multiRender.playingId !== render.id}

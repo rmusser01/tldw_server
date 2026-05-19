@@ -1,5 +1,9 @@
 import { useCallback, useRef, useState } from "react"
 
+import {
+  classifyAudioError,
+  type AudioErrorCategory
+} from "@/components/Option/Audio/audio-error-classification"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 
 export interface ComparisonResult {
@@ -7,6 +11,10 @@ export interface ComparisonResult {
   text: string
   status: "pending" | "running" | "done" | "error"
   error?: string
+  errorCategory?: AudioErrorCategory
+  errorRecovery?: string
+  errorSettingsHref?: "/settings/speech"
+  errorDebugMessage?: string
   latencyMs?: number
   wordCount?: number
 }
@@ -68,10 +76,14 @@ export function useComparisonTranscribe() {
           wordCount: countWords(text)
         })
       } catch (err: unknown) {
-        const errorMsg = err instanceof Error ? err.message : String(err)
+        const classified = classifyAudioError(err)
         updateResult(model, {
           status: "error",
-          error: errorMsg,
+          error: classified.title,
+          errorCategory: classified.category,
+          errorRecovery: classified.recovery,
+          errorSettingsHref: classified.settingsHref,
+          errorDebugMessage: classified.debugMessage,
           text: "",
           latencyMs: performance.now() - start
         })

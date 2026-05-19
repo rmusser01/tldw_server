@@ -395,7 +395,7 @@ git commit -m "fix speech route parity and tts config provenance"
 - `cd apps/packages/ui && bunx vitest run src/components/Option/Speech/__tests__/SpeechPlaygroundPage.render.test.tsx src/components/Option/Speech/__tests__/TtsProviderStrip.test.tsx`
 - `cd apps/tldw-frontend && bun run test:extension -- extension/__tests__/audio-route-parity.guard.test.tsx`
 
-**Status:** Complete via `TASK-430` / commit `a43bc013d`.
+**Status:** Complete via `TASK-430` / commit `c46563eaa`.
 
 ### Files
 
@@ -464,7 +464,7 @@ Add:
 - `cd apps/packages/ui && bunx vitest run src/components/Option/STT/__tests__/RecordingStrip.test.tsx src/components/Option/STT/__tests__/ComparisonPanel.test.tsx`
 - `cd apps/packages/ui && bunx vitest run src/components/Option/Speech/__tests__/SpeechPlaygroundPage.audio-source.test.tsx src/components/Option/Speech/__tests__/RenderStrip.test.tsx`
 
-**Status:** Not Started
+**Status:** Complete via `TASK-431`.
 
 ### Files
 
@@ -484,14 +484,20 @@ Add:
 
 ### Implementation Steps
 
-- [ ] Write classification tests for known error shapes and browser `NotAllowedError`.
-- [ ] Implement `classifyAudioError(error)`.
-- [ ] Apply classification to STT comparison errors in `useComparisonTranscribe`.
-- [ ] Apply classification to TTS render errors in `useMultiRenderState` or at the closest existing render failure boundary.
-- [ ] Update `ComparisonPanel` and `RenderStrip` to show category title and recovery copy.
-- [ ] Add `/settings/speech` as the recovery link for missing credentials or setup where appropriate.
-- [ ] Add microphone-denied UI to `RecordingStrip` with retry and browser settings guidance.
-- [ ] Confirm errors remain keyboard reachable and screen-reader-readable.
+- [x] Write classification tests for known error shapes and browser `NotAllowedError`.
+- [x] Implement `classifyAudioError(error)`.
+- [x] Apply classification to STT comparison errors in `useComparisonTranscribe`.
+- [x] Apply classification to TTS render errors in `useMultiRenderState` or at the closest existing render failure boundary.
+- [x] Update `ComparisonPanel` and `RenderStrip` to show category title and recovery copy.
+- [x] Add `/settings/speech` as the recovery link for missing credentials or setup where appropriate.
+- [x] Add microphone-denied UI to `RecordingStrip` with retry and browser settings guidance.
+- [x] Confirm errors remain keyboard reachable and screen-reader-readable.
+
+### Stage 3 Verification Notes
+
+- Added shared classifier coverage for credentials, missing model, microphone permission, network, timeout, engine unavailable, unsupported, and unknown failures.
+- Added STT comparison and TTS render recovery links to `/settings/speech` when the classifier returns a settings recovery target.
+- Verified with focused Stage 3 and audio readiness/parity suites; full package TypeScript remains blocked by existing unrelated frontend baseline errors outside the touched audio files.
 
 ## Stage 4: Comparison Run Provenance And Power-User Controls
 
