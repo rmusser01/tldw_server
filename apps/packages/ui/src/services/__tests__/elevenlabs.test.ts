@@ -86,6 +86,77 @@ describe("ElevenLabs fetch service", () => {
     })
   })
 
+  it("aborts generated speech with the caller-provided signal without reporting a timeout", async () => {
+    vi.useFakeTimers()
+    const callerAbort = new AbortController()
+    let fetchSignal: AbortSignal | undefined
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      fetchSignal = init?.signal ?? undefined
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"))
+        })
+      })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const request = generateSpeech(
+      "eleven-key",
+      "hello",
+      "voice-1",
+      "model-1",
+      undefined,
+      { signal: callerAbort.signal, timeoutMs: 10_000 }
+    )
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+
+    callerAbort.abort()
+
+    expect(fetchSignal?.aborted).toBe(true)
+    await expect(request).rejects.toThrow("Aborted")
+  })
+
+  it("keeps caller abort active while generated speech response bodies are read", async () => {
+    const callerAbort = new AbortController()
+    let resolveBody!: (value: ArrayBuffer) => void
+    let bodyStarted!: () => void
+    const bodyStartedPromise = new Promise<void>((resolve) => {
+      bodyStarted = resolve
+    })
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) =>
+      Promise.resolve({
+        ok: true,
+        arrayBuffer: vi.fn(() => {
+          bodyStarted()
+          return new Promise<ArrayBuffer>((resolve, reject) => {
+            resolveBody = resolve
+            init?.signal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("Aborted", "AbortError")),
+              { once: true }
+            )
+          })
+        })
+      } as Response)
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    const request = generateSpeech(
+      "eleven-key",
+      "hello",
+      "voice-1",
+      "model-1",
+      undefined,
+      { signal: callerAbort.signal, timeoutMs: 10_000 }
+    )
+    await bodyStartedPromise
+
+    callerAbort.abort()
+    resolveBody(new ArrayBuffer(1))
+
+    await expect(request).rejects.toThrow("Aborted")
+  })
+
   it("rejects failed ElevenLabs responses with a descriptive status error", async () => {
     const fetchMock = vi
       .fn()
@@ -113,6 +184,49 @@ describe("ElevenLabs fetch service", () => {
       "ElevenLabs request timed out"
     )
     await vi.advanceTimersByTimeAsync(5)
+
+    await requestAssertion
+  })
+
+  it("keeps timeouts active while generated speech response bodies are read", async () => {
+    vi.useFakeTimers()
+    let resolveBody!: (value: ArrayBuffer) => void
+    let bodyStarted!: () => void
+    const bodyStartedPromise = new Promise<void>((resolve) => {
+      bodyStarted = resolve
+    })
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) =>
+      Promise.resolve({
+        ok: true,
+        arrayBuffer: vi.fn(() => {
+          bodyStarted()
+          return new Promise<ArrayBuffer>((resolve, reject) => {
+            resolveBody = resolve
+            init?.signal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("Aborted", "AbortError")),
+              { once: true }
+            )
+          })
+        })
+      } as Response)
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    const request = generateSpeech(
+      "eleven-key",
+      "hello",
+      "voice-1",
+      "model-1",
+      undefined,
+      { timeoutMs: 5 }
+    )
+    await bodyStartedPromise
+    const requestAssertion = expect(request).rejects.toThrow(
+      "ElevenLabs request timed out"
+    )
+    await vi.advanceTimersByTimeAsync(5)
+    resolveBody(new ArrayBuffer(1))
 
     await requestAssertion
   })

@@ -1,8 +1,17 @@
+import { existsSync, readFileSync } from "node:fs"
 import React from "react"
 import { describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import OptionMediaMulti from "../option-media-multi"
 import OptionMediaTrash from "../option-media-trash"
+
+const readFirstExisting = (candidates: string[]): string => {
+  const path = candidates.find((candidate) => existsSync(candidate))
+  if (!path) {
+    throw new Error(`Unable to locate any route source candidate: ${candidates.join(", ")}`)
+  }
+  return readFileSync(path, "utf8")
+}
 
 vi.mock("~/components/Layouts/Layout", () => ({
   __esModule: true,
@@ -86,5 +95,36 @@ describe("media option route guards", () => {
     render(<OptionMediaTrash />)
     expect(screen.getByTestId("route-boundary-media-trash")).toBeVisible()
     expect(screen.getByTestId("media-trash-page")).toBeVisible()
+  })
+
+  it("keeps WebUI and extension media routes on the shared ViewMediaPage implementation", () => {
+    const sharedOptionMediaSource = readFirstExisting([
+      "src/routes/option-media.tsx",
+      "apps/packages/ui/src/routes/option-media.tsx"
+    ])
+    const extensionOptionMediaSource = readFirstExisting([
+      "../../tldw-frontend/extension/routes/option-media.tsx",
+      "apps/tldw-frontend/extension/routes/option-media.tsx"
+    ])
+    const extensionMediaRouteSources = [
+      extensionOptionMediaSource,
+      readFirstExisting([
+        "../../tldw-frontend/extension/routes/option-media-multi.tsx",
+        "apps/tldw-frontend/extension/routes/option-media-multi.tsx"
+      ]),
+      readFirstExisting([
+        "../../tldw-frontend/extension/routes/option-media-trash.tsx",
+        "apps/tldw-frontend/extension/routes/option-media-trash.tsx"
+      ])
+    ]
+
+    expect(sharedOptionMediaSource).toContain(
+      'import ViewMediaPage from "@/components/Review/ViewMediaPage"'
+    )
+    expect(extensionOptionMediaSource).toContain(
+      'import ViewMediaPage from "@/components/Review/ViewMediaPage"'
+    )
+    expect(extensionMediaRouteSources.join("\n")).not.toContain("read-along")
+    expect(extensionMediaRouteSources.join("\n")).not.toContain("ContentViewer")
   })
 })

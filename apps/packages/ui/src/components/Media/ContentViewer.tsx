@@ -11,7 +11,6 @@ import {
   MessageSquare,
   Clock,
   FileText,
-  StickyNote,
   Edit3,
   ExternalLink,
   Expand,
@@ -23,7 +22,7 @@ import {
   User,
   Download
 } from 'lucide-react'
-import React, { useState, Suspense, useMemo, useRef, useCallback } from 'react'
+import React, { useState, Suspense, useMemo, useRef, useCallback, useEffect } from 'react'
 import { Select, Dropdown, Tooltip, message, Spin } from 'antd'
 import { useTranslation } from 'react-i18next'
 import type { MenuProps } from 'antd'
@@ -59,6 +58,11 @@ import {
   LARGE_PLAIN_CONTENT_THRESHOLD_CHARS,
   LARGE_PLAIN_CONTENT_CHUNK_CHARS
 } from './hooks/useTranscriptDisplay'
+import { MediaReadAlongPopover } from './read-along/MediaReadAlongPopover'
+import { MediaReadAlongTransport } from './read-along/MediaReadAlongTransport'
+import { useContentSelectionActions } from './read-along/useContentSelectionActions'
+import { useMediaReadAlongSession } from './read-along/useMediaReadAlongSession'
+import type { ReadAlongScope } from './read-along/types'
 
 // Re-export for test compatibility
 export {
@@ -116,6 +120,38 @@ export const shouldShowMediaDeveloperTools = (
   if (!env || typeof env !== 'object') return false
   const mode = String((env as Record<string, unknown>).MODE || '').toLowerCase()
   return Boolean((env as Record<string, unknown>).DEV) || mode === 'development'
+}
+
+const buildContentRevisionHash = (value: string): string => {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash.toString(16).padStart(8, '0')
+}
+
+const clearDocumentSelection = (): void => {
+  if (typeof window === 'undefined' || typeof window.getSelection !== 'function') {
+    return
+  }
+  window.getSelection()?.removeAllRanges()
+}
+
+const getReadAlongScrollBehavior = (): ScrollBehavior => {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return 'smooth'
+  }
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ? 'auto'
+    : 'smooth'
+}
+
+const escapeCssAttributeValue = (value: string): string => {
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+    return CSS.escape(value)
+  }
+  return value.replace(/["\\]/g, '\\$&')
 }
 
 // Metadata helpers moved to useContentMetadata hook
@@ -205,6 +241,7 @@ export function ContentViewer({
   const rootContainerRef = useRef<HTMLDivElement | null>(null)
   const contentBodyRef = useRef<HTMLDivElement | null>(null)
   const contentScrollContainerRef = useRef<HTMLDivElement | null>(null)
+  const readAlongTransportAnchorRef = useRef<DOMRect | null>(null)
   const [versionHistoryMounted, setVersionHistoryMounted] = useState(false)
 
   const selectedMediaId = selectedMedia?.id != null ? String(selectedMedia.id) : null
@@ -267,6 +304,80 @@ export function ContentViewer({
     t
   })
 
+  const contentSelectionIdentityKey = useMemo(
+    () => [
+      selectedMediaId || 'none',
+      selectedMedia?.kind || 'none',
+      rendering.effectiveRenderMode,
+      content.length,
+      buildContentRevisionHash(content)
+    ].join(':'),
+    [content, rendering.effectiveRenderMode, selectedMedia?.kind, selectedMediaId]
+  )
+
+  const selectionActions = useContentSelectionActions({
+    contentBodyRef,
+    contentIdentityKey: contentSelectionIdentityKey,
+    onApplyAnnotationSelection: modals.captureAnnotationSelection
+  })
+
+  useEffect(() => {
+    selectionActions.clearSelectionActions()
+  }, [contentSelectionIdentityKey, selectionActions.clearSelectionActions])
+
+  const readAlong = useMediaReadAlongSession({
+    mediaId: selectedMediaId,
+    mediaKind: selectedMedia?.kind || null,
+    content,
+    displayContent: rendering.displayContent,
+    renderMode: rendering.effectiveRenderMode,
+    hideTranscriptTimings: rendering.shouldHideTranscriptTimings,
+    selection: selectionActions.selectionActionState,
+    contentBodyRef,
+    contentScrollContainerRef,
+    embeddedMediaRef: modals.mediaPlayerRef
+  })
+
+  const handleStartReadAlongScope = useCallback(
+    (scope: ReadAlongScope) => {
+      const currentSelection = selectionActions.selectionActionState
+      if (!currentSelection) return
+
+      readAlongTransportAnchorRef.current = currentSelection.anchorRect
+      void readAlong.start(scope)
+      selectionActions.clearSelectionActions()
+      clearDocumentSelection()
+    },
+    [readAlong, selectionActions]
+  )
+
+  const handleStopReadAlong = useCallback(() => {
+    readAlong.stop()
+    selectionActions.clearSelectionActions()
+    clearDocumentSelection()
+  }, [readAlong, selectionActions])
+
+  const handleToggleReadAlong = useCallback(() => {
+    if (readAlong.state.status === 'paused') {
+      readAlong.resume()
+      return
+    }
+    readAlong.pause()
+  }, [readAlong])
+
+  const supportedReadAlongScopes = useMemo<ReadAlongScope[]>(() => {
+    const selection = selectionActions.selectionActionState
+    if (
+      selection?.mappingConfidence === 'exact' &&
+      (selection.startSegmentId ||
+        selection.endSegmentId ||
+        (selection.sourceStart != null && selection.sourceEnd != null))
+    ) {
+      return ['selection', 'from-here', 'current-section', 'full-item']
+    }
+    return ['selection', 'full-item']
+  }, [selectionActions.selectionActionState])
+
   // Now we have shouldShowEmbeddedPlayer from modals, re-run rendering with correct value
   // Actually, we need to use the modals result. Let's restructure:
   // The rendering hook needs shouldShowEmbeddedPlayer which comes from modals.
@@ -287,11 +398,51 @@ export function ContentViewer({
     effectiveRenderMode: rendering.effectiveRenderMode,
     shouldHideTranscriptTimings: rendering.shouldHideTranscriptTimings,
     hasClickableTranscriptTimestamps,
+    activeReadAlongSegmentId: readAlong.activeSegmentId,
     contentScrollContainerRef,
     rootContainerRef,
     mediaPlayerRef: modals.mediaPlayerRef,
     t
   })
+
+  const transcriptReadAlongSegments = useMemo(
+    () =>
+      transcript.readAlongSegments.filter(
+        (segment) => segment.kind === 'transcript-line'
+      ),
+    [transcript.readAlongSegments]
+  )
+
+  useEffect(() => {
+    const activeSegmentId = readAlong.activeSegmentId
+    if (!activeSegmentId || transcript.normalizedFindQuery) return
+    const body = contentBodyRef.current
+    if (!body) return
+
+    const activeNode = body.querySelector<HTMLElement>(
+      `[data-read-along-segment-id="${escapeCssAttributeValue(activeSegmentId)}"]`
+    )
+    if (!activeNode) return
+
+    const container = contentScrollContainerRef.current
+    const nodeRect = activeNode.getBoundingClientRect()
+    const viewportRect = container?.getBoundingClientRect()
+    const isOutside = viewportRect
+      ? nodeRect.top < viewportRect.top || nodeRect.bottom > viewportRect.bottom
+      : nodeRect.top < 0 ||
+        nodeRect.bottom > (typeof window !== 'undefined' ? window.innerHeight : 0)
+
+    if (isOutside && typeof activeNode.scrollIntoView === 'function') {
+      activeNode.scrollIntoView({
+        behavior: getReadAlongScrollBehavior(),
+        block: 'center'
+      })
+    }
+  }, [
+    readAlong.activeSegmentId,
+    transcript.normalizedFindQuery,
+    transcript.visiblePlainContentChars
+  ])
 
   // --- Hook: Reading Progress ---
   const readingProgress = useReadingProgress({
@@ -1176,45 +1327,104 @@ export function ContentViewer({
                 ) : null}
                 <div
                   ref={contentBodyRef}
-                  className={`text-sm text-text leading-relaxed ${
+                  className={`select-text text-sm text-text leading-relaxed ${
                     !modals.contentExpanded && shouldShowExpandToggle ? 'max-h-64 overflow-hidden relative' : ''
                   }`}
-                  onMouseUp={modals.handleCaptureAnnotationSelection}
-                  onKeyUp={modals.handleCaptureAnnotationSelection}
+                  tabIndex={0}
+                  role="region"
+                  aria-label={t('review:mediaPage.contentRegion', {
+                    defaultValue: 'Media content'
+                  })}
+                  onMouseUp={selectionActions.handleContentSelectionEvent}
+                  onKeyUp={selectionActions.handleContentSelectionEvent}
                 >
+                  {selectionActions.selectionActionState ? (
+                    <MediaReadAlongPopover
+                      anchorRect={selectionActions.selectionActionState.anchorRect}
+                      viewportRect={
+                        contentScrollContainerRef.current?.getBoundingClientRect() ??
+                        rootContainerRef.current?.getBoundingClientRect() ??
+                        null
+                      }
+                      supportedScopes={supportedReadAlongScopes}
+                      onReadScope={handleStartReadAlongScope}
+                      onAnnotate={selectionActions.applyAnnotationSelection}
+                      t={t}
+                    />
+                  ) : null}
+                  <MediaReadAlongTransport
+                    state={readAlong.state}
+                    anchorRect={readAlongTransportAnchorRef.current}
+                    viewportRect={
+                      contentScrollContainerRef.current?.getBoundingClientRect() ??
+                      rootContainerRef.current?.getBoundingClientRect() ??
+                      null
+                    }
+                    onToggle={handleToggleReadAlong}
+                    onStop={handleStopReadAlong}
+                    onRetry={readAlong.retry}
+                    onSkip={() => readAlong.skip('next')}
+                    t={t}
+                  />
                   {rendering.effectiveRenderMode === 'plain' ? (
                     transcript.shouldRenderTranscriptTimestampChips ? (
                       <div
                         className={`m-0 space-y-1 whitespace-pre-wrap text-text font-mono ${rendering.contentBodyTypographyClass}`}
                       >
-                        {rendering.transcriptLines.map((line, lineIndex) => {
-                          const parsed = parseLeadingTranscriptTiming(line)
-                          if (!parsed) {
+                        {(() => {
+                          let readAlongSegmentIndex = 0
+                          return rendering.transcriptLines.map((line, lineIndex) => {
+                            const parsed = parseLeadingTranscriptTiming(line)
+                            if (!parsed) {
+                              return (
+                                <div key={`line-${lineIndex}`}>
+                                  {line.length > 0 ? line : '\u00A0'}
+                                </div>
+                              )
+                            }
+                            const timestamp = parsed.timestamp
+                            const readAlongSegment =
+                              parsed.text.trim().length > 0
+                                ? transcriptReadAlongSegments[readAlongSegmentIndex++]
+                                : undefined
+                            const isActive =
+                              readAlongSegment?.id === readAlong.activeSegmentId
                             return (
-                              <div key={`line-${lineIndex}`}>
-                                {line.length > 0 ? line : '\u00A0'}
+                              <div key={`line-${lineIndex}`} className="flex flex-wrap items-start gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => transcript.handleTranscriptTimestampSeek(timestamp)}
+                                  className="rounded border border-border bg-surface px-1.5 py-0.5 text-[11px] text-primary hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                                  aria-label={t('review:mediaPage.seekToTimestamp', {
+                                    defaultValue: 'Seek to {{timestamp}}',
+                                    timestamp
+                                  })}
+                                >
+                                  {timestamp}
+                                </button>
+                                <span className="flex-1 whitespace-pre-wrap break-words">
+                                  {parsed.leadingWhitespace}
+                                  {parsed.separator}
+                                  {readAlongSegment ? (
+                                    <span
+                                      data-read-along-segment-id={readAlongSegment.id}
+                                      data-read-along-active={isActive ? 'true' : undefined}
+                                      className={
+                                        isActive
+                                          ? 'rounded bg-primary/20 px-0.5 text-text'
+                                          : undefined
+                                      }
+                                    >
+                                      {parsed.text}
+                                    </span>
+                                  ) : (
+                                    parsed.text
+                                  )}
+                                </span>
                               </div>
                             )
-                          }
-                          const timestamp = parsed.timestamp
-                          const tail = `${parsed.leadingWhitespace}${parsed.separator}${parsed.text}`
-                          return (
-                            <div key={`line-${lineIndex}`} className="flex flex-wrap items-start gap-2">
-                              <button
-                                type="button"
-                                onClick={() => transcript.handleTranscriptTimestampSeek(timestamp)}
-                                className="rounded border border-border bg-surface px-1.5 py-0.5 text-[11px] text-primary hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                                aria-label={t('review:mediaPage.seekToTimestamp', {
-                                  defaultValue: 'Seek to {{timestamp}}',
-                                  timestamp
-                                })}
-                              >
-                                {timestamp}
-                              </button>
-                              <span className="flex-1 whitespace-pre-wrap break-words">{tail}</span>
-                            </div>
-                          )
-                        })}
+                          })
+                        })()}
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -1253,8 +1463,6 @@ export function ContentViewer({
                     rendering.displayContent ? (
                       <div
                         className={`${rendering.richTextTypographyClass} break-words dark:prose-invert max-w-none prose-p:leading-relaxed`}
-                        role="region"
-                        aria-label={t('review:mediaPage.contentRegion', { defaultValue: 'Media content' })}
                         dangerouslySetInnerHTML={{
                           __html: rendering.sanitizedRichContent
                         }}
