@@ -2,7 +2,12 @@ import type { TldwTtsProvidersInfo } from "@/services/tldw/audio-providers"
 
 export type ReadinessState = "ready" | "warning" | "blocked" | "unknown"
 export type CapabilityValue = "supported" | "unsupported" | "unknown"
-export type MetadataSource = "health" | "static_catalog" | "provider" | "unknown"
+export type MetadataSource =
+  | "health"
+  | "static_catalog"
+  | "provider"
+  | "response_schema"
+  | "unknown"
 export type AvailabilityState = "ready" | "on_demand" | "unavailable" | "unknown"
 
 export type ReadinessItem = {
@@ -37,6 +42,31 @@ export type SttModelHealth = {
   message?: string | null
 }
 
+export type SttCapabilitiesSummaryModel = {
+  id: string
+  label?: string
+  description?: string
+  category?: string
+  provider?: string
+  availability?: AvailabilityState
+  availability_source?: MetadataSource
+  capabilities?: Partial<SttModelOption["capabilities"]>
+  sources?: Partial<
+    Record<
+      | keyof SttModelOption["capabilities"]
+      | "availability"
+      | "label"
+      | "description",
+      MetadataSource
+    >
+  >
+  message?: string | null
+}
+
+export type SttCapabilitiesSummary = {
+  models?: SttCapabilitiesSummaryModel[]
+}
+
 export type SttModelOption = {
   id: string
   label: string
@@ -66,6 +96,7 @@ export type SttModelOption = {
 export type BuildSttModelOptionsArgs = {
   catalog?: SttModelCatalog | null
   healthByModel?: Record<string, SttModelHealth | undefined>
+  capabilitySummary?: SttCapabilitiesSummary | null
 }
 
 export type BuildTtsReadinessItemsArgs = {
@@ -106,12 +137,14 @@ const availabilityFromHealth = (
 
 export function buildSttModelOptions({
   catalog,
-  healthByModel = {}
+  healthByModel = {},
+  capabilitySummary
 }: BuildSttModelOptionsArgs): SttModelOption[] {
   const metadataById = new Map<
     string,
     { label?: string; description?: string; category?: string }
   >()
+  const capabilityById = new Map<string, SttCapabilitiesSummaryModel>()
 
   for (const [category, entries] of Object.entries(catalog?.categories ?? {})) {
     for (const entry of entries ?? []) {
@@ -124,31 +157,50 @@ export function buildSttModelOptions({
     }
   }
 
+  for (const entry of capabilitySummary?.models ?? []) {
+    if (!entry?.id) continue
+    capabilityById.set(entry.id, entry)
+  }
+
   const ids = Array.from(
     new Set([
       ...(catalog?.all_models ?? []),
-      ...Array.from(metadataById.keys())
+      ...Array.from(metadataById.keys()),
+      ...Array.from(capabilityById.keys())
     ])
   ).sort()
 
   return ids.map((id) => {
     const metadata = metadataById.get(id)
     const health = healthByModel[id]
-    const availability = availabilityFromHealth(health)
-    const sources: SttModelOption["sources"] = {}
-    if (metadata?.label) sources.label = "static_catalog"
-    if (metadata?.description) sources.description = "static_catalog"
-    if (health) sources.availability = "health"
+    const capability = capabilityById.get(id)
+    const availability = capability?.availability || availabilityFromHealth(health)
+    const sources: SttModelOption["sources"] = { ...(capability?.sources ?? {}) }
+    if (metadata?.label || capability?.label) {
+      sources.label = sources.label || "static_catalog"
+    }
+    if (metadata?.description || capability?.description) {
+      sources.description = sources.description || "static_catalog"
+    }
+    if (capability?.availability_source) {
+      sources.availability = capability.availability_source
+    } else if (health) {
+      sources.availability = "health"
+    }
+    const capabilities = {
+      ...UNKNOWN_CAPABILITIES,
+      ...(capability?.capabilities ?? {})
+    }
 
     return {
       id,
-      label: metadata?.label || id,
-      description: metadata?.description,
-      category: metadata?.category,
-      provider: health?.provider || undefined,
+      label: capability?.label || metadata?.label || id,
+      description: capability?.description || metadata?.description,
+      category: capability?.category || metadata?.category,
+      provider: capability?.provider || health?.provider || undefined,
       availability,
-      readinessMessage: health?.message || undefined,
-      capabilities: { ...UNKNOWN_CAPABILITIES },
+      readinessMessage: capability?.message || health?.message || undefined,
+      capabilities,
       sources
     }
   })

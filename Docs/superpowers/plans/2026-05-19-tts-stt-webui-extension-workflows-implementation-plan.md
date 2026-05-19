@@ -579,11 +579,74 @@ Add:
 - `cd apps/packages/ui && bunx vitest run src/hooks/__tests__/useTranscriptionModelsCatalog.test.tsx`
 - `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints tldw_Server_API/app/core -f json -o /tmp/bandit_tts_stt_capabilities.json`
 
-**Status:** Gated
+**Status:** Complete via `TASK-433`
+
+### Phase 2A Gap Note
+
+`TASK-433` confirms the Phase 2B gate is satisfied. The Stage 2A UI can show
+explicit `unknown` capability states, but current public APIs do not provide
+enough structured metadata for clear STT capability comparison.
+
+Observed API gaps:
+
+- `/api/v1/media/transcription-models` returns static categories and model ids
+  only. It does not return provider ids, readiness, capability support, or
+  metadata source/confidence.
+- `/api/v1/audio/transcriptions/health?model=...` returns availability,
+  usability, on-demand state, provider, message, and estimated size for one
+  requested model. It does not return batch, streaming, diarization, timestamp,
+  or segment capability metadata.
+- `useTranscriptionModelsCatalog` intentionally bounds health checks to the
+  selected/default/first model, so most models remain `unknown` for
+  availability and all models remain `unknown` for capabilities.
+- The backend STT provider adapter registry already exposes lightweight
+  provider-level batch, streaming, and diarization metadata without loading
+  models. That metadata is not currently surfaced to WebUI or extension routes.
+- REST transcription responses can include duration, language, and segments
+  after a run, and can include word data when `timestamp_granularities` requests
+  words and the backend returns it. That proves result metadata, not reliable
+  pre-run capability disclosure for every model.
+
+Decision:
+
+- Implement `GET /api/v1/audio/transcriptions/capabilities` as a read-only
+  enhancement. It must reuse the static catalog, the existing lightweight
+  health check, and provider adapter capabilities.
+- The endpoint must not warm, download, or initialize STT models.
+- It must label unsupported only when the provider adapter or endpoint contract
+  explicitly says unsupported; otherwise use unknown.
+- Frontend consumers must keep the existing catalog/health fallback when the
+  endpoint is unavailable.
+- AuthNZ and rate-limit behavior should match current audio health endpoints:
+  `/api/v1/audio/health` and `/api/v1/audio/transcriptions/health` are mounted
+  under the audio router without explicit `check_rate_limit` or token-scope
+  dependencies, while generation/transcription mutation endpoints carry those
+  dependencies.
+
+### Stage 5 Verification Notes
+
+- Added `GET /api/v1/audio/transcriptions/capabilities` under the current
+  audio health endpoint owner. The endpoint is read-only and calls the existing
+  lightweight status probe with `warm=false` behavior; tests assert it does not
+  warm or load Whisper models.
+- The response combines static catalog labels/categories, lightweight health
+  availability, provider adapter batch/streaming/diarization support, and
+  response-schema timestamp/segment support with per-field sources.
+- Frontend model catalog loading now attempts the capability summary first and
+  falls back to the existing bounded one-model health probe when the endpoint is
+  unavailable.
+- Verified with backend capability and health tests, focused STT/readiness
+  Vitest suites, the tldw API client ownership guard, Bandit on the touched
+  backend endpoint, and `git diff --check`.
+- `./node_modules/.bin/tsc --noEmit --pretty false` still fails on the existing
+  package-wide frontend baseline; after fixing the new `response_schema` source
+  label, the focused Stage 5 suites pass and the remaining reported failures
+  are inherited package-wide test/source type debt outside the capability
+  endpoint path.
 
 ### Potential Files
 
-Modify or add only after the gate:
+Modified or added:
 
 - `tldw_Server_API/app/api/v1/endpoints/audio.py` or the current audio endpoint owner.
 - `tldw_Server_API/app/api/v1/schemas/audio.py` or the current audio schema owner.
@@ -633,12 +696,12 @@ Candidate response:
 
 ### Gate Checklist
 
-- [ ] Document the Phase 2A gap.
-- [ ] Confirm existing backend owner for audio schemas and endpoints.
-- [ ] Confirm AuthNZ dependency and rate-limit behavior by matching current audio endpoint patterns.
-- [ ] Confirm response does not require downloading or warming models just to inspect metadata.
-- [ ] Add API tests before implementation.
-- [ ] Run backend tests and Bandit on touched backend scope.
+- [x] Document the Phase 2A gap.
+- [x] Confirm existing backend owner for audio schemas and endpoints.
+- [x] Confirm AuthNZ dependency and rate-limit behavior by matching current audio endpoint patterns.
+- [x] Confirm response does not require downloading or warming models just to inspect metadata.
+- [x] Add API tests before implementation.
+- [x] Run backend tests and Bandit on touched backend scope.
 
 ## Stage 6: Phase 4 Preset Ownership Decision
 
@@ -849,8 +912,8 @@ git diff --check
 
 - [x] Slice 1 route parity and TTS config truthfulness shipped with tests.
 - [x] Slice 2A readiness shipped with current APIs and explicit unknown states.
-- [ ] Slice 3 comparison provenance shipped with privacy-safe metadata.
-- [ ] Phase 2B either shipped with backend tests or explicitly closed as unnecessary after Phase 2A.
+- [x] Slice 3 comparison provenance shipped with privacy-safe metadata.
+- [x] Phase 2B either shipped with backend tests or explicitly closed as unnecessary after Phase 2A.
 - [ ] Phase 4 preset ownership decision completed before CRUD work.
 - [ ] Preset CRUD shipped only after storage/AuthNZ/migration ownership is approved.
 - [ ] Browser-observed QA completed for WebUI `/tts`, WebUI `/stt`, extension `#/tts`, and extension `#/stt`.

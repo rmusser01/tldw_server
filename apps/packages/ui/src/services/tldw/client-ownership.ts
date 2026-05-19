@@ -33,6 +33,7 @@ export const TRANSITIONAL_DOMAIN_OVERLAPS = {
     "getModelsMetadata",
     "getProviders",
     "getSystemStats",
+    "getTranscriptionCapabilities",
     "getTranscriptionModelHealth",
     "getTranscriptionModels",
     "getTtsJobArtifacts",

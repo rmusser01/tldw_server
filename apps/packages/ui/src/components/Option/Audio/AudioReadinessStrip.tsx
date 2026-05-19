@@ -23,6 +23,7 @@ const SOURCE_LABEL: Record<MetadataSource, string> = {
   health: "model health",
   static_catalog: "static catalog",
   provider: "provider metadata",
+  response_schema: "response schema",
   unknown: "unknown source"
 }
 

@@ -5,6 +5,7 @@ import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { isTimeoutLikeError } from "@/utils/request-timeout"
 import {
   buildSttModelOptions,
+  type SttCapabilitiesSummary,
   type SttModelCatalog,
   type SttModelHealth,
   type SttModelOption
@@ -83,8 +84,23 @@ export function useTranscriptionModelsCatalog(
               : defaultModel && unique.includes(defaultModel)
                 ? defaultModel
                 : unique[0]
+          let capabilitySummary: SttCapabilitiesSummary | null = null
+          const capabilityLoader = (tldwClient as any).getTranscriptionCapabilities
+          if (typeof capabilityLoader === "function") {
+            try {
+              const candidate = await capabilityLoader.call(tldwClient, {
+                timeoutMs: 10_000
+              }) as SttCapabilitiesSummary
+              capabilitySummary =
+                Array.isArray(candidate?.models) && candidate.models.length > 0
+                  ? candidate
+                  : null
+            } catch {
+              capabilitySummary = null
+            }
+          }
           const healthByModel: Record<string, SttModelHealth | undefined> = {}
-          if (readinessModel) {
+          if (!capabilitySummary && readinessModel) {
             try {
               healthByModel[readinessModel] =
                 await tldwClient.getTranscriptionModelHealth(readinessModel)
@@ -94,7 +110,11 @@ export function useTranscriptionModelsCatalog(
           }
           if (!cancelled) {
             setServerModels(unique)
-            setModelOptions(buildSttModelOptions({ catalog: res, healthByModel }))
+            setModelOptions(buildSttModelOptions({
+              catalog: res,
+              healthByModel,
+              capabilitySummary
+            }))
             if (onInitialModel && !activeModel) {
               const initial =
                 defaultModel && unique.includes(defaultModel) ? defaultModel : unique[0]

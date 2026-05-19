@@ -8,11 +8,13 @@ import { useTranscriptionModelsCatalog } from "../useTranscriptionModelsCatalog"
 const {
   getTranscriptionModelsMock,
   getTranscriptionModelHealthMock,
+  getTranscriptionCapabilitiesMock,
   tMock,
   unstableTranslationRef
 } = vi.hoisted(() => ({
   getTranscriptionModelsMock: vi.fn(),
   getTranscriptionModelHealthMock: vi.fn(),
+  getTranscriptionCapabilitiesMock: vi.fn(),
   tMock: vi.fn((_key: string, fallback?: string) => fallback || _key),
   unstableTranslationRef: { current: false }
 }))
@@ -28,7 +30,8 @@ vi.mock("react-i18next", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     getTranscriptionModels: getTranscriptionModelsMock,
-    getTranscriptionModelHealth: getTranscriptionModelHealthMock
+    getTranscriptionModelHealth: getTranscriptionModelHealthMock,
+    getTranscriptionCapabilities: getTranscriptionCapabilitiesMock
   }
 }))
 
@@ -68,6 +71,7 @@ describe("useTranscriptionModelsCatalog", () => {
       message: "Ready",
       provider: "whisper"
     })
+    getTranscriptionCapabilitiesMock.mockRejectedValue(new Error("not available"))
   })
 
   it("retries model loading through the shared retry callback", async () => {
@@ -183,6 +187,120 @@ describe("useTranscriptionModelsCatalog", () => {
 
     expect(getTranscriptionModelHealthMock).toHaveBeenCalledTimes(1)
     expect(getTranscriptionModelHealthMock).toHaveBeenCalledWith("whisper-small")
+  })
+
+  it("falls back to selected-model health when capability summary is empty", async () => {
+    getTranscriptionCapabilitiesMock.mockResolvedValue({ models: [] })
+
+    const { result } = renderHook(() =>
+      useTranscriptionModelsCatalog({ defaultModel: "whisper-small" })
+    )
+
+    await waitFor(() => {
+      expect(result.current.serverModelsLoading).toBe(false)
+    })
+
+    expect(getTranscriptionCapabilitiesMock).toHaveBeenCalledTimes(1)
+    expect(getTranscriptionModelHealthMock).toHaveBeenCalledTimes(1)
+    expect(getTranscriptionModelHealthMock).toHaveBeenCalledWith("whisper-small")
+    expect(result.current.modelOptions).toEqual([
+      expect.objectContaining({
+        id: "nemo-parakeet-1.1b",
+        availability: "unknown"
+      }),
+      expect.objectContaining({
+        id: "whisper-small",
+        availability: "ready"
+      })
+    ])
+  })
+
+  it("uses capability summary as an enhancement when available", async () => {
+    getTranscriptionCapabilitiesMock.mockResolvedValue({
+      models: [
+        {
+          id: "whisper-small",
+          label: "Whisper Small",
+          description: "Balanced speed/accuracy",
+          category: "Whisper Models",
+          provider: "faster-whisper",
+          availability: "ready",
+          availability_source: "health",
+          capabilities: {
+            batch: "supported",
+            streaming: "supported",
+            diarization: "supported",
+            timestamps: "supported",
+            segments: "supported"
+          },
+          sources: {
+            availability: "health",
+            batch: "provider",
+            streaming: "provider",
+            diarization: "provider",
+            timestamps: "response_schema",
+            segments: "response_schema"
+          },
+          message: "Ready"
+        },
+        {
+          id: "nemo-parakeet-1.1b",
+          label: "Nemo Parakeet 1.1B",
+          provider: "parakeet",
+          availability: "on_demand",
+          availability_source: "health",
+          capabilities: {
+            batch: "supported",
+            streaming: "supported",
+            diarization: "unsupported",
+            timestamps: "supported",
+            segments: "supported"
+          },
+          sources: {
+            availability: "health",
+            batch: "provider",
+            streaming: "provider",
+            diarization: "provider",
+            timestamps: "response_schema",
+            segments: "response_schema"
+          },
+          message: "Initializes on first use"
+        }
+      ]
+    })
+
+    const { result } = renderHook(() =>
+      useTranscriptionModelsCatalog({ defaultModel: "whisper-small" })
+    )
+
+    await waitFor(() => {
+      expect(result.current.serverModelsLoading).toBe(false)
+    })
+
+    expect(getTranscriptionCapabilitiesMock).toHaveBeenCalledTimes(1)
+    expect(getTranscriptionModelHealthMock).not.toHaveBeenCalled()
+    expect(result.current.modelOptions).toEqual([
+      expect.objectContaining({
+        id: "nemo-parakeet-1.1b",
+        provider: "parakeet",
+        availability: "on_demand",
+        capabilities: expect.objectContaining({
+          streaming: "supported",
+          diarization: "unsupported"
+        })
+      }),
+      expect.objectContaining({
+        id: "whisper-small",
+        provider: "faster-whisper",
+        availability: "ready",
+        capabilities: expect.objectContaining({
+          timestamps: "supported"
+        }),
+        sources: expect.objectContaining({
+          timestamps: "response_schema"
+        })
+      })
+    ])
   })
 
   it("does not loop when disabled and translation references are unstable", async () => {

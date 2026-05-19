@@ -5976,6 +5976,15 @@ export class TldwApiClientBase {
     })
   }
 
+  async getTranscriptionCapabilities(options?: { timeoutMs?: number }): Promise<any> {
+    await this.ensureConfigForRequest(true)
+    return await bgRequest<any>({
+      path: "/api/v1/audio/transcriptions/capabilities",
+      method: "GET",
+      timeoutMs: options?.timeoutMs
+    })
+  }
+
   async transcribeAudio(audioFile: File | Blob, options?: any): Promise<any> {
     await this.ensureConfigForRequest(true)
     const fields: Record<string, any> = {}

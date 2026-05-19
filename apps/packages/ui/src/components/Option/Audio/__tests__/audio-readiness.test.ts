@@ -64,6 +64,79 @@ describe("audio readiness helpers", () => {
     ])
   })
 
+  it("prefers STT capability summary metadata when the endpoint is available", () => {
+    const options = buildSttModelOptions({
+      catalog: {
+        categories: {
+          "Whisper Models": [
+            {
+              value: "whisper-small",
+              label: "Whisper Small",
+              description: "Balanced speed/accuracy"
+            }
+          ]
+        },
+        all_models: ["whisper-small"]
+      },
+      capabilitySummary: {
+        models: [
+          {
+            id: "whisper-small",
+            label: "Whisper Small",
+            description: "Balanced speed/accuracy",
+            category: "Whisper Models",
+            provider: "faster-whisper",
+            availability: "ready",
+            availability_source: "health",
+            capabilities: {
+              batch: "supported",
+              streaming: "supported",
+              diarization: "supported",
+              timestamps: "supported",
+              segments: "supported"
+            },
+            sources: {
+              availability: "health",
+              batch: "provider",
+              streaming: "provider",
+              diarization: "provider",
+              timestamps: "response_schema",
+              segments: "response_schema"
+            },
+            message: "Ready"
+          }
+        ]
+      },
+      healthByModel: {
+        "whisper-small": {
+          available: false,
+          usable: false,
+          message: "Stale fallback"
+        }
+      }
+    })
+
+    expect(options).toEqual([
+      expect.objectContaining({
+        id: "whisper-small",
+        provider: "faster-whisper",
+        availability: "ready",
+        readinessMessage: "Ready",
+        capabilities: {
+          batch: "supported",
+          streaming: "supported",
+          diarization: "supported",
+          timestamps: "supported",
+          segments: "supported"
+        },
+        sources: expect.objectContaining({
+          availability: "health",
+          timestamps: "response_schema"
+        })
+      })
+    ])
+  })
+
   it("keeps unsupported and unknown capability labels distinct", () => {
     expect(describeCapabilityValue("supported")).toEqual({
       label: "Supported",

@@ -675,6 +675,18 @@ export const modelsAudioMethods = {
     })
   },
 
+  async getTranscriptionCapabilities(
+    this: TldwApiClientCore,
+    options?: { timeoutMs?: number }
+  ): Promise<any> {
+    await this.ensureConfigForRequest(true)
+    return await bgRequest<any>({
+      path: "/api/v1/audio/transcriptions/capabilities",
+      method: "GET",
+      timeoutMs: options?.timeoutMs
+    })
+  },
+
   async transcribeAudio(
     this: TldwApiClientCore,
     audioFile: File | Blob,
