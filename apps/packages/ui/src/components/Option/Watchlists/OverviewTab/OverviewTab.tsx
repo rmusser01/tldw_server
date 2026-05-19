@@ -116,7 +116,9 @@ export const OverviewTab: React.FC = () => {
     readWatchlistsOnboardingPath()
   )
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const quickSetupTriggerRef = useRef<HTMLButtonElement | null>(null)
   const quickSetupRestoreFocusTargetRef = useRef<HTMLElement | null>(null)
+  const quickSetupFocusRestoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pipelineSetupRestoreFocusTargetRef = useRef<HTMLElement | null>(null)
   const quickSetupWasOpenRef = useRef(false)
   const pipelineSetupWasOpenRef = useRef(false)
@@ -193,10 +195,21 @@ export const OverviewTab: React.FC = () => {
 
   const quickSetupAutoShownWatchlistRef = useRef<number | null>(null)
 
+  const restoreQuickSetupFocus = useCallback(() => {
+    if (quickSetupFocusRestoreTimerRef.current) {
+      clearTimeout(quickSetupFocusRestoreTimerRef.current)
+      quickSetupFocusRestoreTimerRef.current = null
+    }
+    const target = quickSetupRestoreFocusTargetRef.current
+    quickSetupRestoreFocusTargetRef.current = null
+    restoreFocusToElement(target)
+  }, [])
+
   useLayoutEffect(() => {
     if (quickSetupOpen) {
       if (!quickSetupWasOpenRef.current) {
-        quickSetupRestoreFocusTargetRef.current = getFocusableActiveElement()
+        quickSetupRestoreFocusTargetRef.current =
+          quickSetupRestoreFocusTargetRef.current || getFocusableActiveElement()
       }
       quickSetupWasOpenRef.current = true
       return
@@ -204,9 +217,18 @@ export const OverviewTab: React.FC = () => {
 
     if (quickSetupWasOpenRef.current) {
       quickSetupWasOpenRef.current = false
-      restoreFocusToElement(quickSetupRestoreFocusTargetRef.current)
+      quickSetupFocusRestoreTimerRef.current = setTimeout(restoreQuickSetupFocus, 0)
     }
-  }, [quickSetupOpen])
+  }, [quickSetupOpen, restoreQuickSetupFocus])
+
+  useEffect(() => {
+    return () => {
+      if (quickSetupFocusRestoreTimerRef.current) {
+        clearTimeout(quickSetupFocusRestoreTimerRef.current)
+        quickSetupFocusRestoreTimerRef.current = null
+      }
+    }
+  }, [])
 
   useLayoutEffect(() => {
     if (pipelineSetupOpen) {
@@ -278,12 +300,25 @@ export const OverviewTab: React.FC = () => {
     writeWatchlistsOnboardingPath(path)
   }, [])
 
-  const openQuickSetup = useCallback(() => {
+  const markQuickSetupAutoShown = useCallback(() => {
+    if (selectedWatchlistId == null) return
+    quickSetupAutoShownWatchlistRef.current = selectedWatchlistId
+    try {
+      localStorage.setItem(`watchlists:quickSetup:autoshown:v1:${selectedWatchlistId}`, "1")
+    } catch {
+      // Keep setup usable when storage is unavailable.
+    }
+  }, [selectedWatchlistId])
+
+  const openQuickSetup = useCallback((restoreTarget?: HTMLElement | null) => {
+    quickSetupRestoreFocusTargetRef.current =
+      restoreTarget || quickSetupTriggerRef.current || getFocusableActiveElement()
+    markQuickSetupAutoShown()
     quickSetupForm.setFieldsValue(QUICK_SETUP_DEFAULT_VALUES)
     setQuickSetupStep(0)
     setQuickSetupOpen(true)
     void trackWatchlistsOnboardingTelemetry({ type: "quick_setup_opened" })
-  }, [quickSetupForm])
+  }, [markQuickSetupAutoShown, quickSetupForm])
 
   // Auto-open Quick Setup for first-time users with no sources
   useEffect(() => {
@@ -325,6 +360,7 @@ export const OverviewTab: React.FC = () => {
   }, [data, quickSetupOpen, onboardingPath, openQuickSetup, selectedWatchlistId])
 
   const closeQuickSetup = useCallback(() => {
+    markQuickSetupAutoShown()
     quickSetupPreviewRequestRef.current += 1
     setQuickSetupOpen(false)
     setQuickSetupStep(0)
@@ -332,7 +368,7 @@ export const OverviewTab: React.FC = () => {
     setQuickSetupCandidatePreviewLoading(false)
     setQuickSetupCandidatePreviewError(null)
     quickSetupForm.resetFields()
-  }, [quickSetupForm])
+  }, [markQuickSetupAutoShown, quickSetupForm])
 
   const loadQuickSetupCandidatePreview = useCallback(async (draftValues?: Partial<QuickSetupValues>) => {
     const mergedValues = {
@@ -1234,7 +1270,8 @@ export const OverviewTab: React.FC = () => {
               <Space className="mt-4" wrap>
                 <Button
                   type={onboardingPath === "beginner" ? "primary" : "default"}
-                  onClick={openQuickSetup}
+                  ref={quickSetupTriggerRef}
+                  onClick={(event) => openQuickSetup(event.currentTarget)}
                   data-testid="watchlists-overview-cta-guided-setup"
                 >
                   {t("watchlists:overview.onboarding.cta.guidedSetup", "Add initial collection")}
@@ -1624,6 +1661,7 @@ export const OverviewTab: React.FC = () => {
         open={quickSetupOpen}
         title={t("watchlists:overview.onboarding.quickSetup.title", "Add initial collection")}
         onCancel={quickSetupSubmitting ? undefined : cancelQuickSetup}
+        afterClose={restoreQuickSetupFocus}
         destroyOnHidden
         maskClosable={!quickSetupSubmitting}
         footer={[

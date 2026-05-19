@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Circle,
+  Copy,
   Download,
   Edit2,
   ExternalLink,
@@ -73,6 +74,7 @@ import { getSourceStatusVisual, type SourceStatusIconToken } from "./sourceStatu
 import { findActiveSourceUsage, mapActiveSourceUsage } from "./source-usage"
 import { mapWatchlistsError } from "../shared/watchlists-error"
 import { useWatchlistsViewport } from "../shared/useWatchlistsViewport"
+import { buildClonedWatchlistSourcePayload } from "./clone-utils"
 
 const { Search } = Input
 
@@ -179,6 +181,8 @@ export const SourcesTab: React.FC = () => {
   )
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const [bulkWorking, setBulkWorking] = useState(false)
+  const cloningSourceIdsRef = useRef<Set<number>>(new Set())
+  const [cloningSourceIds, setCloningSourceIds] = useState<Set<number>>(() => new Set())
   const [bulkMoveTargetValue, setBulkMoveTargetValue] = useState<BulkMoveTargetValue>(null)
   const [checkingSourceIds, setCheckingSourceIds] = useState<number[]>([])
   const [importOpen, setImportOpen] = useState(false)
@@ -1162,6 +1166,50 @@ export const SourcesTab: React.FC = () => {
     }
   }
 
+  const startCloningSource = useCallback((sourceId: number) => {
+    if (cloningSourceIdsRef.current.has(sourceId)) {
+      return false
+    }
+    const next = new Set(cloningSourceIdsRef.current)
+    next.add(sourceId)
+    cloningSourceIdsRef.current = next
+    setCloningSourceIds(next)
+    return true
+  }, [])
+
+  const finishCloningSource = useCallback((sourceId: number) => {
+    if (!cloningSourceIdsRef.current.has(sourceId)) {
+      return
+    }
+    const next = new Set(cloningSourceIdsRef.current)
+    next.delete(sourceId)
+    cloningSourceIdsRef.current = next
+    setCloningSourceIds(next)
+  }, [])
+
+  const handleCloneSource = async (source: WatchlistSource) => {
+    if (!startCloningSource(source.id)) return
+    try {
+      const cloned = await createWatchlistSource(
+        buildClonedWatchlistSourcePayload(source, selectedWatchlistId)
+      )
+      addSource(cloned)
+      message.success(
+        t(
+          "watchlists:sources.cloneSuccess",
+          "Feed cloned as an inactive copy. Review and enable it when ready."
+        )
+      )
+      void loadSources()
+      void loadTags()
+    } catch (err) {
+      console.error("Failed to clone source:", err)
+      message.error(t("watchlists:sources.cloneError", "Failed to clone feed"))
+    } finally {
+      finishCloningSource(source.id)
+    }
+  }
+
   // Get source for editing
   const editingSource = sourceFormEditId
     ? sources.find((s) => s.id === sourceFormEditId)
@@ -1376,6 +1424,16 @@ export const SourcesTab: React.FC = () => {
               onClick={() => setSeenDrawerSourceId(record.id)}
             />
           </Tooltip>
+          <Tooltip title={t("watchlists:sources.clone", "Clone")}>
+            <Button
+              type="text"
+              size="small"
+              aria-label={t("watchlists:sources.cloneFeedAria", "Clone {{name}}", { name: record.name })}
+              icon={<Copy className="h-4 w-4" />}
+              loading={cloningSourceIds.has(record.id)}
+              onClick={() => handleCloneSource(record)}
+            />
+          </Tooltip>
           <Tooltip title={t("common:delete", "Delete")}>
             <Button
               type="text"
@@ -1523,6 +1581,14 @@ export const SourcesTab: React.FC = () => {
                   aria-label={t("watchlists:sources.seenInfoForSourceAria", "Source Health & Dedup Stats for {{name}}", { name: source.name })}
                   icon={<Eye className="h-4 w-4" />}
                   onClick={() => setSeenDrawerSourceId(source.id)}
+                />
+                <Button
+                  type="text"
+                  size="small"
+                  aria-label={t("watchlists:sources.cloneFeedAria", "Clone {{name}}", { name: source.name })}
+                  icon={<Copy className="h-4 w-4" />}
+                  loading={cloningSourceIds.has(source.id)}
+                  onClick={() => handleCloneSource(source)}
                 />
                 <Button
                   type="text"

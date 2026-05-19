@@ -24,11 +24,14 @@ import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { PageShell } from "@/components/Common/PageShell"
 import WorkspaceConnectionGate from "@/components/Common/WorkspaceConnectionGate"
+import { downloadBlob } from "@/utils/download-blob"
 import {
   bulkCreateSources,
   createWatchlist,
   createWatchlistJob,
   createWatchlistSource,
+  exportOpml,
+  exportRunsCsv,
   fetchWatchlistRuns,
   fetchWatchlists,
   triggerWatchlistRun,
@@ -702,6 +705,44 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   const [refreshKey, setRefreshKey] = React.useState(0)
   const triggerRefresh = useCallback(() => setRefreshKey((k) => k + 1), [])
 
+  const exportSourcesFromPalette = useCallback(async () => {
+    try {
+      const opml = await exportOpml()
+      downloadBlob(new Blob([opml], { type: "application/xml" }), `watchlists_sources_${Date.now()}.opml`)
+      notification.success({
+        message: t("watchlists:sources.exported", "OPML exported"),
+        placement: "bottomRight",
+        duration: 5
+      })
+    } catch (err) {
+      console.error("Failed to export watchlist feeds from command palette:", err)
+      notification.error({
+        message: t("watchlists:sources.exportError", "Failed to export OPML"),
+        placement: "bottomRight",
+        duration: 5
+      })
+    }
+  }, [notification, t])
+
+  const exportRunsFromPalette = useCallback(async () => {
+    try {
+      const csv = await exportRunsCsv({ scope: "global", include_tallies: true })
+      downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), `watchlists_runs_${Date.now()}.csv`)
+      notification.success({
+        message: t("watchlists:runs.exported", "Activity CSV exported"),
+        placement: "bottomRight",
+        duration: 5
+      })
+    } catch (err) {
+      console.error("Failed to export watchlist activity from command palette:", err)
+      notification.error({
+        message: t("watchlists:runs.exportError", "Failed to export activity CSV"),
+        placement: "bottomRight",
+        duration: 5
+      })
+    }
+  }, [notification, t])
+
   const tabHelpLabels = {
     overview: t("watchlists:help.tabs.overview", "Overview guidance"),
     sources: t("watchlists:help.tabs.sources", "Feeds setup"),
@@ -1152,8 +1193,19 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     openJobForm: () => openJobForm(),
     openSettings: () => setSettingsDrawerOpen(true),
     refreshCurrentView: triggerRefresh,
-    startGuidedTour
-  }), [navigateToTab, openSourceForm, openJobForm, triggerRefresh, startGuidedTour])
+    startGuidedTour,
+    createPipeline: () => setSetupWizardOpen(true),
+    exportSources: exportSourcesFromPalette,
+    exportRuns: exportRunsFromPalette
+  }), [
+    navigateToTab,
+    openSourceForm,
+    openJobForm,
+    triggerRefresh,
+    startGuidedTour,
+    exportSourcesFromPalette,
+    exportRunsFromPalette
+  ])
   const commandPaletteCommands = useWatchlistsCommands(commandPaletteActions)
 
   // Keyboard shortcuts — memoize actions to avoid event listener churn

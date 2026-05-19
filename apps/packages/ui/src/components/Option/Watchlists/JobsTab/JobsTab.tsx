@@ -12,7 +12,7 @@ import {
   message
 } from "antd"
 import type { ColumnsType } from "antd/es/table"
-import { Edit2, Eye, Play, Plus, RefreshCw, Trash2 } from "lucide-react"
+import { Copy, Edit2, Eye, Play, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useUndoNotification } from "@/hooks/useUndoNotification"
 import { useWatchlistsStore } from "@/store/watchlists"
@@ -22,6 +22,7 @@ import {
   fetchWatchlistGroups,
   fetchWatchlistJobs,
   fetchWatchlistSources,
+  createWatchlistJob,
   restoreWatchlistJob,
   triggerWatchlistRun,
   updateWatchlistJob
@@ -44,6 +45,7 @@ import {
 import { JobPreviewModal } from "./JobPreviewModal"
 import { mapWatchlistsError } from "../shared/watchlists-error"
 import { useWatchlistsViewport } from "../shared/useWatchlistsViewport"
+import { buildClonedWatchlistJobPayload } from "./clone-utils"
 
 const SCOPE_CATALOG_LIMIT = 200
 const JOBS_ADVANCED_COLUMNS_STORAGE_KEY = "watchlists:jobs:advanced-columns:v1"
@@ -106,6 +108,8 @@ export const JobsTab: React.FC = () => {
 
   // Local state
   const [triggeringJobId, setTriggeringJobId] = useState<number | null>(null)
+  const cloningJobIdsRef = useRef<Set<number>>(new Set())
+  const [cloningJobIds, setCloningJobIds] = useState<Set<number>>(() => new Set())
   const [previewJob, setPreviewJob] = useState<WatchlistJob | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [sourceNamesById, setSourceNamesById] = useState<Record<number, string>>({})
@@ -346,6 +350,47 @@ export const JobsTab: React.FC = () => {
     }
   }
 
+  const startCloningJob = useCallback((jobId: number) => {
+    if (cloningJobIdsRef.current.has(jobId)) {
+      return false
+    }
+    const next = new Set(cloningJobIdsRef.current)
+    next.add(jobId)
+    cloningJobIdsRef.current = next
+    setCloningJobIds(next)
+    return true
+  }, [])
+
+  const finishCloningJob = useCallback((jobId: number) => {
+    if (!cloningJobIdsRef.current.has(jobId)) {
+      return
+    }
+    const next = new Set(cloningJobIdsRef.current)
+    next.delete(jobId)
+    cloningJobIdsRef.current = next
+    setCloningJobIds(next)
+  }, [])
+
+  const handleCloneJob = async (job: WatchlistJob) => {
+    if (!startCloningJob(job.id)) return
+    try {
+      const cloned = await createWatchlistJob(buildClonedWatchlistJobPayload(job))
+      addJob(cloned)
+      message.success(
+        t(
+          "watchlists:jobs.cloneSuccess",
+          "Monitor cloned as a paused copy. Review and enable it when ready."
+        )
+      )
+      void loadJobs()
+    } catch (err) {
+      console.error("Failed to clone job:", err)
+      message.error(t("watchlists:jobs.cloneError", "Failed to clone monitor"))
+    } finally {
+      finishCloningJob(job.id)
+    }
+  }
+
   // Get job for editing
   const editingJob = jobFormEditId
     ? jobs.find((j) => j.id === jobFormEditId)
@@ -568,6 +613,16 @@ export const JobsTab: React.FC = () => {
               onClick={() => openJobForm(record.id)}
             />
           </Tooltip>
+          <Tooltip title={t("watchlists:jobs.clone", "Clone")}>
+            <Button
+              type="text"
+              size="small"
+              aria-label={t("watchlists:jobs.cloneMonitorAria", "Clone {{name}}", { name: record.name })}
+              icon={<Copy className="h-4 w-4" />}
+              onClick={() => handleCloneJob(record)}
+              loading={cloningJobIds.has(record.id)}
+            />
+          </Tooltip>
           <Tooltip title={t("common:delete", "Delete")}>
             <Button
               type="text"
@@ -729,6 +784,14 @@ export const JobsTab: React.FC = () => {
                 aria-label={t("watchlists:jobs.editMonitorAria", "Edit {{name}}", { name: job.name })}
                 icon={<Edit2 className="h-4 w-4" />}
                 onClick={() => openJobForm(job.id)}
+              />
+              <Button
+                type="text"
+                size="small"
+                aria-label={t("watchlists:jobs.cloneMonitorAria", "Clone {{name}}", { name: job.name })}
+                icon={<Copy className="h-4 w-4" />}
+                onClick={() => handleCloneJob(job)}
+                loading={cloningJobIds.has(job.id)}
               />
               <Button
                 type="text"

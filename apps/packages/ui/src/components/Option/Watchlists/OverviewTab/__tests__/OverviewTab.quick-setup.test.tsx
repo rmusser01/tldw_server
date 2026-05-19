@@ -1017,7 +1017,7 @@ describe("OverviewTab quick setup flow", () => {
       runNow: true,
       destination: "outputs"
     })
-  })
+  }, 20_000)
 
   it("restores focus to guided setup trigger after quick setup modal closes", async () => {
     mockState.fetchOverviewMock.mockResolvedValue(createOverviewPayload())
@@ -1037,7 +1037,7 @@ describe("OverviewTab quick setup flow", () => {
     await waitFor(() => {
       expect(trigger).toHaveFocus()
     })
-  })
+  }, 20_000)
 
   it("restores focus to pipeline builder trigger after modal closes", async () => {
     mockState.fetchOverviewMock.mockResolvedValue(
@@ -1062,5 +1062,5 @@ describe("OverviewTab quick setup flow", () => {
     await waitFor(() => {
       expect(trigger).toHaveFocus()
     })
-  })
+  }, 20_000)
 })

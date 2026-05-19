@@ -514,6 +514,30 @@ class RunCancelResponse(BaseModel):
     message: str | None = None
 
 
+class RunStageRetryResponse(BaseModel):
+    """Response returned after retrying a single recoverable run stage."""
+
+    run_id: int
+    stage: str
+    retried: bool
+    task_id: str | None = None
+    output_id: int | None = None
+    delivery_results: list[dict[str, Any]] = Field(default_factory=list)
+    message: str | None = None
+
+
+class RunDiagnosticsResponse(BaseModel):
+    """Safe diagnostics bundle for a watchlist run and its recovery options."""
+
+    run_id: int
+    generated_at: str
+    run: dict[str, Any]
+    job: dict[str, Any] | None = None
+    outputs: list[dict[str, Any]] = Field(default_factory=list)
+    audio: dict[str, Any] | None = None
+    recovery: dict[str, Any] = Field(default_factory=dict)
+
+
 class RunsListResponse(BaseModel):
     items: list[Run]
     total: int

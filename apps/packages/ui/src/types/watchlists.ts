@@ -333,6 +333,26 @@ export interface WatchlistRunAudioStatus {
   error?: string | null
 }
 
+export interface WatchlistRunStageRetryResponse {
+  run_id: number
+  stage: "audio" | "delivery" | string
+  retried: boolean
+  task_id?: string | null
+  output_id?: number | null
+  delivery_results?: Array<Record<string, unknown>>
+  message?: string | null
+}
+
+export interface WatchlistRunDiagnostics {
+  run_id: number
+  generated_at: string
+  run: Record<string, unknown>
+  job?: Record<string, unknown> | null
+  outputs?: Array<Record<string, unknown>>
+  audio?: Record<string, unknown> | null
+  recovery?: Record<string, unknown> | null
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Scraped Item Types
 // ─────────────────────────────────────────────────────────────────────────────

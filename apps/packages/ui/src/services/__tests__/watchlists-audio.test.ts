@@ -11,7 +11,12 @@ vi.mock("@/services/background-proxy", () => ({
   bgUpload: (...args: unknown[]) => mocks.bgUpload(...args)
 }))
 
-import { getWatchlistRunAudio } from "@/services/watchlists"
+import {
+  getWatchlistRunAudio,
+  getWatchlistRunDiagnostics,
+  retryWatchlistRunAudio,
+  retryWatchlistRunDelivery
+} from "@/services/watchlists"
 
 describe("watchlists audio services", () => {
   beforeEach(() => {
@@ -48,6 +53,64 @@ describe("watchlists audio services", () => {
       size_bytes: 1024,
       mime_type: "audio/mpeg"
     })
+  })
+
+  it("retries only the audio briefing stage for a run", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      run_id: 123,
+      stage: "audio",
+      retried: true,
+      task_id: "task-retry"
+    })
+
+    const result = await retryWatchlistRunAudio(123)
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/watchlists/runs/123/retry-audio",
+        method: "POST"
+      })
+    )
+    expect(result.task_id).toBe("task-retry")
+  })
+
+  it("retries only the output delivery stage for a run", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      run_id: 123,
+      stage: "delivery",
+      retried: true,
+      output_id: 55,
+      delivery_results: [{ channel: "email", status: "sent" }]
+    })
+
+    const result = await retryWatchlistRunDelivery(123)
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/watchlists/runs/123/retry-delivery",
+        method: "POST"
+      })
+    )
+    expect(result.delivery_results).toEqual([{ channel: "email", status: "sent" }])
+  })
+
+  it("fetches a run diagnostic bundle without rerunning ingestion", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      run_id: 123,
+      generated_at: "2026-05-19T04:00:00Z",
+      run: { id: 123, status: "failed" },
+      outputs: [{ id: 55, delivery_status: "failed" }]
+    })
+
+    const result = await getWatchlistRunDiagnostics(123)
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/watchlists/runs/123/diagnostics",
+        method: "GET"
+      })
+    )
+    expect(result.run_id).toBe(123)
   })
 
   it("accepts backend-supported audio fields on output creation payloads", () => {

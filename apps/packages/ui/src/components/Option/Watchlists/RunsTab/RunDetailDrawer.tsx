@@ -26,8 +26,11 @@ import {
   fetchWatchlistOutputs,
   fetchWatchlistSources,
   fetchScrapedItems,
+  getWatchlistRunDiagnostics,
   getWatchlistRunAudio,
   getRunDetails,
+  retryWatchlistRunAudio,
+  retryWatchlistRunDelivery,
   triggerWatchlistRun,
   updateScrapedItem
 } from "@/services/watchlists"
@@ -125,6 +128,9 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   const [streamingEnabled, setStreamingEnabled] = useState(true)
   const [cancelState, setCancelState] = useState<"idle" | "cancelling" | "failed-to-cancel">("idle")
   const [retryingRun, setRetryingRun] = useState(false)
+  const [retryingDelivery, setRetryingDelivery] = useState(false)
+  const [retryingAudio, setRetryingAudio] = useState(false)
+  const [exportingDiagnostics, setExportingDiagnostics] = useState(false)
   const [sourceNamesById, setSourceNamesById] = useState<Record<number, string>>({})
   const [linkedOutputCount, setLinkedOutputCount] = useState<number | null>(null)
   const [linkedOutputsLoading, setLinkedOutputsLoading] = useState(false)
@@ -160,6 +166,20 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
 
   const downloadCsv = (content: string, filename: string): void => {
     const blob = new Blob([content], { type: "text/csv;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement("a")
+    anchor.href = url
+    anchor.download = filename
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+    URL.revokeObjectURL(url)
+  }
+
+  const downloadJson = (content: unknown, filename: string): void => {
+    const blob = new Blob([JSON.stringify(content, null, 2)], {
+      type: "application/json;charset=utf-8"
+    })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement("a")
     anchor.href = url
@@ -996,6 +1016,82 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
     }
   }
 
+  const handleRetryDelivery = async () => {
+    if (!runId || retryingDelivery) return
+    setRetryingDelivery(true)
+    try {
+      const result = await retryWatchlistRunDelivery(runId)
+      if (!result.retried) {
+        message.warning(
+          result.message || t("watchlists:runs.detail.deliveryRetrySkipped", "Delivery retry was not started.")
+        )
+        return
+      }
+      message.success(
+        t("watchlists:runs.detail.deliveryRetrySuccess", "Delivery retry completed for output #{{id}}.", {
+          id: result.output_id ?? "-"
+        })
+      )
+      void loadRunDetails()
+    } catch (err) {
+      console.error("Failed to retry delivery:", err)
+      message.error(t("watchlists:runs.detail.deliveryRetryError", "Failed to retry delivery"))
+    } finally {
+      setRetryingDelivery(false)
+    }
+  }
+
+  const handleRetryAudio = async () => {
+    if (!runId || retryingAudio) return
+    setRetryingAudio(true)
+    setAudioStatusError(null)
+    try {
+      const result = await retryWatchlistRunAudio(runId)
+      if (!result.retried) {
+        message.warning(
+          result.message || t("watchlists:runs.detail.audioRetrySkipped", "Audio retry was not started.")
+        )
+        return
+      }
+      if (result.task_id) {
+        setAudioStatusError(null)
+        setAudioStatus((prev) => ({
+          ...(prev || { run_id: runId }),
+          run_id: runId,
+          task_id: result.task_id,
+          status: "pending",
+          audio_uri: null,
+          download_url: null,
+          error: null
+        }))
+      }
+      message.success(
+        t("watchlists:runs.detail.audioRetrySuccess", "Audio retry queued.")
+      )
+      void loadRunDetails()
+    } catch (err) {
+      console.error("Failed to retry audio:", err)
+      message.error(t("watchlists:runs.detail.audioRetryError", "Failed to retry audio"))
+    } finally {
+      setRetryingAudio(false)
+    }
+  }
+
+  const handleDownloadDiagnostics = async () => {
+    if (!runId || exportingDiagnostics) return
+    setExportingDiagnostics(true)
+    try {
+      const diagnostics = await getWatchlistRunDiagnostics(runId)
+      downloadJson(diagnostics, `watchlists_run_${runId}_diagnostics_${Date.now()}.json`)
+      message.success(t("watchlists:runs.detail.diagnosticsExported", "Diagnostics downloaded"))
+    } catch (err) {
+      console.error("Failed to download run diagnostics:", err)
+      message.error(t("watchlists:runs.detail.diagnosticsExportError", "Failed to download diagnostics"))
+    } finally {
+      setExportingDiagnostics(false)
+    }
+  }
+
   const handleEditMonitor = () => {
     if (!data?.job_id) return
     setActiveTab("jobs")
@@ -1074,6 +1170,16 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
             )}
           </div>
         )}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="small"
+            onClick={handleRetryAudio}
+            loading={retryingAudio}
+          >
+            {t("watchlists:runs.detail.retryAudio", "Retry audio")}
+          </Button>
+        </div>
       </div>
     )
   }
@@ -1112,6 +1218,22 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
                     onClick={handleOpenOutputs}
                   >
                     {t("watchlists:runs.detail.openRunOutputs", "Open reports for this run")}
+                  </Button>
+                  <Button
+                    size="small"
+                    loading={retryingDelivery}
+                    disabled={(linkedOutputCount ?? 0) <= 0}
+                    onClick={handleRetryDelivery}
+                  >
+                    {t("watchlists:runs.detail.retryDelivery", "Retry delivery")}
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<Download className="h-3.5 w-3.5" />}
+                    loading={exportingDiagnostics}
+                    onClick={handleDownloadDiagnostics}
+                  >
+                    {t("watchlists:runs.detail.downloadDiagnostics", "Download diagnostics")}
                   </Button>
                 </div>
               </div>
