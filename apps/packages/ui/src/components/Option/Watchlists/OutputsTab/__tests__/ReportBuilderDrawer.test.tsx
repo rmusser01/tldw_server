@@ -33,6 +33,10 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
+vi.mock("@/design-system/states", () => ({
+  READY_STATE_LABEL: "Registry Ready"
+}))
+
 vi.mock("antd", () => {
   const Select = ({ value, onChange, options = [], ...rest }: any) => (
     <select
@@ -265,6 +269,27 @@ describe("ReportBuilderDrawer", () => {
     expect(await screen.findByText("0 queued updates")).toBeInTheDocument()
     expect(screen.getByText("No queued updates found for this run.")).toBeInTheDocument()
     expect(screen.getByText("No included updates")).toBeInTheDocument()
+  })
+
+  it("uses the design-system registry label when report readiness is ready", async () => {
+    const readyItems: ScrapedItem[] = [
+      { ...queuedItem, reviewed: true, source_id: 11 },
+      { ...queuedItem, id: 103, reviewed: true, source_id: 12, title: "Second source update" }
+    ]
+    setupQueueMocks(readyItems, readyItems)
+
+    render(
+      <ReportBuilderDrawer
+        open
+        selectedWatchlist={newsWatchlist}
+        onClose={vi.fn()}
+        onCreated={vi.fn()}
+      />
+    )
+
+    expect(await screen.findByText("2 queued updates")).toBeInTheDocument()
+    expect(screen.getByText("Registry Ready")).toBeInTheDocument()
+    expect(screen.queryByText("Ready")).not.toBeInTheDocument()
   })
 
   it("submits Stage 5 report options with queued item ids and warning acknowledgement", async () => {
