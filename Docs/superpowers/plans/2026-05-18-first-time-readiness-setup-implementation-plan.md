@@ -688,6 +688,8 @@ git commit -m "feat: add native first-run readiness setup screen"
 
 ### Task 8: Admin Post-Setup Entry And Shared Permission States
 
+> Status: Folded into Task 5.5 and Task 7. The backend admin readiness endpoints were added with the first-run/admin shared helpers, and the WebUI `/setup` route switches the same readiness screen to `mode="admin"` after first-run completion.
+
 **Files:**
 - Modify: `tldw_Server_API/app/api/v1/endpoints/setup.py`
 - Modify: `apps/packages/ui/src/components/Option/Setup/ReadinessSetupScreen.tsx`
@@ -695,7 +697,7 @@ git commit -m "feat: add native first-run readiness setup screen"
 - Test: `tldw_Server_API/tests/Setup/test_setup_readiness_api.py`
 - Test: `apps/packages/ui/src/components/Option/Setup/__tests__/ReadinessSetupScreen.test.tsx`
 
-- [ ] **Step 1: Write failing admin endpoint tests**
+- [x] **Step 1: Write failing admin endpoint tests**
 
 ```python
 def test_admin_readiness_available_after_setup_completed(admin_client, monkeypatch):
@@ -717,13 +719,13 @@ def test_non_admin_post_setup_cannot_provision(non_admin_client):
     assert response.status_code in {401, 403}
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_setup_readiness_api.py -q`
 
 Expected: FAIL with missing admin readiness paths.
 
-- [ ] **Step 3: Add admin readiness endpoints**
+- [x] **Step 3: Add admin readiness endpoints**
 
 Endpoint behavior:
 
@@ -731,13 +733,13 @@ Endpoint behavior:
 - Post-setup paths use `require_shared_audio_installer_access` or a stricter admin/system-configure dependency.
 - Regular users can see admin-required UI state but cannot provision server-wide models.
 
-- [ ] **Step 4: Add frontend admin state tests**
+- [x] **Step 4: Add frontend admin state tests**
 
 Run: `bunx vitest run apps/packages/ui/src/components/Option/Setup/__tests__/ReadinessSetupScreen.test.tsx`
 
 Expected: PASS after admin state implementation.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/endpoints/setup.py \
@@ -757,29 +759,29 @@ git commit -m "feat: add admin setup readiness controls"
 - Modify: `apps/packages/ui/src/services/tldw/openapi-guard.ts` if not already updated.
 - Modify: `backlog/tasks/task-427 - Plan-first-time-readiness-setup-implementation.md`
 
-- [ ] **Step 1: Run backend setup tests**
+- [x] **Step 1: Run backend setup tests**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_setup_readiness_profiles.py tldw_Server_API/tests/Setup/test_setup_readiness_preview.py tldw_Server_API/tests/Setup/test_setup_readiness_store.py tldw_Server_API/tests/Setup/test_setup_readiness_api.py tldw_Server_API/tests/Setup/test_setup_audio_installer_lifecycle_api.py tldw_Server_API/tests/Setup/test_setup_manager_masking.py -q`
 
-Expected: PASS.
+Result: PASS, 42 tests with `--timeout=30`.
 
-- [ ] **Step 2: Run frontend setup tests**
+- [x] **Step 2: Run frontend setup tests**
 
 Run: `bunx vitest run apps/packages/ui/src/components/Option/Setup/__tests__/ReadinessSetupScreen.test.tsx apps/packages/ui/src/components/Option/Setup/hooks/__tests__/useSetupReadiness.test.tsx apps/packages/ui/src/components/Option/Setup/__tests__/AudioInstallerPanel.test.tsx`
 
-Expected: PASS.
+Result: PASS, 20 tests across `ReadinessSetupScreen`, `useSetupReadiness`, `AudioInstallerPanel`, and `option-setup` route coverage.
 
-- [ ] **Step 3: Run OpenAPI verification**
+- [x] **Step 3: Run OpenAPI verification**
 
 Run from `apps/packages/ui`: `bun run verify:openapi`
 
-Expected: PASS, or update `openapi-guard.ts`/generated spec according to the verifier output.
+Result: PASS, 269 ClientPath entries verified; existing 10 reviewed OSS exception paths allowed.
 
-- [ ] **Step 4: Run Bandit on touched backend code**
+- [x] **Step 4: Run Bandit on touched backend code**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Setup/readiness_models.py tldw_Server_API/app/core/Setup/readiness_profiles.py tldw_Server_API/app/core/Setup/readiness_service.py tldw_Server_API/app/core/Setup/readiness_store.py tldw_Server_API/app/api/v1/endpoints/setup.py -f json -o /tmp/bandit_first_time_readiness_setup.json`
 
-Expected: no new findings in touched code.
+Result: PASS, 0 findings.
 
 - [ ] **Step 5: Browser QA**
 
@@ -792,7 +794,9 @@ Start the backend and WebUI with the repo's normal local commands, then verify:
 - Remote/proxy guard failure shows fallback instead of weakening setup protections.
 - Admin post-setup screen shows admin-required state for non-admin and controls for admin.
 
-- [ ] **Step 6: Update docs and Backlog final summaries**
+Result: Not run in this final pass. Focused route/component tests cover the native `/setup` decision behavior; manual browser QA should still be run with a configured first-run backend before release.
+
+- [x] **Step 6: Update docs and Backlog final summaries**
 
 Update setup docs with:
 
@@ -802,7 +806,7 @@ Update setup docs with:
 - post-setup admin-only controls
 - backend `/setup` fallback
 
-- [ ] **Step 7: Commit final verification/docs**
+- [x] **Step 7: Commit final verification/docs**
 
 ```bash
 git add Docs/Development/Setup.md \
@@ -815,17 +819,17 @@ git commit -m "docs: document first-time readiness setup flow"
 
 ## Completion Checklist
 
-- [ ] Backend readiness profiles expose canonical lanes and overlay semantics.
-- [ ] Preview returns config/install plan without mutation.
-- [ ] Provisioning requires `Provision now` and returns pollable status.
-- [ ] Secrets are write-only and never echoed.
-- [ ] Trusted custom HF models require explicit acknowledgement.
-- [ ] Verification is explicit for hosted calls and expensive local checks.
-- [ ] WebUI first-run setup is native when setup guard permits it.
-- [ ] Backend `/setup` fallback remains visible.
-- [ ] Post-setup provisioning is admin-only.
-- [ ] Backend tests pass.
-- [ ] Frontend tests pass.
-- [ ] OpenAPI guard passes.
-- [ ] Bandit reports no new findings in touched backend code.
-- [ ] Browser QA covers first-run and post-setup paths.
+- [x] Backend readiness profiles expose canonical lanes and overlay semantics.
+- [x] Preview returns config/install plan without mutation.
+- [x] Provisioning requires `Provision now` and returns pollable status.
+- [x] Secrets are write-only and never echoed.
+- [x] Trusted custom HF models require explicit acknowledgement.
+- [x] Verification is explicit for hosted calls and expensive local checks.
+- [x] WebUI first-run setup is native when setup guard permits it.
+- [x] Backend `/setup` fallback remains visible.
+- [x] Post-setup provisioning is admin-only.
+- [x] Backend tests pass.
+- [x] Frontend tests pass.
+- [x] OpenAPI guard passes.
+- [x] Bandit reports no new findings in touched backend code.
+- [ ] Browser QA covers first-run and post-setup paths. Not run in this pass; manual end-to-end QA still recommended before release.

@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
@@ -96,6 +96,11 @@ class AssistantQuestion(BaseModel):
     question: str = Field(..., min_length=1, description="Natural language question for the setup assistant")
 
 
+def _legacy_pack_name(path_value: str) -> str:
+    normalized = str(path_value).replace("\\", "/")
+    return normalized.rsplit("/", 1)[-1]
+
+
 def _sanitize_setup_payload(value: Any) -> Any:
     if isinstance(value, str):
         return (
@@ -165,9 +170,31 @@ class AudioPackExportRequest(BaseModel):
         description="Optional curated TTS choice for profiles that expose multiple curated TTS engines.",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def accept_legacy_pack_path(cls, data: Any) -> Any:
+        if isinstance(data, dict) and not data.get("pack_name") and data.get("pack_path"):
+            payload = dict(data)
+            payload["pack_name"] = _legacy_pack_name(payload["pack_path"])
+            return payload
+        return data
+
 
 class AudioPackImportRequest(BaseModel):
-    pack_path: str = Field(..., min_length=1, description="Filesystem path to an audio pack manifest JSON file.")
+    pack_name: str = Field(
+        ...,
+        min_length=1,
+        description="JSON filename inside the setup-managed audio_packs directory.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_legacy_pack_path(cls, data: Any) -> Any:
+        if isinstance(data, dict) and not data.get("pack_name") and data.get("pack_path"):
+            payload = dict(data)
+            payload["pack_name"] = _legacy_pack_name(payload["pack_path"])
+            return payload
+        return data
 
 
 async def require_admin_and_system_configure(
