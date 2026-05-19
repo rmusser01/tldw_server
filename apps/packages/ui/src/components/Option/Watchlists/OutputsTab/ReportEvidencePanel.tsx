@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react"
-import { Alert, Button, Empty, Spin, Table, Tag, Tooltip } from "antd"
+import { Empty, Spin, Table, Tag, Tooltip } from "antd"
 import type { ColumnsType } from "antd/es/table"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui"
 import { getWatchlistOutputEvidence } from "@/services/watchlists"
 import type {
   WatchlistOutputEvidenceResponse,
@@ -9,6 +10,7 @@ import type {
   WatchlistReportExcludedItem
 } from "@/types/watchlists"
 import {
+  createOutputMetadataLabels,
   getReadinessLabel,
   getReadinessTagColor
 } from "./outputMetadata"
@@ -38,6 +40,7 @@ export const ReportEvidencePanel: React.FC<ReportEvidencePanelProps> = ({
 }) => {
   const { t } = useTranslation(["watchlists", "common"])
   const { isConstrained } = useWatchlistsViewport()
+  const outputMetadataLabels = useMemo(() => createOutputMetadataLabels(t), [t])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [response, setResponse] = useState<WatchlistOutputEvidenceResponse | null>(
@@ -240,16 +243,15 @@ export const ReportEvidencePanel: React.FC<ReportEvidencePanelProps> = ({
   if (error) {
     return (
       <Alert
-        type="error"
-        showIcon
+        variant="error"
         title={t("watchlists:reports.evidence.errorTitle", "Evidence snapshot unavailable")}
-        description={error}
-        action={(
-          <Button size="small" onClick={loadEvidence}>
-            {t("common:retry", "Retry")}
-          </Button>
-        )}
-      />
+        action={{
+          label: t("common:retry", "Retry"),
+          onClick: loadEvidence
+        }}
+      >
+        {error}
+      </Alert>
     )
   }
 
@@ -266,17 +268,15 @@ export const ReportEvidencePanel: React.FC<ReportEvidencePanelProps> = ({
     const warning = readinessWarnings[0]
     return (
       <Alert
-        type="info"
-        showIcon
+        variant="info"
         title={t("watchlists:reports.evidence.legacyTitle", "Live provenance only")}
-        description={
-          warning?.message ||
+      >
+        {warning?.message ||
           t(
             "watchlists:reports.evidence.legacyDescription",
             "This older report was created before evidence snapshots were available."
-          )
-        }
-      />
+          )}
+      </Alert>
     )
   }
 
@@ -295,7 +295,7 @@ export const ReportEvidencePanel: React.FC<ReportEvidencePanelProps> = ({
           </span>
           {readiness && (
             <Tag color={getReadinessTagColor(readiness.state)}>
-              {getReadinessLabel(readiness.state)}
+              {getReadinessLabel(readiness.state, outputMetadataLabels)}
             </Tag>
           )}
         </div>
@@ -332,8 +332,7 @@ export const ReportEvidencePanel: React.FC<ReportEvidencePanelProps> = ({
           {readinessWarnings.map((warning) => (
             <Alert
               key={`${warning.code}-${warning.message}`}
-              type={warning.severity === "blocking" ? "error" : "warning"}
-              showIcon
+              variant={warning.severity === "blocking" ? "error" : "warning"}
               title={warning.message}
             />
           ))}

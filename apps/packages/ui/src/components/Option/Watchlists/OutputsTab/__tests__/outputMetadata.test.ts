@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest"
 import {
   buildDeliveryDisclosureSummary,
   buildRegenerateOutputRequest,
+  createOutputMetadataLabels,
+  getAudioStatusLabel,
   getDeliveryStatusColor,
   getDeliveryStatusLabel,
   getAudioStatusSummary,
@@ -268,6 +270,26 @@ describe("outputMetadata helpers", () => {
     expect(getReadinessTagColor("legacy_live_only")).toBe("default")
   })
 
+  it("accepts translated readiness and audio labels from call sites", () => {
+    const labels = createOutputMetadataLabels((key, fallback) => `${key}:${fallback}`)
+
+    expect(getReadinessLabel("warning", labels)).toBe(
+      "watchlists:reports.readiness.needsReview:Needs review"
+    )
+    expect(getReadinessLabel("legacy_live_only", labels)).toBe(
+      "watchlists:reports.readiness.legacyLiveOnly:Live provenance only"
+    )
+    expect(getAudioStatusLabel("completed", labels)).toBe(
+      "watchlists:outputs.audioStatus.completed:Completed"
+    )
+    expect(getAudioStatusLabel("fallback", labels)).toBe(
+      "watchlists:outputs.audioStatus.fallback:Fallback"
+    )
+    expect(getAudioStatusSummary({ status: "queued" }, labels).statusLabel).toBe(
+      "watchlists:outputs.audioStatus.queued:Queued"
+    )
+  })
+
   it("uses design-system registry labels for canonical readiness and audio states", async () => {
     vi.resetModules()
     vi.doMock("@/design-system", () => ({
@@ -276,13 +298,16 @@ describe("outputMetadata helpers", () => {
       LOADING_STATE_LABEL: "Registry Loading"
     }))
 
-    const metadataModule = await import("../outputMetadata")
+    try {
+      const metadataModule = await import("../outputMetadata")
 
-    expect(metadataModule.getReadinessLabel("ready")).toBe("Registry Ready")
-    expect(metadataModule.getReadinessLabel("blocked")).toBe("Registry Blocked")
-    expect(metadataModule.getAudioStatusLabel("ready")).toBe("Registry Ready")
-
-    vi.doUnmock("@/design-system")
+      expect(metadataModule.getReadinessLabel("ready")).toBe("Registry Ready")
+      expect(metadataModule.getReadinessLabel("blocked")).toBe("Registry Blocked")
+      expect(metadataModule.getAudioStatusLabel("ready")).toBe("Registry Ready")
+    } finally {
+      vi.doUnmock("@/design-system")
+      vi.resetModules()
+    }
   })
 
   it("returns safe legacy defaults when report metadata is absent or malformed", () => {

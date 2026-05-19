@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { RunDetailDrawer } from "../RunDetailDrawer"
 
@@ -289,6 +289,30 @@ describe("RunDetailDrawer source column", () => {
     })
   })
 
+  it("renders warning-level load failures as degraded recovery states", async () => {
+    mocks.fetchWatchlistSourcesMock.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      size: 200,
+      has_more: false
+    })
+    mocks.getRunDetailsMock.mockRejectedValue({
+      status: 400,
+      message: "invalid input"
+    })
+
+    render(<RunDetailDrawer open runId={10} onClose={vi.fn()} />)
+
+    await waitFor(() => {
+      const callout = screen
+        .getByText("Could not load run details.")
+        .closest('[data-ds-component="RecoveryCallout"]')
+      expect(callout).toBeInTheDocument()
+      expect(within(callout as HTMLElement).getByText("Degraded")).toBeInTheDocument()
+    })
+  })
+
   it("falls back to source id when source lookup data is unavailable", async () => {
     mocks.fetchWatchlistSourcesMock.mockResolvedValue({
       items: [],
@@ -404,6 +428,11 @@ describe("RunDetailDrawer source column", () => {
       expect(screen.getByText("Suggested recovery steps")).toBeInTheDocument()
       expect(
         screen.getByText("Suggested recovery steps").closest('[data-ds-component="RecoveryCallout"]')
+      ).toBeInTheDocument()
+      expect(
+        within(
+          screen.getByText("Suggested recovery steps").closest('[data-ds-component="RecoveryCallout"]') as HTMLElement
+        ).getByText("Degraded")
       ).toBeInTheDocument()
       expect(screen.getByText("Common causes").closest('[data-ds-component="Alert"]')).toBeInTheDocument()
       expect(screen.getByText("Edit monitor schedule")).toBeInTheDocument()

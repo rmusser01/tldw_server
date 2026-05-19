@@ -18,7 +18,7 @@ import { Download } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { LOADING_STATE_LABEL } from "@/design-system"
 import { Alert } from "@/components/ui"
-import { RecoveryCallout } from "@/components/ui/state"
+import { RecoveryCallout, type RecoveryState } from "@/components/ui/state"
 import { useWatchlistsStore } from "@/store/watchlists"
 import {
   cancelWatchlistRun,
@@ -41,7 +41,10 @@ import { formatRelativeTime } from "@/utils/dateFormatters"
 import { StatusTag } from "../shared"
 import { mapWatchlistsError } from "../shared/watchlists-error"
 import { classifyRunFailure, getRunFailureHint } from "./run-notifications"
-import { getAudioStatusSummary } from "../OutputsTab/outputMetadata"
+import {
+  createOutputMetadataLabels,
+  getAudioStatusSummary
+} from "../OutputsTab/outputMetadata"
 import { useWatchlistsViewport } from "../shared/useWatchlistsViewport"
 import {
   getFocusableActiveElement,
@@ -91,6 +94,13 @@ const COMMON_CAUSES_BY_KIND: Record<string, [string, string][]> = {
   ]
 }
 
+const getRecoveryStateForSeverity = (
+  severity: ReturnType<typeof mapWatchlistsError>["severity"] | string | null | undefined
+): RecoveryState => {
+  if (severity === "error") return "error"
+  return "degraded"
+}
+
 export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   runId,
   open,
@@ -98,6 +108,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
 }) => {
   const { t } = useTranslation(["watchlists", "common"])
   const { isConstrained } = useWatchlistsViewport()
+  const outputMetadataLabels = useMemo(() => createOutputMetadataLabels(t), [t])
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<RunDetailResponse | null>(null)
   const [error, setError] = useState<ReturnType<typeof mapWatchlistsError> | null>(null)
@@ -144,8 +155,8 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   }, [data?.stats])
 
   const audioSummary = useMemo(() => {
-    return getAudioStatusSummary(audioStatus)
-  }, [audioStatus])
+    return getAudioStatusSummary(audioStatus, outputMetadataLabels)
+  }, [audioStatus, outputMetadataLabels])
 
   const downloadCsv = (content: string, filename: string): void => {
     const blob = new Blob([content], { type: "text/csv;charset=utf-8" })
@@ -1146,7 +1157,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
           {data?.error_msg && (
             <div className="mt-4 space-y-3">
               <RecoveryCallout
-                state="error"
+                state="degraded"
                 title={t("watchlists:runs.detail.remediationTitle", "Suggested recovery steps")}
                 message={remediationHint || t(
                   "watchlists:runs.detail.remediationFallback",
@@ -1423,7 +1434,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
         </div>
       ) : error ? (
         <RecoveryCallout
-          state={error.severity === "warning" ? "degraded" : "error"}
+          state={getRecoveryStateForSeverity(error.severity)}
           title={error.title}
           message={error.description}
           primaryAction={{

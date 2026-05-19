@@ -13,6 +13,21 @@ import {
   READY_STATE_LABEL
 } from "@/design-system"
 
+export type OutputMetadataTranslator = (key: string, defaultValue: string) => string
+
+export type AudioStatusLabelKey =
+  | "completed"
+  | "ready"
+  | "fallback"
+  | "partial"
+  | "queued"
+  | "pending"
+  | "running"
+  | "in_progress"
+  | "failed"
+  | "error"
+  | "unknown"
+
 export interface DeliveryStatusSummary {
   channel: string
   status: string
@@ -46,6 +61,11 @@ export interface AudioStatusSummary {
   finalArtifact?: AudioArtifactSummary
 }
 
+export interface OutputMetadataLabels {
+  readiness?: Partial<Record<WatchlistReportReadinessState, string>>
+  audioStatus?: Partial<Record<AudioStatusLabelKey, string>>
+}
+
 const AUDIO_OUTPUT_FORMATS = new Set(["mp3", "wav", "ogg", "m4a", "aac", "flac", "opus"])
 const REPORT_PRESETS = new Set<WatchlistReportPreset>([
   "auto",
@@ -75,6 +95,55 @@ const OUTPUT_MIME_TYPES: Record<string, string> = {
   flac: "audio/flac",
   opus: "audio/ogg"
 }
+const DEFAULT_READINESS_LABELS: Record<WatchlistReportReadinessState, string> = {
+  ready: READY_STATE_LABEL,
+  warning: "Needs review",
+  blocked: BLOCKED_STATE_LABEL,
+  legacy_live_only: "Live provenance only"
+}
+const DEFAULT_AUDIO_STATUS_LABELS: Record<AudioStatusLabelKey, string> = {
+  completed: "Completed",
+  ready: READY_STATE_LABEL,
+  fallback: "Fallback",
+  partial: "Partial",
+  queued: "Queued",
+  pending: "Pending",
+  running: "Running",
+  in_progress: "In progress",
+  failed: "Failed",
+  error: "Error",
+  unknown: "Unknown"
+}
+
+export const createOutputMetadataLabels = (
+  t: OutputMetadataTranslator
+): OutputMetadataLabels => ({
+  readiness: {
+    ready: t("watchlists:reports.readiness.ready", READY_STATE_LABEL),
+    warning: t("watchlists:reports.readiness.needsReview", DEFAULT_READINESS_LABELS.warning),
+    blocked: t("watchlists:reports.readiness.blocked", BLOCKED_STATE_LABEL),
+    legacy_live_only: t(
+      "watchlists:reports.readiness.legacyLiveOnly",
+      DEFAULT_READINESS_LABELS.legacy_live_only
+    )
+  },
+  audioStatus: {
+    completed: t("watchlists:outputs.audioStatus.completed", DEFAULT_AUDIO_STATUS_LABELS.completed),
+    ready: t("watchlists:outputs.audioStatus.ready", READY_STATE_LABEL),
+    fallback: t("watchlists:outputs.audioStatus.fallback", DEFAULT_AUDIO_STATUS_LABELS.fallback),
+    partial: t("watchlists:outputs.audioStatus.partial", DEFAULT_AUDIO_STATUS_LABELS.partial),
+    queued: t("watchlists:outputs.audioStatus.queued", DEFAULT_AUDIO_STATUS_LABELS.queued),
+    pending: t("watchlists:outputs.audioStatus.pending", DEFAULT_AUDIO_STATUS_LABELS.pending),
+    running: t("watchlists:outputs.audioStatus.running", DEFAULT_AUDIO_STATUS_LABELS.running),
+    in_progress: t(
+      "watchlists:outputs.audioStatus.inProgress",
+      DEFAULT_AUDIO_STATUS_LABELS.in_progress
+    ),
+    failed: t("watchlists:outputs.audioStatus.failed", DEFAULT_AUDIO_STATUS_LABELS.failed),
+    error: t("watchlists:outputs.audioStatus.error", DEFAULT_AUDIO_STATUS_LABELS.error),
+    unknown: t("watchlists:outputs.audioStatus.unknown", DEFAULT_AUDIO_STATUS_LABELS.unknown)
+  }
+})
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -302,12 +371,10 @@ export const getReadinessTagColor = (state: WatchlistReportReadinessState): stri
   return "default"
 }
 
-export const getReadinessLabel = (state: WatchlistReportReadinessState): string => {
-  if (state === "ready") return READY_STATE_LABEL
-  if (state === "warning") return "Needs review"
-  if (state === "blocked") return BLOCKED_STATE_LABEL
-  return "Live provenance only"
-}
+export const getReadinessLabel = (
+  state: WatchlistReportReadinessState,
+  labels?: OutputMetadataLabels
+): string => labels?.readiness?.[state] ?? DEFAULT_READINESS_LABELS[state]
 
 const normalizeDelivery = (
   value: unknown,
@@ -417,19 +484,15 @@ export const getAudioStatusColor = (status: string): string => {
   return "default"
 }
 
-export const getAudioStatusLabel = (status: string): string => {
+export const getAudioStatusLabel = (
+  status: string,
+  labels?: OutputMetadataLabels
+): string => {
   const normalized = status.trim().toLowerCase()
-  if (normalized === "completed") return "Completed"
-  if (normalized === "ready") return READY_STATE_LABEL
-  if (normalized === "fallback") return "Fallback"
-  if (normalized === "partial") return "Partial"
-  if (normalized === "queued") return "Queued"
-  if (normalized === "pending") return "Pending"
-  if (normalized === "running") return "Running"
-  if (normalized === "in_progress") return "In progress"
-  if (normalized === "failed") return "Failed"
-  if (normalized === "error") return "Error"
-  if (normalized === "unknown") return "Unknown"
+  if (normalized in DEFAULT_AUDIO_STATUS_LABELS) {
+    const labelKey = normalized as AudioStatusLabelKey
+    return labels?.audioStatus?.[labelKey] ?? DEFAULT_AUDIO_STATUS_LABELS[labelKey]
+  }
   return status
 }
 
@@ -496,7 +559,8 @@ const getAudioMetadataRecord = (metadata: unknown): Record<string, unknown> | nu
 }
 
 export const getAudioStatusSummary = (
-  value: WatchlistRunAudioStatus | unknown
+  value: WatchlistRunAudioStatus | unknown,
+  labels?: OutputMetadataLabels
 ): AudioStatusSummary => {
   const record = getMetadataRecord(value)
   const status = asNonEmptyString(record?.status) || "unknown"
@@ -536,7 +600,7 @@ export const getAudioStatusSummary = (
   return {
     requested,
     status,
-    statusLabel: getAudioStatusLabel(status),
+    statusLabel: getAudioStatusLabel(status, labels),
     statusColor: getAudioStatusColor(status),
     fallbackReason,
     error,
@@ -547,8 +611,11 @@ export const getAudioStatusSummary = (
   }
 }
 
-export const getOutputAudioStatusSummary = (metadata: unknown): AudioStatusSummary => {
-  return getAudioStatusSummary(getAudioMetadataRecord(metadata))
+export const getOutputAudioStatusSummary = (
+  metadata: unknown,
+  labels?: OutputMetadataLabels
+): AudioStatusSummary => {
+  return getAudioStatusSummary(getAudioMetadataRecord(metadata), labels)
 }
 
 interface BuildRegenerateOptions {

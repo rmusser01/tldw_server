@@ -42,6 +42,7 @@ import { OutputPreviewDrawer } from "./OutputPreviewDrawer"
 import {
   buildDeliveryDisclosureSummary,
   buildRegenerateOutputRequest,
+  createOutputMetadataLabels,
   getDeliveryStatusColor,
   getDeliveryStatusLabel,
   getOutputArtifactLabel,
@@ -112,6 +113,7 @@ const hasOutputDeliveryIssue = (output: WatchlistOutput): boolean =>
 export const OutputsTab: React.FC = () => {
   const { t } = useTranslation(["watchlists", "common"])
   const { isConstrained } = useWatchlistsViewport()
+  const outputMetadataLabels = useMemo(() => createOutputMetadataLabels(t), [t])
 
   // Store state
   const outputs = useWatchlistsStore((s) => s.outputs)
@@ -681,7 +683,7 @@ export const OutputsTab: React.FC = () => {
         return (
           <Space size={[4, 4]} wrap>
             <Tag color={getReadinessTagColor(readiness.state)}>
-              {getReadinessLabel(readiness.state)}
+              {getReadinessLabel(readiness.state, outputMetadataLabels)}
             </Tag>
             {getOutputReportSnapshotAvailable(record.metadata) ? (
               <Tooltip title={t("watchlists:reports.evidence.snapshotAvailable", "Immutable evidence snapshot is available")}>
@@ -901,7 +903,7 @@ export const OutputsTab: React.FC = () => {
                 </div>
                 <div className="flex flex-wrap gap-1">
                   <Tag color={getReadinessTagColor(readiness.state)}>
-                    {getReadinessLabel(readiness.state)}
+                    {getReadinessLabel(readiness.state, outputMetadataLabels)}
                   </Tag>
                   {getOutputReportSnapshotAvailable(output.metadata) ? (
                     <Tag color="blue">

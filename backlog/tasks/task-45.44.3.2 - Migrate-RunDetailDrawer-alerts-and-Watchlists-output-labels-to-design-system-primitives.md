@@ -19,8 +19,12 @@ modified_files:
 - apps/packages/ui/src/components/Option/Watchlists/RunsTab/RunDetailDrawer.tsx
 - apps/packages/ui/src/components/Option/Watchlists/RunsTab/__tests__/RunDetailDrawer.source-column.test.tsx
 - apps/packages/ui/src/components/Option/Watchlists/RunsTab/__tests__/RunDetailDrawer.stream-lifecycle.test.tsx
+- apps/packages/ui/src/components/Option/Watchlists/OutputsTab/OutputsTab.tsx
+- apps/packages/ui/src/components/Option/Watchlists/OutputsTab/ReportEvidencePanel.tsx
+- apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/ReportEvidencePanel.test.tsx
 - apps/packages/ui/src/components/Option/Watchlists/OutputsTab/outputMetadata.ts
 - apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/outputMetadata.test.ts
+- apps/packages/ui/src/assets/locale/en/watchlists.json
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
 ---
 
@@ -53,7 +57,7 @@ Used TDD: first added failing marker assertions for RunDetailDrawer design-syste
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated RunDetailDrawer's flagged product-state alerts to the shared design-system Alert and RecoveryCallout primitives, including linkage, recovery, common-causes, filtered-sample, stream-error, truncated-log, and load-error surfaces. Routed Watchlists output Ready/Blocked and audio-ready labels through the design-system state registry. Removed stale/migrated baseline exceptions for RunDetailDrawer and outputMetadata. PR: https://github.com/rmusser01/tldw_server/pull/1855. Verification: focused Watchlists Vitest suite passed 33 tests; product-state guard tests passed 52 tests; bun run verify:design-system-state exited 0 with baseline exceptions reduced to 352; git diff --check passed; bunx tsc --noEmit --pretty false still exits 2 on existing unrelated UI TypeScript debt with no touched-file matches. Bandit skipped because this slice only changes frontend TypeScript/JSON and Backlog task metadata.
+Migrated RunDetailDrawer's flagged product-state alerts to the shared design-system Alert and RecoveryCallout primitives, including linkage, recovery, common-causes, filtered-sample, stream-error, truncated-log, and load-error surfaces. Routed Watchlists output Ready/Blocked and audio-ready labels through the design-system state registry, added translation-key label maps for remaining readiness/audio labels, and made mocked registry cleanup exception-safe. Preserved warning-level recovery as the degraded state and migrated ReportEvidencePanel's evidence error, legacy, and warning callouts to design-system Alert instead of rebaselining shifted AntD debt. Removed stale/migrated baseline exceptions for RunDetailDrawer, ReportEvidencePanel, and outputMetadata. PR: https://github.com/rmusser01/tldw_server/pull/1855. Verification: focused Watchlists Vitest suite passed 38 tests; product-state guard tests passed 52 tests; bun run verify:design-system-state exited 0 with baseline exceptions reduced to 350; git diff --check passed; bunx tsc --noEmit --pretty false still exits 2 on existing unrelated UI TypeScript debt with no touched-file matches. Bandit skipped because this slice only changes frontend TypeScript/JSON and Backlog task metadata.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
