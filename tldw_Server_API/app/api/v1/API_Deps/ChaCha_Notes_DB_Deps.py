@@ -108,6 +108,17 @@ def _sanitize_chacha_db_identifier(user_id: int | None, db_path: Path | None = N
     numeric user IDs, absolute paths, or nonstandard filenames. The context
     arguments are accepted only so callers can pass corruption context
     consistently; they are intentionally not encoded in the returned value.
+
+    Args:
+        user_id: Optional owner id from a corruption exception. Ignored to avoid
+            leaking per-user identifiers in public health responses.
+        db_path: Optional filesystem path from a corruption exception. Ignored
+            to avoid leaking path or filename details.
+
+    Returns:
+        The constant public label ``"ChaChaNotes.db"``. For example, both
+        ``user_id=42`` and ``db_path=/private/user/42/ChaChaNotes.db`` return
+        ``"ChaChaNotes.db"``.
     """
     return "ChaChaNotes.db"
 
@@ -115,10 +126,19 @@ def _sanitize_chacha_db_identifier(user_id: int | None, db_path: Path | None = N
 def _build_chacha_failure_details(error: Exception | None) -> dict[str, Any] | None:
     """Build sanitized recovery metadata for current ChaChaNotes failures.
 
-    Returns None for non-corruption failures so generic runtime errors are not
-    copied into health responses. Corruption failures include a stable reason
-    code, a redacted database label, and recovery guidance without raw exception
-    text, filesystem paths, or user identifiers.
+    Args:
+        error: Exception raised while opening a ChaChaNotes database. Only
+            exceptions recognized by ``_is_sqlite_corruption_error`` are exposed.
+
+    Returns:
+        ``None`` for non-corruption failures so generic runtime errors are not
+        copied into health responses. For corruption failures, returns a dict
+        with ``reason_code`` from the exception or ``"sqlite_corruption"``,
+        ``affected_db`` from ``_sanitize_chacha_db_identifier``, and ``recovery``
+        containing ``automatic_repair=False``, ``documentation`` from
+        ``_CHACHA_RECOVERY_DOC``, and ``message`` from
+        ``_CHACHA_RECOVERY_MESSAGE``. The payload avoids raw exception text,
+        filesystem paths, and user identifiers.
     """
     if not _is_sqlite_corruption_error(error):
         return None
@@ -140,9 +160,16 @@ def _build_chacha_failure_details(error: Exception | None) -> dict[str, Any] | N
 def _copy_chacha_failure_details(failure: Any) -> dict[str, Any] | None:
     """Copy stored failure metadata while preserving public redaction rules.
 
-    Tests and older in-process state can seed dictionaries directly, so this
-    helper normalizes affected_db through the same public-safe label path before
-    returning a snapshot copy to callers.
+    Args:
+        failure: Candidate failure dict from shared health state.
+
+    Returns:
+        ``None`` when the input is not a dict. Otherwise returns a new dict with
+        a string ``reason_code``, a re-sanitized ``affected_db`` fallback of
+        ``"ChaChaNotes.db"``, and a shallow copy of the ``recovery`` dict. The
+        copy prevents callers from mutating shared health state and also
+        normalizes dictionaries seeded directly by tests or older in-process
+        state.
     """
     if not isinstance(failure, dict):
         return None

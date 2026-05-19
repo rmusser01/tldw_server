@@ -144,6 +144,7 @@ async def test_api_health_exposes_chacha_recovery_details_without_path_leak(monk
     monkeypatch.setattr(metrics_manager, "get_metrics_registry", lambda: object())
 
     with chacha_deps._CHACHA_HEALTH_LOCK:
+        previous_health = dict(chacha_deps._CHACHA_HEALTH)
         chacha_deps._CHACHA_HEALTH.update(
             {
                 "init_attempts": 1,
@@ -167,23 +168,28 @@ async def test_api_health_exposes_chacha_recovery_details_without_path_leak(monk
             }
         )
 
-    response = await health_mod.api_health()
-    body = json.loads(response.body.decode("utf-8"))
+    try:
+        response = await health_mod.api_health()
+        body = json.loads(response.body.decode("utf-8"))
 
-    assert response.status_code == 206
-    assert body["status"] == "degraded"
-    assert body["checks"]["chacha_notes"]["status"] == "degraded"
-    assert body["checks"]["chacha_notes"]["last_init_success"] is False
-    assert body["checks"]["chacha_notes"]["consecutive_failures"] == 1
-    assert body["checks"]["chacha_notes"]["warm_startups"] == 2
-    assert body["checks"]["chacha_notes"]["last_failure"]["affected_db"] == "ChaChaNotes.db"
-    assert body["checks"]["chacha_notes"]["last_failure"]["recovery"]["automatic_repair"] is False
-    assert body["checks"]["chacha_notes"]["last_failure"]["recovery"]["documentation"] == (
-        "Docs/Operations/ChaChaNotes_DB_Recovery.md"
-    )
-    assert "user:42" not in str(body)
-    assert str(tmp_path) not in str(body)
-    assert "/private/" not in str(body)
+        assert response.status_code == 206
+        assert body["status"] == "degraded"
+        assert body["checks"]["chacha_notes"]["status"] == "degraded"
+        assert body["checks"]["chacha_notes"]["last_init_success"] is False
+        assert body["checks"]["chacha_notes"]["consecutive_failures"] == 1
+        assert body["checks"]["chacha_notes"]["warm_startups"] == 2
+        assert body["checks"]["chacha_notes"]["last_failure"]["affected_db"] == "ChaChaNotes.db"
+        assert body["checks"]["chacha_notes"]["last_failure"]["recovery"]["automatic_repair"] is False
+        assert body["checks"]["chacha_notes"]["last_failure"]["recovery"]["documentation"] == (
+            "Docs/Operations/ChaChaNotes_DB_Recovery.md"
+        )
+        assert "user:42" not in str(body)
+        assert str(tmp_path) not in str(body)
+        assert "/private/" not in str(body)
+    finally:
+        with chacha_deps._CHACHA_HEALTH_LOCK:
+            chacha_deps._CHACHA_HEALTH.clear()
+            chacha_deps._CHACHA_HEALTH.update(previous_health)
 
 
 @pytest.mark.asyncio

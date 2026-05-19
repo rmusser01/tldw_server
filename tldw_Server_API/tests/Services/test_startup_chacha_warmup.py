@@ -157,15 +157,23 @@ async def test_warm_chacha_db_for_user_records_corrupt_db_and_fails_open(
             }
         )
 
+    def _get_user_base_directory(request_user_id: int):
+        assert request_user_id == user_id
+        return db_path.parent
+
+    def _get_chacha_db_path(request_user_id: int):
+        assert request_user_id == user_id
+        return db_path
+
     monkeypatch.setattr(
         chacha_deps.DatabasePaths,
         "get_user_base_directory",
-        lambda _user_id: db_path.parent,
+        _get_user_base_directory,
     )
     monkeypatch.setattr(
         chacha_deps.DatabasePaths,
         "get_chacha_db_path",
-        lambda _user_id: db_path,
+        _get_chacha_db_path,
     )
 
     await chacha_deps.warm_chacha_db_for_user(user_id, str(user_id))
@@ -177,7 +185,11 @@ async def test_warm_chacha_db_for_user_records_corrupt_db_and_fails_open(
     assert snapshot["consecutive_failures"] == 1
     assert snapshot["warm_startups"] == 0
     assert snapshot["last_failure"]["affected_db"] == "ChaChaNotes.db"
+    assert snapshot["last_failure"]["reason_code"] == "sqlite_corruption"
     assert snapshot["last_failure"]["recovery"]["automatic_repair"] is False
+    assert snapshot["last_failure"]["recovery"]["documentation"] == (
+        "Docs/Operations/ChaChaNotes_DB_Recovery.md"
+    )
     assert "user:43" not in str(snapshot)
     assert str(tmp_path) not in str(snapshot)
     assert "not a sqlite database" not in str(snapshot)
