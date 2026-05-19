@@ -447,11 +447,14 @@ def test_chacha_health_last_error_uses_safe_error_type():
                 "init_failures": 0,
                 "last_init_ms": None,
                 "last_error": None,
+                "last_init_success": None,
                 "last_warn_dump": None,
                 "cached_instances": 0,
+                "consecutive_failures": 0,
                 "default_char_ensures": 0,
                 "default_char_failures": 0,
                 "warm_startups": 0,
+                "last_failure": None,
             }
         )
 

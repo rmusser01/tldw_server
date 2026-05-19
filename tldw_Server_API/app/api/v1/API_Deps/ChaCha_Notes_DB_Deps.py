@@ -43,6 +43,8 @@ _CHACHA_EXECUTOR_MAX_WORKERS = max(1, int(os.getenv("CHACHA_EXECUTOR_MAX_WORKERS
 _CHACHA_WATCHDOG_SECS = float(os.getenv("CHACHA_INIT_WATCHDOG_SECS", "5"))
 _CHACHA_SHUTDOWN_INIT_ERROR_DETAIL = "ChaChaNotes shutdown in progress"
 _CHACHA_CORRUPTION_ERROR_DETAIL = "ChaChaNotes DB corruption detected; repair or restore required"
+_CHACHA_RECOVERY_DOC = "Docs/Operations/ChaChaNotes_DB_Recovery.md"
+_CHACHA_RECOVERY_MESSAGE = "Restore the affected ChaChaNotes DB from backup or move it aside before retrying."
 _SQLITE_CORRUPTION_SIGNATURES = (
     "database disk image is malformed",
     "malformed database schema",
@@ -54,11 +56,14 @@ _CHACHA_HEALTH: dict[str, Any] = {
     "init_failures": 0,
     "last_init_ms": None,
     "last_error": None,
+    "last_init_success": None,
     "last_warn_dump": None,
     "cached_instances": 0,
+    "consecutive_failures": 0,
     "default_char_ensures": 0,
     "default_char_failures": 0,
     "warm_startups": 0,
+    "last_failure": None,
 }
 _CHACHA_SHUTTING_DOWN = False
 _CHACHA_SHUTDOWN_LOCK = threading.Lock()
@@ -66,6 +71,19 @@ _CHACHA_SHUTDOWN_LOCK = threading.Lock()
 
 class ChaChaDatabaseCorruptionError(CharactersRAGDBError):
     """Raised when an existing ChaChaNotes SQLite DB fails integrity preflight."""
+
+    def __init__(
+        self,
+        detail: str = _CHACHA_CORRUPTION_ERROR_DETAIL,
+        *,
+        user_id: int | None = None,
+        db_path: Path | None = None,
+        reason_code: str = "sqlite_corruption",
+    ) -> None:
+        super().__init__(detail)
+        self.user_id = user_id
+        self.db_path = db_path
+        self.reason_code = reason_code
 
 
 def _is_sqlite_corruption_error(error: Exception | None) -> bool:
@@ -81,6 +99,96 @@ def _safe_chacha_health_error(error: Exception | None) -> str:
     if _is_sqlite_corruption_error(error):
         return "sqlite_corruption"
     return type(error).__name__ if error else "unknown error"
+
+
+def _sanitize_chacha_db_identifier(user_id: int | None, db_path: Path | None = None) -> str:
+    """Return a public-safe DB label for ChaChaNotes health payloads.
+
+    Aggregate health is unauthenticated, so the default label must not expose
+    numeric user IDs, absolute paths, or nonstandard filenames. The context
+    arguments are accepted only so callers can pass corruption context
+    consistently; they are intentionally not encoded in the returned value.
+
+    Args:
+        user_id: Optional owner id from a corruption exception. Ignored to avoid
+            leaking per-user identifiers in public health responses.
+        db_path: Optional filesystem path from a corruption exception. Ignored
+            to avoid leaking path or filename details.
+
+    Returns:
+        The constant public label ``"ChaChaNotes.db"``. For example, both
+        ``user_id=42`` and ``db_path=/private/user/42/ChaChaNotes.db`` return
+        ``"ChaChaNotes.db"``.
+    """
+    return "ChaChaNotes.db"
+
+
+def _build_chacha_failure_details(error: Exception | None) -> dict[str, Any] | None:
+    """Build sanitized recovery metadata for current ChaChaNotes failures.
+
+    Args:
+        error: Exception raised while opening a ChaChaNotes database. Only
+            exceptions recognized by ``_is_sqlite_corruption_error`` are exposed.
+
+    Returns:
+        ``None`` for non-corruption failures so generic runtime errors are not
+        copied into health responses. For corruption failures, returns a dict
+        with ``reason_code`` from the exception or ``"sqlite_corruption"``,
+        ``affected_db`` from ``_sanitize_chacha_db_identifier``, and ``recovery``
+        containing ``automatic_repair=False``, ``documentation`` from
+        ``_CHACHA_RECOVERY_DOC``, and ``message`` from
+        ``_CHACHA_RECOVERY_MESSAGE``. The payload avoids raw exception text,
+        filesystem paths, and user identifiers.
+    """
+    if not _is_sqlite_corruption_error(error):
+        return None
+
+    user_id = getattr(error, "user_id", None)
+    db_path = getattr(error, "db_path", None)
+    reason_code = getattr(error, "reason_code", "sqlite_corruption")
+    return {
+        "reason_code": str(reason_code or "sqlite_corruption"),
+        "affected_db": _sanitize_chacha_db_identifier(user_id, db_path),
+        "recovery": {
+            "automatic_repair": False,
+            "documentation": _CHACHA_RECOVERY_DOC,
+            "message": _CHACHA_RECOVERY_MESSAGE,
+        },
+    }
+
+
+def _copy_chacha_failure_details(failure: Any) -> dict[str, Any] | None:
+    """Copy stored failure metadata while preserving public redaction rules.
+
+    Args:
+        failure: Candidate failure dict from shared health state.
+
+    Returns:
+        ``None`` when the input is not a dict. Otherwise returns a new dict with
+        a string ``reason_code``, a re-sanitized ``affected_db`` fallback of
+        ``"ChaChaNotes.db"``, and a shallow copy of the ``recovery`` dict. The
+        copy prevents callers from mutating shared health state and also
+        normalizes dictionaries seeded directly by tests or older in-process
+        state.
+    """
+    if not isinstance(failure, dict):
+        return None
+
+    recovery = failure.get("recovery")
+    recovery_details = dict(recovery) if isinstance(recovery, dict) else {}
+    affected_db = failure.get("affected_db")
+    safe_db = _sanitize_chacha_db_identifier(None, Path(str(affected_db))) if affected_db else "ChaChaNotes.db"
+    return {
+        "reason_code": str(failure.get("reason_code") or "unknown"),
+        "affected_db": safe_db,
+        "recovery": recovery_details,
+    }
+
+
+def _get_chacha_cached_instance_count() -> int:
+    """Return the cached DB instance count under the cache lock."""
+    with _chacha_db_lock:
+        return len(_chacha_db_instances)
 
 
 def _set_chacha_shutting_down(value: bool) -> None:
@@ -119,15 +227,22 @@ def _get_chacha_executor() -> ThreadPoolExecutor:
 
 
 def _record_init(duration_ms: float, success: bool, error: Exception | None = None) -> None:
+    """Record one ChaChaNotes initialization attempt and current health state."""
+    cached_count = _get_chacha_cached_instance_count()
     with _CHACHA_HEALTH_LOCK:
         _CHACHA_HEALTH["init_attempts"] += 1
         _CHACHA_HEALTH["last_init_ms"] = duration_ms
-        _CHACHA_HEALTH["cached_instances"] = len(_chacha_db_instances)
+        _CHACHA_HEALTH["cached_instances"] = cached_count
+        _CHACHA_HEALTH["last_init_success"] = success
         if success:
             _CHACHA_HEALTH["last_error"] = None
+            _CHACHA_HEALTH["last_failure"] = None
+            _CHACHA_HEALTH["consecutive_failures"] = 0
         else:
             _CHACHA_HEALTH["init_failures"] += 1
+            _CHACHA_HEALTH["consecutive_failures"] = int(_CHACHA_HEALTH.get("consecutive_failures") or 0) + 1
             _CHACHA_HEALTH["last_error"] = _safe_chacha_health_error(error)
+            _CHACHA_HEALTH["last_failure"] = _build_chacha_failure_details(error)
 
 
 def _record_default_character(success: bool) -> None:
@@ -164,18 +279,40 @@ def _track_default_character_future(future: asyncio.Future) -> None:
 
 
 def get_chacha_health_snapshot() -> dict[str, Any]:
-    status = "healthy"
-    if _CHACHA_HEALTH.get("init_failures"):
-        status = "degraded"
+    """Return current ChaChaNotes health plus lifetime counters.
+
+    `status` reflects the latest/current initialization state, not the lifetime
+    failure counter. `init_failures` remains a monotonic diagnostic counter while
+    `consecutive_failures` and `last_init_success` drive recovery back to healthy
+    after an operator fixes the database and a later init succeeds.
+    """
+    with _CHACHA_HEALTH_LOCK:
+        init_attempts = _CHACHA_HEALTH.get("init_attempts")
+        init_failures = _CHACHA_HEALTH.get("init_failures")
+        last_init_ms = _CHACHA_HEALTH.get("last_init_ms")
+        last_error = _CHACHA_HEALTH.get("last_error")
+        last_init_success = _CHACHA_HEALTH.get("last_init_success")
+        consecutive_failures = int(_CHACHA_HEALTH.get("consecutive_failures") or 0)
+        default_char_ensures = _CHACHA_HEALTH.get("default_char_ensures")
+        default_char_failures = _CHACHA_HEALTH.get("default_char_failures")
+        warm_startups = _CHACHA_HEALTH.get("warm_startups")
+        last_failure = _copy_chacha_failure_details(_CHACHA_HEALTH.get("last_failure"))
+    cached_instances = _get_chacha_cached_instance_count()
+
+    status = "degraded" if consecutive_failures else "healthy"
     return {
         "status": status,
-        "init_attempts": _CHACHA_HEALTH.get("init_attempts"),
-        "init_failures": _CHACHA_HEALTH.get("init_failures"),
-        "last_init_ms": _CHACHA_HEALTH.get("last_init_ms"),
-        "last_error": _CHACHA_HEALTH.get("last_error"),
-        "cached_instances": len(_chacha_db_instances),
-        "default_char_ensures": _CHACHA_HEALTH.get("default_char_ensures"),
-        "default_char_failures": _CHACHA_HEALTH.get("default_char_failures"),
+        "init_attempts": init_attempts,
+        "init_failures": init_failures,
+        "last_init_ms": last_init_ms,
+        "last_error": last_error,
+        "last_init_success": last_init_success,
+        "consecutive_failures": consecutive_failures,
+        "last_failure": last_failure,
+        "cached_instances": cached_instances,
+        "default_char_ensures": default_char_ensures,
+        "default_char_failures": default_char_failures,
+        "warm_startups": warm_startups,
     }
 
 
@@ -237,7 +374,7 @@ def _get_chacha_db_path_for_user(user_id: int) -> Path:
     return db_file
 
 
-def _verify_existing_chacha_db_integrity(db_path: Path) -> None:
+def _verify_existing_chacha_db_integrity(db_path: Path, *, user_id: int | None = None) -> None:
     """Run a read-only quick check before opening an existing SQLite DB for writes."""
     if not db_path.exists():
         return
@@ -250,13 +387,21 @@ def _verify_existing_chacha_db_integrity(db_path: Path) -> None:
         )
     except sqlite3.Error as exc:
         if _is_sqlite_corruption_error(exc):
-            raise ChaChaDatabaseCorruptionError(_CHACHA_CORRUPTION_ERROR_DETAIL) from exc
+            raise ChaChaDatabaseCorruptionError(
+                _CHACHA_CORRUPTION_ERROR_DETAIL,
+                user_id=user_id,
+                db_path=db_path,
+            ) from exc
         raise
 
     if check_values and all(value.lower() == "ok" for value in check_values):
         return
 
-    raise ChaChaDatabaseCorruptionError(_CHACHA_CORRUPTION_ERROR_DETAIL)
+    raise ChaChaDatabaseCorruptionError(
+        _CHACHA_CORRUPTION_ERROR_DETAIL,
+        user_id=user_id,
+        db_path=db_path,
+    )
 
 
 def _apply_sqlite_tuning(db_instance: CharactersRAGDB) -> None:
@@ -301,11 +446,12 @@ def _create_and_prepare_db(user_id: int, client_id: str) -> CharactersRAGDB:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     except OSError as _mk2:
         logger.debug("Secondary ensure for ChaChaNotes parent failed softly ({})", type(_mk2).__name__)
-    logger.info(f"Initializing CharactersRAGDB instance for user {user_id} at path: {db_path}")
+    affected_db = _sanitize_chacha_db_identifier(user_id, db_path)
+    logger.info("Initializing CharactersRAGDB instance for user {} ({})", user_id, affected_db)
     try:
-        _verify_existing_chacha_db_integrity(db_path)
+        _verify_existing_chacha_db_integrity(db_path, user_id=user_id)
     except ChaChaDatabaseCorruptionError:
-        logger.error("ChaChaNotes DB corruption preflight failed for user {} at path: {}", user_id, db_path)
+        logger.error("ChaChaNotes DB corruption preflight failed for user {} ({})", user_id, affected_db)
         raise
     db_instance = CharactersRAGDB(db_path=str(db_path), client_id=str(client_id))
     _apply_sqlite_tuning(db_instance)
@@ -454,15 +600,18 @@ async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRA
     wait_for_existing_init = False
     with _chacha_db_lock:
         cached_instance = _chacha_db_instances.get(cache_key)
-        if cached_instance is not None:
-            _CHACHA_HEALTH["cached_instances"] = len(_chacha_db_instances)
-            return cached_instance
-        init_event = _chacha_db_init_events.get(cache_key)
-        if init_event is None:
-            init_event = threading.Event()
-            _chacha_db_init_events[cache_key] = init_event
-        else:
-            wait_for_existing_init = True
+        cached_count = len(_chacha_db_instances)
+        if cached_instance is None:
+            init_event = _chacha_db_init_events.get(cache_key)
+            if init_event is None:
+                init_event = threading.Event()
+                _chacha_db_init_events[cache_key] = init_event
+            else:
+                wait_for_existing_init = True
+    if cached_instance is not None:
+        with _CHACHA_HEALTH_LOCK:
+            _CHACHA_HEALTH["cached_instances"] = cached_count
+        return cached_instance
 
     if wait_for_existing_init:
         wait_timeout = max(_CHACHA_WATCHDOG_SECS * 3, 5)
@@ -540,7 +689,9 @@ async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRA
         with _chacha_db_lock:
             _chacha_db_instances[cache_key] = db_instance
             _chacha_db_init_errors.pop(cache_key, None)
-            _CHACHA_HEALTH["cached_instances"] = len(_chacha_db_instances)
+            cached_count = len(_chacha_db_instances)
+        with _CHACHA_HEALTH_LOCK:
+            _CHACHA_HEALTH["cached_instances"] = cached_count
         return db_instance
     finally:
         with _chacha_db_lock:
@@ -555,7 +706,8 @@ async def warm_chacha_db_for_user(user_id: int, client_id: str | None = None) ->
         return
     try:
         db_instance = await _get_or_init_db_instance(user_id, client_id or str(user_id))
-        _CHACHA_HEALTH["warm_startups"] += 1
+        with _CHACHA_HEALTH_LOCK:
+            _CHACHA_HEALTH["warm_startups"] += 1
         task = asyncio.create_task(_ensure_default_character_async(db_instance, user_id))
         _chacha_default_char_tasks.add(task)
         task.add_done_callback(_chacha_default_char_tasks.discard)

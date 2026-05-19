@@ -121,3 +121,75 @@ async def test_warm_chacha_notes_on_startup_logs_best_effort_failure(
     )
 
     assert logger.warning_messages == ["ChaChaNotes warm-up scheduling failed: boom"]
+
+
+@pytest.mark.asyncio
+async def test_warm_chacha_db_for_user_records_corrupt_db_and_fails_open(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
+
+    user_id = 43
+    db_path = tmp_path / "43" / "ChaChaNotes.db"
+    db_path.parent.mkdir(parents=True)
+    db_path.write_bytes(b"not a sqlite database")
+
+    with chacha_deps._chacha_db_lock:
+        chacha_deps._chacha_db_instances.clear()
+        chacha_deps._chacha_db_init_events.clear()
+        chacha_deps._chacha_db_init_errors.clear()
+    with chacha_deps._CHACHA_HEALTH_LOCK:
+        chacha_deps._CHACHA_HEALTH.update(
+            {
+                "init_attempts": 0,
+                "init_failures": 0,
+                "last_init_ms": None,
+                "last_error": None,
+                "last_init_success": None,
+                "last_warn_dump": None,
+                "cached_instances": 0,
+                "consecutive_failures": 0,
+                "default_char_ensures": 0,
+                "default_char_failures": 0,
+                "warm_startups": 0,
+                "last_failure": None,
+            }
+        )
+
+    def _get_user_base_directory(request_user_id: int):
+        assert request_user_id == user_id
+        return db_path.parent
+
+    def _get_chacha_db_path(request_user_id: int):
+        assert request_user_id == user_id
+        return db_path
+
+    monkeypatch.setattr(
+        chacha_deps.DatabasePaths,
+        "get_user_base_directory",
+        _get_user_base_directory,
+    )
+    monkeypatch.setattr(
+        chacha_deps.DatabasePaths,
+        "get_chacha_db_path",
+        _get_chacha_db_path,
+    )
+
+    await chacha_deps.warm_chacha_db_for_user(user_id, str(user_id))
+
+    snapshot = chacha_deps.get_chacha_health_snapshot()
+    assert snapshot["status"] == "degraded"
+    assert snapshot["last_error"] == "sqlite_corruption"
+    assert snapshot["last_init_success"] is False
+    assert snapshot["consecutive_failures"] == 1
+    assert snapshot["warm_startups"] == 0
+    assert snapshot["last_failure"]["affected_db"] == "ChaChaNotes.db"
+    assert snapshot["last_failure"]["reason_code"] == "sqlite_corruption"
+    assert snapshot["last_failure"]["recovery"]["automatic_repair"] is False
+    assert snapshot["last_failure"]["recovery"]["documentation"] == (
+        "Docs/Operations/ChaChaNotes_DB_Recovery.md"
+    )
+    assert "user:43" not in str(snapshot)
+    assert str(tmp_path) not in str(snapshot)
+    assert "not a sqlite database" not in str(snapshot)

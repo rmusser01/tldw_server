@@ -128,6 +128,71 @@ async def test_api_health_sanitizes_chacha_notes_probe_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_api_health_exposes_chacha_recovery_details_without_path_leak(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
+    from tldw_Server_API.app.core.AuthNZ import database as auth_database
+    from tldw_Server_API.app.core.Metrics import metrics_manager
+
+    class _HealthyPool:
+        async def health_check(self):
+            return {"status": "healthy"}
+
+    async def _healthy_pool():
+        return _HealthyPool()
+
+    monkeypatch.setattr(auth_database, "get_db_pool", _healthy_pool)
+    monkeypatch.setattr(metrics_manager, "get_metrics_registry", lambda: object())
+
+    with chacha_deps._CHACHA_HEALTH_LOCK:
+        previous_health = dict(chacha_deps._CHACHA_HEALTH)
+        chacha_deps._CHACHA_HEALTH.update(
+            {
+                "init_attempts": 1,
+                "init_failures": 1,
+                "last_init_ms": 2.5,
+                "last_error": "sqlite_corruption",
+                "last_init_success": False,
+                "cached_instances": 0,
+                "consecutive_failures": 1,
+                "default_char_ensures": 0,
+                "default_char_failures": 0,
+                "warm_startups": 2,
+                "last_failure": {
+                    "reason_code": "sqlite_corruption",
+                    "affected_db": "user:42/ChaChaNotes.db",
+                    "recovery": {
+                        "automatic_repair": False,
+                        "documentation": "Docs/Operations/ChaChaNotes_DB_Recovery.md",
+                    },
+                },
+            }
+        )
+
+    try:
+        response = await health_mod.api_health()
+        body = json.loads(response.body.decode("utf-8"))
+
+        assert response.status_code == 206
+        assert body["status"] == "degraded"
+        assert body["checks"]["chacha_notes"]["status"] == "degraded"
+        assert body["checks"]["chacha_notes"]["last_init_success"] is False
+        assert body["checks"]["chacha_notes"]["consecutive_failures"] == 1
+        assert body["checks"]["chacha_notes"]["warm_startups"] == 2
+        assert body["checks"]["chacha_notes"]["last_failure"]["affected_db"] == "ChaChaNotes.db"
+        assert body["checks"]["chacha_notes"]["last_failure"]["recovery"]["automatic_repair"] is False
+        assert body["checks"]["chacha_notes"]["last_failure"]["recovery"]["documentation"] == (
+            "Docs/Operations/ChaChaNotes_DB_Recovery.md"
+        )
+        assert "user:42" not in str(body)
+        assert str(tmp_path) not in str(body)
+        assert "/private/" not in str(body)
+    finally:
+        with chacha_deps._CHACHA_HEALTH_LOCK:
+            chacha_deps._CHACHA_HEALTH.clear()
+            chacha_deps._CHACHA_HEALTH.update(previous_health)
+
+
+@pytest.mark.asyncio
 async def test_api_health_sanitizes_rg_policy_snapshot_failure(monkeypatch, tmp_path):
     from tldw_Server_API.app import main as app_main
     from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
