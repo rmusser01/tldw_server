@@ -604,6 +604,193 @@ def test_host_reboot_pre_wraps_raising_ping_checker_and_writes_manifest(
     CASE.assertEqual(payload["helper_ping_reason"], "helper_ping_failed")
 
 
+def test_host_reboot_post_reports_missing_pre_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    evidence.mkdir(parents=True, mode=0o700)
+    evidence.chmod(0o700)
+    monkeypatch.setattr(helperctl, "VOLATILE_EVIDENCE_ROOTS", ())
+
+    results = helperctl.run_host_reboot_post(
+        evidence_dir=evidence,
+        bundle_path=tmp_path / "bundle",
+        helper_path=tmp_path / "bundle" / "macos-vz-helper",
+        helper_mode="direct",
+        socket_path=tmp_path / "helper.sock",
+        log_dir=tmp_path / "logs",
+    )
+
+    by_name = dict(results)
+    CASE.assertTrue(by_name["evidence_directory"].ok)
+    CASE.assertEqual(by_name["pre_manifest"].reason, "host_reboot_pre_manifest_missing")
+    CASE.assertFalse(by_name["pre_manifest"].ok)
+    CASE.assertEqual(results[-1], ("host_reboot_post", by_name["pre_manifest"]))
+    CASE.assertFalse((evidence / "host-reboot-post.json").exists())
+
+
+def test_host_reboot_post_reports_invalid_pre_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    evidence.mkdir(parents=True, mode=0o700)
+    evidence.chmod(0o700)
+    (evidence / "host-reboot-pre.json").write_text("{not-json", encoding="utf-8")
+    monkeypatch.setattr(helperctl, "VOLATILE_EVIDENCE_ROOTS", ())
+
+    results = helperctl.run_host_reboot_post(
+        evidence_dir=evidence,
+        bundle_path=tmp_path / "bundle",
+        helper_path=tmp_path / "bundle" / "macos-vz-helper",
+        helper_mode="direct",
+        socket_path=tmp_path / "helper.sock",
+        log_dir=tmp_path / "logs",
+    )
+
+    by_name = dict(results)
+    CASE.assertEqual(by_name["pre_manifest"].reason, "host_reboot_pre_manifest_invalid")
+    CASE.assertFalse(by_name["pre_manifest"].ok)
+    CASE.assertEqual(results[-1], ("host_reboot_post", by_name["pre_manifest"]))
+    CASE.assertFalse((evidence / "host-reboot-post.json").exists())
+
+
+def test_host_reboot_post_reports_generation_changed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    evidence.mkdir(parents=True, mode=0o700)
+    evidence.chmod(0o700)
+    (evidence / "host-reboot-pre.json").write_text(
+        json.dumps(
+            {
+                "phase": "pre",
+                "helper_mode": "direct",
+                "helper_details": {"helper_instance_id": "before"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(helperctl, "VOLATILE_EVIDENCE_ROOTS", ())
+
+    results = helperctl.run_host_reboot_post(
+        evidence_dir=evidence,
+        bundle_path=tmp_path / "bundle",
+        helper_path=tmp_path / "bundle" / "macos-vz-helper",
+        helper_mode="direct",
+        socket_path=tmp_path / "helper.sock",
+        log_dir=tmp_path / "logs",
+        serial_log_dir=tmp_path / "logs" / "serial",
+        launchd_label="org.tldw.test-helper",
+        launchd_plist_path=tmp_path / "LaunchAgents" / "org.tldw.test-helper.plist",
+        created_at_factory=lambda: "2026-05-19T01:00:00Z",
+        hostname_provider=lambda: "test-host",
+        ping_checker=lambda path: helperctl.PingState(
+            result=helperctl.CheckResult(True),
+            protocol_version="1",
+            helper_version="test",
+            details={"helper_instance_id": "after"},
+        ),
+    )
+
+    by_name = dict(results)
+    CASE.assertTrue(by_name["helper_status"].ok)
+    CASE.assertEqual(
+        by_name["helper_generation"],
+        helperctl.CheckResult(ok=True, reason="helper_generation_changed"),
+    )
+    CASE.assertEqual(by_name["post_manifest"].reason, "host_reboot_post_manifest_written")
+    CASE.assertEqual(results[-1], ("host_reboot_post", helperctl.CheckResult(ok=True)))
+    payload = json.loads((evidence / "host-reboot-post.json").read_text(encoding="utf-8"))
+    CASE.assertEqual(
+        set(payload),
+        {
+            "phase",
+            "created_at",
+            "hostname",
+            "helper_mode",
+            "bundle_path",
+            "helper_path",
+            "socket_path",
+            "log_dir",
+            "serial_log_dir",
+            "launchd_label",
+            "launchd_plist_path",
+            "pre_helper_instance_id",
+            "post_helper_instance_id",
+            "helper_generation_reason",
+            "helper_ping_ok",
+            "helper_ping_reason",
+            "helper_protocol_version",
+            "helper_version",
+            "helper_details",
+        },
+    )
+    CASE.assertEqual(payload["phase"], "post")
+    CASE.assertEqual(payload["created_at"], "2026-05-19T01:00:00Z")
+    CASE.assertEqual(payload["hostname"], "test-host")
+    CASE.assertEqual(payload["helper_mode"], "direct")
+    CASE.assertEqual(payload["pre_helper_instance_id"], "before")
+    CASE.assertEqual(payload["post_helper_instance_id"], "after")
+    CASE.assertEqual(payload["helper_generation_reason"], "helper_generation_changed")
+    CASE.assertIs(payload["helper_ping_ok"], True)
+    CASE.assertNotIn("environment", payload)
+    CASE.assertNotIn("stdout", payload)
+    CASE.assertNotIn("stderr", payload)
+    CASE.assertNotIn("serial_log_contents", payload)
+
+
+def test_host_reboot_post_wraps_raising_ping_checker_and_writes_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    evidence.mkdir(parents=True, mode=0o700)
+    evidence.chmod(0o700)
+    (evidence / "host-reboot-pre.json").write_text(
+        json.dumps(
+            {
+                "phase": "pre",
+                "helper_mode": "direct",
+                "helper_details": {"helper_instance_id": "before"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(helperctl, "VOLATILE_EVIDENCE_ROOTS", ())
+
+    def raising_ping_checker(path: Path) -> helperctl.PingState:
+        raise RuntimeError("helper socket refused connection")
+
+    results = helperctl.run_host_reboot_post(
+        evidence_dir=evidence,
+        bundle_path=tmp_path / "bundle",
+        helper_path=tmp_path / "bundle" / "macos-vz-helper",
+        helper_mode="direct",
+        socket_path=tmp_path / "helper.sock",
+        log_dir=tmp_path / "logs",
+        created_at_factory=lambda: "2026-05-19T01:00:00Z",
+        hostname_provider=lambda: "test-host",
+        ping_checker=raising_ping_checker,
+    )
+
+    by_name = dict(results)
+    CASE.assertEqual(by_name["helper_status"].reason, "helper_ping_failed")
+    CASE.assertFalse(by_name["helper_status"].ok)
+    CASE.assertEqual(results[-1], ("host_reboot_post", by_name["helper_status"]))
+    payload = json.loads((evidence / "host-reboot-post.json").read_text(encoding="utf-8"))
+    CASE.assertIs(payload["helper_ping_ok"], False)
+    CASE.assertEqual(payload["helper_ping_reason"], "helper_ping_failed")
+    CASE.assertEqual(payload["pre_helper_instance_id"], "before")
+    CASE.assertEqual(payload["post_helper_instance_id"], "")
+
+
 def test_write_json_private_creates_owner_only_file(tmp_path: Path) -> None:
     helperctl = load_helperctl()
     manifest = tmp_path / "manifest.json"

@@ -1001,6 +1001,111 @@ def run_host_reboot_pre(
     return CheckResult(True, "host_reboot_pre_manifest_written", str(manifest_path))
 
 
+def _read_host_reboot_pre_manifest(evidence_dir: Path) -> tuple[CheckResult, dict[str, Any] | None]:
+    manifest_path = evidence_dir / HOST_REBOOT_PRE_MANIFEST
+    try:
+        raw_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return CheckResult(False, "host_reboot_pre_manifest_missing", str(manifest_path)), None
+    except (OSError, json.JSONDecodeError) as exc:
+        return CheckResult(False, "host_reboot_pre_manifest_invalid", str(exc)), None
+    if not isinstance(raw_payload, dict):
+        return CheckResult(False, "host_reboot_pre_manifest_invalid", str(manifest_path)), None
+    return CheckResult(True, "host_reboot_pre_manifest_loaded", str(manifest_path)), raw_payload
+
+
+def _manifest_helper_instance_id(manifest: Mapping[str, Any]) -> str:
+    details = _string_details(manifest.get("helper_details"))
+    return details.get("helper_instance_id", "")
+
+
+def _helper_generation_result(pre_instance_id: str, post_instance_id: str) -> CheckResult:
+    if not pre_instance_id or not post_instance_id:
+        return CheckResult(True, "helper_generation_unavailable")
+    if pre_instance_id == post_instance_id:
+        return CheckResult(True, "helper_generation_match")
+    return CheckResult(True, "helper_generation_changed")
+
+
+def run_host_reboot_post(
+    *,
+    evidence_dir: Path,
+    bundle_path: Path,
+    helper_mode: str,
+    socket_path: Path,
+    log_dir: Path,
+    helper_path: Path = DEFAULT_HELPER,
+    serial_log_dir: Path | None = None,
+    launchd_label: str = "",
+    launchd_plist_path: Path | None = None,
+    allow_volatile_evidence_dir: bool = False,
+    ping_checker: Callable[[Path], CheckResult | PingState] = ping_helper_state,
+    created_at_factory: Callable[[], str] = _host_reboot_created_at,
+    hostname_provider: Callable[[], str] = socket.gethostname,
+) -> list[tuple[str, CheckResult]]:
+    results: list[tuple[str, CheckResult]] = []
+
+    evidence_result = ensure_host_reboot_evidence_dir(
+        evidence_dir,
+        create=False,
+        allow_volatile=allow_volatile_evidence_dir,
+    )
+    results.append(("evidence_directory", evidence_result))
+    if not evidence_result.ok:
+        results.append(("host_reboot_post", evidence_result))
+        return results
+
+    pre_result, pre_manifest = _read_host_reboot_pre_manifest(evidence_dir)
+    results.append(("pre_manifest", pre_result))
+    if not pre_result.ok or pre_manifest is None:
+        results.append(("host_reboot_post", pre_result))
+        return results
+
+    try:
+        ping_state = _coerce_ping_state(ping_checker(socket_path))
+    except Exception as exc:
+        ping_state = PingState(CheckResult(False, "helper_ping_failed", str(exc)))
+    results.append(("helper_status", ping_state.result))
+
+    pre_instance_id = _manifest_helper_instance_id(pre_manifest)
+    post_instance_id = (ping_state.details or {}).get("helper_instance_id", "")
+    generation_result = _helper_generation_result(pre_instance_id, post_instance_id)
+    results.append(("helper_generation", generation_result))
+
+    payload: dict[str, Any] = {
+        "phase": "post",
+        "created_at": created_at_factory(),
+        "hostname": hostname_provider(),
+        "helper_mode": helper_mode,
+        "bundle_path": str(bundle_path),
+        "helper_path": str(helper_path),
+        "socket_path": str(socket_path),
+        "log_dir": str(log_dir),
+        "serial_log_dir": str(serial_log_dir if serial_log_dir is not None else log_dir / "serial"),
+        "launchd_label": launchd_label,
+        "launchd_plist_path": str(launchd_plist_path) if launchd_plist_path is not None else "",
+        "pre_helper_instance_id": pre_instance_id,
+        "post_helper_instance_id": post_instance_id,
+        "helper_generation_reason": generation_result.reason,
+    }
+    payload.update(ping_state_payload(ping_state))
+
+    manifest_path = evidence_dir / HOST_REBOOT_POST_MANIFEST
+    write_result = write_json_private(manifest_path, payload)
+    if write_result.ok:
+        write_result = CheckResult(True, "host_reboot_post_manifest_written", write_result.message)
+    results.append(("post_manifest", write_result))
+
+    if not ping_state.result.ok:
+        final_result = ping_state.result
+    elif not write_result.ok:
+        final_result = write_result
+    else:
+        final_result = CheckResult(True)
+    results.append(("host_reboot_post", final_result))
+    return results
+
+
 def wait_for_ping(
     socket_path: Path,
     *,

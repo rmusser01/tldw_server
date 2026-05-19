@@ -184,7 +184,7 @@ def ensure_host_reboot_evidence_dir(
 
 Run the same pytest command. Expected: pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/macos-vz-helper/scripts/vz-helperctl.py tools/macos-vz-helper/Tests/test_vz_helperctl.py
@@ -295,7 +295,7 @@ git commit -m "feat(vz): record host reboot preflight evidence"
 - Modify: `tools/macos-vz-helper/scripts/vz-helperctl.py`
 - Test: `tools/macos-vz-helper/Tests/test_vz_helperctl.py`
 
-- [ ] **Step 1: Add failing post-phase tests**
+- [x] **Step 1: Add failing post-phase tests**
 
 Add tests for:
 
@@ -339,7 +339,7 @@ def test_host_reboot_post_reports_generation_changed(
     CASE.assertEqual(by_name["helper_generation"].reason, "helper_generation_changed")
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run:
 
@@ -350,7 +350,7 @@ python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py \
 
 Expected: fail because post helpers do not exist.
 
-- [ ] **Step 3: Implement post phase**
+- [x] **Step 3: Implement post phase**
 
 Add `run_host_reboot_post(...) -> list[tuple[str, CheckResult]]` that:
 
@@ -367,7 +367,7 @@ Return generation drift as a named ok result:
 ("helper_generation", CheckResult(ok=True, reason="helper_generation_changed"))
 ```
 
-- [ ] **Step 4: Run focused post tests**
+- [x] **Step 4: Run focused post tests**
 
 Expected: pass.
 
