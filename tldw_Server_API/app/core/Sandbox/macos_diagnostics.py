@@ -28,6 +28,7 @@ from .vz_reconciliation import (
     REASON_RECONCILIATION_UNAVAILABLE,
     collect_vz_reconciliation,
 )
+from .vz_guest_agent import classify_vz_linux_guest_agent
 
 _VZ_LINUX_TEMPLATE_MISSING_REASON = "vz_linux_template_missing"
 _VZ_MACOS_TEMPLATE_MISSING_REASON = "macos_template_missing"
@@ -132,42 +133,6 @@ def _serial_log_pointer(vm_id: str, serial_log_dir: Path | None) -> dict[str, ob
     return _file_pointer(serial_log_dir / f"{_sanitize_serial_log_component(vm_id)}.serial.log")
 
 
-def _detail_text(details: dict[str, object], key: str) -> str | None:
-    """Extract a non-empty string detail from helper metadata."""
-
-    value = details.get(key)
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _detail_bool(details: dict[str, object], key: str) -> bool | None:
-    """Coerce helper detail booleans without trusting arbitrary truthy strings."""
-
-    value = details.get(key)
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"1", "true", "yes", "on"}:
-            return True
-        if normalized in {"0", "false", "no", "off", ""}:
-            return False
-    return None
-
-
-def _detail_csv(details: dict[str, object], key: str) -> list[str]:
-    """Extract a list-like helper detail from either a list or comma-separated string."""
-
-    value = details.get(key)
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
-    if isinstance(value, str):
-        return [item.strip() for item in value.split(",") if item.strip()]
-    return []
-
-
 def _detail_int(details: dict[str, object], key: str) -> int | None:
     """Extract an integer helper detail while rejecting booleans."""
 
@@ -183,12 +148,7 @@ def _detail_int(details: dict[str, object], key: str) -> int | None:
 def _guest_observability(details: dict[str, object]) -> dict[str, object]:
     """Project helper guest-agent details into the admin observability schema."""
 
-    return {
-        "version": _detail_text(details, "guest_version"),
-        "workspace_root": _detail_text(details, "guest_workspace_root"),
-        "capabilities_known": _detail_bool(details, "guest_capabilities_known"),
-        "capabilities": _detail_csv(details, "guest_capabilities"),
-    }
+    return classify_vz_linux_guest_agent(details)
 
 
 def _resource_snapshot(details: dict[str, object]) -> dict[str, int]:

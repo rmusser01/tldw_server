@@ -23,6 +23,7 @@ from ..policy import SandboxPolicyConfig
 from ..runtime_capabilities import RuntimePreflightResult
 from ..streams import get_hub
 from ..utils import coerce_optional_nonempty_string
+from ..vz_guest_agent import vz_linux_guest_agent_mismatched
 from .resource_limits import log_limit_counters
 from .vz_common import _VZ_NONCRITICAL_EXCEPTIONS, VZBaseRunner, vz_host_facts
 
@@ -274,6 +275,8 @@ class VZLinuxRunner(VZBaseRunner):
     ) -> bool:
         """Return true only when live VM metadata proves safe same-session reuse."""
         if not bool(getattr(status, "healthy", False)):
+            return False
+        if vz_linux_guest_agent_mismatched(getattr(status, "details", None)):
             return False
 
         metadata = getattr(status, "metadata", None)

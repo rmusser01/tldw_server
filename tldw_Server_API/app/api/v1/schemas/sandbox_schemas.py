@@ -720,6 +720,11 @@ class SandboxAdminMacOSGuestObservability(BaseModel):
     workspace_root: str | None = None
     capabilities_known: bool | None = None
     capabilities: list[str] = Field(default_factory=list)
+    compatibility: Literal["compatible", "unknown", "mismatch"] = "unknown"
+    reasons: list[str] = Field(default_factory=list)
+    expected_workspace_root: str | None = None
+    required_capabilities: list[str] = Field(default_factory=list)
+    missing_required_capabilities: list[str] = Field(default_factory=list)
 
 
 class SandboxAdminMacOSVMObservability(BaseModel):
