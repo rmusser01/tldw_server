@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, model_validator
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
     RequireRole,
+    check_rate_limit,
     get_auth_principal,
     get_db_transaction,
 )
@@ -59,6 +60,7 @@ from tldw_Server_API.app.core.Setup.audio_bundle_catalog import (
 from tldw_Server_API.app.core.Setup.install_schema import InstallPlan
 from tldw_Server_API.app.core.Setup.install_manager import execute_install_plan
 from tldw_Server_API.app.core.Setup.readiness_profiles import build_readiness_profiles
+from tldw_Server_API.app.core.Setup.readiness_models import LANE_IDS, LANE_STATUSES, OVERLAY_IDS
 from tldw_Server_API.app.core.Setup.readiness_service import preview_readiness_selection, verify_readiness_lanes
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 from tldw_Server_API.app.services.auth_service import mark_user_verified
@@ -345,11 +347,54 @@ def _build_setup_readiness_profiles_payload(
     return _merge_setup_readiness_store_payload(payload)
 
 
-def _merge_setup_readiness_store_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Overlay persisted preview/provision status onto the profile/status payload."""
+def _build_setup_readiness_status_base_payload(
+    *,
+    allow_completed_when_disabled: bool = False,
+) -> dict[str, Any]:
+    """Build the lightweight pollable readiness status payload without recommendation work."""
 
-    store = readiness_store.get_setup_readiness_store()
-    readiness = _refresh_setup_readiness_operation_status(store.load(), store)
+    status_snapshot = setup_manager.get_status_snapshot()
+    _ensure_setup_readiness_available(
+        status_snapshot,
+        allow_completed_when_disabled=allow_completed_when_disabled,
+    )
+    setup_mode = "first_run" if status_snapshot.get("needs_setup") else "admin"
+    overlays = ["requires_admin"] if not status_snapshot.get("needs_setup") else []
+    return {
+        "setup_access": {
+            "mode": setup_mode,
+            "needs_setup": bool(status_snapshot.get("needs_setup")),
+            "setup_completed": bool(status_snapshot.get("setup_completed")),
+            "remote_access_active": bool(status_snapshot.get("remote_access_active")),
+        },
+        "lane_ids": list(LANE_IDS),
+        "supported_statuses": list(LANE_STATUSES),
+        "supported_overlays": list(OVERLAY_IDS),
+        "active_overlays": overlays,
+        "overlays": list(overlays),
+        "readiness_status": "not_started",
+        "operation_id": None,
+        "operation_status": None,
+        "errors": [],
+    }
+
+
+async def _build_setup_readiness_status_payload(
+    *,
+    allow_completed_when_disabled: bool = False,
+) -> dict[str, Any]:
+    """Build a lightweight readiness status payload for frequent polling."""
+
+    return await _merge_setup_readiness_store_payload_async(
+        _build_setup_readiness_status_base_payload(
+            allow_completed_when_disabled=allow_completed_when_disabled,
+        )
+    )
+
+
+def _merge_setup_readiness_record_payload(payload: dict[str, Any], readiness: dict[str, Any]) -> dict[str, Any]:
+    """Overlay one persisted readiness record onto a profile or status payload."""
+
     if readiness.get("status") == "not_started":
         return payload
 
@@ -367,11 +412,63 @@ def _merge_setup_readiness_store_payload(payload: dict[str, Any]) -> dict[str, A
     return merged
 
 
-def _refresh_setup_readiness_operation_status(
+def _merge_setup_readiness_store_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Overlay persisted preview/provision status onto the profile/status payload."""
+
+    store = readiness_store.get_setup_readiness_store()
+    readiness = store.load()
+    return _merge_setup_readiness_record_payload(payload, readiness)
+
+
+async def _load_setup_readiness(
+    store: readiness_store.SetupReadinessStore,
+) -> dict[str, Any]:
+    return await asyncio.to_thread(store.load)
+
+
+async def _save_setup_readiness(
+    store: readiness_store.SetupReadinessStore,
+    readiness: dict[str, Any],
+) -> dict[str, Any]:
+    return await asyncio.to_thread(store.save, readiness)
+
+
+async def _update_setup_readiness(
+    store: readiness_store.SetupReadinessStore,
+    **fields: Any,
+) -> dict[str, Any]:
+    return await asyncio.to_thread(store.update, **fields)
+
+
+async def _update_setup_config(config_updates: dict[str, dict[str, Any]]) -> Path | None:
+    return await asyncio.to_thread(setup_manager.update_config, config_updates)
+
+
+async def _merge_setup_readiness_store_payload_async(payload: dict[str, Any]) -> dict[str, Any]:
+    """Async-safe status merge that keeps store writes off the event loop."""
+
+    store = readiness_store.get_setup_readiness_store()
+    readiness = await _load_setup_readiness(store)
+    readiness = await _refresh_setup_readiness_operation_status_async(readiness, store)
+    return _merge_setup_readiness_record_payload(payload, readiness)
+
+
+def _readiness_status_for_completed_install(
+    readiness: dict[str, Any],
+    install_status: dict[str, Any],
+) -> str:
+    """Derive final readiness after installer completion without promoting warnings to ready."""
+
+    if install_status.get("errors") or readiness.get("errors") or readiness.get("overlays"):
+        return "ready_with_warnings"
+    return "ready"
+
+
+async def _refresh_setup_readiness_operation_status_async(
     readiness: dict[str, Any],
     store: readiness_store.SetupReadinessStore,
 ) -> dict[str, Any]:
-    """Map the shared installer status back onto the pollable readiness operation."""
+    """Async-safe installer status refresh for pollable readiness endpoints."""
 
     if readiness.get("operation_status") not in {"queued", "running"}:
         return readiness
@@ -393,7 +490,7 @@ def _refresh_setup_readiness_operation_status(
         readiness_status = "provisioning"
     elif installer_status == "completed":
         operation_status = "completed"
-        readiness_status = "ready_with_warnings"
+        readiness_status = _readiness_status_for_completed_install(readiness, install_status)
     elif installer_status == "failed":
         operation_status = "failed"
         readiness_status = "failed"
@@ -404,7 +501,8 @@ def _refresh_setup_readiness_operation_status(
     last_provision = dict(last_provision)
     last_provision["operation_status"] = operation_status
     last_provision["install_status"] = install_status
-    return store.update(
+    return await _update_setup_readiness(
+        store,
         status=readiness_status,
         operation_status=operation_status,
         last_provision=last_provision,
@@ -476,6 +574,59 @@ def _provision_lanes_from_preview(preview: dict[str, Any], *, install_plan_submi
     return lanes
 
 
+def _secret_config_keys_from_preview(preview: dict[str, Any]) -> set[tuple[str, str]]:
+    """Return config update keys that correspond to submitted secret fields."""
+
+    secret_keys: set[tuple[str, str]] = set()
+    for field in preview.get("secret_fields") or []:
+        if not isinstance(field, dict) or field.get("state") != "submitted":
+            continue
+        section = str(field.get("section") or "").strip()
+        key = str(field.get("key") or "").strip()
+        if section and key:
+            secret_keys.add((section, key))
+    return secret_keys
+
+
+def _raise_if_preview_lost_submitted_secrets(preview: dict[str, Any]) -> None:
+    """Reject provisioning previews that acknowledge secrets without retaining values."""
+
+    config_updates = preview.get("config_updates") or {}
+    missing = [
+        f"{section}.{key}"
+        for section, key in sorted(_secret_config_keys_from_preview(preview))
+        if key not in (config_updates.get(section) or {})
+    ]
+    if missing:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Submitted secret values are not retained after preview. "
+                "Re-submit the readiness selection during provisioning."
+            ),
+        )
+
+
+def _stored_setup_readiness_preview(preview: dict[str, Any]) -> dict[str, Any]:
+    """Return a preview payload safe for persistence in the readiness store."""
+
+    stored = dict(preview)
+    config_updates = {
+        section: dict(updates)
+        for section, updates in (preview.get("config_updates") or {}).items()
+        if isinstance(updates, dict)
+    }
+    for section, key in _secret_config_keys_from_preview(preview):
+        section_updates = config_updates.get(section)
+        if not section_updates:
+            continue
+        section_updates.pop(key, None)
+        if not section_updates:
+            config_updates.pop(section, None)
+    stored["config_updates"] = config_updates
+    return stored
+
+
 def _readiness_status_after_provision(preview: dict[str, Any], *, install_plan_submitted: bool) -> str:
     if install_plan_submitted:
         return "provisioning"
@@ -497,7 +648,7 @@ def _resolve_setup_readiness_preview(
             payload.selection,
             allow_completed_when_disabled=allow_completed_when_disabled,
         )
-        preview = preview_readiness_selection(selection)
+        preview = preview_readiness_selection(selection, include_secret_config_updates=True)
         preview["preview_id"] = _new_setup_readiness_preview_id()
         return preview
 
@@ -512,7 +663,9 @@ def _resolve_setup_readiness_preview(
             status.HTTP_400_BAD_REQUEST,
             detail="A current readiness preview is required before provisioning.",
         )
-    return dict(stored_preview)
+    preview = dict(stored_preview)
+    _raise_if_preview_lost_submitted_secrets(preview)
+    return preview
 
 
 def _resolve_setup_readiness_verification_selection(
@@ -571,7 +724,7 @@ async def get_setup_readiness_status(
 ) -> dict[str, Any]:
     """Return the current first-run setup readiness status snapshot."""
 
-    return _build_setup_readiness_profiles_payload()
+    return await _build_setup_readiness_status_payload()
 
 
 @router.post(
@@ -582,13 +735,14 @@ async def get_setup_readiness_status(
 async def preview_setup_readiness(
     payload: SetupReadinessPreviewRequest,
     _guard: None = Depends(require_local_setup_access),
+    _rate_limit: None = Depends(check_rate_limit),
 ) -> SetupReadinessPreviewResponse:
     """Preview setup readiness changes without writing config or provisioning assets."""
 
-    return _preview_setup_readiness(payload)
+    return await _preview_setup_readiness(payload)
 
 
-def _preview_setup_readiness(
+async def _preview_setup_readiness(
     payload: SetupReadinessPreviewRequest,
     *,
     allow_completed_when_disabled: bool = False,
@@ -606,7 +760,8 @@ def _preview_setup_readiness(
     )
     preview = preview_readiness_selection(selection)
     preview["preview_id"] = _new_setup_readiness_preview_id()
-    readiness_store.get_setup_readiness_store().save(
+    await _save_setup_readiness(
+        readiness_store.get_setup_readiness_store(),
         {
             "status": "previewed",
             "selected_profile_id": preview.get("profile_id"),
@@ -628,13 +783,14 @@ async def provision_setup_readiness(
     payload: SetupReadinessProvisionRequest,
     background_tasks: BackgroundTasks,
     _guard: None = Depends(require_local_setup_access),
+    _rate_limit: None = Depends(check_rate_limit),
 ) -> JSONResponse:
     """Persist previewed config changes and queue any selected setup provisioning work."""
 
-    return _provision_setup_readiness(payload, background_tasks)
+    return await _provision_setup_readiness(payload, background_tasks)
 
 
-def _provision_setup_readiness(
+async def _provision_setup_readiness(
     payload: SetupReadinessProvisionRequest,
     background_tasks: BackgroundTasks,
     *,
@@ -665,7 +821,7 @@ def _provision_setup_readiness(
     backup_path = None
     config_updates = preview.get("config_updates") or {}
     if config_updates:
-        backup_path = setup_manager.update_config(config_updates)
+        backup_path = await _update_setup_config(config_updates)
 
     install_plan = InstallPlan.model_validate(preview.get("install_plan") or {})
     install_plan_submitted = not install_plan.is_empty()
@@ -680,6 +836,7 @@ def _provision_setup_readiness(
         install_plan_submitted=install_plan_submitted,
     )
     lanes = _provision_lanes_from_preview(preview, install_plan_submitted=install_plan_submitted)
+    stored_preview = _stored_setup_readiness_preview(preview)
     provision_payload = {
         "operation_id": operation_id,
         "operation_status": operation_status,
@@ -690,13 +847,14 @@ def _provision_setup_readiness(
         "backup_path": str(backup_path) if backup_path else None,
         "install_plan": install_plan_payload if install_plan_submitted else None,
     }
-    saved = store.save(
+    saved = await _save_setup_readiness(
+        store,
         {
             "status": readiness_status,
             "selected_profile_id": preview.get("profile_id"),
             "lanes": lanes,
             "overlays": preview.get("overlays", []),
-            "last_preview": preview,
+            "last_preview": stored_preview,
             "last_provision": provision_payload,
             "operation_id": operation_id,
             "operation_status": operation_status,
@@ -730,6 +888,7 @@ def _provision_setup_readiness(
 async def verify_setup_readiness(
     payload: SetupReadinessVerifyRequest,
     _guard: None = Depends(require_local_setup_access),
+    _rate_limit: None = Depends(check_rate_limit),
 ) -> SetupReadinessVerifyResponse:
     """Explicitly verify selected setup readiness lanes."""
 
@@ -756,7 +915,8 @@ async def _verify_setup_readiness(
         allow_completed_when_disabled=allow_completed_when_disabled,
     )
     verification = _sanitize_setup_payload(await verify_readiness_lanes(selection))
-    store.update(
+    await _update_setup_readiness(
+        store,
         status=verification["status"],
         selected_profile_id=verification.get("profile_id"),
         lanes=list(verification.get("lanes", {}).values()),
@@ -781,17 +941,18 @@ async def get_admin_setup_readiness_status(
 ) -> dict[str, Any]:
     """Return admin-gated setup readiness status after first-run setup."""
 
-    return _build_setup_readiness_profiles_payload(allow_completed_when_disabled=True)
+    return await _build_setup_readiness_status_payload(allow_completed_when_disabled=True)
 
 
 @router.post("/admin/readiness/preview", response_model=SetupReadinessPreviewResponse)
 async def preview_admin_setup_readiness(
     payload: SetupReadinessPreviewRequest,
     _guard: None = Depends(require_shared_audio_installer_access),
+    _rate_limit: None = Depends(check_rate_limit),
 ) -> SetupReadinessPreviewResponse:
     """Preview setup readiness changes through the admin setup surface."""
 
-    return _preview_setup_readiness(payload, allow_completed_when_disabled=True)
+    return await _preview_setup_readiness(payload, allow_completed_when_disabled=True)
 
 
 @router.post(
@@ -803,10 +964,11 @@ async def provision_admin_setup_readiness(
     payload: SetupReadinessProvisionRequest,
     background_tasks: BackgroundTasks,
     _guard: None = Depends(require_shared_audio_installer_access),
+    _rate_limit: None = Depends(check_rate_limit),
 ) -> JSONResponse:
     """Provision setup readiness changes through the admin setup surface."""
 
-    return _provision_setup_readiness(
+    return await _provision_setup_readiness(
         payload,
         background_tasks,
         allow_completed_when_disabled=True,
@@ -817,6 +979,7 @@ async def provision_admin_setup_readiness(
 async def verify_admin_setup_readiness(
     payload: SetupReadinessVerifyRequest,
     _guard: None = Depends(require_shared_audio_installer_access),
+    _rate_limit: None = Depends(check_rate_limit),
 ) -> SetupReadinessVerifyResponse:
     """Verify setup readiness lanes through the admin setup surface."""
 

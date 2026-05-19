@@ -1,17 +1,25 @@
 from types import SimpleNamespace
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Setup.audio_bundle_catalog import get_audio_bundle_catalog
 from tldw_Server_API.app.core.Setup.audio_profile_service import MachineProfile
-from tldw_Server_API.app.main import app
 import tldw_Server_API.app.api.v1.endpoints.setup as setup_endpoint
 
 
 def _make_client():
-    return TestClient(app)
+    # Scope the context-managed client to setup routes; full-app lifespan starts unrelated workers.
+    test_app = FastAPI()
+    test_app.include_router(setup_endpoint.router, prefix="/api/v1")
+    return TestClient(test_app)
+
+
+def _request(method: str, path: str, **kwargs):
+    with _make_client() as client:
+        return getattr(client, method)(path, **kwargs)
 
 
 class _BundleCatalogStub:
@@ -136,8 +144,7 @@ def test_admin_audio_installer_routes_remain_available_after_setup_completed(
     )
 
     request_kwargs = {"json": json_body} if json_body is not None else {}
-    client = _make_client()
-    response = getattr(client, method)(path, **request_kwargs)
+    response = _request(method, path, **request_kwargs)
 
     assert response.status_code == 200
 
@@ -173,8 +180,7 @@ def test_admin_audio_installer_routes_stay_unavailable_without_setup_or_completi
     )
 
     request_kwargs = {"json": json_body} if json_body is not None else {}
-    client = _make_client()
-    response = getattr(client, method)(path, **request_kwargs)
+    response = _request(method, path, **request_kwargs)
 
     assert response.status_code == 404
 
@@ -189,8 +195,7 @@ def test_admin_audio_recommendations_include_curated_tts_choices(
         lambda: {"enabled": True, "setup_completed": False, "needs_setup": True},
     )
 
-    client = _make_client()
-    response = client.get("/api/v1/setup/admin/audio/recommendations")
+    response = _request("get", "/api/v1/setup/admin/audio/recommendations")
 
     assert response.status_code == 200
     payload = response.json()
@@ -239,23 +244,23 @@ def test_admin_audio_provision_and_verify_accept_tts_choice(
         _fake_execute_audio_bundle_verification,
     )
 
-    client = _make_client()
-    provision_response = client.post(
-        "/api/v1/setup/admin/audio/provision",
-        json={
-            "bundle_id": "cpu_local",
-            "resource_profile": "balanced",
-            "tts_choice": "kitten_tts",
-        },
-    )
-    verify_response = client.post(
-        "/api/v1/setup/admin/audio/verify",
-        json={
-            "bundle_id": "cpu_local",
-            "resource_profile": "balanced",
-            "tts_choice": "kitten_tts",
-        },
-    )
+    with _make_client() as client:
+        provision_response = client.post(
+            "/api/v1/setup/admin/audio/provision",
+            json={
+                "bundle_id": "cpu_local",
+                "resource_profile": "balanced",
+                "tts_choice": "kitten_tts",
+            },
+        )
+        verify_response = client.post(
+            "/api/v1/setup/admin/audio/verify",
+            json={
+                "bundle_id": "cpu_local",
+                "resource_profile": "balanced",
+                "tts_choice": "kitten_tts",
+            },
+        )
 
     assert provision_response.status_code == 200
     assert verify_response.status_code == 200
@@ -280,8 +285,8 @@ def test_setup_complete_accepts_direct_omnivoice_install_plan(monkeypatch):
         lambda payload: install_calls.append(payload),
     )
 
-    client = _make_client()
-    response = client.post(
+    response = _request(
+        "post",
         "/api/v1/setup/complete",
         json={
             "disable_first_time_setup": False,
@@ -319,8 +324,8 @@ def test_admin_audio_provision_rejects_invalid_tts_choice_with_400(
         lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("Unknown curated TTS choice 'bogus_choice'")),
     )
 
-    client = _make_client()
-    response = client.post(
+    response = _request(
+        "post",
         "/api/v1/setup/admin/audio/provision",
         json={
             "bundle_id": "cpu_local",
@@ -352,8 +357,8 @@ def test_admin_audio_verify_rejects_invalid_tts_choice_with_400(
         _raise_invalid_choice,
     )
 
-    client = _make_client()
-    response = client.post(
+    response = _request(
+        "post",
         "/api/v1/setup/admin/audio/verify",
         json={
             "bundle_id": "cpu_local",
@@ -386,8 +391,8 @@ def test_audio_pack_export_rejects_invalid_tts_choice_with_400(
         lambda **kwargs: (_ for _ in ()).throw(ValueError("Unknown curated TTS choice 'bogus_choice'")),
     )
 
-    client = _make_client()
-    response = client.post(
+    response = _request(
+        "post",
         "/api/v1/setup/audio/packs/export",
         json={
             "bundle_id": "cpu_local",
@@ -415,8 +420,8 @@ def test_audio_pack_import_rejects_invalid_tts_choice_with_400(
         lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("Unknown curated TTS choice 'bogus_choice'")),
     )
 
-    client = _make_client()
-    response = client.post(
+    response = _request(
+        "post",
         "/api/v1/setup/audio/packs/import",
         json={"pack_path": "/tmp/invalid-audio-pack.json"},
     )

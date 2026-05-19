@@ -10,6 +10,7 @@ import {
   Tag,
   Typography
 } from "antd"
+import type { RadioChangeEvent } from "antd"
 import {
   CheckCircle2,
   ExternalLink,
@@ -17,6 +18,7 @@ import {
   SearchCheck,
   ServerCog
 } from "lucide-react"
+import { useTranslation } from "react-i18next"
 
 import { useSetupReadiness } from "./hooks/useSetupReadiness"
 import type {
@@ -30,6 +32,7 @@ const { Paragraph, Text, Title } = Typography
 type ReadinessSetupScreenProps = {
   mode?: SetupReadinessClientMode
   onComplete?: () => void
+  onUnavailable?: () => void
 }
 
 const statusColor = (status?: string) => {
@@ -54,9 +57,9 @@ const statusColor = (status?: string) => {
 const formatStatus = (status?: string) =>
   String(status || "not_configured").replace(/_/g, " ")
 
-const displayValue = (value: unknown): string => {
-  if (value == null || value === "") return "Not set"
-  if (Array.isArray(value)) return value.map(displayValue).join(", ")
+const displayValue = (value: unknown, emptyValue: string): string => {
+  if (value == null || value === "") return emptyValue
+  if (Array.isArray(value)) return value.map((item) => displayValue(item, emptyValue)).join(", ")
   if (typeof value === "object") return JSON.stringify(value)
   return String(value)
 }
@@ -76,6 +79,8 @@ const installPlanHasWork = (value: unknown): boolean => {
   return Boolean(value)
 }
 
+const statusKey = (status?: string) => `setupReadiness.statuses.${status || "not_configured"}`
+
 const renderList = (items: string[]) => {
   if (items.length === 0) return null
   return (
@@ -88,8 +93,10 @@ const renderList = (items: string[]) => {
 }
 
 const ReadinessLaneCard = ({ lane }: { lane: SetupReadinessLane }) => {
+  const { t } = useTranslation("option")
   const entries = selectionEntries(lane)
   const tts = lane.lane_id === "speech" ? ttsSelection(lane) : null
+  const emptyValue = t("setupReadiness.valueNotSet", "Not set")
 
   return (
     <Card size="small" className="h-full" styles={{ body: { minHeight: 180 } }}>
@@ -103,22 +110,28 @@ const ReadinessLaneCard = ({ lane }: { lane: SetupReadinessLane }) => {
               </div>
             )}
           </div>
-          <Tag color={statusColor(lane.status)}>{formatStatus(lane.status)}</Tag>
+          <Tag color={statusColor(lane.status)}>
+            {t(statusKey(lane.status), formatStatus(lane.status))}
+          </Tag>
         </div>
 
         {entries.length > 0 ? (
           <Descriptions size="small" column={1}>
             {entries.map(([key, value]) => (
               <Descriptions.Item key={key} label={key.replace(/_/g, " ")}>
-                {displayValue(value)}
+                {displayValue(value, emptyValue)}
               </Descriptions.Item>
             ))}
           </Descriptions>
         ) : (
-          <Text type="secondary">No selection yet.</Text>
+          <Text type="secondary">{t("setupReadiness.lanes.noSelection", "No selection yet.")}</Text>
         )}
 
-        {tts && <Text className="secondary text-xs text-text-muted">TTS: {tts}</Text>}
+        {tts && (
+          <Text className="secondary text-xs text-text-muted">
+            {t("setupReadiness.lanes.ttsSelection", "TTS: {{value}}", { value: tts })}
+          </Text>
+        )}
         {renderList([...(lane.warnings || []), ...(lane.blockers || [])])}
       </Space>
     </Card>
@@ -127,10 +140,13 @@ const ReadinessLaneCard = ({ lane }: { lane: SetupReadinessLane }) => {
 
 export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
   mode = "first-run",
-  onComplete
+  onComplete,
+  onUnavailable
 }) => {
+  const { t } = useTranslation("option")
   const {
     error,
+    errorKey,
     fallbackUrl,
     guard,
     loading,
@@ -150,6 +166,12 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
   const profileOptions = profiles?.profiles || []
   const recommendedProfileId = profiles?.recommended_profile_id || profileOptions[0]?.profile_id || null
   const [selectedProfileId, setSelectedProfileId] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    if (mode === "first-run" && guard === "not_found") {
+      onUnavailable?.()
+    }
+  }, [guard, mode, onUnavailable])
 
   React.useEffect(() => {
     if (!recommendedProfileId) return
@@ -183,6 +205,10 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
     [lanes]
   )
   const overlays = preview?.overlays || status?.active_overlays || profiles?.active_overlays || []
+  const emptyValue = t("setupReadiness.valueNotSet", "Not set")
+  const errorDescription = errorKey
+    ? t(errorKey, error || "Readiness request failed.")
+    : error
 
   const handlePreview = React.useCallback(
     async (profileId = selectedProfileId) => {
@@ -193,7 +219,7 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
   )
 
   const handleProfileChange = React.useCallback(
-    (event: any) => {
+    (event: RadioChangeEvent) => {
       const nextProfileId = String(event.target.value)
       setSelectedProfileId(nextProfileId)
       void handlePreview(nextProfileId)
@@ -227,12 +253,18 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
         <Alert
           type="warning"
           showIcon
-          title="Local setup required"
+          title={t("setupReadiness.errors.localSetupRequiredTitle", "Local setup required")}
           description={
             <Space orientation="vertical" size="small">
-              <span>{error || "First-run setup is restricted to local requests."}</span>
+              <span>
+                {error ||
+                  t(
+                    "setupReadiness.errors.localSetupRequiredDescription",
+                    "First-run setup is restricted to local requests."
+                  )}
+              </span>
               <Button href={fallbackUrl} icon={<ExternalLink className="h-4 w-4" />}>
-                Open backend setup
+                {t("setupReadiness.actions.openBackendSetup", "Open backend setup")}
               </Button>
             </Space>
           }
@@ -246,19 +278,22 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
       <Space orientation="vertical" size="large" className="w-full">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="max-w-3xl">
-            <Title level={2} className="mb-1">
-              Setup readiness
+            <Title level={1} className="mb-1">
+              {t("setupReadiness.title", "Setup readiness")}
             </Title>
             <Paragraph type="secondary" className="mb-0">
-              Choose the defaults that make chat, search, ingestion, and speech ready before the first large import.
+              {t(
+                "setupReadiness.description",
+                "Choose the defaults that make chat, search, ingestion, and speech ready before the first large import."
+              )}
             </Paragraph>
           </div>
           <Space wrap>
             <Button href={fallbackUrl} icon={<ExternalLink className="h-4 w-4" />}>
-              Open backend setup
+              {t("setupReadiness.actions.openBackendSetup", "Open backend setup")}
             </Button>
             <Button onClick={() => void refresh()} icon={<RefreshCw className="h-4 w-4" />}>
-              Refresh
+              {t("setupReadiness.actions.refresh", "Refresh")}
             </Button>
           </Space>
         </div>
@@ -267,8 +302,12 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
           <Alert
             type={guard === "admin_required" ? "warning" : "error"}
             showIcon
-            title={guard === "admin_required" ? "Admin access required" : "Readiness request failed"}
-            description={error}
+            title={
+              guard === "admin_required"
+                ? t("setupReadiness.errors.adminRequiredTitle", "Admin access required")
+                : t("setupReadiness.errors.requestFailedTitle", "Readiness request failed")
+            }
+            description={errorDescription}
           />
         )}
 
@@ -276,19 +315,28 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
           <Space orientation="vertical" size="middle" className="w-full">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <Text strong>Readiness profile</Text>
+                <Text strong>{t("setupReadiness.profile.title", "Readiness profile")}</Text>
                 <Paragraph type="secondary" className="mb-0">
-                  Profiles set defaults only. Provisioning is a separate action.
+                  {t(
+                    "setupReadiness.profile.description",
+                    "Profiles set defaults only. Provisioning is a separate action."
+                  )}
                 </Paragraph>
               </div>
               {profiles?.machine_profile && (
                 <Space wrap size="small">
-                  {profiles.machine_profile.apple_silicon && <Tag>Apple Silicon</Tag>}
+                  {profiles.machine_profile.apple_silicon && (
+                    <Tag>{t("setupReadiness.machine.appleSilicon", "Apple Silicon")}</Tag>
+                  )}
                   {profiles.machine_profile.platform && (
-                    <Tag>{displayValue(profiles.machine_profile.platform)}</Tag>
+                    <Tag>{displayValue(profiles.machine_profile.platform, emptyValue)}</Tag>
                   )}
                   {typeof profiles.machine_profile.free_disk_gb === "number" && (
-                    <Tag>{`${profiles.machine_profile.free_disk_gb} GB free`}</Tag>
+                    <Tag>
+                      {t("setupReadiness.machine.freeDiskGb", "{{value}} GB free", {
+                        value: profiles.machine_profile.free_disk_gb
+                      })}
+                    </Tag>
                   )}
                 </Space>
               )}
@@ -305,7 +353,12 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
                 </Space>
               </Radio.Group>
             ) : (
-              <Empty description="No setup readiness profiles are available." />
+              <Empty
+                description={t(
+                  "setupReadiness.profile.empty",
+                  "No setup readiness profiles are available."
+                )}
+              />
             )}
 
             {selectedProfile && (
@@ -318,7 +371,9 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
                 )}
                 {selectedProfile.advanced && (
                   <details className="mt-3 text-sm text-text-muted">
-                    <summary className="cursor-pointer text-text">Advanced controls</summary>
+                    <summary className="cursor-pointer text-text">
+                      {t("setupReadiness.profile.advancedControls", "Advanced controls")}
+                    </summary>
                     <pre className="mt-2 max-h-48 overflow-auto rounded-md bg-surface p-3 text-xs">
                       {JSON.stringify(selectedProfile.lanes || {}, null, 2)}
                     </pre>
@@ -335,26 +390,34 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
           ))}
         </div>
 
-        <Card size="small" title="Preview and provision">
+        <Card size="small" title={t("setupReadiness.preview.title", "Preview and provision")}>
           <Space orientation="vertical" size="middle" className="w-full">
             {preview ? (
               <div className="grid gap-3 lg:grid-cols-3">
                 <div>
-                  <Text strong>Config updates</Text>
+                  <Text strong>{t("setupReadiness.preview.configUpdates", "Config updates")}</Text>
                   <Paragraph type="secondary" className="mb-0">
-                    {Object.keys(preview.config_updates || {}).length} section(s)
+                    {t("setupReadiness.preview.configUpdateCount", "{{count}} section(s)", {
+                      count: Object.keys(preview.config_updates || {}).length
+                    })}
                   </Paragraph>
                 </div>
                 <div>
-                  <Text strong>Install plan</Text>
+                  <Text strong>{t("setupReadiness.preview.installPlan", "Install plan")}</Text>
                   <Paragraph type="secondary" className="mb-0">
-                    {installPlanHasWork(preview.install_plan) ? "Provisioning work planned" : "No downloads needed"}
+                    {installPlanHasWork(preview.install_plan)
+                      ? t("setupReadiness.preview.installPlanWork", "Provisioning work planned")
+                      : t("setupReadiness.preview.noDownloads", "No downloads needed")}
                   </Paragraph>
                 </div>
                 <div>
-                  <Text strong>Overlays</Text>
+                  <Text strong>{t("setupReadiness.preview.overlays", "Overlays")}</Text>
                   <Paragraph type="secondary" className="mb-0">
-                    {overlays.length > 0 ? overlays.map(formatStatus).join(", ") : "None"}
+                    {overlays.length > 0
+                      ? overlays
+                          .map((overlay) => t(statusKey(overlay), formatStatus(overlay)))
+                          .join(", ")
+                      : t("setupReadiness.preview.none", "None")}
                   </Paragraph>
                 </div>
               </div>
@@ -362,8 +425,11 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
               <Alert
                 type="info"
                 showIcon
-                title="Review before provisioning"
-                description="Select a profile or preview the current selection before running Provision now."
+                title={t("setupReadiness.preview.reviewTitle", "Review before provisioning")}
+                description={t(
+                  "setupReadiness.preview.reviewDescription",
+                  "Select a profile or preview the current selection before running Provision now."
+                )}
               />
             )}
 
@@ -371,7 +437,7 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
               <Alert
                 type="warning"
                 showIcon
-                title="Skipped-lane consequences"
+                title={t("setupReadiness.consequences.title", "Skipped-lane consequences")}
                 description={renderList(consequences)}
               />
             )}
@@ -380,8 +446,16 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
               <Alert
                 type="success"
                 showIcon
-                title={`Provision status: ${formatStatus(provisionResult.operation_status || provisionResult.status)}`}
-                description={provisionResult.status_url}
+                title={t("setupReadiness.provision.statusTitle", "Provision status: {{status}}", {
+                  status: t(
+                    statusKey(provisionResult.operation_status || provisionResult.status),
+                    formatStatus(provisionResult.operation_status || provisionResult.status)
+                  )
+                })}
+                description={t(
+                  "setupReadiness.provision.description",
+                  "Readiness provisioning has started. Refresh or watch the status cards for progress."
+                )}
               />
             )}
 
@@ -389,8 +463,13 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
               <Alert
                 type="info"
                 showIcon
-                title={`Verification: ${formatStatus(verification.status)}`}
-                description={verification.verified_at || "Verification completed."}
+                title={t("setupReadiness.verification.statusTitle", "Verification: {{status}}", {
+                  status: t(statusKey(verification.status), formatStatus(verification.status))
+                })}
+                description={
+                  verification.verified_at ||
+                  t("setupReadiness.verification.description", "Verification completed.")
+                }
               />
             )}
 
@@ -402,7 +481,7 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
                 disabled={!selectedProfileId}
                 onClick={() => void handlePreview()}
               >
-                Preview selection
+                {t("setupReadiness.actions.preview", "Preview selection")}
               </Button>
               <Button
                 icon={<ServerCog className="h-4 w-4" />}
@@ -410,7 +489,7 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
                 disabled={!selectedProfileId}
                 onClick={() => void handleProvision()}
               >
-                Provision now
+                {t("setupReadiness.actions.provision", "Provision now")}
               </Button>
               <Button
                 icon={<CheckCircle2 className="h-4 w-4" />}
@@ -418,11 +497,11 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
                 disabled={!selectedProfileId}
                 onClick={() => void handleVerify()}
               >
-                Verify readiness
+                {t("setupReadiness.actions.verify", "Verify readiness")}
               </Button>
               {onComplete && (
                 <Button type="link" onClick={onComplete}>
-                  Continue
+                  {t("setupReadiness.actions.continue", "Continue")}
                 </Button>
               )}
             </Space>

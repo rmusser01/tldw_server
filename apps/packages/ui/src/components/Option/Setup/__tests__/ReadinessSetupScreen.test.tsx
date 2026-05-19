@@ -5,6 +5,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import optionMessages from "@/assets/locale/en/option.json"
 import { ReadinessSetupScreen } from "../ReadinessSetupScreen"
 
 const mocks = vi.hoisted(() => ({
@@ -17,6 +18,19 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../hooks/useSetupReadiness", () => ({
   useSetupReadiness: (...args: unknown[]) => mocks.useSetupReadiness(...args)
+}))
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string, defaultValue?: string, options?: Record<string, unknown>) => {
+      const translations: Record<string, string> = {
+        "setupReadiness.errors.load": "Localized setup readiness load failure."
+      }
+      if (translations[key]) return translations[key]
+      const template = typeof defaultValue === "string" ? defaultValue : key
+      return template.replace(/{{(\w+)}}/g, (_match, token) => String(options?.[token] ?? ""))
+    }
+  })
 }))
 
 const readinessProfiles = {
@@ -93,6 +107,7 @@ const readinessProfiles = {
 
 const baseHookState = {
   error: null,
+  errorKey: null,
   fallbackUrl: "/setup",
   guard: null,
   loading: false,
@@ -143,6 +158,9 @@ describe("ReadinessSetupScreen", () => {
   it("renders profile picker, canonical lanes, and secondary TTS copy", async () => {
     render(<ReadinessSetupScreen />)
 
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Setup readiness" })
+    ).toBeInTheDocument()
     expect(await screen.findAllByText("Local Balanced")).not.toHaveLength(0)
     expect(screen.getByText("Chat")).toBeInTheDocument()
     expect(screen.getByText("Embeddings/RAG")).toBeInTheDocument()
@@ -152,6 +170,12 @@ describe("ReadinessSetupScreen", () => {
       "href",
       "/setup"
     )
+  })
+
+  it("has English translation keys for setup readiness copy", () => {
+    expect(optionMessages.setupReadiness.title).toBe("Setup readiness")
+    expect(optionMessages.setupReadiness.actions.provision).toBe("Provision now")
+    expect(optionMessages.setupReadiness.provision.description).toContain("status cards")
   })
 
   it("does not provision until Provision now is clicked", async () => {
@@ -228,6 +252,36 @@ describe("ReadinessSetupScreen", () => {
       "href",
       "/setup"
     )
+  })
+
+  it("does not display raw provisioning status endpoints to users", async () => {
+    mocks.useSetupReadiness.mockReturnValue({
+      ...baseHookState,
+      provisionResult: {
+        operation_id: "operation-1",
+        operation_status: "queued",
+        status_url: "/api/v1/setup/readiness/status",
+        status: "provisioning"
+      }
+    })
+
+    render(<ReadinessSetupScreen />)
+
+    expect(screen.queryByText("/api/v1/setup/readiness/status")).not.toBeInTheDocument()
+    expect(screen.getByText(/watch the status cards/i)).toBeInTheDocument()
+  })
+
+  it("prefers localized error copy when the readiness hook exposes an error key", async () => {
+    mocks.useSetupReadiness.mockReturnValue({
+      ...baseHookState,
+      error: "Request failed: 500 backend detail",
+      errorKey: "setupReadiness.errors.load"
+    })
+
+    render(<ReadinessSetupScreen />)
+
+    expect(screen.getByText("Localized setup readiness load failure.")).toBeInTheDocument()
+    expect(screen.queryByText("Request failed: 500 backend detail")).not.toBeInTheDocument()
   })
 
   it("passes admin mode through to the setup readiness hook", () => {

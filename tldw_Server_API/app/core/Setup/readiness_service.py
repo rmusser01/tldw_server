@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from loguru import logger
+
 from tldw_Server_API.app.core.Setup import install_manager
 from tldw_Server_API.app.core.Setup.install_schema import InstallPlan
 from tldw_Server_API.app.core.Setup.readiness_models import (
@@ -92,6 +94,14 @@ def _append_unique(values: list[str], value: Any) -> None:
         values.append(text_value)
 
 
+def _unsupported_chat_provider_blocker(provider: str) -> str:
+    return f"Unsupported chat provider: {provider}"
+
+
+def _is_supported_local_chat_provider(provider: str) -> bool:
+    return provider in _LOCAL_PROVIDER_MODEL_KEYS or provider in _LOCAL_PROVIDER_ENDPOINT_KEYS
+
+
 def _merge_install_plan(target: dict[str, Any], source: InstallPlan) -> None:
     source_payload = _model_dump(source)
     target["stt"].extend(source_payload.get("stt", []))
@@ -139,6 +149,8 @@ def _preview_chat_lane(
     lane: dict[str, Any],
     config_updates: dict[str, dict[str, Any]],
     secret_fields: list[dict[str, str]],
+    *,
+    include_secret_config_updates: bool,
 ) -> dict[str, Any]:
     mode = _text(lane.get("mode"))
     provider = _text(lane.get("provider"))
@@ -155,19 +167,30 @@ def _preview_chat_lane(
     if mode == "hosted":
         if not provider:
             return build_lane_summary(LANE_CHAT, status="blocked", blockers=["Hosted chat provider is required."])
+        if provider not in _CHAT_MODEL_KEYS:
+            return build_lane_summary(
+                LANE_CHAT,
+                status="blocked",
+                selection={"mode": mode, "provider": provider, "model": model},
+                blockers=[_unsupported_chat_provider_blocker(provider)],
+            )
         _merge_config_update(config_updates, "API", "default_api", provider)
         model_key = _CHAT_MODEL_KEYS.get(provider)
         if model_key and model:
             _merge_config_update(config_updates, model_key[0], model_key[1], model)
-        if lane.get("api_key"):
+        api_key = lane.get("api_key")
+        if api_key:
+            secret_key = f"{provider}_api_key"
             secret_fields.append(
                 {
                     "section": "API",
-                    "key": f"{provider}_api_key",
+                    "key": secret_key,
                     "provider": provider,
                     "state": "submitted",
                 }
             )
+            if include_secret_config_updates:
+                _merge_config_update(config_updates, "API", secret_key, api_key)
         return build_lane_summary(
             LANE_CHAT,
             status="previewed",
@@ -180,6 +203,13 @@ def _preview_chat_lane(
         )
     if mode == "local":
         provider = provider or "custom_openai"
+        if not _is_supported_local_chat_provider(provider):
+            return build_lane_summary(
+                LANE_CHAT,
+                status="blocked",
+                selection={"mode": mode, "provider": provider, "model": model},
+                blockers=[_unsupported_chat_provider_blocker(provider)],
+            )
         _merge_config_update(config_updates, "API", "default_api", provider)
         model_key = _LOCAL_PROVIDER_MODEL_KEYS.get(provider)
         endpoint_key = _LOCAL_PROVIDER_ENDPOINT_KEYS.get(provider)
@@ -266,7 +296,12 @@ def _preview_speech_lane(lane: dict[str, Any], install_plan: dict[str, Any]) -> 
             tts_choice=_text(lane.get("tts_choice")) or None,
         )
     except (KeyError, ValueError) as exc:
-        return build_lane_summary(LANE_SPEECH, status="blocked", blockers=[str(exc)])
+        logger.warning("Invalid setup readiness speech bundle selection: {}", exc)
+        return build_lane_summary(
+            LANE_SPEECH,
+            status="blocked",
+            blockers=["Speech bundle selection is invalid."],
+        )
 
     _merge_install_plan(install_plan, bundle_plan)
     return build_lane_summary(
@@ -280,8 +315,19 @@ def _preview_speech_lane(lane: dict[str, Any], install_plan: dict[str, Any]) -> 
     )
 
 
-def preview_readiness_selection(selection: Any) -> dict[str, Any]:
-    """Return a sanitized readiness preview without writes, downloads, or verification calls."""
+def preview_readiness_selection(
+    selection: Any,
+    *,
+    include_secret_config_updates: bool = False,
+) -> dict[str, Any]:
+    """
+    Return a readiness preview without writes, downloads, or verification calls.
+
+    Public preview callers must leave ``include_secret_config_updates`` false so
+    submitted API keys are represented only as secret field metadata. The setup
+    provisioning endpoint enables it for the short-lived internal preview used
+    immediately before persisting config updates.
+    """
 
     payload = _payload_dict(selection)
     lane_inputs = _nested_payload_dict(payload.get("lanes"))
@@ -290,7 +336,12 @@ def preview_readiness_selection(selection: Any) -> dict[str, Any]:
     install_plan = _empty_install_plan_payload()
 
     lanes = {
-        LANE_CHAT: _preview_chat_lane(lane_inputs.get(LANE_CHAT, {}), config_updates, secret_fields),
+        LANE_CHAT: _preview_chat_lane(
+            lane_inputs.get(LANE_CHAT, {}),
+            config_updates,
+            secret_fields,
+            include_secret_config_updates=include_secret_config_updates,
+        ),
         LANE_EMBEDDINGS_RAG: _preview_embeddings_lane(
             lane_inputs.get(LANE_EMBEDDINGS_RAG, {}),
             config_updates,
@@ -368,6 +419,14 @@ def _verify_chat_lane(lane: dict[str, Any]) -> dict[str, Any]:
             consequences=["Chat will remain limited until a provider or local endpoint is configured."],
         )
     if mode == "local":
+        provider = provider or "custom_openai"
+        if not _is_supported_local_chat_provider(provider):
+            return build_lane_summary(
+                LANE_CHAT,
+                status="blocked",
+                selection={"mode": mode, "provider": provider, "model": model},
+                blockers=[_unsupported_chat_provider_blocker(provider)],
+            )
         if not endpoint and provider not in {"custom_openai"}:
             return build_lane_summary(
                 LANE_CHAT,
@@ -391,6 +450,13 @@ def _verify_chat_lane(lane: dict[str, Any]) -> dict[str, Any]:
     if mode == "hosted":
         if not provider:
             return build_lane_summary(LANE_CHAT, status="blocked", blockers=["Hosted chat provider is required."])
+        if provider not in _CHAT_MODEL_KEYS:
+            return build_lane_summary(
+                LANE_CHAT,
+                status="blocked",
+                selection={"mode": mode, "provider": provider, "model": model},
+                blockers=[_unsupported_chat_provider_blocker(provider)],
+            )
         return build_lane_summary(
             LANE_CHAT,
             status="ready_with_warnings",
@@ -443,11 +509,24 @@ async def _verify_speech_lane(lane: dict[str, Any]) -> dict[str, Any]:
     if not bundle_id:
         return build_lane_summary(LANE_SPEECH, status="blocked", blockers=["Speech bundle is required."])
 
-    verification = await install_manager.verify_audio_bundle_async(
-        bundle_id,
-        resource_profile=resource_profile,
-        tts_choice=tts_choice,
-    )
+    try:
+        verification = await install_manager.verify_audio_bundle_async(
+            bundle_id,
+            resource_profile=resource_profile,
+            tts_choice=tts_choice,
+        )
+    except (KeyError, ValueError) as exc:
+        logger.warning("Setup readiness speech bundle verification failed: {}", exc)
+        return build_lane_summary(
+            LANE_SPEECH,
+            status="blocked",
+            selection={
+                "bundle_id": bundle_id,
+                "resource_profile": resource_profile,
+                "tts_choice": tts_choice,
+            },
+            blockers=["Speech bundle verification failed."],
+        )
     stt_ready = _health_ready(verification.get("stt_health"))
     tts_ready = _health_ready(verification.get("tts_health"))
     if stt_ready and tts_ready:

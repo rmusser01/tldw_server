@@ -68,17 +68,18 @@ def test_user_db_base_dir_update_allows_env_allowlist(monkeypatch, tmp_path):
     assert f"USER_DB_BASE_DIR = {allowed}" in updated
 
 
-def test_update_config_preserves_line_breaks_for_adjacent_updates(monkeypatch, tmp_path):
+@pytest.mark.parametrize("line_ending", ["\n", "\r\n"])
+def test_update_config_preserves_line_breaks_for_adjacent_updates(monkeypatch, tmp_path, line_ending):
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     config_path = config_dir / "config.txt"
-    config_path.write_text(
-        "[Embeddings]\n"
-        "embedding_provider = old-provider\n"
-        "embedding_model = old-model\n"
-        "onnx_model_path = ./models\n",
-        encoding="utf-8",
-    )
+    original_lines = [
+        "[Embeddings]",
+        "embedding_provider = old-provider",
+        "embedding_model = old-model",
+        "onnx_model_path = ./models",
+    ]
+    config_path.write_text(line_ending.join(original_lines) + line_ending, encoding="utf-8")
     monkeypatch.setenv("TLDW_CONFIG_DIR", str(config_dir))
     _patch_project_root(monkeypatch, tmp_path / "project")
 
@@ -92,12 +93,16 @@ def test_update_config_preserves_line_breaks_for_adjacent_updates(monkeypatch, t
         create_backup=False,
     )
 
-    assert config_path.read_text(encoding="utf-8").splitlines() == [
+    expected_lines = [
         "[Embeddings]",
         "embedding_provider = huggingface",
         "embedding_model = Qwen/Qwen3-Embedding-0.6B",
         "onnx_model_path = ./models",
     ]
+    with config_path.open("r", encoding="utf-8", newline="") as handle:
+        updated = handle.read()
+
+    assert updated == line_ending.join(expected_lines) + line_ending
 
 
 def test_user_db_base_dir_update_rejects_relative_escape(monkeypatch, tmp_path):

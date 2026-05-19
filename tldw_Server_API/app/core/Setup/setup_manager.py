@@ -585,9 +585,11 @@ def _write_config_preserving_comments(config_path: Path, updates: dict[str, dict
       - Leave comments and spacing outside the key/value token intact where reasonable.
     """
     try:
-        original_lines = config_path.read_text(encoding="utf-8").splitlines(keepends=True)
+        with config_path.open("r", encoding="utf-8", newline="") as handle:
+            original_lines = handle.read().splitlines(keepends=True)
     except FileNotFoundError:
         raise
+    default_line_ending = "\r\n" if any(line.endswith("\r\n") for line in original_lines) else "\n"
 
     # Prepare a mutable copy of updates: section -> key -> str(value)
     pending: dict[str, dict[str, str]] = {
@@ -650,12 +652,13 @@ def _write_config_preserving_comments(config_path: Path, updates: dict[str, dict
             # Append under a section header (create if missing)
             header = f"[{section}]"
             if header not in text:
-                text += f"\n{header}\n"
+                text += f"{default_line_ending}{header}{default_line_ending}"
             for k, v in items.items():
-                text += f"{k} = {v}\n"
+                text += f"{k} = {v}{default_line_ending}"
         out_lines = [text]
 
-    config_path.write_text("".join(out_lines), encoding="utf-8")
+    with config_path.open("w", encoding="utf-8", newline="") as handle:
+        handle.write("".join(out_lines))
 
 
 def _validate_updates(parser: ConfigParser, updates: dict[str, dict[str, Any]]) -> None:

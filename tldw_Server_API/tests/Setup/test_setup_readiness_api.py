@@ -183,7 +183,21 @@ def test_readiness_status_reports_overlays_separately(_readiness_api_setup):
     assert response.status_code == 200
     payload = response.json()
     assert isinstance(payload["overlays"], list)
-    assert all(lane["status"] != "restart_required" for lane in payload["lanes"])
+    assert all(lane["status"] != "restart_required" for lane in payload.get("lanes", []))
+
+
+def test_readiness_status_polling_does_not_rebuild_recommendations(monkeypatch, _readiness_api_setup):
+    monkeypatch.setattr(
+        setup_endpoint.audio_profile_service,
+        "recommend_audio_bundles",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("status polling must stay lightweight")),
+    )
+
+    client = _make_client()
+    response = client.get("/api/v1/setup/readiness/status", headers={"host": "localhost"})
+
+    assert response.status_code == 200
+    assert response.json()["setup_access"]["mode"] == "first_run"
 
 
 def test_readiness_preview_route_does_not_write_or_echo_secret(monkeypatch, _readiness_api_setup):
@@ -310,6 +324,138 @@ def test_readiness_provision_returns_pollable_status_without_waiting_for_downloa
     status_payload = status_response.json()
     assert status_payload["operation_id"] == payload["operation_id"]
     assert status_payload["operation_status"] == "queued"
+
+
+@pytest.mark.parametrize(
+    ("overlays", "install_errors", "expected_status"),
+    [
+        ([], [], "ready"),
+        (["restart_required"], [], "ready_with_warnings"),
+        ([], ["download warning"], "ready_with_warnings"),
+    ],
+)
+def test_readiness_status_maps_completed_install_to_ready_only_without_warnings(
+    monkeypatch,
+    _readiness_api_setup,
+    overlays,
+    install_errors,
+    expected_status,
+):
+    install_plan = {
+        "stt": [],
+        "tts": [],
+        "embeddings": {"huggingface": ["Qwen/Qwen3-Embedding-0.6B"], "custom": [], "onnx": []},
+    }
+    _readiness_api_setup.save(
+        {
+            "status": "provisioning",
+            "selected_profile_id": "local_balanced",
+            "lanes": [],
+            "overlays": overlays,
+            "last_provision": {
+                "operation_id": "operation-1",
+                "operation_status": "queued",
+                "install_plan": install_plan,
+            },
+            "operation_id": "operation-1",
+            "operation_status": "queued",
+        }
+    )
+    monkeypatch.setattr(
+        setup_endpoint.install_manager,
+        "get_install_status_snapshot",
+        lambda: {"status": "completed", "plan": install_plan, "errors": install_errors},
+    )
+
+    client = _make_client()
+    response = client.get("/api/v1/setup/readiness/status", headers={"host": "localhost"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["readiness_status"] == expected_status
+    assert payload["operation_status"] == "completed"
+
+
+def test_readiness_inline_provision_persists_submitted_secret_without_storing_it(
+    monkeypatch,
+    _readiness_api_setup,
+):
+    config_updates: list[dict[str, dict[str, str]]] = []
+
+    monkeypatch.setattr(
+        setup_endpoint.setup_manager,
+        "update_config",
+        lambda updates: config_updates.append(updates),
+    )
+    monkeypatch.setattr(setup_endpoint, "execute_install_plan", lambda plan: None)
+
+    client = _make_client()
+    response = client.post(
+        "/api/v1/setup/readiness/provision",
+        headers={"host": "localhost"},
+        json={
+            "confirmed": True,
+            "selection": {
+                "profile_id": "advanced_custom",
+                "lanes": {
+                    "chat": {
+                        "mode": "hosted",
+                        "provider": "openai",
+                        "api_key": "sk-sensitive",
+                        "model": "gpt-4.1-mini",
+                    }
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 202
+    assert config_updates == [
+        {
+            "API": {
+                "default_api": "openai",
+                "openai_model": "gpt-4.1-mini",
+                "openai_api_key": "sk-sensitive",
+            }
+        }
+    ]
+    assert "sk-sensitive" not in str(response.json())
+    assert "sk-sensitive" not in str(_readiness_api_setup.load())
+
+
+def test_readiness_preview_id_provision_rejects_unretained_submitted_secret(
+    monkeypatch,
+    _readiness_api_setup,
+):
+    monkeypatch.setattr(setup_endpoint.setup_manager, "update_config", lambda updates: None)
+    monkeypatch.setattr(setup_endpoint, "execute_install_plan", lambda plan: None)
+
+    client = _make_client()
+    preview_response = client.post(
+        "/api/v1/setup/readiness/preview",
+        headers={"host": "localhost"},
+        json={
+            "profile_id": "advanced_custom",
+            "lanes": {
+                "chat": {
+                    "mode": "hosted",
+                    "provider": "openai",
+                    "api_key": "sk-sensitive",
+                    "model": "gpt-4.1-mini",
+                }
+            },
+        },
+    )
+    assert preview_response.status_code == 200
+
+    response = client.post(
+        "/api/v1/setup/readiness/provision",
+        headers={"host": "localhost"},
+        json={"preview_id": preview_response.json()["preview_id"], "confirmed": True},
+    )
+
+    assert response.status_code == 400
+    assert "Re-submit" in response.json()["detail"]
 
 
 def test_readiness_provision_requires_explicit_confirmation(_readiness_api_setup):

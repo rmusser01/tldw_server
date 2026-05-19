@@ -2,7 +2,7 @@
 
 import React from "react"
 import { MemoryRouter } from "react-router-dom"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import OptionSetup from "../option-setup"
@@ -24,9 +24,18 @@ vi.mock("@/components/Option/Onboarding/OnboardingWizard", () => ({
 }))
 
 vi.mock("@/components/Option/Setup/ReadinessSetupScreen", () => ({
-  ReadinessSetupScreen: ({ mode }: { mode?: string }) => (
+  ReadinessSetupScreen: ({
+    mode,
+    onUnavailable
+  }: {
+    mode?: string
+    onUnavailable?: () => void
+  }) => (
     <div data-testid="readiness-screen" data-mode={mode}>
       Readiness
+      <button type="button" data-testid="readiness-unavailable" onClick={onUnavailable}>
+        Unavailable
+      </button>
     </div>
   )
 }))
@@ -35,6 +44,12 @@ vi.mock("@/components/ui/state", () => ({
   SetupRequiredPanel: ({ title }: { title: string }) => (
     <div data-testid="setup-required-panel">{title}</div>
   )
+}))
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (_key: string, defaultValue?: string) => defaultValue || _key
+  })
 }))
 
 vi.mock("@/hooks/useConnectionState", () => ({
@@ -91,6 +106,15 @@ describe("OptionSetup readiness route", () => {
     mocks.useConnectionUxState.mockReturnValue({ isConfigOrError: true })
 
     renderRoute()
+
+    expect(screen.getByTestId("onboarding-wizard")).toBeInTheDocument()
+    expect(screen.queryByTestId("readiness-screen")).not.toBeInTheDocument()
+  })
+
+  it("falls back to the connection onboarding wizard when setup readiness is unavailable", () => {
+    renderRoute()
+
+    fireEvent.click(screen.getByTestId("readiness-unavailable"))
 
     expect(screen.getByTestId("onboarding-wizard")).toBeInTheDocument()
     expect(screen.queryByTestId("readiness-screen")).not.toBeInTheDocument()

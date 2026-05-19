@@ -15,17 +15,23 @@ const OptionSetup = () => {
   const navigate = useNavigate()
   const { serverUrl } = useConnectionState()
   const { hasCompletedFirstRun, isConfigOrError } = useConnectionUxState()
+  const [readinessUnavailable, setReadinessUnavailable] = React.useState(false)
 
   const handleFinish = React.useCallback(() => {
     navigate("/")
   }, [navigate])
 
-  if (serverUrl && !isConfigOrError) {
+  React.useEffect(() => {
+    setReadinessUnavailable(false)
+  }, [serverUrl, isConfigOrError, hasCompletedFirstRun])
+
+  if (serverUrl && !isConfigOrError && !readinessUnavailable) {
     return (
       <OptionLayout hideHeader hideSidebar>
         <ReadinessSetupScreen
           mode={hasCompletedFirstRun ? "admin" : "first-run"}
           onComplete={handleFinish}
+          onUnavailable={() => setReadinessUnavailable(true)}
         />
       </OptionLayout>
     )

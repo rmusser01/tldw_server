@@ -42,7 +42,7 @@ Added setup readiness preview request/response schema models for the future API 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the read-only setup readiness preview contract. Verification: initial TDD run failed at collection because readiness_service was missing; final /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_setup_readiness_profiles.py tldw_Server_API/tests/Setup/test_setup_readiness_preview.py -q passed with 9 tests; /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Setup/readiness_service.py tldw_Server_API/app/api/v1/schemas/setup_schemas.py -f json -o /tmp/bandit_first_time_readiness_preview.json completed with zero findings.
+Implemented the read-only setup readiness preview contract. Verification: initial TDD run failed at collection because readiness_service was missing; final `.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_setup_readiness_profiles.py tldw_Server_API/tests/Setup/test_setup_readiness_preview.py -q` passed with 9 tests; `.venv/bin/python -m bandit -r tldw_Server_API/app/core/Setup/readiness_service.py tldw_Server_API/app/api/v1/schemas/setup_schemas.py -f json -o /tmp/bandit_first_time_readiness_preview.json` completed with zero findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -31,6 +31,12 @@ type UseSetupReadinessOptions = {
   mode?: SetupReadinessClientMode
 }
 
+type SetupReadinessErrorKey =
+  | "setupReadiness.errors.load"
+  | "setupReadiness.errors.preview"
+  | "setupReadiness.errors.provision"
+  | "setupReadiness.errors.verify"
+
 const fallbackUrl = "/setup"
 
 const extractStatus = (err: unknown): number | null => {
@@ -75,6 +81,7 @@ export const useSetupReadiness = (options: UseSetupReadinessOptions = {}) => {
   const mode = options.mode || "first-run"
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
+  const [errorKey, setErrorKey] = React.useState<SetupReadinessErrorKey | null>(null)
   const [guard, setGuard] = React.useState<SetupReadinessGuardState>(null)
   const [profiles, setProfiles] = React.useState<SetupReadinessProfilesResponse | null>(null)
   const [status, setStatus] = React.useState<SetupReadinessStatusResponse | null>(null)
@@ -104,10 +111,12 @@ export const useSetupReadiness = (options: UseSetupReadinessOptions = {}) => {
       setStatus(nextStatus)
       setGuard(null)
       setError(null)
+      setErrorKey(null)
       return { profiles: nextProfiles, status: nextStatus }
     } catch (err) {
       setGuard(deriveGuardFromError(err, mode))
       setError(errorMessage(err, "Unable to load setup readiness."))
+      setErrorKey("setupReadiness.errors.load")
       return null
     } finally {
       setLoading(false)
@@ -121,16 +130,28 @@ export const useSetupReadiness = (options: UseSetupReadinessOptions = {}) => {
   React.useEffect(() => {
     if (!isActiveStatus(status)) return
 
-    const timeout = window.setTimeout(() => {
-      void refreshStatus().catch((err) => {
-        logNonFatalRefreshError("polling", err)
-      })
-    }, POLL_INTERVAL_MS)
+    let cancelled = false
+    let timeout: number | null = null
+
+    const scheduleNextPoll = () => {
+      timeout = window.setTimeout(() => {
+        void refreshStatus()
+          .catch((err) => {
+            logNonFatalRefreshError("polling", err)
+          })
+          .finally(() => {
+            if (!cancelled) scheduleNextPoll()
+          })
+      }, POLL_INTERVAL_MS)
+    }
+
+    scheduleNextPoll()
 
     return () => {
-      window.clearTimeout(timeout)
+      cancelled = true
+      if (timeout !== null) window.clearTimeout(timeout)
     }
-  }, [refreshStatus, status])
+  }, [refreshStatus, status?.operation_status, status?.readiness_status])
 
   const previewSelection = React.useCallback(
     async (request: SetupReadinessPreviewRequest) => {
@@ -140,10 +161,12 @@ export const useSetupReadiness = (options: UseSetupReadinessOptions = {}) => {
         setPreview(result)
         setGuard(null)
         setError(null)
+        setErrorKey(null)
         return result
       } catch (err) {
         setGuard(deriveGuardFromError(err, mode))
         setError(errorMessage(err, "Unable to preview setup readiness."))
+        setErrorKey("setupReadiness.errors.preview")
         return null
       } finally {
         setPreviewing(false)
@@ -164,6 +187,7 @@ export const useSetupReadiness = (options: UseSetupReadinessOptions = {}) => {
         setVerification(null)
         setGuard(null)
         setError(null)
+        setErrorKey(null)
         await refreshStatus().catch((err) => {
           logNonFatalRefreshError("post-provision refresh", err)
         })
@@ -171,6 +195,7 @@ export const useSetupReadiness = (options: UseSetupReadinessOptions = {}) => {
       } catch (err) {
         setGuard(deriveGuardFromError(err, mode))
         setError(errorMessage(err, "Unable to provision setup readiness."))
+        setErrorKey("setupReadiness.errors.provision")
         return null
       } finally {
         setProvisioning(false)
@@ -187,10 +212,12 @@ export const useSetupReadiness = (options: UseSetupReadinessOptions = {}) => {
         setVerification(result)
         setGuard(null)
         setError(null)
+        setErrorKey(null)
         return result
       } catch (err) {
         setGuard(deriveGuardFromError(err, mode))
         setError(errorMessage(err, "Unable to verify setup readiness."))
+        setErrorKey("setupReadiness.errors.verify")
         return null
       } finally {
         setVerifying(false)
@@ -201,6 +228,7 @@ export const useSetupReadiness = (options: UseSetupReadinessOptions = {}) => {
 
   return {
     error,
+    errorKey,
     fallbackUrl,
     guard,
     loading,

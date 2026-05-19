@@ -38,7 +38,7 @@ Added readiness_models.py for canonical lane IDs, supported statuses, overlays, 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the backend setup readiness profile contract slice. Verification: initial TDD run failed with the expected missing module error; final `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_setup_readiness_profiles.py -q` passed with 4 tests; `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Setup/readiness_models.py tldw_Server_API/app/core/Setup/readiness_profiles.py -f json -o /tmp/bandit_first_time_readiness_profiles.json` completed with zero findings.
+Implemented the backend setup readiness profile contract slice. Verification: initial TDD run failed with the expected missing module error; final `.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_setup_readiness_profiles.py -q` passed with 4 tests; `.venv/bin/python -m bandit -r tldw_Server_API/app/core/Setup/readiness_models.py tldw_Server_API/app/core/Setup/readiness_profiles.py -f json -o /tmp/bandit_first_time_readiness_profiles.json` completed with zero findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

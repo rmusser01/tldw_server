@@ -95,6 +95,16 @@ describe("useSetupReadiness", () => {
     expect(result.current.error).toContain("Setup access is restricted")
   })
 
+  it("exposes translation keys for load failures", async () => {
+    mocks.bgRequest.mockRejectedValue(new Error("network down"))
+
+    const { result } = renderHook(() => useSetupReadiness())
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.error).toBe("network down")
+    expect(result.current.errorKey).toBe("setupReadiness.errors.load")
+  })
+
   it("uses admin setup readiness endpoints in admin mode", async () => {
     const requests: string[] = []
     mocks.bgRequest.mockImplementation((init: { path: string }) => {
@@ -190,5 +200,94 @@ describe("useSetupReadiness", () => {
       preview_id: "preview-1",
       confirmed: true
     })
+  })
+
+  it("continues polling readiness status after a transient refresh failure", async () => {
+    let statusCalls = 0
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+    mocks.bgRequest.mockImplementation((init: { path: string; body?: string }) => {
+      const path = String(init.path)
+      if (path.endsWith("/profiles")) {
+        return Promise.resolve(createResponse(profilesPayload))
+      }
+      if (path.endsWith("/status")) {
+        statusCalls += 1
+        if (statusCalls === 1) return Promise.resolve(createResponse(statusPayload))
+        if (statusCalls === 2) {
+          return Promise.resolve(
+            createResponse({
+              ...statusPayload,
+              readiness_status: "provisioning",
+              operation_status: "running"
+            })
+          )
+        }
+        if (statusCalls === 3) {
+          return Promise.reject(new Error("transient polling failure"))
+        }
+        return Promise.resolve(
+          createResponse({
+            ...statusPayload,
+            readiness_status: "ready",
+            operation_status: "completed"
+          })
+        )
+      }
+      if (path.endsWith("/preview")) {
+        return Promise.resolve(
+          createResponse({
+            preview_id: "preview-1",
+            profile_id: "local_balanced",
+            lane_ids: ["chat", "embeddings_rag", "speech"],
+            lanes: {},
+            overlays: [],
+            config_updates: {},
+            secret_fields: [],
+            install_plan: {},
+            operation_required: true
+          })
+        )
+      }
+      if (path.endsWith("/provision")) {
+        return Promise.resolve(
+          createResponse({
+            operation_id: "operation-1",
+            operation_status: "queued",
+            status_url: "/api/v1/setup/readiness/status",
+            status: "provisioning",
+            lanes: [],
+            overlays: [],
+            install_plan_submitted: true,
+            config_updates_applied: false
+          })
+        )
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    })
+
+    const { result } = renderHook(() => useSetupReadiness())
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    vi.useFakeTimers()
+
+    await act(async () => {
+      await result.current.previewSelection({ profile_id: "local_balanced" })
+      await result.current.provision({ preview_id: "preview-1" })
+    })
+    expect(result.current.status?.operation_status).toBe("running")
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+    expect(statusCalls).toBe(3)
+    expect(result.current.status?.operation_status).toBe("running")
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+    expect(result.current.status?.operation_status).toBe("completed")
+    expect(warnSpy).toHaveBeenCalled()
+    warnSpy.mockRestore()
   })
 })
