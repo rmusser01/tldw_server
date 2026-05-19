@@ -1468,6 +1468,12 @@
       "news": "News briefing",
       "general": "General research"
     },
+    "readiness": {
+      "ready": "Ready",
+      "needsReview": "Needs review",
+      "blocked": "Blocked",
+      "legacyLiveOnly": "Live provenance only"
+    },
     "table": {
       "sourceCount": "{{count}} sources",
       "alertCount": "{{count}} alerts",
@@ -1546,6 +1552,19 @@
       "pending": "Pending",
       "sent": "Sent",
       "stored": "Stored"
+    },
+    "audioStatus": {
+      "completed": "Completed",
+      "ready": "Ready",
+      "fallback": "Fallback",
+      "partial": "Partial",
+      "queued": "Queued",
+      "pending": "Pending",
+      "running": "Running",
+      "inProgress": "In progress",
+      "failed": "Failed",
+      "error": "Error",
+      "unknown": "Unknown"
     },
     "noContent": "No content available",
     "openInNewTab": "Open in new tab",

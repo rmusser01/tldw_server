@@ -194,6 +194,7 @@ describe("ReportEvidencePanel", () => {
     render(<ReportEvidencePanel outputId={77} />)
 
     expect(await screen.findByText("Live provenance only")).toBeInTheDocument()
+    expect(screen.getByText("Live provenance only").closest('[data-ds-component="Alert"]')).toBeInTheDocument()
     expect(
       screen.getByText("This older report was created before evidence snapshots were available.")
     ).toBeInTheDocument()
@@ -207,6 +208,7 @@ describe("ReportEvidencePanel", () => {
     render(<ReportEvidencePanel outputId={42} />)
 
     expect(await screen.findByText("Evidence snapshot unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Evidence snapshot unavailable").closest('[data-ds-component="Alert"]')).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
 
     await waitFor(() => {

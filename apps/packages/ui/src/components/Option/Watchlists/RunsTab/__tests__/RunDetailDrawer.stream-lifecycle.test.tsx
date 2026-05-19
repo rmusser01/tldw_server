@@ -470,6 +470,7 @@ describe("RunDetailDrawer stream lifecycle", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Stream error")).toBeInTheDocument()
+      expect(screen.getByText("Stream error").closest('[data-ds-component="Alert"]')).toBeInTheDocument()
       expect(screen.getByText("Live stream error")).toBeInTheDocument()
     })
 
@@ -542,6 +543,7 @@ describe("RunDetailDrawer stream lifecycle", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Logs truncated")).toBeInTheDocument()
+      expect(screen.getByText("Logs truncated").closest('[data-ds-component="Alert"]')).toBeInTheDocument()
     })
 
     const pre = document.querySelector("pre")
