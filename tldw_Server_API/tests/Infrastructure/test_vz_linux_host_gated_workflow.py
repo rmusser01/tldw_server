@@ -13,6 +13,19 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "vz-linux-host-gated.yml"
 POLICY_PATH = REPO_ROOT / "Docs" / "Sandbox" / "vz-linux-host-gated-ci-acceptance-policy.md"
 EVIDENCE_TRACKER_PATH = REPO_ROOT / "Docs" / "Sandbox" / "vz-linux-prepared-host-evidence.md"
+ROADMAP_PATH = (
+    REPO_ROOT
+    / "Docs"
+    / "superpowers"
+    / "specs"
+    / "2026-05-02-sandbox-module-roadmap-design.md"
+)
+LIFECYCLE_DRILL_GAPS_SPEC_RELATIVE_PATH = (
+    "Docs/superpowers/specs/2026-05-18-vz-linux-lifecycle-drill-gaps-design.md"
+)
+LIFECYCLE_DRILL_GAPS_SPEC_PATH = (
+    REPO_ROOT / LIFECYCLE_DRILL_GAPS_SPEC_RELATIVE_PATH
+)
 SMOKE_SCRIPT_PATH = REPO_ROOT / "tools" / "vz-linux-image" / "scripts" / "run-host-e2e-smoke.sh"
 
 
@@ -33,6 +46,12 @@ def _workflow_triggers(workflow: dict[str, Any]) -> dict[str, Any]:
 def _normalized_text(path: Path) -> str:
     """Return doc text normalized so wrapping-only edits do not break contracts."""
     return " ".join(path.read_text(encoding="utf-8").split())
+
+
+def _normalized_existing_text(path: Path, label: str) -> str:
+    """Return normalized doc text after a targeted existence assertion."""
+    _require(path.is_file(), f"{label} not found: {path}")
+    return _normalized_text(path)
 
 
 def _require(condition: bool, message: str) -> None:
@@ -238,3 +257,61 @@ def test_vz_linux_prepared_host_evidence_tracker_keeps_real_vm_runs_gated() -> N
             boundary in tracker.lower(),
             f"Evidence tracker should preserve gated-run boundary: {boundary}",
         )
+
+
+def test_vz_linux_lifecycle_drill_gaps_spec_defines_manual_boundaries() -> None:
+    """Remaining lifecycle drills should stay explicit, manual, and bounded."""
+    spec = _normalized_existing_text(
+        LIFECYCLE_DRILL_GAPS_SPEC_PATH,
+        "Lifecycle drill gaps spec",
+    )
+    spec_lower = spec.lower()
+
+    for section in (
+        "## Drill Contract: Stale Socket",
+        "## Drill Contract: Stuck Boot And Stuck Readiness",
+        "## Drill Contract: Guest-Agent Mismatch",
+        "## Host Reboot Boundary",
+        "## Implementation Slices",
+    ):
+        _require(
+            section in spec,
+            f"Lifecycle drill gaps spec should include section {section}",
+        )
+
+    for boundary in (
+        "do not add pr or push triggers",
+        "do not enable scheduled destructive drills",
+        "do not automate host reboot",
+        "do not terminate broad helper or vm state",
+        "do not make repair mutation the default",
+        "private runtime directory",
+        "refusal of symlinks and non-socket files",
+        "dry-run mode before any mutation",
+        "ownership-checked candidates",
+    ):
+        _require(
+            boundary in spec_lower,
+            f"Lifecycle drill gaps spec should preserve boundary: {boundary}",
+        )
+
+
+def test_vz_linux_lifecycle_drill_gaps_spec_is_linked_from_tracker_and_roadmap() -> None:
+    """Contributors should find the drill contract from active roadmap surfaces."""
+    tracker = _normalized_existing_text(
+        EVIDENCE_TRACKER_PATH,
+        "Prepared-host evidence tracker",
+    )
+    roadmap = _normalized_existing_text(
+        ROADMAP_PATH,
+        "Sandbox roadmap",
+    )
+
+    _require(
+        LIFECYCLE_DRILL_GAPS_SPEC_RELATIVE_PATH in tracker,
+        "Evidence tracker should link the lifecycle drill gaps spec",
+    )
+    _require(
+        LIFECYCLE_DRILL_GAPS_SPEC_RELATIVE_PATH in roadmap,
+        "Sandbox roadmap should link the lifecycle drill gaps spec",
+    )

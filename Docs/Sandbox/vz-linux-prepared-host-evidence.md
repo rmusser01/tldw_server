@@ -129,8 +129,8 @@ GitHub Actions run with the packet fields above.
 | Failure-drill evidence | Manual opt-in only. | Record results when a maintainer runs with `include_failure_drills=true`. |
 | Launchd-drill evidence | Manual opt-in only. | Record results only when a runner is intentionally configured for LaunchAgent validation. |
 | Host reboot recovery | Manual operator procedure only and out of scheduled CI. | Add a dedicated operator drill once a prepared host can tolerate disruptive reboot testing and preserve logs. |
-| Stuck boot/readiness and guest-agent mismatch | Not covered by the default smoke. | Add narrow manual drills or diagnostics checks before considering automated coverage. |
-| Stale socket handling | Covered by helper lifecycle docs and tests, but not yet recorded as prepared-host evidence in this tracker. | Include socket-path cleanup and status output in the next evidence packet. |
+| Stuck boot/readiness and guest-agent mismatch | Not covered by the default smoke. | Use `Docs/superpowers/specs/2026-05-18-vz-linux-lifecycle-drill-gaps-design.md` to guide narrow manual drills or diagnostics checks before considering automated coverage. |
+| Stale socket handling | Covered by helper lifecycle docs and tests, but not yet recorded as prepared-host evidence in this tracker. | Use `Docs/superpowers/specs/2026-05-18-vz-linux-lifecycle-drill-gaps-design.md` before adding socket-path cleanup or status evidence. |
 
 ## Recording Guidance
 
