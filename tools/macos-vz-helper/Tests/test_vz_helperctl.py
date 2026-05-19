@@ -444,6 +444,131 @@ def test_host_reboot_evidence_dir_creates_nested_components_owner_only(
     CASE.assertEqual(evidence.stat().st_mode & 0o777, 0o700)
 
 
+def test_host_reboot_pre_writes_bounded_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    bundle_path = tmp_path / "bundle"
+    helper_path = tmp_path / "bundle" / "macos-vz-helper"
+    socket_path = tmp_path / "helper.sock"
+    log_dir = tmp_path / "logs"
+    serial_log_dir = log_dir / "serial"
+    launchd_plist_path = tmp_path / "LaunchAgents" / "org.tldw.test-helper.plist"
+    monkeypatch.setattr(helperctl, "VOLATILE_EVIDENCE_ROOTS", ())
+
+    result = helperctl.run_host_reboot_pre(
+        evidence_dir=evidence,
+        bundle_path=bundle_path,
+        helper_path=helper_path,
+        helper_mode="direct",
+        socket_path=socket_path,
+        log_dir=log_dir,
+        serial_log_dir=serial_log_dir,
+        launchd_label="org.tldw.test-helper",
+        launchd_plist_path=launchd_plist_path,
+        create_evidence_dir=True,
+        created_at_factory=lambda: "2026-05-19T00:00:00Z",
+        hostname_provider=lambda: "test-host",
+        ping_checker=lambda path: helperctl.PingState(
+            result=helperctl.CheckResult(True),
+            protocol_version="1",
+            helper_version="test",
+            details={
+                "helper_instance_id": "before",
+                "helper_started_at": "2026-05-19T00:00:00Z",
+            },
+        ),
+    )
+
+    CASE.assertTrue(result.ok)
+    CASE.assertEqual(result.reason, "host_reboot_pre_manifest_written")
+    payload = json.loads((evidence / "host-reboot-pre.json").read_text(encoding="utf-8"))
+    CASE.assertEqual(
+        set(payload),
+        {
+            "phase",
+            "created_at",
+            "hostname",
+            "helper_mode",
+            "bundle_path",
+            "helper_path",
+            "socket_path",
+            "log_dir",
+            "serial_log_dir",
+            "launchd_label",
+            "launchd_plist_path",
+            "helper_ping_ok",
+            "helper_ping_reason",
+            "helper_protocol_version",
+            "helper_version",
+            "helper_details",
+        },
+    )
+    CASE.assertEqual(payload["phase"], "pre")
+    CASE.assertEqual(payload["created_at"], "2026-05-19T00:00:00Z")
+    CASE.assertEqual(payload["hostname"], "test-host")
+    CASE.assertEqual(payload["helper_mode"], "direct")
+    CASE.assertEqual(payload["bundle_path"], str(bundle_path))
+    CASE.assertEqual(payload["helper_path"], str(helper_path))
+    CASE.assertEqual(payload["socket_path"], str(socket_path))
+    CASE.assertEqual(payload["log_dir"], str(log_dir))
+    CASE.assertEqual(payload["serial_log_dir"], str(serial_log_dir))
+    CASE.assertEqual(payload["launchd_label"], "org.tldw.test-helper")
+    CASE.assertEqual(payload["launchd_plist_path"], str(launchd_plist_path))
+    CASE.assertIs(payload["helper_ping_ok"], True)
+    CASE.assertEqual(payload["helper_ping_reason"], "ok")
+    CASE.assertEqual(payload["helper_protocol_version"], "1")
+    CASE.assertEqual(payload["helper_version"], "test")
+    CASE.assertEqual(
+        payload["helper_details"],
+        {
+            "helper_instance_id": "before",
+            "helper_started_at": "2026-05-19T00:00:00Z",
+        },
+    )
+    CASE.assertNotIn("environment", payload)
+    CASE.assertNotIn("stdout", payload)
+    CASE.assertNotIn("stderr", payload)
+    CASE.assertNotIn("serial_log_contents", payload)
+
+
+def test_write_json_private_creates_owner_only_file(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    manifest = tmp_path / "manifest.json"
+
+    result = helperctl.write_json_private(manifest, {"phase": "pre"})
+
+    CASE.assertTrue(result.ok)
+    CASE.assertEqual(result.reason, "host_reboot_manifest_written")
+    CASE.assertEqual(manifest.stat().st_mode & 0o777, 0o600)
+    CASE.assertEqual(json.loads(manifest.read_text(encoding="utf-8")), {"phase": "pre"})
+
+
+def test_ping_state_payload_maps_helper_manifest_fields() -> None:
+    helperctl = load_helperctl()
+    state = helperctl.PingState(
+        result=helperctl.CheckResult(False, "helper_ping_failed", "unavailable"),
+        protocol_version="1",
+        helper_version="test",
+        details={"helper_instance_id": "before"},
+    )
+
+    payload = helperctl.ping_state_payload(state)
+
+    CASE.assertEqual(
+        payload,
+        {
+            "helper_ping_ok": False,
+            "helper_ping_reason": "helper_ping_failed",
+            "helper_protocol_version": "1",
+            "helper_version": "test",
+            "helper_details": {"helper_instance_id": "before"},
+        },
+    )
+
+
 def test_render_launchd_plist_includes_required_fields(tmp_path):
     helperctl = load_helperctl()
     helper_path = tmp_path / "macos-vz-helper"

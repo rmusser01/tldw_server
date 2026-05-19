@@ -197,7 +197,7 @@ git commit -m "feat(vz): add host reboot evidence directory checks"
 - Modify: `tools/macos-vz-helper/scripts/vz-helperctl.py`
 - Test: `tools/macos-vz-helper/Tests/test_vz_helperctl.py`
 
-- [ ] **Step 1: Add failing tests for `host-reboot-drill pre`**
+- [x] **Step 1: Add failing tests for `host-reboot-drill pre`**
 
 Test that dry-run/pre mode writes bounded manifest data when explicitly allowed
 to create the evidence directory:
@@ -235,7 +235,7 @@ def test_host_reboot_pre_writes_bounded_manifest(
     CASE.assertNotIn("environment", payload)
 ```
 
-- [ ] **Step 2: Run test to verify failure**
+- [x] **Step 2: Run test to verify failure**
 
 Run:
 
@@ -246,7 +246,7 @@ python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py \
 
 Expected: fail because `run_host_reboot_pre` does not exist.
 
-- [ ] **Step 3: Implement pre-phase manifest writer**
+- [x] **Step 3: Implement pre-phase manifest writer**
 
 Add:
 
@@ -278,11 +278,11 @@ Manifest payload should include only:
 Do not include raw env vars, stdout/stderr, serial log contents, or workspace
 paths beyond configured helper/log/socket/bundle paths.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run the same `host_reboot_pre` pytest selection. Expected: pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/macos-vz-helper/scripts/vz-helperctl.py tools/macos-vz-helper/Tests/test_vz_helperctl.py

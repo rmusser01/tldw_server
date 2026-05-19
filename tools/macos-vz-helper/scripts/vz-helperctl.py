@@ -20,7 +20,7 @@ import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -46,6 +46,8 @@ else:
 INVALID_LIFECYCLE_LOCK_GRACE_SEC = 1.0
 DEFAULT_LAUNCHD_LABEL = "org.tldw.macos-vz-helper"
 LAUNCHD_ACTIONS = {"bootstrap", "bootout", "kickstart", "status"}
+HOST_REBOOT_PRE_MANIFEST = "host-reboot-pre.json"
+HOST_REBOOT_POST_MANIFEST = "host-reboot-post.json"
 
 
 def _resolve_operational_path(path: Path) -> Path | None:
@@ -231,6 +233,26 @@ def ensure_host_reboot_evidence_dir(
     if not result.ok:
         return CheckResult(False, "host_reboot_evidence_dir_not_private", result.message or str(evidence_dir))
     return CheckResult(True, "host_reboot_evidence_dir_ok", str(evidence_dir))
+
+
+def write_json_private(path: Path, payload: Mapping[str, Any]) -> CheckResult:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd: int | None = None
+    try:
+        fd = os.open(path, flags, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            fd = None
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+        path.chmod(0o600)
+    except (OSError, TypeError, ValueError) as exc:
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        return CheckResult(False, "host_reboot_manifest_write_failed", str(exc))
+    return CheckResult(True, "host_reboot_manifest_written", str(path))
 
 
 def ensure_private_dir(path: Path, dry_run: bool = False) -> CheckResult:
@@ -900,6 +922,68 @@ def ping_helper_state(
 
 def _ping_helper(socket_path: Path) -> CheckResult:
     return ping_helper_state(socket_path).result
+
+
+def ping_state_payload(state: PingState) -> dict[str, Any]:
+    return {
+        "helper_ping_ok": state.result.ok,
+        "helper_ping_reason": state.result.reason,
+        "helper_protocol_version": state.protocol_version,
+        "helper_version": state.helper_version,
+        "helper_details": state.details or {},
+    }
+
+
+def _host_reboot_created_at() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def run_host_reboot_pre(
+    *,
+    evidence_dir: Path,
+    bundle_path: Path,
+    helper_mode: str,
+    socket_path: Path,
+    log_dir: Path,
+    helper_path: Path = DEFAULT_HELPER,
+    serial_log_dir: Path | None = None,
+    launchd_label: str = "",
+    launchd_plist_path: Path | None = None,
+    create_evidence_dir: bool = False,
+    allow_volatile_evidence_dir: bool = False,
+    ping_checker: Callable[[Path], CheckResult | PingState] = ping_helper_state,
+    created_at_factory: Callable[[], str] = _host_reboot_created_at,
+    hostname_provider: Callable[[], str] = socket.gethostname,
+) -> CheckResult:
+    evidence_result = ensure_host_reboot_evidence_dir(
+        evidence_dir,
+        create=create_evidence_dir,
+        allow_volatile=allow_volatile_evidence_dir,
+    )
+    if not evidence_result.ok:
+        return evidence_result
+
+    ping_state = _coerce_ping_state(ping_checker(socket_path))
+    payload: dict[str, Any] = {
+        "phase": "pre",
+        "created_at": created_at_factory(),
+        "hostname": hostname_provider(),
+        "helper_mode": helper_mode,
+        "bundle_path": str(bundle_path),
+        "helper_path": str(helper_path),
+        "socket_path": str(socket_path),
+        "log_dir": str(log_dir),
+        "serial_log_dir": str(serial_log_dir if serial_log_dir is not None else log_dir / "serial"),
+        "launchd_label": launchd_label,
+        "launchd_plist_path": str(launchd_plist_path) if launchd_plist_path is not None else "",
+    }
+    payload.update(ping_state_payload(ping_state))
+
+    manifest_path = evidence_dir / HOST_REBOOT_PRE_MANIFEST
+    write_result = write_json_private(manifest_path, payload)
+    if not write_result.ok:
+        return write_result
+    return CheckResult(True, "host_reboot_pre_manifest_written", str(manifest_path))
 
 
 def wait_for_ping(
