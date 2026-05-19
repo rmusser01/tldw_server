@@ -15,6 +15,7 @@ import type {
   WatchlistRun,
   WatchlistTemplate
 } from "@/types/watchlists"
+import { Badge } from "@/components/ui/primitives/Badge"
 import { READY_STATE_LABEL } from "@/design-system/states"
 
 interface ReportBuilderDrawerProps {
@@ -458,7 +459,7 @@ export const ReportBuilderDrawer: React.FC<ReportBuilderDrawerProps> = ({
                 ))}
               </div>
             ) : (
-              <Tag color="success">{t("watchlists:reports.builder.ready", READY_STATE_LABEL)}</Tag>
+              <Badge variant="success">{t("watchlists:reports.builder.ready", READY_STATE_LABEL)}</Badge>
             )}
           </div>
 
