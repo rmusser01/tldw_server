@@ -28,6 +28,7 @@ from .vz_reconciliation import (
     REASON_RECONCILIATION_UNAVAILABLE,
     collect_vz_reconciliation,
 )
+from .vz_guest_agent import classify_vz_linux_guest_agent
 
 _VZ_LINUX_TEMPLATE_MISSING_REASON = "vz_linux_template_missing"
 _VZ_MACOS_TEMPLATE_MISSING_REASON = "macos_template_missing"
@@ -188,6 +189,7 @@ def _guest_observability(details: dict[str, object]) -> dict[str, object]:
         "workspace_root": _detail_text(details, "guest_workspace_root"),
         "capabilities_known": _detail_bool(details, "guest_capabilities_known"),
         "capabilities": _detail_csv(details, "guest_capabilities"),
+        **classify_vz_linux_guest_agent(details),
     }
 
 

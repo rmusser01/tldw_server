@@ -160,6 +160,11 @@ def _sample_diagnostics_payload() -> dict:
                         "workspace_root": "/workspace",
                         "capabilities_known": True,
                         "capabilities": ["exec", "output_cap_v1"],
+                        "compatibility": "compatible",
+                        "reasons": [],
+                        "expected_workspace_root": "/workspace",
+                        "required_capabilities": ["exec"],
+                        "missing_required_capabilities": [],
                     },
                     "resource_snapshot": {"cpu_time_sec": 1},
                 }
@@ -442,6 +447,8 @@ def test_admin_schema_accepts_macos_diagnostics_payload() -> None:
     assert model.observability.live_vms == 1
     assert model.observability.vms[0].serial_log.path == "/tmp/vz-serial/vm-live.serial.log"
     assert model.observability.vms[0].guest.capabilities == ["exec", "output_cap_v1"]
+    assert model.observability.vms[0].guest.compatibility == "compatible"
+    assert model.observability.vms[0].guest.reasons == []
     assert model.observability.vms[0].resource_snapshot == {"cpu_time_sec": 1}
     assert model.recovery_summary is not None
     assert model.recovery_summary.status == "healthy"
@@ -1033,6 +1040,11 @@ def test_probe_vz_linux_observability_reports_log_pointers_and_vm_resources(
         "workspace_root": "/workspace",
         "capabilities_known": True,
         "capabilities": ["exec", "output_cap_v1"],
+        "compatibility": "compatible",
+        "reasons": [],
+        "expected_workspace_root": "/workspace",
+        "required_capabilities": ["exec"],
+        "missing_required_capabilities": [],
     }
     assert vm["resource_snapshot"] == {
         "cpu_time_sec": 7,
@@ -1041,6 +1053,50 @@ def test_probe_vz_linux_observability_reports_log_pointers_and_vm_resources(
         "peak_rss_mb": 128,
         "disk_read_bytes": 2048,
     }
+
+
+def test_probe_vz_linux_observability_classifies_guest_agent_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeHelper:
+        def list_vms(self) -> HelperVMListReply:
+            return HelperVMListReply(
+                protocol_version="1",
+                helper_version="0.1.0",
+                vms=[
+                    HelperVMStatusReply(
+                        protocol_version="1",
+                        helper_version="0.1.0",
+                        vm_id="vm-mismatch",
+                        state="running",
+                        healthy=True,
+                        details={
+                            "guest_version": "0.9.0",
+                            "guest_workspace_root": "/var/empty",
+                            "guest_capabilities_known": "true",
+                            "guest_capabilities": "output_cap_v1",
+                        },
+                    )
+                ],
+            )
+
+    monkeypatch.setattr(diagnostics_module, "MacOSVirtualizationHelperClient", _FakeHelper)
+
+    data = diagnostics_module.probe_vz_linux_observability()
+
+    guest = data["vms"][0]["guest"]
+    assert guest["version"] == "0.9.0"
+    assert guest["workspace_root"] == "/var/empty"
+    assert guest["capabilities_known"] is True
+    assert guest["capabilities"] == ["output_cap_v1"]
+    assert guest["compatibility"] == "mismatch"
+    assert guest["expected_workspace_root"] == "/workspace"
+    assert guest["required_capabilities"] == ["exec"]
+    assert guest["missing_required_capabilities"] == ["exec"]
+    assert guest["reasons"] == [
+        "vz_linux_guest_agent_workspace_mismatch",
+        "vz_linux_guest_agent_required_capability_missing",
+    ]
 
 
 def test_probe_vz_linux_observability_handles_helper_unavailable(

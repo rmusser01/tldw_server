@@ -107,8 +107,11 @@ Current limitations:
 - `vz_linux` helper VM status details include guest-agent readiness metadata
   when available: `guest_version`, `guest_workspace_root`,
   `guest_capabilities_known`, and `guest_capabilities`. These fields are
-  diagnostic only; old images that omit capabilities remain compatible and are
-  reported as capability-unknown.
+  diagnostic only; old images that omit capabilities remain accepted and are
+  reported as guest-agent compatibility `unknown`. Diagnostics classify concrete
+  mismatches, such as a non-`/workspace` guest root or known capabilities missing
+  the required `exec` capability, as `mismatch`; same-session VM reuse treats
+  that explicit mismatch as unhealthy and provisions a fresh VM.
 - `vz_linux` artifact capture is bounded by `SANDBOX_MAX_ARTIFACT_FILE_BYTES`
   and `SANDBOX_MAX_ARTIFACT_TOTAL_BYTES`. Oversized or over-budget artifacts
   are skipped without failing an otherwise successful run, and aggregate skip

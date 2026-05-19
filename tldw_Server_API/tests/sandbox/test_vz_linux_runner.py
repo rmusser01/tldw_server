@@ -936,6 +936,104 @@ def test_vz_linux_session_reuse_metadata_mismatch_recreates_vm(
     assert stored and stored[0]["vm_id"] == f"vm-new-{case_name}"
 
 
+def test_vz_linux_session_reuse_guest_agent_mismatch_recreates_vm(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
+    calls: list[str] = []
+    deleted: list[str] = []
+    stored: list[dict[str, object]] = []
+
+    class _Store:
+        def get_vz_session_control(self, session_id: str) -> dict[str, object]:
+            assert session_id == "sess-guest-agent-mismatch"
+            return {
+                "runtime": "vz_linux",
+                "vm_id": "vm-stale-guest-agent",
+                "template_id": "vz_linux:existing",
+                "workspace_mount": str(tmp_path),
+                "agent_ready": True,
+                "helper_instance_id": "helper-a",
+                "helper_started_at": "2026-05-09T00:00:00Z",
+            }
+
+        def delete_vz_session_control(self, session_id: str) -> bool:
+            deleted.append(session_id)
+            return True
+
+        def put_vz_session_control(self, **kwargs) -> None:
+            stored.append(dict(kwargs))
+
+    class _FakeHelper:
+        def get_vm_status(self, vm_id: str) -> HelperVMStatusReply:
+            calls.append("get_vm_status")
+            return HelperVMStatusReply(
+                protocol_version="1",
+                helper_version="0.1.0",
+                vm_id=vm_id,
+                state="running",
+                healthy=True,
+                metadata=HelperVMMetadata(
+                    owner="tldw",
+                    runtime="vz_linux",
+                    session_id="sess-guest-agent-mismatch",
+                    session_mode=True,
+                ),
+                details={
+                    "helper_instance_id": "helper-a",
+                    "helper_started_at": "2026-05-09T00:00:00Z",
+                    "guest_version": "0.9.0",
+                    "guest_workspace_root": "/var/empty",
+                    "guest_capabilities_known": "true",
+                    "guest_capabilities": "output_cap_v1",
+                },
+            )
+
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            calls.append("validate_template")
+            return {
+                "template_id": "vz_linux:new-template",
+                "ready": True,
+                "reasons": [],
+            }
+
+        def create_vm(self, request: dict[str, object]) -> HelperVMReply:
+            calls.append("create_vm")
+            assert request["session_id"] == "sess-guest-agent-mismatch"
+            assert request["session_mode"] is True
+            return HelperVMReply(
+                vm_id="vm-new-guest-agent",
+                state="created",
+                details={
+                    "helper_instance_id": "helper-a",
+                    "helper_started_at": "2026-05-09T00:00:00Z",
+                },
+            )
+
+        def exec_guest(self, *, vm_id: str, request: dict[str, object]) -> HelperExecReply:
+            calls.append("exec_guest")
+            assert vm_id == "vm-new-guest-agent"
+            return HelperExecReply(exit_code=0, stdout=b"recreated\n")
+
+    monkeypatch.setattr(vz_linux_module.VZLinuxRunner, "helper_client_cls", _FakeHelper)
+
+    status = VZLinuxRunner(session_control_store=_Store()).start_run(
+        run_id="vz-run-guest-agent-mismatch",
+        spec=RunSpec(
+            session_id="sess-guest-agent-mismatch",
+            runtime=RuntimeType.vz_linux,
+            base_image="ubuntu-24.04",
+            command=["/bin/echo", "ok"],
+            network_policy="deny_all",
+        ),
+        session_workspace=str(tmp_path),
+    )
+
+    assert status.phase == RunPhase.completed
+    assert status.exit_code == 0
+    assert calls == ["get_vm_status", "validate_template", "create_vm", "exec_guest"]
+    assert deleted == ["sess-guest-agent-mismatch"]
+    assert stored and stored[0]["vm_id"] == "vm-new-guest-agent"
+
+
 def test_vz_linux_session_reuse_helper_unavailable_fails_closed(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
     calls: list[str] = []
