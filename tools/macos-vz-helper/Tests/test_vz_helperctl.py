@@ -347,6 +347,37 @@ def test_ensure_private_dir_refuses_non_owner(monkeypatch, tmp_path):
     CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_directory_owner_mismatch"))
 
 
+def test_host_reboot_evidence_dir_rejects_world_readable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    evidence.chmod(0o755)
+    monkeypatch.setattr(helperctl, "VOLATILE_EVIDENCE_ROOTS", ())
+
+    result = helperctl.ensure_host_reboot_evidence_dir(evidence, create=False)
+
+    CASE.assertEqual(result.reason, "host_reboot_evidence_dir_not_private")
+    CASE.assertFalse(result.ok)
+
+
+def test_host_reboot_evidence_dir_rejects_volatile_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    volatile = tmp_path / "tmp"
+    evidence = volatile / "drill"
+    monkeypatch.setattr(helperctl, "VOLATILE_EVIDENCE_ROOTS", (volatile,))
+
+    result = helperctl.ensure_host_reboot_evidence_dir(evidence, create=True)
+
+    CASE.assertEqual(result.reason, "host_reboot_evidence_dir_volatile")
+    CASE.assertFalse(result.ok)
+
+
 def test_render_launchd_plist_includes_required_fields(tmp_path):
     helperctl = load_helperctl()
     helper_path = tmp_path / "macos-vz-helper"
@@ -2933,6 +2964,32 @@ def test_ping_helper_reports_protocol_mismatch(monkeypatch, tmp_path):
     )
 
     CASE.assertEqual(result.result, helperctl.CheckResult(ok=False, reason="helper_protocol_mismatch", message="macos_virtualization_helper_protocol_mismatch"))
+
+
+def test_ping_helper_state_preserves_helper_details(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+
+    class FakeReply:
+        protocol_version = "1"
+        helper_version = "test-helper"
+        details = {
+            "helper_instance_id": "before",
+            "helper_started_at": "2026-05-19T00:00:00Z",
+            "ignored_number": 1,
+        }
+
+    class FakeClient:
+        def ping(self) -> FakeReply:
+            return FakeReply()
+
+    state = helperctl.ping_helper_state(
+        tmp_path / "helper.sock",
+        client_factory=lambda path: FakeClient(),
+    )
+
+    CASE.assertEqual(state.details["helper_instance_id"], "before")
+    CASE.assertEqual(state.details["helper_started_at"], "2026-05-19T00:00:00Z")
+    CASE.assertNotIn("ignored_number", state.details)
 
 
 def test_ping_helper_falls_back_to_socket_when_helper_client_import_breaks(monkeypatch):

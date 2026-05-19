@@ -46,6 +46,15 @@ else:
 INVALID_LIFECYCLE_LOCK_GRACE_SEC = 1.0
 DEFAULT_LAUNCHD_LABEL = "org.tldw.macos-vz-helper"
 LAUNCHD_ACTIONS = {"bootstrap", "bootout", "kickstart", "status"}
+VOLATILE_EVIDENCE_ROOTS = tuple(
+    Path(path).resolve()
+    for path in (
+        Path(os.sep) / "tmp",
+        Path(os.sep) / "private" / "tmp",
+        os.getenv("TMPDIR") or "",
+    )
+    if path
+)
 
 
 @dataclass(frozen=True)
@@ -101,6 +110,7 @@ class PingState:
     result: CheckResult
     protocol_version: str = ""
     helper_version: str = ""
+    details: dict[str, str] | None = None
 
 
 def default_paths() -> HelperPaths:
@@ -176,6 +186,37 @@ def validate_helper_binary(path: Path) -> CheckResult:
     if not os.access(path, os.X_OK):
         return CheckResult(ok=False, reason="helper_binary_not_executable", message=str(path))
     return CheckResult(ok=True, message=str(path))
+
+
+def _is_under_path(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+    except (OSError, ValueError):
+        return False
+    except RuntimeError:
+        return False
+    return True
+
+
+def ensure_host_reboot_evidence_dir(
+    evidence_dir: Path,
+    *,
+    create: bool = False,
+    allow_volatile: bool = False,
+) -> CheckResult:
+    if not allow_volatile:
+        for root in VOLATILE_EVIDENCE_ROOTS:
+            if _is_under_path(evidence_dir, root):
+                return CheckResult(False, "host_reboot_evidence_dir_volatile", str(evidence_dir))
+    if not evidence_dir.exists():
+        if not create:
+            return CheckResult(False, "host_reboot_evidence_dir_missing", str(evidence_dir))
+        evidence_dir.mkdir(mode=0o700, parents=True)
+        evidence_dir.chmod(0o700)
+    result = ensure_private_dir(evidence_dir, dry_run=False)
+    if not result.ok:
+        return CheckResult(False, "host_reboot_evidence_dir_not_private", result.message or str(evidence_dir))
+    return CheckResult(True, "host_reboot_evidence_dir_ok", str(evidence_dir))
 
 
 def ensure_private_dir(path: Path, dry_run: bool = False) -> CheckResult:
@@ -787,16 +828,28 @@ def _request_helper_ping(socket_path: Path, *, timeout_sec: float = 5.0) -> dict
     return response
 
 
+def _string_details(value: object) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    output: dict[str, str] = {}
+    for key, item in value.items():
+        if isinstance(key, str) and isinstance(item, str):
+            output[key] = item
+    return output
+
+
 def ping_helper_state(
     socket_path: Path,
     *,
     client_factory: Callable[[Path], object] | None = None,
 ) -> PingState:
+    details: dict[str, str] = {}
     try:
         if client_factory is not None:
             reply = client_factory(socket_path).ping()
             protocol_version = str(getattr(reply, "protocol_version", "") or "")
             helper_version = str(getattr(reply, "helper_version", "") or "")
+            details = _string_details(getattr(reply, "details", None))
         else:
             payload = _request_helper_ping(socket_path)
             error_code = str(payload.get("error_code") or "").strip()
@@ -805,6 +858,7 @@ def ping_helper_state(
                 raise RuntimeError(f"{error_code}: {message}")
             protocol_version = str(payload.get("protocol_version") or "")
             helper_version = str(payload.get("helper_version") or "")
+            details = _string_details(payload.get("details"))
     except Exception as exc:
         if (
             exc.__class__.__name__ == "MacOSVirtualizationHelperProtocolError"
@@ -812,18 +866,21 @@ def ping_helper_state(
         ):
             return PingState(
                 result=CheckResult(ok=False, reason="helper_protocol_mismatch", message=str(exc)),
+                details=details,
             )
-        return PingState(result=CheckResult(ok=False, reason="helper_ping_failed", message=str(exc)))
+        return PingState(result=CheckResult(ok=False, reason="helper_ping_failed", message=str(exc)), details=details)
     if protocol_version != str(EXPECTED_HELPER_PROTOCOL_VERSION):
         return PingState(
             result=CheckResult(ok=False, reason="helper_protocol_mismatch"),
             protocol_version=protocol_version,
             helper_version=helper_version,
+            details=details,
         )
     return PingState(
         result=CheckResult(ok=True),
         protocol_version=protocol_version,
         helper_version=helper_version,
+        details=details,
     )
 
 
