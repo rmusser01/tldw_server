@@ -453,7 +453,7 @@ git commit -m "feat(vz): add host reboot drill CLI"
 - Modify: `Docs/Sandbox/vz-linux-host-gated-ci-acceptance-policy.md`
 - Modify: `backlog/tasks/task-438 - Design-VZ-helper-host-reboot-validation-procedure.md`
 
-- [ ] **Step 1: Add docs before final verification**
+- [x] **Step 1: Add docs before final verification**
 
 Document:
 
@@ -465,7 +465,7 @@ Document:
 - scheduled CI must not reboot hosts
 - expected skip/blocking behavior
 
-- [ ] **Step 2: Run focused helperctl tests**
+- [x] **Step 2: Run focused helperctl tests**
 
 Run:
 
@@ -475,7 +475,7 @@ python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -q
 
 Expected: all helperctl tests pass.
 
-- [ ] **Step 3: Run syntax and whitespace checks**
+- [x] **Step 3: Run syntax and whitespace checks**
 
 Run:
 
@@ -486,7 +486,7 @@ git diff --check
 
 Expected: both pass.
 
-- [ ] **Step 4: Run Bandit on touched Python**
+- [x] **Step 4: Run Bandit on touched Python**
 
 Run:
 
@@ -497,7 +497,7 @@ python -m bandit -r tools/macos-vz-helper/scripts/vz-helperctl.py \
 
 Expected: `results=[]`, `errors=[]`.
 
-- [ ] **Step 5: Optional prepared-host validation**
+- [x] **Step 5: Optional prepared-host validation**
 
 Only on a prepared Apple silicon host:
 
@@ -518,19 +518,24 @@ tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill post \
 Expected: helper status/protocol pass, generation drift is reported as expected
 when applicable, and real smoke passes against the restored helper socket.
 
-- [ ] **Step 6: Update Backlog and commit**
+Status: not run for Task 5 closeout because it requires a disruptive manual
+operator reboot. The docs record this as a manual or explicitly
+operator-triggered prepared-host validation only.
 
-Record verification and known host-gated skips in TASK-438, then commit:
+- [x] **Step 6: Update Backlog and commit**
+
+Record verification and known host-gated skips in TASK-438 and TASK-443, then
+commit the docs/task closeout only:
 
 ```bash
 git add \
-  tools/macos-vz-helper/scripts/vz-helperctl.py \
-  tools/macos-vz-helper/Tests/test_vz_helperctl.py \
   tools/macos-vz-helper/README.md \
   Docs/Sandbox/macos-runtime-operator-notes.md \
   Docs/Sandbox/vz-linux-host-gated-ci-acceptance-policy.md \
-  "backlog/tasks/task-438 - Design-VZ-helper-host-reboot-validation-procedure.md"
-git commit -m "feat(vz): add host reboot validation drill"
+  Docs/superpowers/plans/2026-05-19-vz-helper-host-reboot-validation.md \
+  "backlog/tasks/task-438 - Design-VZ-helper-host-reboot-validation-procedure.md" \
+  "backlog/tasks/task-443 - Document-VZ-host-reboot-validation-drill-workflow.md"
+git commit -m "docs(vz): document host reboot validation drill"
 ```
 
 ## Final Verification For PR

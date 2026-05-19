@@ -46,12 +46,32 @@ Created the host reboot validation design spec at Docs/superpowers/specs/2026-05
 Created the execution-ready implementation plan at Docs/superpowers/plans/2026-05-19-vz-helper-host-reboot-validation.md. The plan scopes the future implementation to host-reboot-drill pre/post evidence, PingState helper details, portable helperctl tests, restored-helper smoke targeting, docs, Bandit, and optional prepared-host validation.
 
 Verification: git diff --check passed for the worktree after adding the task/spec/plan. Bandit skipped because this task only adds documentation and Backlog metadata; the implementation plan requires Bandit for future Python changes.
+
+Task 5 documentation closeout recorded the operator host reboot validation drill in the helper README, macOS operator notes, and host-gated CI policy. The docs now require durable private evidence outside `/tmp`/volatile roots, document the exact pre -> manual reboot -> post sequence for direct and launchd helper modes, require explicit launchd `--label` and `--plist-output` in both phases, clarify that post-reboot smoke targets the restored helper socket through the host smoke path, keep diagnostics and dry-run repair operator-reviewed and separate, and prohibit scheduled/nightly CI from rebooting hosts.
+
+Task 5 touched files:
+- tools/macos-vz-helper/README.md
+- Docs/Sandbox/macos-runtime-operator-notes.md
+- Docs/Sandbox/vz-linux-host-gated-ci-acceptance-policy.md
+- Docs/superpowers/plans/2026-05-19-vz-helper-host-reboot-validation.md
+- backlog/tasks/task-438 - Design-VZ-helper-host-reboot-validation-procedure.md
+- backlog/tasks/task-443 - Document-VZ-host-reboot-validation-drill-workflow.md
+
+Task 5 verification:
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -q` passed: 182 passed, 6 skipped, 2 warnings.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m py_compile tools/macos-vz-helper/scripts/vz-helperctl.py` passed.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tools/macos-vz-helper/scripts/vz-helperctl.py -f json -o /tmp/bandit_vz_host_reboot_drill.json` passed; JSON contains `results=[]` and `errors=[]`.
+- `git diff --check` passed.
+
+Prepared-host reboot validation was not run in Task 5 because it is disruptive and requires an operator reboot. Scheduled/nightly CI is expected to skip host reboot validation. A manual prepared-host drill is blocking only when explicitly invoked; blocking failures include missing, unsafe, or volatile evidence directories; pre/post metadata mismatch; helper ping/protocol failure; and post-smoke failure when `--run-smoke` is requested.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Designed the next VZ Linux host-reboot validation slice and wrote an implementation plan. The design keeps reboot manual/operator-owned, uses durable bounded evidence, reuses existing helperctl/status/launchd/smoke/diagnostics/dry-run repair surfaces, and avoids hidden reboot, repair, or launchd mutation. The plan is ready for a future implementation PR.
+
+Task 5 completed the operator documentation closeout for the implemented drill workflow and recorded verification/skip policy in TASK-443.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->

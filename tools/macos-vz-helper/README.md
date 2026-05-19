@@ -111,6 +111,67 @@ These commands never run automatically from `plist`, `status`, `smoke`, or
 server startup. They are operator-owned scaffolding and do not validate host
 reboot behavior.
 
+### Host Reboot Validation Drill
+
+`host-reboot-drill` records bounded helper evidence before a manual host reboot
+and validates the restored helper after the machine comes back. The evidence
+directory must be durable across reboot and private to the operator; use a path
+such as `~/Library/Logs/tldw/vz-host-reboot-drill/<run-id>`, not `/tmp`,
+`$TMPDIR`, or another volatile root.
+
+Direct helper mode uses the managed helper socket directly:
+
+```bash
+evidence_dir="$HOME/Library/Logs/tldw/vz-host-reboot-drill/manual-$(date +%Y%m%d-%H%M%S)"
+
+tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill pre \
+  --evidence-dir "$evidence_dir" \
+  --bundle /path/to/canonical/bundle \
+  --create-evidence-dir
+
+# Manually reboot the host, then restore or verify the same helper socket path.
+
+tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill post \
+  --evidence-dir "$evidence_dir" \
+  --bundle /path/to/canonical/bundle \
+  --run-smoke
+```
+
+Launchd helper mode is explicit in both phases. Provide the same `--label` and
+`--plist-output` before and after reboot so the manifests can bind evidence to
+the intended LaunchAgent instead of an implicit default:
+
+```bash
+label="org.tldw.macos-vz-helper.manual-reboot"
+plist="$HOME/Library/LaunchAgents/${label}.plist"
+evidence_dir="$HOME/Library/Logs/tldw/vz-host-reboot-drill/manual-$(date +%Y%m%d-%H%M%S)"
+
+tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill pre \
+  --helper-mode launchd \
+  --label "$label" \
+  --plist-output "$plist" \
+  --evidence-dir "$evidence_dir" \
+  --bundle /path/to/canonical/bundle \
+  --create-evidence-dir
+
+# Manually reboot the host, then verify launchd restored the helper.
+
+tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill post \
+  --helper-mode launchd \
+  --label "$label" \
+  --plist-output "$plist" \
+  --evidence-dir "$evidence_dir" \
+  --bundle /path/to/canonical/bundle \
+  --run-smoke
+```
+
+When `post --run-smoke` is used, the smoke targets the restored helper socket
+through the host smoke path. It must not start a new helper process for the
+post-reboot proof. Diagnostics and dry-run reconciliation repair remain
+operator-reviewed follow-up steps and are separate from this drill. Scheduled
+or nightly CI must not reboot hosts; this validation is manual or explicitly
+operator-triggered only.
+
 `restart-drill` is an operator-managed lifecycle drill for helpers already
 started through `vz-helperctl.py start`. It verifies the current managed helper
 status, stops it through the pid-file/socket lease, starts a replacement on the
