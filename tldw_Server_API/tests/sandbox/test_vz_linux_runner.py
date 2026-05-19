@@ -936,7 +936,10 @@ def test_vz_linux_session_reuse_metadata_mismatch_recreates_vm(
     assert stored and stored[0]["vm_id"] == f"vm-new-{case_name}"
 
 
-def test_vz_linux_session_reuse_guest_agent_mismatch_recreates_vm(monkeypatch, tmp_path) -> None:
+def test_vz_linux_session_reuse_guest_agent_mismatch_recreates_vm(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
     calls: list[str] = []
     deleted: list[str] = []
