@@ -17,6 +17,21 @@ def clear_chacha_dependency_state() -> Iterator[None]:
         chacha_deps._chacha_db_instances.clear()
         chacha_deps._chacha_db_init_events.clear()
         chacha_deps._chacha_db_init_errors.clear()
+    with chacha_deps._CHACHA_HEALTH_LOCK:
+        chacha_deps._CHACHA_HEALTH.update(
+            {
+                "init_attempts": 0,
+                "init_failures": 0,
+                "last_init_ms": None,
+                "last_error": None,
+                "last_warn_dump": None,
+                "cached_instances": 0,
+                "default_char_ensures": 0,
+                "default_char_failures": 0,
+                "warm_startups": 0,
+                "last_failure": None,
+            }
+        )
     yield
     with chacha_deps._chacha_db_lock:
         chacha_deps._chacha_db_instances.clear()
@@ -58,6 +73,41 @@ async def test_chacha_init_classifies_sqlite_corruption_without_path_leak(monkey
     assert exc_info.value.detail == chacha_deps._CHACHA_CORRUPTION_ERROR_DETAIL
     assert "/private/db/path" not in exc_info.value.detail
     assert chacha_deps.get_chacha_health_snapshot()["last_error"] == "sqlite_corruption"
+
+
+@pytest.mark.asyncio
+async def test_create_and_prepare_db_records_corrupt_db_recovery_details(monkeypatch, tmp_path):
+    user_id = 987
+    db_path = tmp_path / "user-987" / "ChaChaNotes.db"
+    db_path.parent.mkdir(parents=True)
+    db_path.write_bytes(b"not a sqlite database")
+
+    monkeypatch.setattr(
+        chacha_deps.DatabasePaths,
+        "get_user_base_directory",
+        lambda _user_id: db_path.parent,
+    )
+    monkeypatch.setattr(
+        chacha_deps.DatabasePaths,
+        "get_chacha_db_path",
+        lambda _user_id: db_path,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chacha_deps._get_or_init_db_instance(user_id, "client-987")
+
+    snapshot = chacha_deps.get_chacha_health_snapshot()
+    failure = snapshot["last_failure"]
+
+    assert exc_info.value.status_code == 503
+    assert snapshot["status"] == "degraded"
+    assert snapshot["last_error"] == "sqlite_corruption"
+    assert failure["reason_code"] == "sqlite_corruption"
+    assert failure["affected_db"] == "user:987/ChaChaNotes.db"
+    assert failure["recovery"]["automatic_repair"] is False
+    assert failure["recovery"]["documentation"] == "Docs/Operations/ChaChaNotes_DB_Recovery.md"
+    assert str(tmp_path) not in str(snapshot)
+    assert "not a sqlite database" not in str(snapshot)
 
 
 @pytest.mark.asyncio

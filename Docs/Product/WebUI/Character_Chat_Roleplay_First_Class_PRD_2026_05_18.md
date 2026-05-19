@@ -321,14 +321,25 @@ Character Chat depends on the per-user chat/notes database. The earlier audit ve
 
 Requirements:
 
-- Add or link a startup health check that identifies the affected per-user chat DB and failure reason.
-- Prefer quarantine or degraded startup where safe, so one corrupt per-user chat DB does not prevent reaching setup, diagnostics, or recovery UI.
-- Provide a documented doctor/recovery path for backup, SQLite `.recover`, integrity validation, and restore.
+- Add or link a startup health check that identifies the affected per-user chat DB and failure reason. Backend gate: `/api/v1/health` exposes `checks.chacha_notes.last_failure` with a sanitized `affected_db`, `reason_code`, and recovery metadata when ChaChaNotes corruption is detected.
+- Prefer quarantine or degraded startup where safe, so one corrupt per-user chat DB does not prevent reaching setup, diagnostics, or recovery UI. Backend gate: startup warm-up fails open and records a degraded ChaChaNotes health snapshot instead of aborting app startup.
+- Provide a documented doctor/recovery path for backup, SQLite `.recover`, integrity validation, and restore. Recovery guide: `Docs/Operations/ChaChaNotes_DB_Recovery.md`.
 - Surface user-facing recovery copy from setup or diagnostics without implying data was silently changed.
 - Treat this as a release dependency for Character Chat GA, even if implemented in a separate backend-focused task.
 
+Backend acceptance evidence:
+
+- Corrupt existing per-user `ChaChaNotes.db` returns a sanitized 503 to character DB callers and records `last_failure.reason_code = sqlite_corruption`.
+- `/api/v1/health` degrades to 206 with `checks.chacha_notes.last_failure.recovery.automatic_repair = false`.
+- Health payloads do not expose absolute temp or host filesystem paths.
+- Startup warm-up against a corrupt DB does not raise out of the warm-up path.
+
 Likely files:
 
+- `tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py`
+- `tldw_Server_API/app/api/v1/endpoints/health.py`
+- `tldw_Server_API/app/services/startup_chacha_warmup.py`
+- `Docs/Operations/ChaChaNotes_DB_Recovery.md`
 - `tldw_Server_API/app/core/DB_Management`
 - `tldw_Server_API/app/core/Character_Chat`
 - `tldw_Server_API/app/main.py`

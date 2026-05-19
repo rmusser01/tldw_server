@@ -121,3 +121,57 @@ async def test_warm_chacha_notes_on_startup_logs_best_effort_failure(
     )
 
     assert logger.warning_messages == ["ChaChaNotes warm-up scheduling failed: boom"]
+
+
+@pytest.mark.asyncio
+async def test_warm_chacha_db_for_user_records_corrupt_db_and_fails_open(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
+
+    user_id = 43
+    db_path = tmp_path / "43" / "ChaChaNotes.db"
+    db_path.parent.mkdir(parents=True)
+    db_path.write_bytes(b"not a sqlite database")
+
+    with chacha_deps._chacha_db_lock:
+        chacha_deps._chacha_db_instances.clear()
+        chacha_deps._chacha_db_init_events.clear()
+        chacha_deps._chacha_db_init_errors.clear()
+    with chacha_deps._CHACHA_HEALTH_LOCK:
+        chacha_deps._CHACHA_HEALTH.update(
+            {
+                "init_attempts": 0,
+                "init_failures": 0,
+                "last_init_ms": None,
+                "last_error": None,
+                "last_warn_dump": None,
+                "cached_instances": 0,
+                "default_char_ensures": 0,
+                "default_char_failures": 0,
+                "warm_startups": 0,
+                "last_failure": None,
+            }
+        )
+
+    monkeypatch.setattr(
+        chacha_deps.DatabasePaths,
+        "get_user_base_directory",
+        lambda _user_id: db_path.parent,
+    )
+    monkeypatch.setattr(
+        chacha_deps.DatabasePaths,
+        "get_chacha_db_path",
+        lambda _user_id: db_path,
+    )
+
+    await chacha_deps.warm_chacha_db_for_user(user_id, str(user_id))
+
+    snapshot = chacha_deps.get_chacha_health_snapshot()
+    assert snapshot["status"] == "degraded"
+    assert snapshot["last_error"] == "sqlite_corruption"
+    assert snapshot["last_failure"]["affected_db"] == "user:43/ChaChaNotes.db"
+    assert snapshot["last_failure"]["recovery"]["automatic_repair"] is False
+    assert str(tmp_path) not in str(snapshot)
+    assert "not a sqlite database" not in str(snapshot)
