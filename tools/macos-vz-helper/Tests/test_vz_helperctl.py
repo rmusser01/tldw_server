@@ -658,6 +658,7 @@ def test_host_reboot_post_reports_invalid_pre_manifest(
     CASE.assertFalse((evidence / "host-reboot-post.json").exists())
 
 
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="requires fifo support")
 def test_read_host_reboot_pre_manifest_rejects_fifo_without_unsafe_read(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -688,11 +689,13 @@ def test_read_host_reboot_pre_manifest_rejects_fifo_without_unsafe_read(
     CASE.assertFalse(result.ok)
     CASE.assertEqual(result.reason, "host_reboot_pre_manifest_invalid")
     CASE.assertIsNone(payload)
-    CASE.assertTrue(observed_flags)
     if hasattr(helperctl.os, "O_NONBLOCK"):
+        CASE.assertTrue(observed_flags)
         CASE.assertTrue(observed_flags[0] & helperctl.os.O_NONBLOCK)
-    if hasattr(helperctl.os, "O_NOFOLLOW"):
-        CASE.assertTrue(observed_flags[0] & helperctl.os.O_NOFOLLOW)
+        if hasattr(helperctl.os, "O_NOFOLLOW"):
+            CASE.assertTrue(observed_flags[0] & helperctl.os.O_NOFOLLOW)
+    else:
+        CASE.assertEqual(observed_flags, [])
 
 
 def test_read_host_reboot_pre_manifest_rejects_symlink(tmp_path: Path) -> None:
